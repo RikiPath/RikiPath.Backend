@@ -1,0 +1,59 @@
+## Build and Output Directories
+[Bb]in/
+[Oo]bj/
+[Oo]ut/
+[Ll]og/
+[Ll]ogs/
+**/publish/
+*pubxml.user
+
+## Visual Studio
+.vs/
+*.user
+*.userosscache
+*.sln.docstates
+*.suo
+*.userprefs
+*.mono
+
+## Visual Studio Code & Rider
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+.idea/
+*.swp
+*~
+
+## Environment & Sensitive Configuration Files
+# Local secrets and development settings (prevent pushing sensitive keys/passwords)
+appsettings.Development.json
+appsettings.Local.json
+appsettings.*.local.json
+secrets.json
+
+## Database & Local Storage
+*.mdf
+*.ldf
+*.mdf_lock
+*.db
+*.sqlite
+*.sqlite3
+
+## NuGet Packages
+*.nupkg
+*.snupkg
+**/packages/*
+!**/packages/build/
+
+## Test Results & Code Coverage
+[Tt]est[Rr]esult*/
+[Bb]uild[Ll]og.*
+*.coverage
+*.coveragexml
+
+## Operating System Files
+.DS_Store
+Thumbs.db
+ehthumbs.db
