@@ -28,9 +28,8 @@
 
 ## Environment & Sensitive Configuration Files
 # Local secrets and development settings (prevent pushing sensitive keys/passwords)
-appsettings.Development.json
-appsettings.Local.json
-appsettings.*.local.json
+appsettings.json
+appsettings.*.json
 secrets.json
 
 ## Database & Local Storage
