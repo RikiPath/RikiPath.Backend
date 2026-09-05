@@ -1,0 +1,6 @@
+<Solution>
+  <Project Path="RikiPath.Application/RikiPath.Application.csproj" />
+  <Project Path="RikiPath.Domain/RikiPath.Domain.csproj" />
+  <Project Path="RikiPath.Infrastructure/RikiPath.Infrastructure.csproj" />
+  <Project Path="RikiPath.WebApi/RikiPath.WebApi.csproj" />
+</Solution>
