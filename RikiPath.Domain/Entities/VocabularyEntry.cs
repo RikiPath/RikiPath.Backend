@@ -1,10 +1,12 @@
+using Domain.Enums;
+using RikiPath.Domain.Entities;
 using System;
 using System.Collections.Generic;
 
 namespace Domain.Entities
 {
     /// <summary>Vocabulary bank entry — word, reading, meaning, example sentence and audio.</summary>
-    public class VocabularyEntry : Base
+    public class VocabularyEntry : Base, IReviewableContent
     {
         public int Id { get; set; }
         public string Word { get; set; }

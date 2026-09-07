@@ -1,4 +1,4 @@
-namespace Domain.Entities
+namespace Domain.Enums
 {
     /// <summary>Lifecycle of a purchased consultation request.</summary>
     public enum ConsultationStatus

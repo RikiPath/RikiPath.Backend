@@ -1,10 +1,9 @@
-using System;
-using System.Collections.Generic;
+using Domain.Enums;
+using RikiPath.Domain.Entities;
 
 namespace Domain.Entities
 {
-    /// <summary>Kanji bank entry — searchable, tagged by JLPT level, linked to the lessons that introduce it.</summary>
-    public class KanjiEntry : Base
+    public class KanjiEntry : Base, IReviewableContent
     {
         public int Id { get; set; }
         public string Character { get; set; }

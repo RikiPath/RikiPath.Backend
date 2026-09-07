@@ -1,4 +1,5 @@
 ﻿using Domain.Entities;
+using RikiPath.Application.Exceptions;
 using RikiPath.Application.IClients;
 using RikiPath.Application.IServices;
 using RikiPath.Application.Models;
@@ -33,11 +34,23 @@ namespace RikiPath.Application.Services
             try
             {
                 var promptContext = await BuildPromptContextAsync(userId, user);
-                rawJson = await aiClient.GenerateLearningPathJsonAsync(promptContext.ToPromptText(), cancellationToken);
+                // userId truyền vào đây để AiLearningPathClient kiểm tra/ghi nhận quota theo
+                // IAiUsageQuotaService (giới hạn số lượt gọi + token/ngày, chống spam).
+                rawJson = await aiClient.GenerateLearningPathJsonAsync(userId, promptContext.ToPromptText(), cancellationToken);
+            }
+            catch (AiQuotaExceededException ex)
+            {
+                // Vượt quota AI/ngày -> 429, khác với lỗi provider (502), để FE hiển thị đúng thông
+                // báo "đã dùng hết lượt hôm nay" thay vì "AI đang lỗi, thử lại sau".
+                return ApiResponse<LearningPathResponse>.Fail(
+                    ex.Message,
+                    HttpStatusCode.TooManyRequests,
+                    errors: BuildDebugErrors(ex));
             }
             catch (Exception ex)
             {
-                // Lỗi gọi AI provider (mất mạng, hết quota, timeout...) -> 502, không phải lỗi của user
+                // Lỗi gọi AI provider (mất mạng, timeout, JSON không hợp lệ sau retry...) -> 502,
+                // không phải lỗi của user
                 return ApiResponse<LearningPathResponse>.Fail(
                     "Dịch vụ AI hiện không phản hồi, vui lòng thử lại sau.",
                     HttpStatusCode.BadGateway,

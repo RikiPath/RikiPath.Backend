@@ -1,4 +1,4 @@
-namespace Domain.Entities
+namespace Domain.Enums
 {
     /// <summary>
     /// Content authoring workflow status, used by Course, Lesson, KanjiEntry,

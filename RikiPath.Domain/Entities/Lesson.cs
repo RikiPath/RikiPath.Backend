@@ -1,5 +1,7 @@
 using System.Collections.Generic;
 
+using Domain.Enums;
+
 namespace Domain.Entities
 {
     /// <summary>

@@ -1,3 +1,5 @@
+using Domain.Enums;
+using RikiPath.Domain.Entities;
 using System;
 using System.Collections.Generic;
 
@@ -8,7 +10,7 @@ namespace Domain.Entities
     /// <see cref="Lesson"/> records under one JLPT level and one course category.
     /// Carries the content-authoring workflow (Draft/PendingReview/Published/Rejected).
     /// </summary>
-    public class Course : Base
+    public class Course : Base, IReviewableContent
     {
         public int Id { get; set; }
         public string Title { get; set; }
