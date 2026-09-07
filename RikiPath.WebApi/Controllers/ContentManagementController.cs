@@ -8,7 +8,7 @@ using System.Security.Claims;
 
 namespace RikiPath.WebApi.Controllers
 {
-    [Route("api/v1/[controller]")]
+    [Route("api/[controller]")]
     [ApiController]
     public class ContentManagementController(IContentManagementService contentService) : ControllerBase
     {

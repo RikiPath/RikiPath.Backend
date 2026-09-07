@@ -5,7 +5,7 @@ using Microsoft.AspNetCore.Http;
 
 namespace RikiPath.WebApi.Controllers
 {
-    [Route("api/v1/[controller]")]
+    [Route("api/[controller]")]
     [ApiController]
     [Authorize]
     public class FileStorageController(IFileStorageService fileStorageService) : ControllerBase

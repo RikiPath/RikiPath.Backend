@@ -3,7 +3,7 @@ using RikiPath.Application.IServices;
 
 namespace RikiPath.WebApi.Controllers
 {
-    [Route("api/v1/[controller]")]
+    [Route("api/[controller]")]
     [ApiController]
     public class EmailController(IEmailService emailService) : ControllerBase
     {

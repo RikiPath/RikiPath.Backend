@@ -6,7 +6,7 @@ using System.Security.Claims;
 
 namespace RikiPath.WebApi.Controllers
 {
-    [Route("api/v1/[controller]")]
+    [Route("api/[controller]")]
     [ApiController]
     [Authorize(Roles = "Learner")]
     public class NotebookController(INotebookService notebookService) : ControllerBase
