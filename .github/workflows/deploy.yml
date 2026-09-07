@@ -28,7 +28,7 @@ jobs:
         key: ${{ secrets.OCI_KEY }}
         source: "publish/*"
         target: "/home/opc/rikipath-api"
-        strip_prefix: "publish"
+        strip_components: 1
         rm: false
 
     - name: Restart Systemd Service
