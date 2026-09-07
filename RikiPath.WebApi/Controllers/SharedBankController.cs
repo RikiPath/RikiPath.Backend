@@ -4,7 +4,7 @@ using RikiPath.Application.Requests.SharedBanks;
 
 namespace RikiPath.WebApi.Controllers
 {
-    [Route("api/v1/[controller]")]
+    [Route("api/[controller]")]
     [ApiController]
     public class SharedBankController(ISharedBankSearchService sharedBankSearchService) : ControllerBase
     {
