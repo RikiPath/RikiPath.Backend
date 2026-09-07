@@ -57,6 +57,11 @@ AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true);
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddHttpClient();
 
+// AiUsageQuotaService (Infrastructure/Services) cần IMemoryCache để đếm quota AI/ngày theo
+// user - THIẾU dòng này chính là nguyên nhân lỗi "Unable to resolve service for type
+// IMemoryCache" khi DI cố dựng AiUsageQuotaService lúc app start.
+builder.Services.AddMemoryCache();
+
 // Helper: kiểm tra 1 class có implement 1 interface không, hỗ trợ cả open generic
 // interface (vd IGenericRepository<T>) vốn không hoạt động đúng với IsAssignableFrom thông thường.
 static bool ImplementsInterface(Type type, Type iface)
@@ -121,7 +126,8 @@ foreach (var iface in repoInterfaces)
     builder.Services.AddScoped(iface, impl);
 }
 
-// 5. Service Registration (Quét cả Application và Infrastructure để tự động nhận IFileStorageService)
+// 5. Service Registration (Quét cả Application và Infrastructure để tự động nhận IFileStorageService,
+//    IAiUsageQuotaService,...)
 var applicationAssembly = typeof(ILessonProgressService).Assembly; // RikiPath.Application
 var infrastructureAssembly = typeof(UnitOfWork).Assembly;           // RikiPath.Infrastructure
 
@@ -135,7 +141,8 @@ var allImplementations = applicationAssembly.GetTypes()
 
 foreach (var iface in serviceInterfaces)
 {
-    // Quy ước đặt tên: IXxxService -> XxxService (vd IAuthService -> AuthService)
+    // Quy ước đặt tên: IXxxService -> XxxService (vd IAuthService -> AuthService,
+    // IAiUsageQuotaService -> AiUsageQuotaService)
     var expectedName = iface.Name.TrimStart('I');
     var candidates = allImplementations
         .Where(t => ImplementsInterface(t, iface))
@@ -160,7 +167,11 @@ foreach (var iface in serviceInterfaces)
     builder.Services.AddScoped(iface, impl);
 }
 
-// 6. Register IClients implemented in Infrastructure.Clients
+// 6. IClients Registration
+// 6a. Client cần cấu hình HttpClient riêng (BaseAddress, header,...) - đăng ký thủ công, KHÔNG
+//     đưa vào vòng quét tự động 6b để tránh bị override bởi AddScoped thường (mất cấu hình HttpClient).
+var manuallyRegisteredClientInterfaces = new[] { typeof(IPaymentGatewayClient), typeof(IAiLearningPathClient), typeof(IAiGradingClient) };
+
 if (Type.GetType("RikiPath.Infrastructure.Clients.PayOsClient, RikiPath.Infrastructure") != null)
 {
     builder.Services.AddHttpClient<IPaymentGatewayClient, PayOsClient>(client =>
@@ -175,14 +186,70 @@ if (Type.GetType("RikiPath.Infrastructure.Clients.AiLearningPathClient, RikiPath
 {
     builder.Services.AddHttpClient<IAiLearningPathClient, AiLearningPathClient>(client =>
     {
-        var baseUrl = builder.Configuration["OpenAI:BaseUrl"];
+        // Đọc từ AppSettings.Ai (đã bind ở bước 1), KHÔNG còn đọc "OpenAI:BaseUrl"/"OpenAI:ApiKey"
+        // rời rạc từ configuration nữa - đúng yêu cầu "mọi key/model đều qua AppSettings.cs".
+        var baseUrl = appSettings?.Ai?.BaseUrl;
         if (!string.IsNullOrEmpty(baseUrl)) client.BaseAddress = new Uri(baseUrl);
         client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
-        var apiKey = builder.Configuration["OpenAI:ApiKey"];
+        var apiKey = appSettings?.Ai?.ApiKey;
         if (!string.IsNullOrWhiteSpace(apiKey))
             client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
     });
+}
+
+if (Type.GetType("RikiPath.Infrastructure.Clients.AiGradingClient, RikiPath.Infrastructure") != null)
+{
+    // Dùng chung AppSettings.Ai.BaseUrl/ApiKey với AiLearningPathClient - model thì mỗi client tự
+    // đọc GradingModel/LearningPathModel riêng bên trong class (xem AiGradingClient.cs).
+    // Nếu sau này muốn tách provider/khoá riêng cho chấm bài, thêm 1 section riêng trong AiSettings.
+    builder.Services.AddHttpClient<IAiGradingClient, AiGradingClient>(client =>
+    {
+        var baseUrl = appSettings?.Ai?.BaseUrl;
+        if (!string.IsNullOrEmpty(baseUrl)) client.BaseAddress = new Uri(baseUrl);
+        client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
+        var apiKey = appSettings?.Ai?.ApiKey;
+        if (!string.IsNullOrWhiteSpace(apiKey))
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+    });
+}
+
+// 6b. Các IClients còn lại (không cần HttpClient tuỳ biến, vd IExcelParser) - quét tự động giống
+//     IRepositories/IServices ở trên. Quy ước đặt tên: IXxxClient -> XxxClient.
+//     LƯU Ý: KHÔNG throw cứng khi thiếu implementation (khác với repo/service) - vì trong lúc dev,
+//     có thể có 1 client interface đã khai báo xong nhưng class implement chưa viết xong (vd
+//     IAiGradingClient). Throw cứng ở đây sẽ chặn toàn bộ app không start được dù các phần khác đã
+//     xong. Thay vào đó chỉ log cảnh báo; nếu 1 service thực sự cần client đó, DI sẽ báo lỗi ngay
+//     lúc validate service đó (rõ ràng, đúng chỗ) thay vì Program.cs throw chung chung.
+var clientInterfaces = applicationAssembly.GetTypes()
+    .Where(t => t.IsInterface && t.Namespace != null && t.Namespace.EndsWith(".IClients"))
+    .Where(t => !manuallyRegisteredClientInterfaces.Contains(t));
+
+foreach (var iface in clientInterfaces)
+{
+    var expectedName = iface.Name.TrimStart('I');
+    var candidates = allImplementations
+        .Where(t => ImplementsInterface(t, iface))
+        .ToList();
+
+    var impl = candidates.FirstOrDefault(t => t.Name == expectedName)
+               ?? (candidates.Count == 1 ? candidates[0] : null);
+
+    if (impl == null)
+    {
+        if (candidates.Count > 1)
+            throw new InvalidOperationException(
+                $"Nhiều class implement {iface.FullName} nhưng không có class nào tên '{expectedName}'. " +
+                $"Ứng viên: {string.Join(", ", candidates.Select(c => c.Name))}. Đổi tên class hoặc đăng ký thủ công.");
+
+        Console.WriteLine(
+            $"[WARN] Chưa có implementation cho {iface.FullName} - bỏ qua đăng ký DI. " +
+            $"Service nào inject interface này sẽ lỗi lúc chạy tới khi bạn thêm class '{expectedName}' implement nó.");
+        continue;
+    }
+
+    builder.Services.AddScoped(iface, impl);
 }
 
 // 7. JWT Authentication & Authorization
