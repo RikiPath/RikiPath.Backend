@@ -1,5 +1,7 @@
 using System;
 
+using Domain.Enums;
+
 namespace Domain.Entities
 {
     /// <summary>History of individual review sessions for a ReviewItem — drives SM-2 recalculation.</summary>

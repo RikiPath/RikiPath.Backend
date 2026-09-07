@@ -1,0 +1,41 @@
+name: Deploy .NET 8 Web API to Oracle Cloud
+
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup .NET 8
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '8.0.x'
+
+    - name: Publish Web API
+      run: dotnet publish RikiPath.WebApi/RikiPath.WebApi.csproj -c Release -o ./publish
+
+    - name: Transfer files to Oracle Cloud
+      uses: appleboy/scp-action@v0.1.7
+      with:
+        host: ${{ secrets.OCI_HOST }}
+        username: ${{ secrets.OCI_USERNAME }}
+        key: ${{ secrets.OCI_KEY }}
+        source: "publish/*"
+        target: "/home/opc/rikipath-api"
+        strip_prefix: "publish"
+        rm: false
+
+    - name: Restart Systemd Service
+      uses: appleboy/ssh-action@v1.0.3
+      with:
+        host: ${{ secrets.OCI_HOST }}
+        username: ${{ secrets.OCI_USERNAME }}
+        key: ${{ secrets.OCI_KEY }}
+        script: |
+          sudo systemctl restart rikipath-api.service

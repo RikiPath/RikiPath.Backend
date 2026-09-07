@@ -1,10 +1,12 @@
+using Domain.Enums;
+using RikiPath.Domain.Entities;
 using System;
 using System.Collections.Generic;
 
 namespace Domain.Entities
 {
     /// <summary>A timed, auto-scored mock JLPT practice test reproducing the official JLPT section structure.</summary>
-    public class PracticeTest : Base
+    public class PracticeTest : Base, IReviewableContent
     {
         public int Id { get; set; }
         public string Title { get; set; }

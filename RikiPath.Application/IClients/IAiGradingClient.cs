@@ -7,6 +7,6 @@
         /// and returns the raw JSON string the model replied with. Must NOT swallow provider
         /// errors — let them bubble up so the caller can map to 502 Bad Gateway.
         /// </summary>
-        Task<string> GradeSubmissionJsonAsync(string promptText, CancellationToken cancellationToken);
+        Task<string> GradeSubmissionJsonAsync(int userId, string promptText, CancellationToken cancellationToken);
     }
 }

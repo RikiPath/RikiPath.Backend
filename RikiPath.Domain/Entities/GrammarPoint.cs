@@ -1,10 +1,12 @@
+using Domain.Enums;
+using RikiPath.Domain.Entities;
 using System;
 using System.Collections.Generic;
 
 namespace Domain.Entities
 {
     /// <summary>Grammar bank entry — structure, usage notes, example sentence.</summary>
-    public class GrammarPoint : Base
+    public class GrammarPoint : Base, IReviewableContent
     {
         public int Id { get; set; }
         public string Title { get; set; }

@@ -2,6 +2,7 @@
 {
     public interface IAiLearningPathClient
     {
-        Task<string> GenerateLearningPathJsonAsync(string prompt, CancellationToken cancellationToken);
+        Task<string> GenerateLearningPathJsonAsync(
+            int userId, string prompt, CancellationToken cancellationToken);
     }
 }
