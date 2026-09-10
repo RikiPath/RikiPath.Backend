@@ -1,4 +1,4 @@
-using Domain.Entities;
+using RikiPath.Domain.Entities;
 using Domain.Enums;
 using System.Collections.Generic;
 using System.Threading.Tasks;

@@ -2,7 +2,7 @@ using System;
 
 using Domain.Enums;
 
-namespace Domain.Entities
+namespace RikiPath.Domain.Entities
 {
     /// <summary>
     /// A learner's purchase of a consultation package, processed through a PCI-compliant

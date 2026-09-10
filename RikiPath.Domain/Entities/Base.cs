@@ -1,5 +1,5 @@
 
-namespace Domain.Entities
+namespace RikiPath.Domain.Entities
 {
     public abstract class Base
     {

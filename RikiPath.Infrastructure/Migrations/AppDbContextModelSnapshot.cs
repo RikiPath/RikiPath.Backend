@@ -22,7 +22,7 @@ namespace RikiPath.Infrastructure.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
-            modelBuilder.Entity("Domain.Entities.ConsultantAvailability", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.ConsultantAvailability", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
@@ -64,7 +64,7 @@ namespace RikiPath.Infrastructure.Migrations
                     b.ToTable("ConsultantAvailabilities");
                 });
 
-            modelBuilder.Entity("Domain.Entities.ConsultationAnswer", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.ConsultationAnswer", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
@@ -112,7 +112,7 @@ namespace RikiPath.Infrastructure.Migrations
                     b.ToTable("ConsultationAnswers");
                 });
 
-            modelBuilder.Entity("Domain.Entities.ConsultationPackage", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.ConsultationPackage", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
@@ -162,7 +162,7 @@ namespace RikiPath.Infrastructure.Migrations
                     b.ToTable("ConsultationPackages");
                 });
 
-            modelBuilder.Entity("Domain.Entities.ConsultationPurchase", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.ConsultationPurchase", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
@@ -215,7 +215,7 @@ namespace RikiPath.Infrastructure.Migrations
                     b.ToTable("ConsultationPurchases");
                 });
 
-            modelBuilder.Entity("Domain.Entities.ConsultationRequest", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.ConsultationRequest", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
@@ -278,7 +278,7 @@ namespace RikiPath.Infrastructure.Migrations
                     b.ToTable("ConsultationRequests");
                 });
 
-            modelBuilder.Entity("Domain.Entities.Course", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.Course", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
@@ -313,6 +313,9 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Property<DateTime?>("ModifiedDate")
                         .HasColumnType("timestamp without time zone");
 
+                    b.Property<decimal>("Price")
+                        .HasColumnType("numeric");
+
                     b.Property<string>("ReviewNote")
                         .HasColumnType("text");
 
@@ -345,7 +348,7 @@ namespace RikiPath.Infrastructure.Migrations
                     b.ToTable("Courses");
                 });
 
-            modelBuilder.Entity("Domain.Entities.CourseCategory", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.CourseCategory", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
@@ -385,7 +388,63 @@ namespace RikiPath.Infrastructure.Migrations
                     b.ToTable("CourseCategories");
                 });
 
-            modelBuilder.Entity("Domain.Entities.EmailVerification", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.CoursePurchase", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<decimal>("AmountPaid")
+                        .HasColumnType("numeric");
+
+                    b.Property<int>("CourseId")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("CreatedDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid?>("ModifiedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("ModifiedDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<long>("OrderCode")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("PaymentStatus")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("PaymentTransactionId")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("PurchasedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int>("UserAccountId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CourseId");
+
+                    b.HasIndex("UserAccountId");
+
+                    b.ToTable("CoursePurchases");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.EmailVerification", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
@@ -413,7 +472,7 @@ namespace RikiPath.Infrastructure.Migrations
                     b.ToTable("EmailVerifications");
                 });
 
-            modelBuilder.Entity("Domain.Entities.GradingResult", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.GradingResult", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
@@ -457,7 +516,7 @@ namespace RikiPath.Infrastructure.Migrations
                     b.ToTable("GradingResults");
                 });
 
-            modelBuilder.Entity("Domain.Entities.GrammarPoint", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.GrammarPoint", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
@@ -532,7 +591,7 @@ namespace RikiPath.Infrastructure.Migrations
                     b.ToTable("GrammarPoints");
                 });
 
-            modelBuilder.Entity("Domain.Entities.JlptLevel", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.JlptLevel", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
@@ -575,7 +634,7 @@ namespace RikiPath.Infrastructure.Migrations
                     b.ToTable("JlptLevels");
                 });
 
-            modelBuilder.Entity("Domain.Entities.KanjiEntry", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.KanjiEntry", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
@@ -659,7 +718,7 @@ namespace RikiPath.Infrastructure.Migrations
                     b.ToTable("KanjiEntries");
                 });
 
-            modelBuilder.Entity("Domain.Entities.LearningPathSuggestion", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.LearningPathSuggestion", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
@@ -705,7 +764,7 @@ namespace RikiPath.Infrastructure.Migrations
                     b.ToTable("LearningPathSuggestions");
                 });
 
-            modelBuilder.Entity("Domain.Entities.Lesson", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.Lesson", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
@@ -767,7 +826,7 @@ namespace RikiPath.Infrastructure.Migrations
                     b.ToTable("Lessons");
                 });
 
-            modelBuilder.Entity("Domain.Entities.LessonGrammar", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.LessonGrammar", b =>
                 {
                     b.Property<int>("LessonId")
                         .HasColumnType("integer");
@@ -782,7 +841,7 @@ namespace RikiPath.Infrastructure.Migrations
                     b.ToTable("LessonGrammars");
                 });
 
-            modelBuilder.Entity("Domain.Entities.LessonKanji", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.LessonKanji", b =>
                 {
                     b.Property<int>("LessonId")
                         .HasColumnType("integer");
@@ -797,7 +856,7 @@ namespace RikiPath.Infrastructure.Migrations
                     b.ToTable("LessonKanjis");
                 });
 
-            modelBuilder.Entity("Domain.Entities.LessonProgress", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.LessonProgress", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
@@ -848,7 +907,7 @@ namespace RikiPath.Infrastructure.Migrations
                     b.ToTable("LessonProgresses");
                 });
 
-            modelBuilder.Entity("Domain.Entities.LessonVocabulary", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.LessonVocabulary", b =>
                 {
                     b.Property<int>("LessonId")
                         .HasColumnType("integer");
@@ -863,7 +922,7 @@ namespace RikiPath.Infrastructure.Migrations
                     b.ToTable("LessonVocabularies");
                 });
 
-            modelBuilder.Entity("Domain.Entities.Notification", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.Notification", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
@@ -916,7 +975,7 @@ namespace RikiPath.Infrastructure.Migrations
                     b.ToTable("Notifications");
                 });
 
-            modelBuilder.Entity("Domain.Entities.PracticeQuestion", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.PracticeQuestion", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
@@ -965,7 +1024,7 @@ namespace RikiPath.Infrastructure.Migrations
                     b.ToTable("PracticeQuestions");
                 });
 
-            modelBuilder.Entity("Domain.Entities.PracticeQuestionOption", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.PracticeQuestionOption", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
@@ -1009,7 +1068,7 @@ namespace RikiPath.Infrastructure.Migrations
                     b.ToTable("PracticeQuestionOptions");
                 });
 
-            modelBuilder.Entity("Domain.Entities.PracticeSubmission", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.PracticeSubmission", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
@@ -1061,7 +1120,7 @@ namespace RikiPath.Infrastructure.Migrations
                     b.ToTable("PracticeSubmissions");
                 });
 
-            modelBuilder.Entity("Domain.Entities.PracticeTest", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.PracticeTest", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
@@ -1126,7 +1185,7 @@ namespace RikiPath.Infrastructure.Migrations
                     b.ToTable("PracticeTests");
                 });
 
-            modelBuilder.Entity("Domain.Entities.PracticeTestAnswer", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.PracticeTestAnswer", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
@@ -1173,7 +1232,7 @@ namespace RikiPath.Infrastructure.Migrations
                     b.ToTable("PracticeTestAnswers");
                 });
 
-            modelBuilder.Entity("Domain.Entities.PracticeTestAttempt", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.PracticeTestAttempt", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
@@ -1223,7 +1282,7 @@ namespace RikiPath.Infrastructure.Migrations
                     b.ToTable("PracticeTestAttempts");
                 });
 
-            modelBuilder.Entity("Domain.Entities.PracticeTestSection", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.PracticeTestSection", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
@@ -1269,7 +1328,7 @@ namespace RikiPath.Infrastructure.Migrations
                     b.ToTable("PracticeTestSections");
                 });
 
-            modelBuilder.Entity("Domain.Entities.PracticeTestSectionResult", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.PracticeTestSectionResult", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
@@ -1317,7 +1376,7 @@ namespace RikiPath.Infrastructure.Migrations
                     b.ToTable("PracticeTestSectionResults");
                 });
 
-            modelBuilder.Entity("Domain.Entities.ReviewItem", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.ReviewItem", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
@@ -1380,7 +1439,7 @@ namespace RikiPath.Infrastructure.Migrations
                     b.ToTable("ReviewItems");
                 });
 
-            modelBuilder.Entity("Domain.Entities.ReviewLog", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.ReviewLog", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
@@ -1424,7 +1483,7 @@ namespace RikiPath.Infrastructure.Migrations
                     b.ToTable("ReviewLogs");
                 });
 
-            modelBuilder.Entity("Domain.Entities.Skill", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.Skill", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
@@ -1464,7 +1523,7 @@ namespace RikiPath.Infrastructure.Migrations
                     b.ToTable("Skills");
                 });
 
-            modelBuilder.Entity("Domain.Entities.UserAccount", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.UserAccount", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
@@ -1557,7 +1616,7 @@ namespace RikiPath.Infrastructure.Migrations
                     b.ToTable("Users");
                 });
 
-            modelBuilder.Entity("Domain.Entities.VocabularyEntry", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.VocabularyEntry", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
@@ -1637,7 +1696,7 @@ namespace RikiPath.Infrastructure.Migrations
                     b.ToTable("VocabularyEntries");
                 });
 
-            modelBuilder.Entity("Domain.Entities.VocabularyList", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.VocabularyList", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
@@ -1678,7 +1737,7 @@ namespace RikiPath.Infrastructure.Migrations
                     b.ToTable("VocabularyLists");
                 });
 
-            modelBuilder.Entity("Domain.Entities.VocabularyNoteEntry", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.VocabularyNoteEntry", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
@@ -1736,9 +1795,9 @@ namespace RikiPath.Infrastructure.Migrations
                     b.ToTable("VocabularyNoteEntries");
                 });
 
-            modelBuilder.Entity("Domain.Entities.ConsultantAvailability", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.ConsultantAvailability", b =>
                 {
-                    b.HasOne("Domain.Entities.UserAccount", "Consultant")
+                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "Consultant")
                         .WithMany("ConsultantAvailabilities")
                         .HasForeignKey("ConsultantId")
                         .OnDelete(DeleteBehavior.Cascade)
@@ -1747,17 +1806,17 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Navigation("Consultant");
                 });
 
-            modelBuilder.Entity("Domain.Entities.ConsultationAnswer", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.ConsultationAnswer", b =>
                 {
-                    b.HasOne("Domain.Entities.UserAccount", "Consultant")
+                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "Consultant")
                         .WithMany("ConsultationAnswers")
                         .HasForeignKey("ConsultantId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
-                    b.HasOne("Domain.Entities.ConsultationRequest", "ConsultationRequest")
+                    b.HasOne("RikiPath.Domain.Entities.ConsultationRequest", "ConsultationRequest")
                         .WithOne("ConsultationAnswer")
-                        .HasForeignKey("Domain.Entities.ConsultationAnswer", "ConsultationRequestId")
+                        .HasForeignKey("RikiPath.Domain.Entities.ConsultationAnswer", "ConsultationRequestId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
@@ -1766,15 +1825,15 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Navigation("ConsultationRequest");
                 });
 
-            modelBuilder.Entity("Domain.Entities.ConsultationPurchase", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.ConsultationPurchase", b =>
                 {
-                    b.HasOne("Domain.Entities.ConsultationPackage", "ConsultationPackage")
+                    b.HasOne("RikiPath.Domain.Entities.ConsultationPackage", "ConsultationPackage")
                         .WithMany("Purchases")
                         .HasForeignKey("ConsultationPackageId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
-                    b.HasOne("Domain.Entities.UserAccount", "UserAccount")
+                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "UserAccount")
                         .WithMany("ConsultationPurchases")
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Restrict)
@@ -1785,21 +1844,21 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Navigation("UserAccount");
                 });
 
-            modelBuilder.Entity("Domain.Entities.ConsultationRequest", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.ConsultationRequest", b =>
                 {
-                    b.HasOne("Domain.Entities.ConsultantAvailability", "ConsultantAvailability")
+                    b.HasOne("RikiPath.Domain.Entities.ConsultantAvailability", "ConsultantAvailability")
                         .WithOne("ConsultationRequest")
-                        .HasForeignKey("Domain.Entities.ConsultationRequest", "ConsultantAvailabilityId")
+                        .HasForeignKey("RikiPath.Domain.Entities.ConsultationRequest", "ConsultantAvailabilityId")
                         .OnDelete(DeleteBehavior.SetNull);
 
-                    b.HasOne("Domain.Entities.UserAccount", "Consultant")
+                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "Consultant")
                         .WithMany("ConsultationRequestsAsConsultant")
                         .HasForeignKey("ConsultantId")
                         .OnDelete(DeleteBehavior.Restrict);
 
-                    b.HasOne("Domain.Entities.ConsultationPurchase", "ConsultationPurchase")
+                    b.HasOne("RikiPath.Domain.Entities.ConsultationPurchase", "ConsultationPurchase")
                         .WithOne("ConsultationRequest")
-                        .HasForeignKey("Domain.Entities.ConsultationRequest", "ConsultationPurchaseId")
+                        .HasForeignKey("RikiPath.Domain.Entities.ConsultationRequest", "ConsultationPurchaseId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
@@ -1810,27 +1869,27 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Navigation("ConsultationPurchase");
                 });
 
-            modelBuilder.Entity("Domain.Entities.Course", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.Course", b =>
                 {
-                    b.HasOne("Domain.Entities.UserAccount", "ContentAuthor")
+                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "ContentAuthor")
                         .WithMany("AuthoredCourses")
                         .HasForeignKey("ContentAuthorId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
-                    b.HasOne("Domain.Entities.CourseCategory", "CourseCategory")
+                    b.HasOne("RikiPath.Domain.Entities.CourseCategory", "CourseCategory")
                         .WithMany("Courses")
                         .HasForeignKey("CourseCategoryId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
-                    b.HasOne("Domain.Entities.JlptLevel", "JlptLevel")
+                    b.HasOne("RikiPath.Domain.Entities.JlptLevel", "JlptLevel")
                         .WithMany("Courses")
                         .HasForeignKey("JlptLevelId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
-                    b.HasOne("Domain.Entities.UserAccount", "ReviewedBy")
+                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "ReviewedBy")
                         .WithMany("ReviewedCourses")
                         .HasForeignKey("ReviewedById")
                         .OnDelete(DeleteBehavior.Restrict);
@@ -1844,9 +1903,28 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Navigation("ReviewedBy");
                 });
 
-            modelBuilder.Entity("Domain.Entities.EmailVerification", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.CoursePurchase", b =>
                 {
-                    b.HasOne("Domain.Entities.UserAccount", "User")
+                    b.HasOne("RikiPath.Domain.Entities.Course", "Course")
+                        .WithMany("Purchases")
+                        .HasForeignKey("CourseId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "UserAccount")
+                        .WithMany("CoursePurchases")
+                        .HasForeignKey("UserAccountId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Course");
+
+                    b.Navigation("UserAccount");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.EmailVerification", b =>
+                {
+                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "User")
                         .WithMany("EmailVerifications")
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
@@ -1855,32 +1933,32 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Navigation("User");
                 });
 
-            modelBuilder.Entity("Domain.Entities.GradingResult", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.GradingResult", b =>
                 {
-                    b.HasOne("Domain.Entities.PracticeSubmission", "PracticeSubmission")
+                    b.HasOne("RikiPath.Domain.Entities.PracticeSubmission", "PracticeSubmission")
                         .WithOne("GradingResult")
-                        .HasForeignKey("Domain.Entities.GradingResult", "PracticeSubmissionId")
+                        .HasForeignKey("RikiPath.Domain.Entities.GradingResult", "PracticeSubmissionId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
                     b.Navigation("PracticeSubmission");
                 });
 
-            modelBuilder.Entity("Domain.Entities.GrammarPoint", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.GrammarPoint", b =>
                 {
-                    b.HasOne("Domain.Entities.UserAccount", "ContentAuthor")
+                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "ContentAuthor")
                         .WithMany("AuthoredGrammarPoints")
                         .HasForeignKey("ContentAuthorId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
-                    b.HasOne("Domain.Entities.JlptLevel", "JlptLevel")
+                    b.HasOne("RikiPath.Domain.Entities.JlptLevel", "JlptLevel")
                         .WithMany("GrammarPoints")
                         .HasForeignKey("JlptLevelId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
-                    b.HasOne("Domain.Entities.UserAccount", "ReviewedBy")
+                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "ReviewedBy")
                         .WithMany("ReviewedGrammarPoints")
                         .HasForeignKey("ReviewedById")
                         .OnDelete(DeleteBehavior.Restrict);
@@ -1892,21 +1970,21 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Navigation("ReviewedBy");
                 });
 
-            modelBuilder.Entity("Domain.Entities.KanjiEntry", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.KanjiEntry", b =>
                 {
-                    b.HasOne("Domain.Entities.UserAccount", "ContentAuthor")
+                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "ContentAuthor")
                         .WithMany("AuthoredKanjiEntries")
                         .HasForeignKey("ContentAuthorId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
-                    b.HasOne("Domain.Entities.JlptLevel", "JlptLevel")
+                    b.HasOne("RikiPath.Domain.Entities.JlptLevel", "JlptLevel")
                         .WithMany("KanjiEntries")
                         .HasForeignKey("JlptLevelId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
-                    b.HasOne("Domain.Entities.UserAccount", "ReviewedBy")
+                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "ReviewedBy")
                         .WithMany("ReviewedKanjiEntries")
                         .HasForeignKey("ReviewedById")
                         .OnDelete(DeleteBehavior.Restrict);
@@ -1918,9 +1996,9 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Navigation("ReviewedBy");
                 });
 
-            modelBuilder.Entity("Domain.Entities.LearningPathSuggestion", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.LearningPathSuggestion", b =>
                 {
-                    b.HasOne("Domain.Entities.UserAccount", "UserAccount")
+                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "UserAccount")
                         .WithMany("LearningPathSuggestions")
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
@@ -1929,15 +2007,15 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Navigation("UserAccount");
                 });
 
-            modelBuilder.Entity("Domain.Entities.Lesson", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.Lesson", b =>
                 {
-                    b.HasOne("Domain.Entities.Course", "Course")
+                    b.HasOne("RikiPath.Domain.Entities.Course", "Course")
                         .WithMany("Lessons")
                         .HasForeignKey("CourseId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
-                    b.HasOne("Domain.Entities.Skill", "Skill")
+                    b.HasOne("RikiPath.Domain.Entities.Skill", "Skill")
                         .WithMany("Lessons")
                         .HasForeignKey("SkillId")
                         .OnDelete(DeleteBehavior.Restrict)
@@ -1948,15 +2026,15 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Navigation("Skill");
                 });
 
-            modelBuilder.Entity("Domain.Entities.LessonGrammar", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.LessonGrammar", b =>
                 {
-                    b.HasOne("Domain.Entities.GrammarPoint", "GrammarPoint")
+                    b.HasOne("RikiPath.Domain.Entities.GrammarPoint", "GrammarPoint")
                         .WithMany("LessonGrammars")
                         .HasForeignKey("GrammarPointId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
-                    b.HasOne("Domain.Entities.Lesson", "Lesson")
+                    b.HasOne("RikiPath.Domain.Entities.Lesson", "Lesson")
                         .WithMany("LessonGrammars")
                         .HasForeignKey("LessonId")
                         .OnDelete(DeleteBehavior.Cascade)
@@ -1967,15 +2045,15 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Navigation("Lesson");
                 });
 
-            modelBuilder.Entity("Domain.Entities.LessonKanji", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.LessonKanji", b =>
                 {
-                    b.HasOne("Domain.Entities.KanjiEntry", "KanjiEntry")
+                    b.HasOne("RikiPath.Domain.Entities.KanjiEntry", "KanjiEntry")
                         .WithMany("LessonKanjis")
                         .HasForeignKey("KanjiEntryId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
-                    b.HasOne("Domain.Entities.Lesson", "Lesson")
+                    b.HasOne("RikiPath.Domain.Entities.Lesson", "Lesson")
                         .WithMany("LessonKanjis")
                         .HasForeignKey("LessonId")
                         .OnDelete(DeleteBehavior.Cascade)
@@ -1986,15 +2064,15 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Navigation("Lesson");
                 });
 
-            modelBuilder.Entity("Domain.Entities.LessonProgress", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.LessonProgress", b =>
                 {
-                    b.HasOne("Domain.Entities.Lesson", "Lesson")
+                    b.HasOne("RikiPath.Domain.Entities.Lesson", "Lesson")
                         .WithMany("LessonProgresses")
                         .HasForeignKey("LessonId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
-                    b.HasOne("Domain.Entities.UserAccount", "UserAccount")
+                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "UserAccount")
                         .WithMany("LessonProgresses")
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
@@ -2005,15 +2083,15 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Navigation("UserAccount");
                 });
 
-            modelBuilder.Entity("Domain.Entities.LessonVocabulary", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.LessonVocabulary", b =>
                 {
-                    b.HasOne("Domain.Entities.Lesson", "Lesson")
+                    b.HasOne("RikiPath.Domain.Entities.Lesson", "Lesson")
                         .WithMany("LessonVocabularies")
                         .HasForeignKey("LessonId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
-                    b.HasOne("Domain.Entities.VocabularyEntry", "VocabularyEntry")
+                    b.HasOne("RikiPath.Domain.Entities.VocabularyEntry", "VocabularyEntry")
                         .WithMany("LessonVocabularies")
                         .HasForeignKey("VocabularyEntryId")
                         .OnDelete(DeleteBehavior.Cascade)
@@ -2024,9 +2102,9 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Navigation("VocabularyEntry");
                 });
 
-            modelBuilder.Entity("Domain.Entities.Notification", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.Notification", b =>
                 {
-                    b.HasOne("Domain.Entities.UserAccount", "UserAccount")
+                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "UserAccount")
                         .WithMany("Notifications")
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
@@ -2035,9 +2113,9 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Navigation("UserAccount");
                 });
 
-            modelBuilder.Entity("Domain.Entities.PracticeQuestion", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.PracticeQuestion", b =>
                 {
-                    b.HasOne("Domain.Entities.PracticeTestSection", "PracticeTestSection")
+                    b.HasOne("RikiPath.Domain.Entities.PracticeTestSection", "PracticeTestSection")
                         .WithMany("Questions")
                         .HasForeignKey("PracticeTestSectionId")
                         .OnDelete(DeleteBehavior.Cascade)
@@ -2046,9 +2124,9 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Navigation("PracticeTestSection");
                 });
 
-            modelBuilder.Entity("Domain.Entities.PracticeQuestionOption", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.PracticeQuestionOption", b =>
                 {
-                    b.HasOne("Domain.Entities.PracticeQuestion", "PracticeQuestion")
+                    b.HasOne("RikiPath.Domain.Entities.PracticeQuestion", "PracticeQuestion")
                         .WithMany("Options")
                         .HasForeignKey("PracticeQuestionId")
                         .OnDelete(DeleteBehavior.Cascade)
@@ -2057,15 +2135,15 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Navigation("PracticeQuestion");
                 });
 
-            modelBuilder.Entity("Domain.Entities.PracticeSubmission", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.PracticeSubmission", b =>
                 {
-                    b.HasOne("Domain.Entities.JlptLevel", "JlptLevel")
+                    b.HasOne("RikiPath.Domain.Entities.JlptLevel", "JlptLevel")
                         .WithMany("PracticeSubmissions")
                         .HasForeignKey("JlptLevelId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
-                    b.HasOne("Domain.Entities.UserAccount", "UserAccount")
+                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "UserAccount")
                         .WithMany("PracticeSubmissions")
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
@@ -2076,21 +2154,21 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Navigation("UserAccount");
                 });
 
-            modelBuilder.Entity("Domain.Entities.PracticeTest", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.PracticeTest", b =>
                 {
-                    b.HasOne("Domain.Entities.UserAccount", "ContentAuthor")
+                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "ContentAuthor")
                         .WithMany("AuthoredPracticeTests")
                         .HasForeignKey("ContentAuthorId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
-                    b.HasOne("Domain.Entities.JlptLevel", "JlptLevel")
+                    b.HasOne("RikiPath.Domain.Entities.JlptLevel", "JlptLevel")
                         .WithMany("PracticeTests")
                         .HasForeignKey("JlptLevelId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
-                    b.HasOne("Domain.Entities.UserAccount", "ReviewedBy")
+                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "ReviewedBy")
                         .WithMany("ReviewedPracticeTests")
                         .HasForeignKey("ReviewedById")
                         .OnDelete(DeleteBehavior.Restrict);
@@ -2102,21 +2180,21 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Navigation("ReviewedBy");
                 });
 
-            modelBuilder.Entity("Domain.Entities.PracticeTestAnswer", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.PracticeTestAnswer", b =>
                 {
-                    b.HasOne("Domain.Entities.PracticeQuestion", "PracticeQuestion")
+                    b.HasOne("RikiPath.Domain.Entities.PracticeQuestion", "PracticeQuestion")
                         .WithMany("Answers")
                         .HasForeignKey("PracticeQuestionId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
-                    b.HasOne("Domain.Entities.PracticeTestAttempt", "PracticeTestAttempt")
+                    b.HasOne("RikiPath.Domain.Entities.PracticeTestAttempt", "PracticeTestAttempt")
                         .WithMany("Answers")
                         .HasForeignKey("PracticeTestAttemptId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
-                    b.HasOne("Domain.Entities.PracticeQuestionOption", "SelectedOption")
+                    b.HasOne("RikiPath.Domain.Entities.PracticeQuestionOption", "SelectedOption")
                         .WithMany()
                         .HasForeignKey("SelectedOptionId")
                         .OnDelete(DeleteBehavior.SetNull);
@@ -2128,15 +2206,15 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Navigation("SelectedOption");
                 });
 
-            modelBuilder.Entity("Domain.Entities.PracticeTestAttempt", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.PracticeTestAttempt", b =>
                 {
-                    b.HasOne("Domain.Entities.PracticeTest", "PracticeTest")
+                    b.HasOne("RikiPath.Domain.Entities.PracticeTest", "PracticeTest")
                         .WithMany("Attempts")
                         .HasForeignKey("PracticeTestId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
-                    b.HasOne("Domain.Entities.UserAccount", "UserAccount")
+                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "UserAccount")
                         .WithMany("PracticeTestAttempts")
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
@@ -2147,15 +2225,15 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Navigation("UserAccount");
                 });
 
-            modelBuilder.Entity("Domain.Entities.PracticeTestSection", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.PracticeTestSection", b =>
                 {
-                    b.HasOne("Domain.Entities.PracticeTest", "PracticeTest")
+                    b.HasOne("RikiPath.Domain.Entities.PracticeTest", "PracticeTest")
                         .WithMany("Sections")
                         .HasForeignKey("PracticeTestId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
-                    b.HasOne("Domain.Entities.Skill", "Skill")
+                    b.HasOne("RikiPath.Domain.Entities.Skill", "Skill")
                         .WithMany("PracticeTestSections")
                         .HasForeignKey("SkillId")
                         .OnDelete(DeleteBehavior.Restrict)
@@ -2166,15 +2244,15 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Navigation("Skill");
                 });
 
-            modelBuilder.Entity("Domain.Entities.PracticeTestSectionResult", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.PracticeTestSectionResult", b =>
                 {
-                    b.HasOne("Domain.Entities.PracticeTestAttempt", "PracticeTestAttempt")
+                    b.HasOne("RikiPath.Domain.Entities.PracticeTestAttempt", "PracticeTestAttempt")
                         .WithMany("SectionResults")
                         .HasForeignKey("PracticeTestAttemptId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
-                    b.HasOne("Domain.Entities.PracticeTestSection", "PracticeTestSection")
+                    b.HasOne("RikiPath.Domain.Entities.PracticeTestSection", "PracticeTestSection")
                         .WithMany("SectionResults")
                         .HasForeignKey("PracticeTestSectionId")
                         .OnDelete(DeleteBehavior.Restrict)
@@ -2185,25 +2263,25 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Navigation("PracticeTestSection");
                 });
 
-            modelBuilder.Entity("Domain.Entities.ReviewItem", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.ReviewItem", b =>
                 {
-                    b.HasOne("Domain.Entities.GrammarPoint", "GrammarPoint")
+                    b.HasOne("RikiPath.Domain.Entities.GrammarPoint", "GrammarPoint")
                         .WithMany("ReviewItems")
                         .HasForeignKey("GrammarPointId")
                         .OnDelete(DeleteBehavior.Restrict);
 
-                    b.HasOne("Domain.Entities.KanjiEntry", "KanjiEntry")
+                    b.HasOne("RikiPath.Domain.Entities.KanjiEntry", "KanjiEntry")
                         .WithMany("ReviewItems")
                         .HasForeignKey("KanjiEntryId")
                         .OnDelete(DeleteBehavior.Restrict);
 
-                    b.HasOne("Domain.Entities.UserAccount", "UserAccount")
+                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "UserAccount")
                         .WithMany("ReviewItems")
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
-                    b.HasOne("Domain.Entities.VocabularyNoteEntry", "VocabularyNoteEntry")
+                    b.HasOne("RikiPath.Domain.Entities.VocabularyNoteEntry", "VocabularyNoteEntry")
                         .WithMany("ReviewItems")
                         .HasForeignKey("VocabularyNoteEntryId")
                         .OnDelete(DeleteBehavior.Cascade);
@@ -2217,9 +2295,9 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Navigation("VocabularyNoteEntry");
                 });
 
-            modelBuilder.Entity("Domain.Entities.ReviewLog", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.ReviewLog", b =>
                 {
-                    b.HasOne("Domain.Entities.ReviewItem", "ReviewItem")
+                    b.HasOne("RikiPath.Domain.Entities.ReviewItem", "ReviewItem")
                         .WithMany("ReviewLogs")
                         .HasForeignKey("ReviewItemId")
                         .OnDelete(DeleteBehavior.Cascade)
@@ -2228,9 +2306,9 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Navigation("ReviewItem");
                 });
 
-            modelBuilder.Entity("Domain.Entities.UserAccount", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.UserAccount", b =>
                 {
-                    b.HasOne("Domain.Entities.JlptLevel", "TargetJlptLevel")
+                    b.HasOne("RikiPath.Domain.Entities.JlptLevel", "TargetJlptLevel")
                         .WithMany("LearnersTargeting")
                         .HasForeignKey("TargetJlptLevelId")
                         .OnDelete(DeleteBehavior.SetNull);
@@ -2238,21 +2316,21 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Navigation("TargetJlptLevel");
                 });
 
-            modelBuilder.Entity("Domain.Entities.VocabularyEntry", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.VocabularyEntry", b =>
                 {
-                    b.HasOne("Domain.Entities.UserAccount", "ContentAuthor")
+                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "ContentAuthor")
                         .WithMany("AuthoredVocabularyEntries")
                         .HasForeignKey("ContentAuthorId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
-                    b.HasOne("Domain.Entities.JlptLevel", "JlptLevel")
+                    b.HasOne("RikiPath.Domain.Entities.JlptLevel", "JlptLevel")
                         .WithMany("VocabularyEntries")
                         .HasForeignKey("JlptLevelId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
-                    b.HasOne("Domain.Entities.UserAccount", "ReviewedBy")
+                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "ReviewedBy")
                         .WithMany("ReviewedVocabularyEntries")
                         .HasForeignKey("ReviewedById")
                         .OnDelete(DeleteBehavior.Restrict);
@@ -2264,9 +2342,9 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Navigation("ReviewedBy");
                 });
 
-            modelBuilder.Entity("Domain.Entities.VocabularyList", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.VocabularyList", b =>
                 {
-                    b.HasOne("Domain.Entities.UserAccount", "UserAccount")
+                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "UserAccount")
                         .WithMany("VocabularyLists")
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
@@ -2275,19 +2353,19 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Navigation("UserAccount");
                 });
 
-            modelBuilder.Entity("Domain.Entities.VocabularyNoteEntry", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.VocabularyNoteEntry", b =>
                 {
-                    b.HasOne("Domain.Entities.KanjiEntry", "KanjiEntry")
+                    b.HasOne("RikiPath.Domain.Entities.KanjiEntry", "KanjiEntry")
                         .WithMany("VocabularyNoteEntries")
                         .HasForeignKey("KanjiEntryId")
                         .OnDelete(DeleteBehavior.Restrict);
 
-                    b.HasOne("Domain.Entities.VocabularyEntry", "VocabularyEntry")
+                    b.HasOne("RikiPath.Domain.Entities.VocabularyEntry", "VocabularyEntry")
                         .WithMany("VocabularyNoteEntries")
                         .HasForeignKey("VocabularyEntryId")
                         .OnDelete(DeleteBehavior.Restrict);
 
-                    b.HasOne("Domain.Entities.VocabularyList", "VocabularyList")
+                    b.HasOne("RikiPath.Domain.Entities.VocabularyList", "VocabularyList")
                         .WithMany("VocabularyNoteEntries")
                         .HasForeignKey("VocabularyListId")
                         .OnDelete(DeleteBehavior.Cascade)
@@ -2300,44 +2378,46 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Navigation("VocabularyList");
                 });
 
-            modelBuilder.Entity("Domain.Entities.ConsultantAvailability", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.ConsultantAvailability", b =>
                 {
                     b.Navigation("ConsultationRequest");
                 });
 
-            modelBuilder.Entity("Domain.Entities.ConsultationPackage", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.ConsultationPackage", b =>
                 {
                     b.Navigation("Purchases");
                 });
 
-            modelBuilder.Entity("Domain.Entities.ConsultationPurchase", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.ConsultationPurchase", b =>
                 {
                     b.Navigation("ConsultationRequest");
                 });
 
-            modelBuilder.Entity("Domain.Entities.ConsultationRequest", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.ConsultationRequest", b =>
                 {
                     b.Navigation("ConsultationAnswer");
                 });
 
-            modelBuilder.Entity("Domain.Entities.Course", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.Course", b =>
                 {
                     b.Navigation("Lessons");
+
+                    b.Navigation("Purchases");
                 });
 
-            modelBuilder.Entity("Domain.Entities.CourseCategory", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.CourseCategory", b =>
                 {
                     b.Navigation("Courses");
                 });
 
-            modelBuilder.Entity("Domain.Entities.GrammarPoint", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.GrammarPoint", b =>
                 {
                     b.Navigation("LessonGrammars");
 
                     b.Navigation("ReviewItems");
                 });
 
-            modelBuilder.Entity("Domain.Entities.JlptLevel", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.JlptLevel", b =>
                 {
                     b.Navigation("Courses");
 
@@ -2354,7 +2434,7 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Navigation("VocabularyEntries");
                 });
 
-            modelBuilder.Entity("Domain.Entities.KanjiEntry", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.KanjiEntry", b =>
                 {
                     b.Navigation("LessonKanjis");
 
@@ -2363,7 +2443,7 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Navigation("VocabularyNoteEntries");
                 });
 
-            modelBuilder.Entity("Domain.Entities.Lesson", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.Lesson", b =>
                 {
                     b.Navigation("LessonGrammars");
 
@@ -2374,52 +2454,52 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Navigation("LessonVocabularies");
                 });
 
-            modelBuilder.Entity("Domain.Entities.PracticeQuestion", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.PracticeQuestion", b =>
                 {
                     b.Navigation("Answers");
 
                     b.Navigation("Options");
                 });
 
-            modelBuilder.Entity("Domain.Entities.PracticeSubmission", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.PracticeSubmission", b =>
                 {
                     b.Navigation("GradingResult");
                 });
 
-            modelBuilder.Entity("Domain.Entities.PracticeTest", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.PracticeTest", b =>
                 {
                     b.Navigation("Attempts");
 
                     b.Navigation("Sections");
                 });
 
-            modelBuilder.Entity("Domain.Entities.PracticeTestAttempt", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.PracticeTestAttempt", b =>
                 {
                     b.Navigation("Answers");
 
                     b.Navigation("SectionResults");
                 });
 
-            modelBuilder.Entity("Domain.Entities.PracticeTestSection", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.PracticeTestSection", b =>
                 {
                     b.Navigation("Questions");
 
                     b.Navigation("SectionResults");
                 });
 
-            modelBuilder.Entity("Domain.Entities.ReviewItem", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.ReviewItem", b =>
                 {
                     b.Navigation("ReviewLogs");
                 });
 
-            modelBuilder.Entity("Domain.Entities.Skill", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.Skill", b =>
                 {
                     b.Navigation("Lessons");
 
                     b.Navigation("PracticeTestSections");
                 });
 
-            modelBuilder.Entity("Domain.Entities.UserAccount", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.UserAccount", b =>
                 {
                     b.Navigation("AuthoredCourses");
 
@@ -2438,6 +2518,8 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Navigation("ConsultationPurchases");
 
                     b.Navigation("ConsultationRequestsAsConsultant");
+
+                    b.Navigation("CoursePurchases");
 
                     b.Navigation("EmailVerifications");
 
@@ -2466,19 +2548,19 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Navigation("VocabularyLists");
                 });
 
-            modelBuilder.Entity("Domain.Entities.VocabularyEntry", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.VocabularyEntry", b =>
                 {
                     b.Navigation("LessonVocabularies");
 
                     b.Navigation("VocabularyNoteEntries");
                 });
 
-            modelBuilder.Entity("Domain.Entities.VocabularyList", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.VocabularyList", b =>
                 {
                     b.Navigation("VocabularyNoteEntries");
                 });
 
-            modelBuilder.Entity("Domain.Entities.VocabularyNoteEntry", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.VocabularyNoteEntry", b =>
                 {
                     b.Navigation("ReviewItems");
                 });

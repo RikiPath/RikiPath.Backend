@@ -3,7 +3,7 @@ using RikiPath.Domain.Entities;
 using System;
 using System.Collections.Generic;
 
-namespace Domain.Entities
+namespace RikiPath.Domain.Entities
 {
     /// <summary>Grammar bank entry — structure, usage notes, example sentence.</summary>
     public class GrammarPoint : Base, IReviewableContent

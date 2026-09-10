@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace Domain.Entities
+namespace RikiPath.Domain.Entities
 {
     /// <summary>
     /// One item in a learner's spaced-repetition review queue — a personal notebook

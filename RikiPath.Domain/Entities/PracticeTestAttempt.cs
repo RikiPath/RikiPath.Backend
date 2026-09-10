@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace Domain.Entities
+namespace RikiPath.Domain.Entities
 {
     /// <summary>One learner's attempt at a mock JLPT practice test.</summary>
     public class PracticeTestAttempt : Base

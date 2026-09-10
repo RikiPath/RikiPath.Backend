@@ -1,6 +1,6 @@
 using System;
 
-namespace Domain.Entities
+namespace RikiPath.Domain.Entities
 {
     /// <summary>One AI-generated learning-path suggestion for a learner.</summary>
     public class LearningPathSuggestion : Base

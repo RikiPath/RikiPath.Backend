@@ -1,6 +1,6 @@
 using System;
 
-namespace Domain.Entities
+namespace RikiPath.Domain.Entities
 {
     /// <summary>Per-learner, per-lesson watch progress.</summary>
     public class LessonProgress : Base

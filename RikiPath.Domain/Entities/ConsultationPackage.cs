@@ -1,6 +1,6 @@
 using Domain.Enums;
 
-namespace Domain.Entities
+namespace RikiPath.Domain.Entities
 {
     /// <summary>A purchasable consultation offering — Admin configures pricing and duration.</summary>
     public class ConsultationPackage : Base

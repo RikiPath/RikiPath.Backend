@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 
-namespace Domain.Entities
+namespace RikiPath.Domain.Entities
 {
     /// <summary>A custom, learner-owned vocabulary list inside the personal notebook (e.g. by topic/difficulty).</summary>
     public class VocabularyList : Base

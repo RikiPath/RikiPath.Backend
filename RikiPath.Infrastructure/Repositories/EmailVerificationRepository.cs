@@ -1,4 +1,4 @@
-﻿using Domain.Entities;
+﻿using RikiPath.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 using RikiPath.Application.IRepositories;
 

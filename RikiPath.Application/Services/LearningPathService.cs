@@ -1,4 +1,4 @@
-﻿using Domain.Entities;
+﻿using RikiPath.Domain.Entities;
 using RikiPath.Application.Exceptions;
 using RikiPath.Application.IClients;
 using RikiPath.Application.IServices;

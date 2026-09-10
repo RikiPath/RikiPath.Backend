@@ -1,4 +1,4 @@
-namespace Domain.Entities
+namespace RikiPath.Domain.Entities
 {
     /// <summary>Join entity: which GrammarPoint a Lesson introduces. Composite key, no audit fields.</summary>
     public class LessonGrammar

@@ -1,9 +1,3 @@
-using System;
-using System.Linq;
-using System.Net.Http.Headers;
-using System.Reflection;
-using System.Text;
-using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -22,6 +16,13 @@ using RikiPath.Application.IServices;
 using RikiPath.Domain;
 using RikiPath.Infrastructure;
 using RikiPath.Infrastructure.Clients;
+using RikiPath.WebApi.Hubs;
+using System;
+using System.Linq;
+using System.Net.Http.Headers;
+using System.Reflection;
+using System.Text;
+using System.Text.Json.Serialization;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -252,6 +253,10 @@ foreach (var iface in clientInterfaces)
     builder.Services.AddScoped(iface, impl);
 }
 
+// 6c. SignalR (WebRTC signaling cho video call tư vấn - ConsultationCallHub)
+builder.Services.AddSignalR();
+builder.Services.AddSingleton<ICallConnectionTracker, CallConnectionTracker>();
+
 // 7. JWT Authentication & Authorization
 var secret = appSettings?.SecretToken?.Value ?? builder.Configuration["SecretToken:Value"];
 if (string.IsNullOrWhiteSpace(secret))
@@ -372,5 +377,6 @@ app.UseCors("DefaultCorsPolicy");
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
+app.MapHub<ConsultationCallHub>("/signalrHub");
 
 app.Run();

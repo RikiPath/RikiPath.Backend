@@ -2,7 +2,6 @@ using RikiPath.Application.IRepositories;
 using RikiPath.Infrastructure.Repositories;
 using RikiPath.Application;
 using Microsoft.EntityFrameworkCore;
-using Infrastructure.Configuration;
 
 namespace RikiPath.Infrastructure
 {
@@ -17,6 +16,7 @@ namespace RikiPath.Infrastructure
         public ICourseCategoryRepository CourseCategories { get; }
 
         public ICourseRepository Courses { get; }
+        public ICoursePurchaseRepository CoursePurchases { get; }
         public ILessonRepository Lessons { get; }
         public ILessonProgressRepository LessonProgresses { get; }
 
@@ -65,6 +65,7 @@ namespace RikiPath.Infrastructure
             CourseCategories = new CourseCategoryRepository(context);
 
             Courses = new CourseRepository(context);
+            CoursePurchases = new CoursePurchaseRepository(context);
             Lessons = new LessonRepository(context);
             LessonProgresses = new LessonProgressRepository(context);
 

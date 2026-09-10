@@ -1,4 +1,4 @@
-﻿using Domain.Entities;
+﻿using RikiPath.Domain.Entities;
 using Domain.Enums;
 using Microsoft.IdentityModel.Tokens;
 using RikiPath.Application.IRepositories;

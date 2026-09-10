@@ -3,7 +3,7 @@ using RikiPath.Domain.Entities;
 using System;
 using System.Collections.Generic;
 
-namespace Domain.Entities
+namespace RikiPath.Domain.Entities
 {
     /// <summary>Vocabulary bank entry — word, reading, meaning, example sentence and audio.</summary>
     public class VocabularyEntry : Base, IReviewableContent

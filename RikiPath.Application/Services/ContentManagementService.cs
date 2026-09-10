@@ -1,4 +1,4 @@
-using Domain.Entities;
+using RikiPath.Domain.Entities;
 using Domain.Enums;
 using RikiPath.Application.DTOs.Content;
 using RikiPath.Application.IClients;

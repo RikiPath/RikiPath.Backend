@@ -15,6 +15,7 @@ namespace RikiPath.Application
 
         // Content
         ICourseRepository Courses { get; }
+        ICoursePurchaseRepository CoursePurchases { get; }
         ILessonRepository Lessons { get; }
         ILessonProgressRepository LessonProgresses { get; }
 

@@ -1,4 +1,4 @@
-﻿using Domain.Entities;
+﻿using RikiPath.Domain.Entities;
 
 namespace RikiPath.Application.IRepositories
 {

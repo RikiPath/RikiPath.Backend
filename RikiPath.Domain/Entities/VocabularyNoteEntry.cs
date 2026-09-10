@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 
-namespace Domain.Entities
+namespace RikiPath.Domain.Entities
 {
     /// <summary>
     /// A single word saved into a personal vocabulary list — either linked back to a

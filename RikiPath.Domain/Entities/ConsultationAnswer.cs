@@ -1,6 +1,6 @@
 using System;
 
-namespace Domain.Entities
+namespace RikiPath.Domain.Entities
 {
     /// <summary>The consultant's meeting notes or final written answer for a request.</summary>
     public class ConsultationAnswer : Base

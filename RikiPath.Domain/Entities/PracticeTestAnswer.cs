@@ -1,4 +1,4 @@
-namespace Domain.Entities
+namespace RikiPath.Domain.Entities
 {
     /// <summary>The option a learner picked for a single question within an attempt.</summary>
     public class PracticeTestAnswer : Base

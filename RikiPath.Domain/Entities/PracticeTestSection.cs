@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 
-namespace Domain.Entities
+namespace RikiPath.Domain.Entities
 {
     /// <summary>One section of a practice test, tied to a Skill (vocab/grammar, reading, listening).</summary>
     public class PracticeTestSection : Base

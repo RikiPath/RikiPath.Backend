@@ -2,7 +2,7 @@ using System.Collections.Generic;
 
 using Domain.Enums;
 
-namespace Domain.Entities
+namespace RikiPath.Domain.Entities
 {
     /// <summary>
     /// A single video lesson that belongs to exactly one <see cref="Course"/> and is

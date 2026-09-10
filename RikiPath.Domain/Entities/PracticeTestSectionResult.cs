@@ -1,4 +1,4 @@
-namespace Domain.Entities
+namespace RikiPath.Domain.Entities
 {
     /// <summary>Aggregated, per-section score for an attempt — powers the per-skill breakdown.</summary>
     public class PracticeTestSectionResult : Base

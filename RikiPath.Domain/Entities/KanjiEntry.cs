@@ -1,7 +1,7 @@
 using Domain.Enums;
 using RikiPath.Domain.Entities;
 
-namespace Domain.Entities
+namespace RikiPath.Domain.Entities
 {
     public class KanjiEntry : Base, IReviewableContent
     {

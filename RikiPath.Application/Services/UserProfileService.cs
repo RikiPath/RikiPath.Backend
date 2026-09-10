@@ -1,4 +1,4 @@
-using Domain.Entities;
+using RikiPath.Domain.Entities;
 using Microsoft.AspNetCore.Http;
 using RikiPath.Application.IServices;
 using RikiPath.Application.Requests.Profile;
