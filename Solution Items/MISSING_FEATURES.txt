@@ -1,0 +1,63 @@
+Danh sách chức năng chính / vấn đề còn thiếu (scan tự động toàn bộ solution)
+
+Tóm tắt môi trường:
+- Solution projects: RikiPath.Application, RikiPath.Infrastructure, RikiPath.Domain, RikiPath.WebApi
+- Controllers hiện có (đã bổ sung XML comments): Analytics, Auth, Consultation, ContentManagement, Email, FileStorage, LearningPath, LessonProgress, Notebook, Notification, PracticeSubmission, PracticeTest, Review, SharedBank, UserProfile, PaymentController
+
+1) Controllers / Public API thiếu (Priority: High / Medium)
+- IClaimService (RikiPath.Application/IServices/IClaimService.cs)
+  - Hiện không có controller tương ứng (ClaimController). Service implementation: RikiPath.Application/Services/ClaimService.cs
+  - Lý do cần: nếu FE cần đọc claim user/info qua API (ví dụ profile tóm tắt, quyền), nên có endpoint rõ ràng; hiện ClaimService lấy claim trực tiếp từ HttpContext trong server-side usage.
+  - Hành động đề xuất: tạo ClaimController với endpoint GET /api/v1/claim/me hoặc tiêu chuẩn hoá usage.
+
+- IAiUsageQuotaService (RikiPath.Application/IServices/IAiUsageQuotaService.cs)
+  - Không có API expose quota (controller) hiện tại. Implementation (AiUsageQuotaService) đã có (Infrastructure/Application) và DI được đăng ký.
+  - Lý do cần: nếu FE muốn hiển thị quota còn lại (AI quota per day) thì cần endpoint trả quota/remaining. Nếu đây chỉ là service nội bộ, giữ private là OK.
+  - Hành động đề xuất: nếu yêu cầu FE hiển thị, tạo AiUsageController với 1 endpoint GET /api/v1/ai/quota.
+
+2) Không đồng nhất khi đọc claims (Priority: High)
+- Vấn đề: Các controller hầu hết lấy userId bằng ClaimTypes.NameIdentifier (int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier))).
+  Nhưng ClaimService (RikiPath.Application/Services/ClaimService.cs) đang dùng httpContextAccessor.HttpContext!.User.FindFirst("UserId") và FindFirst("Role").
+- Hậu quả: có thể dẫn đến NullReference hoặc không tìm thấy claim khi code sử dụng ClaimService thay vì controller style. Gây lỗi xác thực/authorization khó debug.
+- Hành động đề xuất: tiêu chuẩn hóa toàn bộ codebase dùng ClaimTypes.NameIdentifier và ClaimTypes.Role (hoặc cập nhật token generation để ghi thêm claim keys "UserId"/"Role"). Cập nhật ClaimService để dùng ClaimTypes constants.
+
+3) Payment / Webhook (Priority: Medium)
+- PayOS client implementation và PaymentController tồn tại (RikiPath.Infrastructure/Clients/PayOsClient.cs và RikiPath.WebApi/Controllers/PaymentController.cs).
+- Kiểm tra cần làm trước deploy: webhook URL, secret/key, signature verification và route bảo mật, idempotency xử lý callback (ConsultationPurchase repository được cấu hình).
+- Hành động đề xuất: document webhook URL + secret, viết integration test cho webhook verify, đảm bảo webhook handler không throw trên payload invalid.
+
+4) Bulk import / Background processing (Priority: Medium)
+- ContentManagementController.BulkImport có comment cho xử lý batch/async, nhưng không thấy worker/background-hosted-service chuyên dụng trong solution (ví dụ: IHostedService/Hangfire/Queue project).
+- Hành động đề xuất: nếu import lớn, bổ sung background worker (IHostedService / queue) hoặc rõ ràng trả 202 + jobId và expose endpoint check job status.
+
+5) AI features: monitoring / quota / exposure (Priority: Medium)
+- AiLearningPathClient, AiGradingClient và AiUsageQuotaService có mặt. Cần kiểm tra:
+  - Expose endpoint cho FE nếu muốn hiển thị quota/usage.
+  - Circuit breaker / retry policy / timeout khi gọi provider AI.
+  - Logging/metrics cho usage/token cost.
+- Hành động đề xuất: thêm endpoints (optional), add Polly retry/timeouts, record metrics (Prometheus/Serilog) cho cost.
+
+6) Tests (Unit/Integration) vắng mặt (Priority: Low)
+- Không tìm thấy project test trong solution.
+- Hành động đề xuất: tạo dự án test (xUnit/NUnit), viết unit tests cho services core và integration tests cho controllers (TestServer/WebApplicationFactory).
+
+7) Docs / Solution Items
+- Không tìm thấy thư mục 'Solution Items' hay file docs tổng quát trong repository. File này đã được thêm tại Solution Items/MISSING_FEATURES.txt (này).
+- Hành động đề xuất: thêm README.md ở solution root mô tả architecture, flow AI quota, payment webhook, env vars cần set.
+
+8) Các kiểm tra configuration trước khi deploy (Checklist nhanh)
+- Đã cấu hình SecretToken:Value (JWT) trong production.
+- ConnectionStrings:DefaultConnection và migration đã apply.
+- PayOs:BaseUrl và credentials.
+- AppSettings.Ai: BaseUrl, ApiKey, RateLimit cấu hình hợp lý.
+- SMTP/Mail provider cấu hình để gửi email xác thực.
+
+Ghi chú thêm (observations):
+- Nhiều controllers, services và clients đã hiện diện; codebase có vẻ hoàn chỉnh về feature-surface (Auth, Profile, Learning Path, Practice, Review, Notebook, Content Management, Consultation, Payment, FileStorage, Notification). Những mục nêu trên là các gaps chủ yếu cần quyết định về expose API hoặc sync/async design.
+
+Nếu bạn muốn, tôi có thể:
+- Tạo ClaimController và AiUsageController (implement wrapper endpoints) theo chuẩn hiện có.
+- Thêm README.md trong solution root mô tả các bước deploy và các env vars cần thiết.
+- Chuẩn hoá ClaimService để dùng ClaimTypes.NameIdentifier.
+
+-- End of report --

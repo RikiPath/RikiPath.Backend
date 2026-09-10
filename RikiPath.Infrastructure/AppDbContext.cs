@@ -1,4 +1,4 @@
-using Domain.Entities;
+using RikiPath.Domain.Entities;
 using RikiPath.Infrastructure.Configuration;
 using Microsoft.EntityFrameworkCore;
 
@@ -52,6 +52,7 @@ namespace RikiPath.Infrastructure
         // Consultation package
         public DbSet<ConsultationPackage> ConsultationPackages { get; set; }
         public DbSet<ConsultationPurchase> ConsultationPurchases { get; set; }
+        public DbSet<CoursePurchase> CoursePurchases { get; set; }
         public DbSet<ConsultationRequest> ConsultationRequests { get; set; }
         public DbSet<ConsultationAnswer> ConsultationAnswers { get; set; }
         public DbSet<ConsultantAvailability> ConsultantAvailabilities { get; set; }

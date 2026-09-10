@@ -1,9 +1,6 @@
-using System;
-using System.Collections.Generic;
-
 using Domain.Enums;
 
-namespace Domain.Entities
+namespace RikiPath.Domain.Entities
 {
     /// <summary>
     /// A single account table for every role in the system (Learner, ContentAuthor,
@@ -57,6 +54,7 @@ namespace Domain.Entities
         public List<LearningPathSuggestion>? LearningPathSuggestions { get; set; }
         public List<PracticeSubmission>? PracticeSubmissions { get; set; }
         public List<ConsultationPurchase>? ConsultationPurchases { get; set; }
+        public List<CoursePurchase>? CoursePurchases { get; set; }
         public List<ReviewItem>? ReviewItems { get; set; }
 
         // As a Consultant

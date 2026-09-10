@@ -1,4 +1,4 @@
-﻿namespace Domain.Entities
+﻿namespace RikiPath.Domain.Entities
 {
     public class EmailVerification
     {

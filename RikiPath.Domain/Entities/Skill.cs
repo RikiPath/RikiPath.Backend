@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 
-namespace Domain.Entities
+namespace RikiPath.Domain.Entities
 {
     /// <summary>Skill master data (Vocabulary, Kanji, Grammar, Listening, Reading) — Admin-configurable.</summary>
     public class Skill : Base

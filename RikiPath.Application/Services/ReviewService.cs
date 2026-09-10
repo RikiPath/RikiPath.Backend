@@ -1,4 +1,4 @@
-﻿using Domain.Entities;
+﻿using RikiPath.Domain.Entities;
 using Domain.Enums;
 using RikiPath.Application.IServices;
 using RikiPath.Application.Requests.Reviews;

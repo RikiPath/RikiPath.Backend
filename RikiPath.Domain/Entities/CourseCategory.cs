@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 
-namespace Domain.Entities
+namespace RikiPath.Domain.Entities
 {
     /// <summary>Course category master data — Admin-configurable.</summary>
     public class CourseCategory : Base

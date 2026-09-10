@@ -1,6 +1,6 @@
 using System;
 
-namespace Domain.Entities
+namespace RikiPath.Domain.Entities
 {
     /// <summary>The AI grading pipeline's output for one submission — item-level feedback.</summary>
     public class GradingResult : Base

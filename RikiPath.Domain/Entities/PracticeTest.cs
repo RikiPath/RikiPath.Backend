@@ -3,7 +3,7 @@ using RikiPath.Domain.Entities;
 using System;
 using System.Collections.Generic;
 
-namespace Domain.Entities
+namespace RikiPath.Domain.Entities
 {
     /// <summary>A timed, auto-scored mock JLPT practice test reproducing the official JLPT section structure.</summary>
     public class PracticeTest : Base, IReviewableContent

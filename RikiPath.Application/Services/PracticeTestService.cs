@@ -1,4 +1,4 @@
-using Domain.Entities;
+using RikiPath.Domain.Entities;
 using RikiPath.Application.IServices;
 using RikiPath.Application.Requests.PracticeTests;
 using RikiPath.Application.Responses;

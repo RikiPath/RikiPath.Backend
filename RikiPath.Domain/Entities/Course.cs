@@ -3,7 +3,7 @@ using RikiPath.Domain.Entities;
 using System;
 using System.Collections.Generic;
 
-namespace Domain.Entities
+namespace RikiPath.Domain.Entities
 {
     /// <summary>
     /// A JLPT-prep course — the top-level content container that groups multiple
@@ -15,6 +15,7 @@ namespace Domain.Entities
         public int Id { get; set; }
         public string Title { get; set; }
         public string? Description { get; set; }
+        public decimal Price { get; set; }
 
         public ContentStatus Status { get; set; } = ContentStatus.Draft;
         public string? ReviewNote { get; set; }
@@ -31,5 +32,6 @@ namespace Domain.Entities
         public UserAccount? ReviewedBy { get; set; }
 
         public List<Lesson>? Lessons { get; set; }
+        public List<CoursePurchase>? Purchases { get; set; }
     }
 }

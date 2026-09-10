@@ -1,6 +1,6 @@
 using System;
 
-namespace Domain.Entities
+namespace RikiPath.Domain.Entities
 {
     /// <summary>A consultant's open meeting slot. IsBooked mirrors whether a ConsultationRequest now references it.</summary>
     public class ConsultantAvailability : Base

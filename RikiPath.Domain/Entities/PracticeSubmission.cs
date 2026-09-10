@@ -2,7 +2,7 @@ using System;
 
 using Domain.Enums;
 
-namespace Domain.Entities
+namespace RikiPath.Domain.Entities
 {
     /// <summary>
     /// A writing or kanji-practice submission from a learner. TextContent is used for

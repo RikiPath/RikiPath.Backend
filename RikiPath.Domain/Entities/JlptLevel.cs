@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 
-namespace Domain.Entities
+namespace RikiPath.Domain.Entities
 {
     /// <summary>JLPT level master data (N5..N1) — Admin-configurable.</summary>
     public class JlptLevel : Base

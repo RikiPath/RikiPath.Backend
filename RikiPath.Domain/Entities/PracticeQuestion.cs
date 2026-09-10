@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 
-namespace Domain.Entities
+namespace RikiPath.Domain.Entities
 {
     /// <summary>A single practice-test question. AudioUrl for listening, ImageUrl for reading/visual questions.</summary>
     public class PracticeQuestion : Base

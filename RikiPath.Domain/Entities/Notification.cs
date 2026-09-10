@@ -1,4 +1,4 @@
-namespace Domain.Entities
+namespace RikiPath.Domain.Entities
 {
     /// <summary>In-app notification (consultation answered, content approved/rejected, grading finished, etc.).</summary>
     public class Notification : Base

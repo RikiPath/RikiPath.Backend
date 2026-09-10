@@ -1,6 +1,10 @@
 <Solution>
-  <Project Path="RikiPath.Application/RikiPath.Application.csproj" />
-  <Project Path="RikiPath.Domain/RikiPath.Domain.csproj" />
-  <Project Path="RikiPath.Infrastructure/RikiPath.Infrastructure.csproj" />
-  <Project Path="RikiPath.WebApi/RikiPath.WebApi.csproj" />
+  <Folder Name="/Solution Items/">
+    <File Path="C:/Users/huy/Downloads/FA26SE188_RIKIPATH_JAPANESE_LEARNING_AND_JLPT_EXAM_lamnn15.docx" />
+    <File Path="Solution Items/MISSING_FEATURES.txt" />
+  </Folder>
+  <Project Path="D:/Capstone/BE_JP/RikiPath.Backend/RikiPath.Application/RikiPath.Application.csproj" />
+  <Project Path="D:/Capstone/BE_JP/RikiPath.Backend/RikiPath.Domain/RikiPath.Domain.csproj" />
+  <Project Path="D:/Capstone/BE_JP/RikiPath.Backend/RikiPath.Infrastructure/RikiPath.Infrastructure.csproj" />
+  <Project Path="D:/Capstone/BE_JP/RikiPath.Backend/RikiPath.WebApi/RikiPath.WebApi.csproj" />
 </Solution>
