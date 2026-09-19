@@ -2,10 +2,6 @@ using Domain.Enums;
 
 namespace RikiPath.Domain.Entities
 {
-    /// <summary>
-    /// A single account table for every role in the system (Learner, ContentAuthor,
-    /// Consultant, Admin) — discriminated by <see cref="Role"/> instead of per-role tables.
-    /// </summary>
     public class UserAccount : Base
     {
         public int Id { get; set; }
@@ -22,8 +18,10 @@ namespace RikiPath.Domain.Entities
         public bool SystemNotificationsEnabled { get; set; } = true;
         public bool EmailNotificationsEnabled { get; set; } = true;
         public int DailyStudyMinutes { get; set; } = 30;
-        public int? TargetJlptLevelId { get; set; }
-        public JlptLevel? TargetJlptLevel { get; set; }
+
+        /// <summary>Which certification level the learner is currently targeting — e.g. "JLPT N4".</summary>
+        public int? TargetCertificationLevelId { get; set; }
+        public CertificationLevel? TargetCertificationLevel { get; set; }
         public string? StudyTimePreference { get; set; }
 
         // Learning history / streaks
@@ -34,18 +32,14 @@ namespace RikiPath.Domain.Entities
         // ---- Navigation properties ----
 
         // As a Content Author
-        public List<Course>? AuthoredCourses { get; set; }
+        public List<Lesson>? AuthoredLessons { get; set; }
         public List<KanjiEntry>? AuthoredKanjiEntries { get; set; }
         public List<VocabularyEntry>? AuthoredVocabularyEntries { get; set; }
         public List<GrammarPoint>? AuthoredGrammarPoints { get; set; }
         public List<PracticeTest>? AuthoredPracticeTests { get; set; }
 
-        // As Admin reviewer
-        public List<Course>? ReviewedCourses { get; set; }
-        public List<KanjiEntry>? ReviewedKanjiEntries { get; set; }
-        public List<VocabularyEntry>? ReviewedVocabularyEntries { get; set; }
-        public List<GrammarPoint>? ReviewedGrammarPoints { get; set; }
-        public List<PracticeTest>? ReviewedPracticeTests { get; set; }
+        // As Admin reviewer: KHÔNG dùng FK nữa — Lesson/KanjiEntry/VocabularyEntry/GrammarPoint/
+        // PracticeTest lưu thẳng ReviewedByName (string) vì hệ thống chỉ có 1 Admin duy nhất.
 
         // As a Learner
         public List<LessonProgress>? LessonProgresses { get; set; }
@@ -54,8 +48,9 @@ namespace RikiPath.Domain.Entities
         public List<LearningPathSuggestion>? LearningPathSuggestions { get; set; }
         public List<PracticeSubmission>? PracticeSubmissions { get; set; }
         public List<ConsultationPurchase>? ConsultationPurchases { get; set; }
-        public List<CoursePurchase>? CoursePurchases { get; set; }
         public List<ReviewItem>? ReviewItems { get; set; }
+        public List<UserSubscription>? UserSubscriptions { get; set; }
+        public List<AiCreditTopUp>? AiCreditTopUps { get; set; }
 
         // As a Consultant
         public List<ConsultationRequest>? ConsultationRequestsAsConsultant { get; set; }

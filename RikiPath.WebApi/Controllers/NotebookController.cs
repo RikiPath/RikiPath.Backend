@@ -28,8 +28,7 @@ namespace RikiPath.WebApi.Controllers
         [HttpPost("lists")]
         public async Task<IActionResult> CreateList([FromBody] CreateVocabularyListRequest request, CancellationToken cancellationToken)
         {
-            var userId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
-            var result = await notebookService.CreateListAsync(userId, request, cancellationToken);
+            var result = await notebookService.CreateListAsync(request, cancellationToken);
             return StatusCode((int)result.StatusCode, result);
         }
 
@@ -48,8 +47,7 @@ namespace RikiPath.WebApi.Controllers
         [HttpGet("lists")]
         public async Task<IActionResult> GetMyLists(CancellationToken cancellationToken)
         {
-            var userId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
-            var result = await notebookService.GetMyListsAsync(userId, cancellationToken);
+            var result = await notebookService.GetMyListsAsync(cancellationToken);
             return StatusCode((int)result.StatusCode, result);
         }
 
@@ -73,8 +71,7 @@ namespace RikiPath.WebApi.Controllers
         [HttpPut("lists/{listId:int}")]
         public async Task<IActionResult> UpdateList(int listId, [FromBody] UpdateVocabularyListRequest request, CancellationToken cancellationToken)
         {
-            var userId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
-            var result = await notebookService.UpdateListAsync(userId, listId, request, cancellationToken);
+            var result = await notebookService.UpdateListAsync(listId, request, cancellationToken);
             return StatusCode((int)result.StatusCode, result);
         }
 
@@ -96,8 +93,7 @@ namespace RikiPath.WebApi.Controllers
         [HttpDelete("lists/{listId:int}")]
         public async Task<IActionResult> DeleteList(int listId, CancellationToken cancellationToken)
         {
-            var userId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
-            var result = await notebookService.DeleteListAsync(userId, listId, cancellationToken);
+            var result = await notebookService.DeleteListAsync(listId, cancellationToken);
             return StatusCode((int)result.StatusCode, result);
         }
 
@@ -119,8 +115,7 @@ namespace RikiPath.WebApi.Controllers
         [HttpGet("lists/{listId:int}/entries")]
         public async Task<IActionResult> GetListEntries(int listId, CancellationToken cancellationToken)
         {
-            var userId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
-            var result = await notebookService.GetListEntriesAsync(userId, listId, cancellationToken);
+            var result = await notebookService.GetListEntriesAsync(listId, cancellationToken);
             return StatusCode((int)result.StatusCode, result);
         }
 
@@ -141,8 +136,7 @@ namespace RikiPath.WebApi.Controllers
         [HttpPost("bookmark/vocabulary")]
         public async Task<IActionResult> BookmarkVocabulary([FromBody] BookmarkVocabularyRequest request, CancellationToken cancellationToken)
         {
-            var userId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
-            var result = await notebookService.BookmarkVocabularyAsync(userId, request, cancellationToken);
+            var result = await notebookService.BookmarkVocabularyAsync(request, cancellationToken);
             return StatusCode((int)result.StatusCode, result);
         }
 
@@ -163,8 +157,7 @@ namespace RikiPath.WebApi.Controllers
         [HttpPost("bookmark/kanji")]
         public async Task<IActionResult> BookmarkKanji([FromBody] BookmarkKanjiRequest request, CancellationToken cancellationToken)
         {
-            var userId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
-            var result = await notebookService.BookmarkKanjiAsync(userId, request, cancellationToken);
+            var result = await notebookService.BookmarkKanjiAsync(request, cancellationToken);
             return StatusCode((int)result.StatusCode, result);
         }
 
@@ -185,8 +178,7 @@ namespace RikiPath.WebApi.Controllers
         [HttpPost("bookmark/grammar/{grammarPointId:int}")]
         public async Task<IActionResult> BookmarkGrammar(int grammarPointId, CancellationToken cancellationToken)
         {
-            var userId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
-            var result = await notebookService.BookmarkGrammarAsync(userId, grammarPointId, cancellationToken);
+            var result = await notebookService.BookmarkGrammarAsync(grammarPointId, cancellationToken);
             return StatusCode((int)result.StatusCode, result);
         }
 
@@ -207,8 +199,7 @@ namespace RikiPath.WebApi.Controllers
         [HttpPost("entries")]
         public async Task<IActionResult> AddManualEntry([FromBody] AddManualEntryRequest request, CancellationToken cancellationToken)
         {
-            var userId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
-            var result = await notebookService.AddManualEntryAsync(userId, request, cancellationToken);
+            var result = await notebookService.AddManualEntryAsync(request, cancellationToken);
             return StatusCode((int)result.StatusCode, result);
         }
 
@@ -230,8 +221,7 @@ namespace RikiPath.WebApi.Controllers
         [HttpDelete("entries/{noteEntryId:int}")]
         public async Task<IActionResult> RemoveEntry(int noteEntryId, CancellationToken cancellationToken)
         {
-            var userId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
-            var result = await notebookService.RemoveEntryAsync(userId, noteEntryId, cancellationToken);
+            var result = await notebookService.RemoveEntryAsync(noteEntryId, cancellationToken);
             return StatusCode((int)result.StatusCode, result);
         }
     }

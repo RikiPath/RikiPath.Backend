@@ -13,13 +13,13 @@ namespace RikiPath.Application.Services
     //   INotificationRepository.MarkAllAsReadAsync(userId) -> atomic UPDATE ... SET IsRead=true
     //     WHERE UserId=@userId AND IsRead=false (ExecuteUpdateAsync, giống pattern race-condition
     //     ở ConsultationService, tránh phải load hết N bản ghi lên rồi save từng cái).
-    public class NotificationService(IUnitOfWork unitOfWork) : INotificationService
+    public class NotificationService(IUnitOfWork unitOfWork, IClaimService claimService) : INotificationService
     {
-        public async Task<ApiResponse<PagedResult<NotificationResponse>>> GetMyNotificationsAsync(
-            int userId, bool onlyUnread, int page, int pageSize, CancellationToken cancellationToken)
+        public async Task<ApiResponse<PagedResult<NotificationResponse>>> GetMyNotificationsAsync(bool onlyUnread, int page, int pageSize, CancellationToken cancellationToken)
         {
             try
             {
+                var userId = claimService.GetUserClaim().Id;
                 if (page < 1) page = 1;
                 if (pageSize < 1 || pageSize > 100) pageSize = 20;
 
@@ -42,10 +42,11 @@ namespace RikiPath.Application.Services
             }
         }
 
-        public async Task<ApiResponse<int>> GetUnreadCountAsync(int userId, CancellationToken cancellationToken)
+        public async Task<ApiResponse<int>> GetUnreadCountAsync(CancellationToken cancellationToken)
         {
             try
             {
+                var userId = claimService.GetUserClaim().Id;
                 var count = await unitOfWork.Notifications.CountUnreadAsync(userId);
                 return ApiResponse<int>.Success(count);
             }
@@ -56,10 +57,11 @@ namespace RikiPath.Application.Services
             }
         }
 
-        public async Task<ApiResponse> MarkAsReadAsync(int userId, int notificationId, CancellationToken cancellationToken)
+        public async Task<ApiResponse> MarkAsReadAsync(int notificationId, CancellationToken cancellationToken)
         {
             try
             {
+                var userId = claimService.GetUserClaim().Id;
                 var notification = await unitOfWork.Notifications.GetByIdAsync(notificationId);
                 if (notification is null)
                     return ApiResponse.NotFound($"Không tìm thấy thông báo Id = {notificationId}.");
@@ -83,10 +85,11 @@ namespace RikiPath.Application.Services
             }
         }
 
-        public async Task<ApiResponse> MarkAllAsReadAsync(int userId, CancellationToken cancellationToken)
+        public async Task<ApiResponse> MarkAllAsReadAsync(CancellationToken cancellationToken)
         {
             try
             {
+                var userId = claimService.GetUserClaim().Id;
                 await unitOfWork.Notifications.MarkAllAsReadAsync(userId);
                 return ApiResponse.Success();
             }
@@ -97,14 +100,14 @@ namespace RikiPath.Application.Services
             }
         }
 
-        public async Task CreateNotificationAsync(
-            int userId, string title, string message, string type, CancellationToken cancellationToken)
+        public async Task CreateNotificationAsync(string title, string message, string type, CancellationToken cancellationToken)
         {
             // Fire-and-forget từ các service khác — không throw ra ngoài để không làm hỏng luồng
             // nghiệp vụ chính (VD: chấm điểm AI thành công nhưng tạo notification lỗi thì vẫn
             // phải trả kết quả chấm điểm cho user).
             try
             {
+                var userId = claimService.GetUserClaim().Id;
                 var user = await unitOfWork.UserAccounts.GetByIdAsync(userId);
                 if (user is null || !user.SystemNotificationsEnabled)
                     return;

@@ -7,23 +7,39 @@ using System.Net;
 
 namespace RikiPath.Application.Services
 {
-    // NOTE: file này THAY THẾ PracticeTestService cũ — 3 method đầu (StartAttemptAsync,
-    // SubmitAttemptAsync, GetAttemptResultAsync) giữ nguyên y hệt bản trước, chỉ thêm
-    // GetTestsByLevelAsync + GetDetailedResultAsync ở cuối cho Module 1.5.
-    public class PracticeTestService(IUnitOfWork unitOfWork) : IPracticeTestService
+    public class PracticeTestService(IUnitOfWork unitOfWork, IClaimService claimService) : IPracticeTestService
     {
         private const string StatusInProgress = "in_progress";
         private const string StatusCompleted = "completed";
 
-        public async Task<ApiResponse<StartAttemptResponse>> StartAttemptAsync(
-            int userId, int practiceTestId, CancellationToken cancellationToken)
+        public async Task<ApiResponse<StartAttemptResponse>> StartAttemptAsync(int practiceTestId, CancellationToken cancellationToken = default)
         {
             try
             {
+                var userId = claimService.GetUserClaim().Id;
                 var test = await unitOfWork.PracticeTests.GetByIdAsync(practiceTestId);
                 if (test is null)
                     return ApiResponse<StartAttemptResponse>.NotFound(
                         $"Không tìm thấy PracticeTest có Id = {practiceTestId}.");
+
+                // --- Thuật toán Quizlet: Tìm câu hỏi bị làm sai ở lần thi trước ---
+                var previousAttempts = await unitOfWork.PracticeTestAttempts.FindAsync(a =>
+                    a.UserId == userId && a.PracticeTestId == practiceTestId && a.IsCompleted);
+
+                var previousAttemptIds = previousAttempts.Select(a => a.Id).ToList();
+                var previouslyWrongQuestionIds = new List<int>();
+
+                if (previousAttemptIds.Count > 0)
+                {
+                    var pastAnswers = await unitOfWork.PracticeTestAnswers.FindAsync(ans =>
+                        previousAttemptIds.Contains(ans.PracticeTestAttemptId));
+
+                    previouslyWrongQuestionIds = pastAnswers
+                        .GroupBy(ans => ans.PracticeQuestionId)
+                        .Where(g => !g.OrderByDescending(x => x.PracticeTestAttemptId).First().IsCorrect)
+                        .Select(g => g.Key)
+                        .ToList();
+                }
 
                 var attempt = new PracticeTestAttempt
                 {
@@ -34,6 +50,7 @@ namespace RikiPath.Application.Services
                     TotalScore = 0,
                     IsCompleted = false,
                 };
+
                 await unitOfWork.PracticeTestAttempts.AddAsync(attempt);
                 await unitOfWork.SaveChangesAsync();
 
@@ -43,6 +60,8 @@ namespace RikiPath.Application.Services
                     PracticeTestId = practiceTestId,
                     StartedAt = attempt.StartedAt,
                     TimeLimitMinutes = test.TimeLimitMinutes,
+                    TotalPreviouslyWrongQuestions = previouslyWrongQuestionIds.Count,
+                    PreviouslyWrongQuestionIds = previouslyWrongQuestionIds,
                 };
 
                 return ApiResponse<StartAttemptResponse>.Created(result);
@@ -54,11 +73,11 @@ namespace RikiPath.Application.Services
             }
         }
 
-        public async Task<ApiResponse<AttemptResultResponse>> SubmitAttemptAsync(
-            int userId, int attemptId, SubmitAttemptRequest request, CancellationToken cancellationToken)
+        public async Task<ApiResponse<AttemptResultResponse>> SubmitAttemptAsync(int attemptId, SubmitAttemptRequest request, CancellationToken cancellationToken = default)
         {
             try
             {
+                var userId = claimService.GetUserClaim().Id;
                 var attempt = await unitOfWork.PracticeTestAttempts.GetByIdAsync(attemptId);
                 if (attempt is null)
                     return ApiResponse<AttemptResultResponse>.NotFound(
@@ -102,6 +121,9 @@ namespace RikiPath.Application.Services
 
                 await unitOfWork.SaveChangesAsync();
 
+                // Bóc tách danh sách ID các câu làm sai
+                var wrongQuestionIds = correctByQuestion.Where(kv => !kv.Value).Select(kv => kv.Key).ToList();
+
                 var result = new AttemptResultResponse
                 {
                     AttemptId = attempt.Id,
@@ -110,6 +132,7 @@ namespace RikiPath.Application.Services
                     StartedAt = attempt.StartedAt,
                     SubmittedAt = attempt.SubmittedAt,
                     TotalScore = attempt.TotalScore.Value,
+                    WrongQuestionIds = wrongQuestionIds,
                     Sections = sections.Responses,
                 };
 
@@ -122,11 +145,11 @@ namespace RikiPath.Application.Services
             }
         }
 
-        public async Task<ApiResponse<AttemptResultResponse>> GetAttemptResultAsync(
-            int userId, int attemptId, CancellationToken cancellationToken)
+        public async Task<ApiResponse<AttemptResultResponse>> GetAttemptResultAsync(int attemptId, CancellationToken cancellationToken = default)
         {
             try
             {
+                var userId = claimService.GetUserClaim().Id;
                 var attempt = await unitOfWork.PracticeTestAttempts.GetByIdAsync(attemptId);
                 if (attempt is null)
                     return ApiResponse<AttemptResultResponse>.NotFound(
@@ -170,22 +193,23 @@ namespace RikiPath.Application.Services
             }
         }
 
-        // ---------------- Module 1.5 additions ----------------
-
         public async Task<ApiResponse<List<TestSummaryResponse>>> GetTestsByLevelAsync(
-            int jlptLevelId, CancellationToken cancellationToken)
+            int certificationLevelId, CancellationToken cancellationToken = default)
         {
             try
             {
-                // NOTE: cần IPracticeTestRepository.GetByLevelAsync(jlptLevelId), Include(JlptLevel).
-                var tests = await unitOfWork.PracticeTests.GetByLevelAsync(jlptLevelId);
+                var tests = await unitOfWork.PracticeTests.GetByLevelAsync(certificationLevelId);
 
                 var result = tests.Select(t => new TestSummaryResponse
                 {
                     PracticeTestId = t.Id,
                     Title = t.Title,
                     Description = t.Description,
-                    JlptLevelName = t.JlptLevel?.Name ?? string.Empty,
+                    // NOTE: property response vẫn tên "JlptLevelName" (từ trước khi đổi model) - giữ tên
+                    // field để không vỡ FE, nhưng lấy giá trị từ CertificationLevel.Code (không còn Name).
+                    // Nên đổi tên field này thành CertificationLevelName trong Responses/PracticeTests
+                    // khi bạn tiện cập nhật FE.
+                    JlptLevelName = t.CertificationLevel?.Code ?? string.Empty,
                     TimeLimitMinutes = t.TimeLimitMinutes,
                 }).ToList();
 
@@ -198,11 +222,11 @@ namespace RikiPath.Application.Services
             }
         }
 
-        public async Task<ApiResponse<DetailedAttemptResultResponse>> GetDetailedResultAsync(
-            int userId, int attemptId, CancellationToken cancellationToken)
+        public async Task<ApiResponse<DetailedAttemptResultResponse>> GetDetailedResultAsync(int attemptId, CancellationToken cancellationToken = default)
         {
             try
             {
+                var userId = claimService.GetUserClaim().Id;
                 var attempt = await unitOfWork.PracticeTestAttempts.GetByIdAsync(attemptId);
                 if (attempt is null)
                     return ApiResponse<DetailedAttemptResultResponse>.NotFound(
@@ -216,10 +240,7 @@ namespace RikiPath.Application.Services
                     return ApiResponse<DetailedAttemptResultResponse>.Fail(
                         "Lượt làm bài này chưa được nộp/chấm điểm.", HttpStatusCode.BadRequest);
 
-                // NOTE: cần IPracticeTestAnswerRepository.GetByAttemptIdAsync(attemptId),
-                // Include(Question.Options) — trả về từng câu kèm option đã chọn + đáp án đúng.
                 var answers = await unitOfWork.PracticeTestAnswers.GetByAttemptIdAsync(attemptId);
-
 
                 var questions = answers.Select(a => new QuestionReviewItem
                 {
@@ -228,6 +249,7 @@ namespace RikiPath.Application.Services
                     Explanation = a.PracticeQuestion.Explanation,
                     SelectedOptionId = a.SelectedOptionId,
                     IsCorrect = a.IsCorrect,
+                    WasPreviouslyIncorrect = !a.IsCorrect,
                     Options = a.PracticeQuestion.Options.Select(o => new QuestionOptionReview
                     {
                         OptionId = o.Id,
@@ -251,7 +273,79 @@ namespace RikiPath.Application.Services
             }
         }
 
-        // ---------------- helpers (giữ nguyên từ bản trước) ----------------
+        // ---------------- Chế độ Ôn tập Câu hỏi Sai (Quizlet Review Mode) ----------------
+
+        public async Task<ApiResponse<List<QuestionReviewItem>>> GetWrongQuestionsReviewSessionAsync(int? practiceTestId = null, CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                var userId = claimService.GetUserClaim().Id;
+                // 1. Lấy tất cả lượt làm bài đã hoàn thành
+                var attempts = await unitOfWork.PracticeTestAttempts.FindAsync(a =>
+                    a.UserId == userId && a.IsCompleted && (!practiceTestId.HasValue || a.PracticeTestId == practiceTestId.Value));
+
+                var attemptIds = attempts.Select(a => a.Id).ToList();
+                if (attemptIds.Count == 0)
+                {
+                    return ApiResponse<List<QuestionReviewItem>>.Success([]);
+                }
+
+                // 2. Lấy tất cả câu trả lời của Learner trong các lượt làm bài đó
+                var pastAnswers = await unitOfWork.PracticeTestAnswers.FindAsync(ans => attemptIds.Contains(ans.PracticeTestAttemptId));
+
+                // 3. Nhóm câu hỏi & lọc câu mà lần trả lời gần đây nhất bị SAI
+                var wrongStats = pastAnswers
+                    .GroupBy(ans => ans.PracticeQuestionId)
+                    .Select(g => new
+                    {
+                        QuestionId = g.Key,
+                        LatestAnswer = g.OrderByDescending(x => x.PracticeTestAttemptId).FirstOrDefault(),
+                        TimesWrong = g.Count(x => !x.IsCorrect)
+                    })
+                    .Where(x => x.LatestAnswer != null && !x.LatestAnswer.IsCorrect)
+                    .ToList();
+
+                if (wrongStats.Count == 0)
+                {
+                    return ApiResponse<List<QuestionReviewItem>>.Success([]);
+                }
+
+                var wrongQuestionIds = wrongStats.Select(x => x.QuestionId).ToList();
+                var questions = await unitOfWork.PracticeQuestions.GetByIdsWithOptionsAsync(wrongQuestionIds);
+                var statsDict = wrongStats.ToDictionary(x => x.QuestionId);
+
+                // 4. Map câu hỏi kèm thống kê Quizlet (ưu tiên câu sai nhiều lần lên trước)
+                var reviewItems = questions.Select(q =>
+                {
+                    var stat = statsDict.GetValueOrDefault(q.Id);
+                    return new QuestionReviewItem
+                    {
+                        QuestionId = q.Id,
+                        QuestionText = q.QuestionText,
+                        Explanation = q.Explanation,
+                        SelectedOptionId = stat?.LatestAnswer?.SelectedOptionId,
+                        IsCorrect = false,
+                        WasPreviouslyIncorrect = true,
+                        TimesAnsweredWrong = stat?.TimesWrong ?? 0,
+                        Options = q.Options.Select(o => new QuestionOptionReview
+                        {
+                            OptionId = o.Id,
+                            OptionText = o.OptionText,
+                            IsCorrect = o.IsCorrect,
+                        }).ToList(),
+                    };
+                }).OrderByDescending(x => x.TimesAnsweredWrong).ToList();
+
+                return ApiResponse<List<QuestionReviewItem>>.Success(reviewItems);
+            }
+            catch (Exception ex)
+            {
+                return ApiResponse<List<QuestionReviewItem>>.Fail(
+                    "Không thể tải danh sách câu hỏi cần ôn tập.", HttpStatusCode.InternalServerError, errors: BuildDebugErrors(ex));
+            }
+        }
+
+        // ---------------- Helpers ----------------
 
         private static (List<PracticeTestAnswer> Answers, Dictionary<int, bool> CorrectByQuestion) GradeAnswers(
             int attemptId,

@@ -20,8 +20,8 @@ namespace RikiPath.Domain.Entities
         public string? TextContent { get; set; }
         public string? ImageUrl { get; set; }
 
-        public int JlptLevelId { get; set; }
-        public JlptLevel JlptLevel { get; set; }
+        public int CertificationLevelId { get; set; }
+        public CertificationLevel CertificationLevel { get; set; }
 
         public DateTime SubmittedAt { get; set; }
 

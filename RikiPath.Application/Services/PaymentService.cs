@@ -18,16 +18,16 @@ namespace RikiPath.Application.Services
     //    của bạn đặt tên khác (vd Cancelled thay vì Failed), đổi lại ở HandlePayOsWebhookAsync.
     // 3) PayOS giới hạn "description" tối đa 25 ký tự - đã truncate ConsultationPackage.Name nếu
     //    dài hơn. Kiểm tra lại giới hạn thật trong doc PayOS hiện hành phòng khi họ đổi.
-    public class PaymentService(IUnitOfWork unitOfWork, IPaymentGatewayClient paymentGatewayClient)
+    public class PaymentService(IUnitOfWork unitOfWork, IPaymentGatewayClient paymentGatewayClient, IClaimService claimService)
         : IPaymentService
     {
         private const int MaxDescriptionLength = 25;
 
-        public async Task<ApiResponse<ConsultationPaymentResponse>> CreateConsultationPaymentAsync(
-            int userId, CreateConsultationPaymentRequest request, CancellationToken cancellationToken)
+        public async Task<ApiResponse<ConsultationPaymentResponse>> CreateConsultationPaymentAsync(CreateConsultationPaymentRequest request, CancellationToken cancellationToken)
         {
             try
             {
+                var userId = claimService.GetUserClaim().Id;
                 var package = await unitOfWork.ConsultationPackages.GetByIdAsync(request.ConsultationPackageId);
                 if (package is null || !package.IsActive)
                     return ApiResponse<ConsultationPaymentResponse>.Fail("Gói tư vấn không tồn tại hoặc đã ngừng bán.");
@@ -107,11 +107,11 @@ namespace RikiPath.Application.Services
             }
         }
 
-        public async Task<ApiResponse<ConsultationPurchaseStatusResponse>> GetPurchaseStatusAsync(
-            int userId, int purchaseId, CancellationToken cancellationToken)
+        public async Task<ApiResponse<ConsultationPurchaseStatusResponse>> GetPurchaseStatusAsync(int purchaseId, CancellationToken cancellationToken)
         {
             try
             {
+                var userId = claimService.GetUserClaim().Id;
                 var purchase = await unitOfWork.ConsultationPurchases.GetByIdAsync(purchaseId);
                 if (purchase is null || purchase.UserId != userId)
                     return ApiResponse<ConsultationPurchaseStatusResponse>.Fail("Không tìm thấy giao dịch.");

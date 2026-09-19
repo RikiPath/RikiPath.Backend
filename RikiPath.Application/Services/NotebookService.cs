@@ -13,15 +13,18 @@ namespace RikiPath.Application.Services
     //   IReviewItemRepository.GetByNoteEntryIdAsync(noteEntryId) — để xoá kèm khi bỏ bookmark
     // Mọi bookmark (vocab/kanji/manual/grammar) đều tự tạo 1 ReviewItem để item xuất hiện ngay
     // trong hàng chờ ôn tập SM-2 (NextReviewDate = hôm nay, EaseFactor mặc định 2.5).
-    public class NotebookService(IUnitOfWork unitOfWork) : INotebookService
+    public class NotebookService(
+         IUnitOfWork unitOfWork,
+         IClaimService claimService) : INotebookService
     {
         private const double DefaultEaseFactor = 2.5;
 
-        public async Task<ApiResponse<VocabularyListResponse>> CreateListAsync(
-            int userId, CreateVocabularyListRequest request, CancellationToken cancellationToken)
+        public async Task<ApiResponse<VocabularyListResponse>> CreateListAsync(CreateVocabularyListRequest request, CancellationToken cancellationToken)
         {
             try
             {
+                var userId = claimService.GetUserClaim().Id;
+
                 if (string.IsNullOrWhiteSpace(request.Name))
                     return ApiResponse<VocabularyListResponse>.Fail("Tên danh sách không được để trống.");
 
@@ -44,10 +47,11 @@ namespace RikiPath.Application.Services
             }
         }
 
-        public async Task<ApiResponse<List<VocabularyListResponse>>> GetMyListsAsync(int userId, CancellationToken cancellationToken)
+        public async Task<ApiResponse<List<VocabularyListResponse>>> GetMyListsAsync(CancellationToken cancellationToken)
         {
             try
             {
+                var userId = claimService.GetUserClaim().Id;
                 var lists = await unitOfWork.VocabularyLists.GetByUserIdAsync(userId);
                 var result = new List<VocabularyListResponse>();
                 foreach (var list in lists)
@@ -66,10 +70,11 @@ namespace RikiPath.Application.Services
         }
 
         public async Task<ApiResponse<VocabularyListResponse>> UpdateListAsync(
-            int userId, int listId, UpdateVocabularyListRequest request, CancellationToken cancellationToken)
+            int listId, UpdateVocabularyListRequest request, CancellationToken cancellationToken)
         {
             try
             {
+                var userId = claimService.GetUserClaim().Id;
                 if (string.IsNullOrWhiteSpace(request.Name))
                     return ApiResponse<VocabularyListResponse>.Fail("Tên danh sách không được để trống.");
 
@@ -94,10 +99,11 @@ namespace RikiPath.Application.Services
             }
         }
 
-        public async Task<ApiResponse> DeleteListAsync(int userId, int listId, CancellationToken cancellationToken)
+        public async Task<ApiResponse> DeleteListAsync(int listId, CancellationToken cancellationToken)
         {
             try
             {
+                var userId = claimService.GetUserClaim().Id;
                 var list = await unitOfWork.VocabularyLists.GetByIdAsync(listId);
                 if (list is null)
                     return ApiResponse.NotFound($"Không tìm thấy danh sách Id = {listId}.");
@@ -116,11 +122,11 @@ namespace RikiPath.Application.Services
             }
         }
 
-        public async Task<ApiResponse<List<NotebookEntryResponse>>> GetListEntriesAsync(
-            int userId, int listId, CancellationToken cancellationToken)
+        public async Task<ApiResponse<List<NotebookEntryResponse>>> GetListEntriesAsync(int listId, CancellationToken cancellationToken)
         {
             try
             {
+                var userId = claimService.GetUserClaim().Id;
                 var list = await unitOfWork.VocabularyLists.GetByIdAsync(listId);
                 if (list is null)
                     return ApiResponse<List<NotebookEntryResponse>>.NotFound($"Không tìm thấy danh sách Id = {listId}.");
@@ -137,11 +143,11 @@ namespace RikiPath.Application.Services
             }
         }
 
-        public async Task<ApiResponse<NotebookEntryResponse>> BookmarkVocabularyAsync(
-            int userId, BookmarkVocabularyRequest request, CancellationToken cancellationToken)
+        public async Task<ApiResponse<NotebookEntryResponse>> BookmarkVocabularyAsync(BookmarkVocabularyRequest request, CancellationToken cancellationToken)
         {
             try
             {
+                var userId = claimService.GetUserClaim().Id;
                 var list = await unitOfWork.VocabularyLists.GetByIdAsync(request.VocabularyListId);
                 if (list is null)
                     return ApiResponse<NotebookEntryResponse>.NotFound("Không tìm thấy danh sách.");
@@ -176,11 +182,11 @@ namespace RikiPath.Application.Services
             }
         }
 
-        public async Task<ApiResponse<NotebookEntryResponse>> BookmarkKanjiAsync(
-            int userId, BookmarkKanjiRequest request, CancellationToken cancellationToken)
+        public async Task<ApiResponse<NotebookEntryResponse>> BookmarkKanjiAsync(BookmarkKanjiRequest request, CancellationToken cancellationToken)
         {
             try
             {
+                var userId = claimService.GetUserClaim().Id;
                 var list = await unitOfWork.VocabularyLists.GetByIdAsync(request.VocabularyListId);
                 if (list is null)
                     return ApiResponse<NotebookEntryResponse>.NotFound("Không tìm thấy danh sách.");
@@ -215,11 +221,11 @@ namespace RikiPath.Application.Services
             }
         }
 
-        public async Task<ApiResponse<GrammarBookmarkResponse>> BookmarkGrammarAsync(
-            int userId, int grammarPointId, CancellationToken cancellationToken)
+        public async Task<ApiResponse<GrammarBookmarkResponse>> BookmarkGrammarAsync(int grammarPointId, CancellationToken cancellationToken)
         {
             try
             {
+                var userId = claimService.GetUserClaim().Id;
                 var grammar = await unitOfWork.GrammarPoints.GetByIdAsync(grammarPointId);
                 if (grammar is null)
                     return ApiResponse<GrammarBookmarkResponse>.NotFound("Không tìm thấy điểm ngữ pháp.");
@@ -250,11 +256,12 @@ namespace RikiPath.Application.Services
             }
         }
 
-        public async Task<ApiResponse<NotebookEntryResponse>> AddManualEntryAsync(
-            int userId, AddManualEntryRequest request, CancellationToken cancellationToken)
+        public async Task<ApiResponse<NotebookEntryResponse>> AddManualEntryAsync(AddManualEntryRequest request, CancellationToken cancellationToken)
         {
             try
             {
+                var userId = claimService.GetUserClaim().Id;
+
                 if (string.IsNullOrWhiteSpace(request.Word) || string.IsNullOrWhiteSpace(request.Meaning))
                     return ApiResponse<NotebookEntryResponse>.Fail("Từ và nghĩa không được để trống.");
 
@@ -290,10 +297,11 @@ namespace RikiPath.Application.Services
             }
         }
 
-        public async Task<ApiResponse> RemoveEntryAsync(int userId, int noteEntryId, CancellationToken cancellationToken)
+        public async Task<ApiResponse> RemoveEntryAsync(int noteEntryId, CancellationToken cancellationToken)
         {
             try
             {
+                var userId = claimService.GetUserClaim().Id;
                 var note = await unitOfWork.VocabularyNoteEntries.GetByIdAsync(noteEntryId);
                 if (note is null)
                     return ApiResponse.NotFound($"Không tìm thấy mục sổ tay Id = {noteEntryId}.");

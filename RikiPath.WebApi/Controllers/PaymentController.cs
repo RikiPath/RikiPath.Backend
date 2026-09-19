@@ -31,8 +31,8 @@ namespace RikiPath.WebApi.Controllers
         [Authorize(Roles = "Learner")]
         public async Task<IActionResult> CreateConsultationPayment([FromBody] CreateConsultationPaymentRequest request, CancellationToken cancellationToken)
         {
-            var userId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
-            var result = await paymentService.CreateConsultationPaymentAsync(userId, request, cancellationToken);
+
+            var result = await paymentService.CreateConsultationPaymentAsync(request, cancellationToken);
             return StatusCode((int)result.StatusCode, result);
         }
 
@@ -76,8 +76,8 @@ namespace RikiPath.WebApi.Controllers
         [Authorize(Roles = "Learner")]
         public async Task<IActionResult> GetPurchaseStatus([FromRoute] int purchaseId, CancellationToken cancellationToken)
         {
-            var userId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
-            var result = await paymentService.GetPurchaseStatusAsync(userId, purchaseId, cancellationToken);
+
+            var result = await paymentService.GetPurchaseStatusAsync(purchaseId, cancellationToken);
             return StatusCode((int)result.StatusCode, result);
         }
     }

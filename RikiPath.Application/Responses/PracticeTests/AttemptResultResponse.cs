@@ -8,6 +8,7 @@
         public DateTime StartedAt { get; set; }
         public DateTime? SubmittedAt { get; set; }
         public double TotalScore { get; set; }
+        public List<int> WrongQuestionIds { get; set; } = [];
         public List<SectionResultItem> Sections { get; set; } = new();
     }
 }

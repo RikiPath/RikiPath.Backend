@@ -8,27 +8,21 @@ namespace RikiPath.Application.IServices
     public interface IConsultationService
     {
         // ---- Learner ----
-        Task<ApiResponse<ConsultationRequestResponse>> BookMeetingAsync(
-            int learnerId, BookMeetingRequest request, CancellationToken cancellationToken);
+        Task<ApiResponse<ConsultationRequestResponse>> BookMeetingAsync(BookMeetingRequest request, CancellationToken cancellationToken);
 
-        Task<ApiResponse<ConsultationRequestResponse>> SubmitTicketAsync(
-            int learnerId, SubmitTicketRequest request, CancellationToken cancellationToken);
+        Task<ApiResponse<ConsultationRequestResponse>> SubmitTicketAsync(SubmitTicketRequest request, CancellationToken cancellationToken);
 
-        Task<ApiResponse<List<ConsultationRequestResponse>>> GetMyRequestsAsync(
-            int learnerId, CancellationToken cancellationToken);
+        Task<ApiResponse<List<ConsultationRequestResponse>>> GetMyRequestsAsync(CancellationToken cancellationToken);
 
         // ---- Consultant ----
-        Task<ApiResponse<ConsultantQueueResponse>> GetConsultantQueueAsync(
-            int consultantId, CancellationToken cancellationToken);
+        Task<ApiResponse<ConsultantQueueResponse>> GetConsultantQueueAsync(CancellationToken cancellationToken);
 
         // Nhận 1 ticket đang chờ (chưa có consultant nào claim) vào hàng đợi của mình
-        Task<ApiResponse<ConsultationRequestResponse>> ClaimTicketAsync(
-            int consultantId, int requestId, CancellationToken cancellationToken);
+        Task<ApiResponse<ConsultationRequestResponse>> ClaimTicketAsync(int requestId, CancellationToken cancellationToken);
 
-        Task<ApiResponse<ConsultationRequestResponse>> SubmitAnswerAsync(
-            int consultantId, int requestId, SubmitAnswerRequest request, CancellationToken cancellationToken);
+        Task<ApiResponse<ConsultationRequestResponse>> SubmitAnswerAsync(int requestId, SubmitAnswerRequest request, CancellationToken cancellationToken);
 
-        Task<ApiResponse<ConsultationRequestResponse>> LogMeetingNoteAsync(
-            int consultantId, int requestId, LogMeetingNoteRequest request, CancellationToken cancellationToken);
+        Task<ApiResponse<ConsultationRequestResponse>> LogMeetingNoteAsync(int requestId, LogMeetingNoteRequest request, CancellationToken cancellationToken);
+
     }
 }

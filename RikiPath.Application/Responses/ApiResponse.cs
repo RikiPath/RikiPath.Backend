@@ -12,7 +12,7 @@ namespace RikiPath.Application.Responses
         public T? Result { get; protected set; }
 
         // --- Success Handlers ---
-        public static ApiResponse<T> Success(T result, HttpStatusCode statusCode = HttpStatusCode.OK)
+        public static ApiResponse<T> Success(T result, HttpStatusCode statusCode = HttpStatusCode.OK, string? message = null)
         {
             return new ApiResponse<T>
             {

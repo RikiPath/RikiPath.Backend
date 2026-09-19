@@ -17,7 +17,7 @@ namespace RikiPath.Infrastructure.Repositories
         private IQueryable<VocabularyEntry> BuildSearchQuery(int? jlptLevelId, ContentStatus? status, string? keyword)
         {
             IQueryable<VocabularyEntry> query = _context.VocabularyEntries.AsQueryable();
-            if (jlptLevelId.HasValue) query = query.Where(x => x.JlptLevelId == jlptLevelId.Value);
+            if (jlptLevelId.HasValue) query = query.Where(x => x.CertificationLevelId == jlptLevelId.Value);
             if (status.HasValue) query = query.Where(x => x.Status == status.Value);
             if (!string.IsNullOrEmpty(keyword))
                 query = query.Where(x => x.Word.Contains(keyword) || x.Reading.Contains(keyword) || x.Meaning.ToLower().Contains(keyword.ToLower()));
@@ -36,7 +36,7 @@ namespace RikiPath.Infrastructure.Repositories
             var total = await query.CountAsync();
 
             var items = await query
-                .Include(x => x.JlptLevel)
+                .Include(x => x.CertificationLevel)
                 .OrderBy(x => x.Word)
                 .Skip((pageIndex - 1) * pageSize)
                 .Take(pageSize)

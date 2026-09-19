@@ -9,21 +9,27 @@ namespace RikiPath.Application.Services
     {
         public ClaimDTO GetUserClaim()
         {
-            var tokenUserId = httpContextAccessor.HttpContext!.User.FindFirst("UserId");
-            var tokenUserRole = httpContextAccessor.HttpContext!.User.FindFirst("Role");
-            if (tokenUserId == null)
-            {
-                throw new ArgumentNullException("UserId can not be found!");
-            }
-            var userId = Int32.Parse(tokenUserId?.Value.ToString()!);
-            Role userRole = Enum.Parse<Role>(tokenUserRole?.Value.ToString()!);
-            var userClaim = new ClaimDTO
-            {
-                Role = userRole,
-                Id = userId
-            };
+            var user = httpContextAccessor.HttpContext?.User;
+            var tokenUserId = user?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)
+                              ?? user?.FindFirst("sub")
+                              ?? user?.FindFirst("userId")
+                              ?? user?.FindFirst("id");
 
-            return userClaim;
+            var tokenUserRole = user?.FindFirst(System.Security.Claims.ClaimTypes.Role) ?? user?.FindFirst("role");
+
+            if (tokenUserId == null || string.IsNullOrWhiteSpace(tokenUserId.Value))
+            {
+                throw new ArgumentNullException("UserId can not be found in JWT claims.");
+            }
+
+            if (!int.TryParse(tokenUserId.Value, out var userId))
+                throw new FormatException("UserId claim is not a valid integer.");
+
+            Role userRole = tokenUserRole is null
+                ? Role.Learner
+                : Enum.Parse<Role>(tokenUserRole.Value, ignoreCase: true);
+
+            return new ClaimDTO { Role = userRole, Id = userId };
         }
     }
 

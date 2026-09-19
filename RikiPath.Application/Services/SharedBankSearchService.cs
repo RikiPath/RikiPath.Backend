@@ -166,7 +166,7 @@ namespace RikiPath.Application.Services
             Meaning = e.Meaning,
             ExampleSentence = e.ExampleSentence,
             AudioUrl = e.AudioUrl,
-            JlptLevelName = e.JlptLevel?.Name ?? string.Empty,
+            JlptLevelName = e.CertificationLevel?.Code ?? string.Empty,
         };
 
         private static KanjiCardResponse MapKanji(KanjiEntry k) => new()
@@ -180,7 +180,7 @@ namespace RikiPath.Application.Services
             StrokeCount = k.StrokeCount,
             StrokeOrderUrl = k.StrokeOrderImageUrl,
             AudioUrl = k.AudioUrl,
-            JlptLevelName = k.JlptLevel?.Name ?? string.Empty,
+            JlptLevelName = k.CertificationLevel?.Code ?? string.Empty,
         };
 
         private static GrammarCardResponse MapGrammar(GrammarPoint g) => new()
@@ -190,7 +190,7 @@ namespace RikiPath.Application.Services
             Structure = g.Structure,
             Explanation = g.UsageNotes,
             ExampleSentence = g.ExampleSentence,
-            JlptLevelName = g.JlptLevel?.Name ?? string.Empty,
+            JlptLevelName = g.CertificationLevel?.Code ?? string.Empty,
         };
 
         private static List<string> BuildDebugErrors(Exception ex)

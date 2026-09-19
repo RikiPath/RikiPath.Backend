@@ -7,20 +7,27 @@ using RikiPath.Application.IServices;
 using RikiPath.Application.Requests.Content;
 using RikiPath.Application.Responses;
 using RikiPath.Application.Responses.Content;
-using RikiPath.Domain.Entities;
-using System.Linq.Expressions;
 
 namespace RikiPath.Application.Services
 {
-    public class ContentManagementService(IUnitOfWork unitOfWork, IExcelParser excelParser)
-         : IContentManagementService
+    // Đã bỏ IReviewableContent + generic dispatch qua Expression.Property. Đổi lại: mỗi loại nội
+    // dung (Lesson/KanjiEntry/VocabularyEntry/GrammarPoint/PracticeTest) có bộ method riêng, code
+    // dài hơn nhưng thẳng, không còn "ảo thuật" generic/reflection nào - dễ đọc, dễ debug độc lập
+    // từng loại, không có rủi ro EF Core dịch sai LINQ expression qua interface.
+    //
+    // GHI CHÚ: entity không còn field "ReviewedById" (int FK) - đã đổi sang "ReviewedByName"
+    // (string, lưu tên hiển thị của admin đã duyệt ngay tại thời điểm duyệt) - áp dụng cho cả 5 loại.
+    public class ContentManagementService(IUnitOfWork unitOfWork, IExcelParser excelParser, IClaimService claimService)
+        : IContentManagementService
     {
         public async Task<ApiResponse<BulkImportResultResponse>> BulkImportAsync(
-            int authorId, BulkImportRequest request, CancellationToken cancellationToken)
+            BulkImportRequest request, CancellationToken cancellationToken)
         {
             try
             {
-                if (request.EntityType is ContentEntityType.Course or ContentEntityType.PracticeTest)
+                var authorId = claimService.GetUserClaim().Id;
+
+                if (request.EntityType is ContentEntityType.Lesson or ContentEntityType.PracticeTest)
                     return ApiResponse<BulkImportResultResponse>.Fail(
                         "Loại nội dung này không hỗ trợ import hàng loạt, hãy tạo thủ công.");
 
@@ -47,10 +54,10 @@ namespace RikiPath.Application.Services
                                     OnYomi = GetOptional(row, "OnYomi"),
                                     KunYomi = GetOptional(row, "KunYomi"),
                                     StrokeCount = int.Parse(GetRequired(row, "StrokeCount")),
-                                    JlptLevelId = request.JlptLevelId,
+                                    CertificationLevelId = request.CertificationLevelId,
                                     ContentAuthorId = authorId,
                                     Status = ContentStatus.Draft
-                                });
+                                }, cancellationToken);
                                 break;
 
                             case ContentEntityType.VocabularyEntry:
@@ -61,10 +68,10 @@ namespace RikiPath.Application.Services
                                     Meaning = GetRequired(row, "Meaning"),
                                     ExampleSentence = GetOptional(row, "ExampleSentence"),
                                     ExampleSentenceMeaning = GetOptional(row, "ExampleSentenceMeaning"),
-                                    JlptLevelId = request.JlptLevelId,
+                                    CertificationLevelId = request.CertificationLevelId,
                                     ContentAuthorId = authorId,
                                     Status = ContentStatus.Draft
-                                });
+                                }, cancellationToken);
                                 break;
 
                             case ContentEntityType.GrammarPoint:
@@ -75,10 +82,10 @@ namespace RikiPath.Application.Services
                                     UsageNotes = GetOptional(row, "UsageNotes"),
                                     ExampleSentence = GetOptional(row, "ExampleSentence"),
                                     ExampleSentenceMeaning = GetOptional(row, "ExampleSentenceMeaning"),
-                                    JlptLevelId = request.JlptLevelId,
+                                    CertificationLevelId = request.CertificationLevelId,
                                     ContentAuthorId = authorId,
                                     Status = ContentStatus.Draft
-                                });
+                                }, cancellationToken);
                                 break;
 
                             case ContentEntityType.PracticeQuestion:
@@ -96,7 +103,7 @@ namespace RikiPath.Application.Services
                                     ImageUrl = GetOptional(row, "ImageUrl"),
                                     PracticeTestSectionId = request.TargetPracticeTestSectionId.Value,
                                     SortOrder = row.RowNumber
-                                });
+                                }, cancellationToken);
                                 break;
 
                             default:
@@ -112,7 +119,7 @@ namespace RikiPath.Application.Services
                     }
                 }
 
-                await unitOfWork.SaveChangesAsync();
+                await unitOfWork.SaveChangesAsync(cancellationToken);
 
                 return ApiResponse<BulkImportResultResponse>.Success(
                     new BulkImportResultResponse
@@ -129,104 +136,182 @@ namespace RikiPath.Application.Services
             }
         }
 
+        // ================= SubmitForReviewAsync =================
+
         public Task<ApiResponse<ContentReviewStatusResponse>> SubmitForReviewAsync(
-            int authorId, ContentEntityType entityType, int entityId, CancellationToken cancellationToken) => entityType switch
+            ContentEntityType entityType, int entityId, CancellationToken cancellationToken)
+        {
+            var authorId = claimService.GetUserClaim().Id;
+            return entityType switch
             {
-                ContentEntityType.Course => SubmitForReviewGenericAsync(unitOfWork.Courses, authorId, entityId, entityType, cancellationToken),
-                ContentEntityType.KanjiEntry => SubmitForReviewGenericAsync(unitOfWork.KanjiEntries, authorId, entityId, entityType, cancellationToken),
-                ContentEntityType.VocabularyEntry => SubmitForReviewGenericAsync(unitOfWork.VocabularyEntries, authorId, entityId, entityType, cancellationToken),
-                ContentEntityType.GrammarPoint => SubmitForReviewGenericAsync(unitOfWork.GrammarPoints, authorId, entityId, entityType, cancellationToken),
-                ContentEntityType.PracticeTest => SubmitForReviewGenericAsync(unitOfWork.PracticeTests, authorId, entityId, entityType, cancellationToken),
+                ContentEntityType.Lesson => SubmitLessonForReviewAsync(authorId, entityId, cancellationToken),
+                ContentEntityType.KanjiEntry => SubmitKanjiForReviewAsync(authorId, entityId, cancellationToken),
+                ContentEntityType.VocabularyEntry => SubmitVocabularyForReviewAsync(authorId, entityId, cancellationToken),
+                ContentEntityType.GrammarPoint => SubmitGrammarForReviewAsync(authorId, entityId, cancellationToken),
+                ContentEntityType.PracticeTest => SubmitPracticeTestForReviewAsync(authorId, entityId, cancellationToken),
                 _ => Task.FromResult(ApiResponse<ContentReviewStatusResponse>.Fail("Loại nội dung không hỗ trợ gửi duyệt."))
             };
-
-        public Task<ApiResponse<List<ContentReviewStatusResponse>>> GetMyContentAsync(
-            int authorId, ContentEntityType entityType, CancellationToken cancellationToken) => entityType switch
-            {
-                ContentEntityType.Course => GetByPredicateAsync(unitOfWork.Courses, entityType, ByAuthor<Course>(authorId)),
-                ContentEntityType.KanjiEntry => GetByPredicateAsync(unitOfWork.KanjiEntries, entityType, ByAuthor<KanjiEntry>(authorId)),
-                ContentEntityType.VocabularyEntry => GetByPredicateAsync(unitOfWork.VocabularyEntries, entityType, ByAuthor<VocabularyEntry>(authorId)),
-                ContentEntityType.GrammarPoint => GetByPredicateAsync(unitOfWork.GrammarPoints, entityType, ByAuthor<GrammarPoint>(authorId)),
-                ContentEntityType.PracticeTest => GetByPredicateAsync(unitOfWork.PracticeTests, entityType, ByAuthor<PracticeTest>(authorId)),
-                _ => Task.FromResult(ApiResponse<List<ContentReviewStatusResponse>>.Fail("Loại nội dung không hợp lệ."))
-            };
-
-        public Task<ApiResponse<List<ContentReviewStatusResponse>>> GetPendingReviewAsync(
-            ContentEntityType entityType, CancellationToken cancellationToken) => entityType switch
-            {
-                ContentEntityType.Course => GetByPredicateAsync(unitOfWork.Courses, entityType, ByStatus<Course>(ContentStatus.PendingReview)),
-                ContentEntityType.KanjiEntry => GetByPredicateAsync(unitOfWork.KanjiEntries, entityType, ByStatus<KanjiEntry>(ContentStatus.PendingReview)),
-                ContentEntityType.VocabularyEntry => GetByPredicateAsync(unitOfWork.VocabularyEntries, entityType, ByStatus<VocabularyEntry>(ContentStatus.PendingReview)),
-                ContentEntityType.GrammarPoint => GetByPredicateAsync(unitOfWork.GrammarPoints, entityType, ByStatus<GrammarPoint>(ContentStatus.PendingReview)),
-                ContentEntityType.PracticeTest => GetByPredicateAsync(unitOfWork.PracticeTests, entityType, ByStatus<PracticeTest>(ContentStatus.PendingReview)),
-                _ => Task.FromResult(ApiResponse<List<ContentReviewStatusResponse>>.Fail("Loại nội dung không hợp lệ."))
-            };
-
-        public Task<ApiResponse<ContentReviewStatusResponse>> ReviewAsync(
-            int adminId, ContentEntityType entityType, int entityId, ReviewContentRequest request, CancellationToken cancellationToken) => entityType switch
-            {
-                ContentEntityType.Course => ReviewGenericAsync(unitOfWork.Courses, adminId, entityId, entityType, request, cancellationToken),
-                ContentEntityType.KanjiEntry => ReviewGenericAsync(unitOfWork.KanjiEntries, adminId, entityId, entityType, request, cancellationToken),
-                ContentEntityType.VocabularyEntry => ReviewGenericAsync(unitOfWork.VocabularyEntries, adminId, entityId, entityType, request, cancellationToken),
-                ContentEntityType.GrammarPoint => ReviewGenericAsync(unitOfWork.GrammarPoints, adminId, entityId, entityType, request, cancellationToken),
-                ContentEntityType.PracticeTest => ReviewGenericAsync(unitOfWork.PracticeTests, adminId, entityId, entityType, request, cancellationToken),
-                _ => Task.FromResult(ApiResponse<ContentReviewStatusResponse>.Fail("Loại nội dung không hỗ trợ duyệt."))
-            };
-
-        // ------------------- Generic helpers (DRY cho cả 5 loại entity) -------------------
-        // Nhận thẳng repository cụ thể (unitOfWork.Courses, unitOfWork.KanjiEntries, ...) qua
-        // tham số kiểu IGenericRepository<T> - compiler suy luận T từ interface base mà
-        // ICourseRepository/IKanjiEntryRepository/... đều kế thừa.
-
-        private async Task<ApiResponse<ContentReviewStatusResponse>> SubmitForReviewGenericAsync<T>(
-            IGenericRepository<T> repository, int authorId, int entityId, ContentEntityType entityType, CancellationToken cancellationToken)
-            where T : class, IReviewableContent
-        {
-            var entity = await repository.GetByIdAsync(entityId);
-            if (entity is null || entity.ContentAuthorId != authorId)
-                return ApiResponse<ContentReviewStatusResponse>.Fail("Không tìm thấy nội dung.");
-
-            if (entity.Status is not (ContentStatus.Draft or ContentStatus.Rejected))
-                return ApiResponse<ContentReviewStatusResponse>.Fail("Chỉ có thể gửi duyệt nội dung Draft hoặc Rejected.");
-
-            entity.Status = ContentStatus.PendingReview;
-            entity.ReviewNote = null;
-            entity.ReviewedDate = null;
-
-            repository.Update(entity);
-            await unitOfWork.SaveChangesAsync();
-
-            return ApiResponse<ContentReviewStatusResponse>.Success(MapToStatusResponse(entityType, entity));
         }
 
-        private async Task<ApiResponse<ContentReviewStatusResponse>> ReviewGenericAsync<T>(
-            IGenericRepository<T> repository, int adminId, int entityId, ContentEntityType entityType, ReviewContentRequest request, CancellationToken cancellationToken)
-            where T : class, IReviewableContent
-        {
-            var entity = await repository.GetByIdAsync(entityId);
-            if (entity is null || entity.Status != ContentStatus.PendingReview)
-                return ApiResponse<ContentReviewStatusResponse>.Fail("Không tìm thấy nội dung đang chờ duyệt.");
-
-            entity.Status = request.Approve ? ContentStatus.Published : ContentStatus.Rejected;
-            entity.ReviewedById = adminId;
-            entity.ReviewNote = request.ReviewNote;
-            entity.ReviewedDate = DateTime.UtcNow;
-
-            repository.Update(entity);
-            await unitOfWork.SaveChangesAsync();
-
-            return ApiResponse<ContentReviewStatusResponse>.Success(
-                MapToStatusResponse(entityType, entity));
-        }
-
-        private static async Task<ApiResponse<List<ContentReviewStatusResponse>>> GetByPredicateAsync<T>(
-            IGenericRepository<T> repository, ContentEntityType entityType, Expression<Func<T, bool>> predicate)
-            where T : class, IReviewableContent
+        private async Task<ApiResponse<ContentReviewStatusResponse>> SubmitLessonForReviewAsync(
+            int authorId, int entityId, CancellationToken cancellationToken)
         {
             try
             {
-                var items = await repository.FindAsync(predicate);
-                var result = items.Select(e => MapToStatusResponse(entityType, e)).ToList();
+                var entity = await unitOfWork.Lessons.GetByIdAsync(entityId, cancellationToken);
+                if (entity is null || entity.ContentAuthorId != authorId)
+                    return ApiResponse<ContentReviewStatusResponse>.Fail("Không tìm thấy nội dung.");
+
+                if (entity.Status is not (ContentStatus.Draft or ContentStatus.Rejected))
+                    return ApiResponse<ContentReviewStatusResponse>.Fail("Chỉ có thể gửi duyệt nội dung Draft hoặc Rejected.");
+
+                entity.Status = ContentStatus.PendingReview;
+                entity.ReviewNote = null;
+                entity.ReviewedDate = null;
+
+                unitOfWork.Lessons.Update(entity);
+                await unitOfWork.SaveChangesAsync(cancellationToken);
+
+                return ApiResponse<ContentReviewStatusResponse>.Success(MapLessonToResponse(entity));
+            }
+            catch (Exception ex)
+            {
+                return ApiResponse<ContentReviewStatusResponse>.Fail($"Không thể gửi duyệt: {ex.Message}");
+            }
+        }
+
+        private async Task<ApiResponse<ContentReviewStatusResponse>> SubmitKanjiForReviewAsync(
+            int authorId, int entityId, CancellationToken cancellationToken)
+        {
+            try
+            {
+                var entity = await unitOfWork.KanjiEntries.GetByIdAsync(entityId, cancellationToken);
+                if (entity is null || entity.ContentAuthorId != authorId)
+                    return ApiResponse<ContentReviewStatusResponse>.Fail("Không tìm thấy nội dung.");
+
+                if (entity.Status is not (ContentStatus.Draft or ContentStatus.Rejected))
+                    return ApiResponse<ContentReviewStatusResponse>.Fail("Chỉ có thể gửi duyệt nội dung Draft hoặc Rejected.");
+
+                entity.Status = ContentStatus.PendingReview;
+                entity.ReviewNote = null;
+                entity.ReviewedDate = null;
+
+                unitOfWork.KanjiEntries.Update(entity);
+                await unitOfWork.SaveChangesAsync(cancellationToken);
+
+                return ApiResponse<ContentReviewStatusResponse>.Success(MapKanjiToResponse(entity));
+            }
+            catch (Exception ex)
+            {
+                return ApiResponse<ContentReviewStatusResponse>.Fail($"Không thể gửi duyệt: {ex.Message}");
+            }
+        }
+
+        private async Task<ApiResponse<ContentReviewStatusResponse>> SubmitVocabularyForReviewAsync(
+            int authorId, int entityId, CancellationToken cancellationToken)
+        {
+            try
+            {
+                var entity = await unitOfWork.VocabularyEntries.GetByIdAsync(entityId, cancellationToken);
+                if (entity is null || entity.ContentAuthorId != authorId)
+                    return ApiResponse<ContentReviewStatusResponse>.Fail("Không tìm thấy nội dung.");
+
+                if (entity.Status is not (ContentStatus.Draft or ContentStatus.Rejected))
+                    return ApiResponse<ContentReviewStatusResponse>.Fail("Chỉ có thể gửi duyệt nội dung Draft hoặc Rejected.");
+
+                entity.Status = ContentStatus.PendingReview;
+                entity.ReviewNote = null;
+                entity.ReviewedDate = null;
+
+                unitOfWork.VocabularyEntries.Update(entity);
+                await unitOfWork.SaveChangesAsync(cancellationToken);
+
+                return ApiResponse<ContentReviewStatusResponse>.Success(MapVocabularyToResponse(entity));
+            }
+            catch (Exception ex)
+            {
+                return ApiResponse<ContentReviewStatusResponse>.Fail($"Không thể gửi duyệt: {ex.Message}");
+            }
+        }
+
+        private async Task<ApiResponse<ContentReviewStatusResponse>> SubmitGrammarForReviewAsync(
+            int authorId, int entityId, CancellationToken cancellationToken)
+        {
+            try
+            {
+                var entity = await unitOfWork.GrammarPoints.GetByIdAsync(entityId, cancellationToken);
+                if (entity is null || entity.ContentAuthorId != authorId)
+                    return ApiResponse<ContentReviewStatusResponse>.Fail("Không tìm thấy nội dung.");
+
+                if (entity.Status is not (ContentStatus.Draft or ContentStatus.Rejected))
+                    return ApiResponse<ContentReviewStatusResponse>.Fail("Chỉ có thể gửi duyệt nội dung Draft hoặc Rejected.");
+
+                entity.Status = ContentStatus.PendingReview;
+                entity.ReviewNote = null;
+                entity.ReviewedDate = null;
+
+                unitOfWork.GrammarPoints.Update(entity);
+                await unitOfWork.SaveChangesAsync(cancellationToken);
+
+                return ApiResponse<ContentReviewStatusResponse>.Success(MapGrammarToResponse(entity));
+            }
+            catch (Exception ex)
+            {
+                return ApiResponse<ContentReviewStatusResponse>.Fail($"Không thể gửi duyệt: {ex.Message}");
+            }
+        }
+
+        private async Task<ApiResponse<ContentReviewStatusResponse>> SubmitPracticeTestForReviewAsync(
+            int authorId, int entityId, CancellationToken cancellationToken)
+        {
+            try
+            {
+                var entity = await unitOfWork.PracticeTests.GetByIdAsync(entityId, cancellationToken);
+                if (entity is null || entity.ContentAuthorId != authorId)
+                    return ApiResponse<ContentReviewStatusResponse>.Fail("Không tìm thấy nội dung.");
+
+                if (entity.Status is not (ContentStatus.Draft or ContentStatus.Rejected))
+                    return ApiResponse<ContentReviewStatusResponse>.Fail("Chỉ có thể gửi duyệt nội dung Draft hoặc Rejected.");
+
+                entity.Status = ContentStatus.PendingReview;
+                entity.ReviewNote = null;
+                entity.ReviewedDate = null;
+
+                unitOfWork.PracticeTests.Update(entity);
+                await unitOfWork.SaveChangesAsync(cancellationToken);
+
+                return ApiResponse<ContentReviewStatusResponse>.Success(MapPracticeTestToResponse(entity));
+            }
+            catch (Exception ex)
+            {
+                return ApiResponse<ContentReviewStatusResponse>.Fail($"Không thể gửi duyệt: {ex.Message}");
+            }
+        }
+
+        // ================= GetMyContentAsync =================
+
+        public async Task<ApiResponse<List<ContentReviewStatusResponse>>> GetMyContentAsync(
+            ContentEntityType entityType, CancellationToken cancellationToken)
+        {
+            try
+            {
+                var authorId = claimService.GetUserClaim().Id;
+
+                List<ContentReviewStatusResponse> result = entityType switch
+                {
+                    ContentEntityType.Lesson => (await unitOfWork.Lessons.FindAsync(e => e.ContentAuthorId == authorId, cancellationToken))
+                        .Select(MapLessonToResponse).ToList(),
+                    ContentEntityType.KanjiEntry => (await unitOfWork.KanjiEntries.FindAsync(e => e.ContentAuthorId == authorId, cancellationToken))
+                        .Select(MapKanjiToResponse).ToList(),
+                    ContentEntityType.VocabularyEntry => (await unitOfWork.VocabularyEntries.FindAsync(e => e.ContentAuthorId == authorId, cancellationToken))
+                        .Select(MapVocabularyToResponse).ToList(),
+                    ContentEntityType.GrammarPoint => (await unitOfWork.GrammarPoints.FindAsync(e => e.ContentAuthorId == authorId, cancellationToken))
+                        .Select(MapGrammarToResponse).ToList(),
+                    ContentEntityType.PracticeTest => (await unitOfWork.PracticeTests.FindAsync(e => e.ContentAuthorId == authorId, cancellationToken))
+                        .Select(MapPracticeTestToResponse).ToList(),
+                    _ => throw new InvalidOperationException("Loại nội dung không hợp lệ.")
+                };
+
                 return ApiResponse<List<ContentReviewStatusResponse>>.Success(result);
             }
             catch (Exception ex)
@@ -235,50 +320,249 @@ namespace RikiPath.Application.Services
             }
         }
 
-        // Xây expression tree trỏ trực tiếp vào property CỦA CLASS CỤ THỂ (không phải qua interface),
-        // vì LINQ provider của EF Core dịch MemberExpression theo PropertyInfo thực tế của entity -
-        // nếu để trình biên dịch tự suy ra "e => e.ContentAuthorId == x" trong 1 method generic <T>
-        // ràng buộc bởi interface, PropertyInfo sinh ra sẽ thuộc về interface chứ không phải entity,
-        // dễ gây lỗi "could not be translated" tùy phiên bản EF Core. Cách dưới đây luôn an toàn.
-        private static Expression<Func<T, bool>> ByAuthor<T>(int authorId) where T : class, IReviewableContent
-            => PropertyEquals<T>(nameof(IReviewableContent.ContentAuthorId), authorId);
+        // ================= GetPendingReviewAsync =================
 
-        private static Expression<Func<T, bool>> ByStatus<T>(ContentStatus status) where T : class, IReviewableContent
-            => PropertyEquals<T>(nameof(IReviewableContent.Status), status);
-
-        private static Expression<Func<T, bool>> PropertyEquals<T>(string propertyName, object value) where T : class
+        public async Task<ApiResponse<List<ContentReviewStatusResponse>>> GetPendingReviewAsync(
+            ContentEntityType entityType, CancellationToken cancellationToken)
         {
-            var param = Expression.Parameter(typeof(T), "e");
-            var property = Expression.Property(param, propertyName);
-            var constant = Expression.Constant(value, property.Type);
-            var equal = Expression.Equal(property, constant);
-            return Expression.Lambda<Func<T, bool>>(equal, param);
+            try
+            {
+                List<ContentReviewStatusResponse> result = entityType switch
+                {
+                    ContentEntityType.Lesson => (await unitOfWork.Lessons.FindAsync(e => e.Status == ContentStatus.PendingReview, cancellationToken))
+                        .Select(MapLessonToResponse).ToList(),
+                    ContentEntityType.KanjiEntry => (await unitOfWork.KanjiEntries.FindAsync(e => e.Status == ContentStatus.PendingReview, cancellationToken))
+                        .Select(MapKanjiToResponse).ToList(),
+                    ContentEntityType.VocabularyEntry => (await unitOfWork.VocabularyEntries.FindAsync(e => e.Status == ContentStatus.PendingReview, cancellationToken))
+                        .Select(MapVocabularyToResponse).ToList(),
+                    ContentEntityType.GrammarPoint => (await unitOfWork.GrammarPoints.FindAsync(e => e.Status == ContentStatus.PendingReview, cancellationToken))
+                        .Select(MapGrammarToResponse).ToList(),
+                    ContentEntityType.PracticeTest => (await unitOfWork.PracticeTests.FindAsync(e => e.Status == ContentStatus.PendingReview, cancellationToken))
+                        .Select(MapPracticeTestToResponse).ToList(),
+                    _ => throw new InvalidOperationException("Loại nội dung không hợp lệ.")
+                };
+
+                return ApiResponse<List<ContentReviewStatusResponse>>.Success(result);
+            }
+            catch (Exception ex)
+            {
+                return ApiResponse<List<ContentReviewStatusResponse>>.Fail($"Không thể tải danh sách chờ duyệt: {ex.Message}");
+            }
         }
 
-        private static ContentReviewStatusResponse MapToStatusResponse(ContentEntityType entityType, IReviewableContent entity)
-        {
-            var title = entityType switch
-            {
-                ContentEntityType.Course => ((Course)entity).Title,
-                ContentEntityType.KanjiEntry => ((KanjiEntry)entity).Character,
-                ContentEntityType.VocabularyEntry => ((VocabularyEntry)entity).Word,
-                ContentEntityType.GrammarPoint => ((GrammarPoint)entity).Title,
-                ContentEntityType.PracticeTest => ((PracticeTest)entity).Title,
-                _ => "N/A"
-            };
+        // ================= ReviewAsync =================
 
-            return new ContentReviewStatusResponse
+        public Task<ApiResponse<ContentReviewStatusResponse>> ReviewAsync(
+            ContentEntityType entityType, int entityId, ReviewContentRequest request, CancellationToken cancellationToken)
+        {
+            var adminId = claimService.GetUserClaim().Id;
+            return entityType switch
             {
-                Id = entity.Id,
-                EntityType = entityType,
-                Title = title,
-                Status = entity.Status,
-                ContentAuthorId = entity.ContentAuthorId,
-                ReviewNote = entity.ReviewNote,
-                ReviewedDate = entity.ReviewedDate,
-                ReviewedById = entity.ReviewedById
+                ContentEntityType.Lesson => ReviewLessonAsync(adminId, entityId, request, cancellationToken),
+                ContentEntityType.KanjiEntry => ReviewKanjiAsync(adminId, entityId, request, cancellationToken),
+                ContentEntityType.VocabularyEntry => ReviewVocabularyAsync(adminId, entityId, request, cancellationToken),
+                ContentEntityType.GrammarPoint => ReviewGrammarAsync(adminId, entityId, request, cancellationToken),
+                ContentEntityType.PracticeTest => ReviewPracticeTestAsync(adminId, entityId, request, cancellationToken),
+                _ => Task.FromResult(ApiResponse<ContentReviewStatusResponse>.Fail("Loại nội dung không hỗ trợ duyệt."))
             };
         }
+
+        // Lấy tên hiển thị của admin đã duyệt - dùng chung cho cả 5 loại (private helper, không
+        // phải interface nên không vi phạm yêu cầu "bỏ IReviewableContent").
+        // Sửa lại lỗi precedence: "a + " " + b ?? fallback" KHÔNG hoạt động như mong đợi vì
+        // string + null vẫn ra chuỗi non-null, nên "?? fallback" không bao giờ được kích hoạt.
+        private async Task<string> GetReviewerNameAsync(int adminId, CancellationToken cancellationToken)
+        {
+            var admin = await unitOfWork.UserAccounts.GetByIdAsync(adminId, cancellationToken);
+            return admin is null ? $"Admin #{adminId}" : $"{admin.FirstName} {admin.LastName}".Trim();
+        }
+
+        private async Task<ApiResponse<ContentReviewStatusResponse>> ReviewLessonAsync(
+            int adminId, int entityId, ReviewContentRequest request, CancellationToken cancellationToken)
+        {
+            try
+            {
+                var entity = await unitOfWork.Lessons.GetByIdAsync(entityId, cancellationToken);
+                if (entity is null || entity.Status != ContentStatus.PendingReview)
+                    return ApiResponse<ContentReviewStatusResponse>.Fail("Không tìm thấy nội dung đang chờ duyệt.");
+
+                entity.Status = request.Approve ? ContentStatus.Published : ContentStatus.Rejected;
+                entity.ReviewedByName = await GetReviewerNameAsync(adminId, cancellationToken);
+                entity.ReviewNote = request.ReviewNote;
+                entity.ReviewedDate = DateTime.UtcNow;
+
+                unitOfWork.Lessons.Update(entity);
+                await unitOfWork.SaveChangesAsync(cancellationToken);
+
+                return ApiResponse<ContentReviewStatusResponse>.Success(MapLessonToResponse(entity));
+            }
+            catch (Exception ex)
+            {
+                return ApiResponse<ContentReviewStatusResponse>.Fail($"Không thể duyệt nội dung: {ex.Message}");
+            }
+        }
+
+        private async Task<ApiResponse<ContentReviewStatusResponse>> ReviewKanjiAsync(
+            int adminId, int entityId, ReviewContentRequest request, CancellationToken cancellationToken)
+        {
+            try
+            {
+                var entity = await unitOfWork.KanjiEntries.GetByIdAsync(entityId, cancellationToken);
+                if (entity is null || entity.Status != ContentStatus.PendingReview)
+                    return ApiResponse<ContentReviewStatusResponse>.Fail("Không tìm thấy nội dung đang chờ duyệt.");
+
+                entity.Status = request.Approve ? ContentStatus.Published : ContentStatus.Rejected;
+                entity.ReviewedByName = await GetReviewerNameAsync(adminId, cancellationToken);
+                entity.ReviewNote = request.ReviewNote;
+                entity.ReviewedDate = DateTime.UtcNow;
+
+                unitOfWork.KanjiEntries.Update(entity);
+                await unitOfWork.SaveChangesAsync(cancellationToken);
+
+                return ApiResponse<ContentReviewStatusResponse>.Success(MapKanjiToResponse(entity));
+            }
+            catch (Exception ex)
+            {
+                return ApiResponse<ContentReviewStatusResponse>.Fail($"Không thể duyệt nội dung: {ex.Message}");
+            }
+        }
+
+        private async Task<ApiResponse<ContentReviewStatusResponse>> ReviewVocabularyAsync(
+            int adminId, int entityId, ReviewContentRequest request, CancellationToken cancellationToken)
+        {
+            try
+            {
+                var entity = await unitOfWork.VocabularyEntries.GetByIdAsync(entityId, cancellationToken);
+                if (entity is null || entity.Status != ContentStatus.PendingReview)
+                    return ApiResponse<ContentReviewStatusResponse>.Fail("Không tìm thấy nội dung đang chờ duyệt.");
+
+                entity.Status = request.Approve ? ContentStatus.Published : ContentStatus.Rejected;
+                entity.ReviewedByName = await GetReviewerNameAsync(adminId, cancellationToken);
+                entity.ReviewNote = request.ReviewNote;
+                entity.ReviewedDate = DateTime.UtcNow;
+
+                unitOfWork.VocabularyEntries.Update(entity);
+                await unitOfWork.SaveChangesAsync(cancellationToken);
+
+                return ApiResponse<ContentReviewStatusResponse>.Success(MapVocabularyToResponse(entity));
+            }
+            catch (Exception ex)
+            {
+                return ApiResponse<ContentReviewStatusResponse>.Fail($"Không thể duyệt nội dung: {ex.Message}");
+            }
+        }
+
+        private async Task<ApiResponse<ContentReviewStatusResponse>> ReviewGrammarAsync(
+            int adminId, int entityId, ReviewContentRequest request, CancellationToken cancellationToken)
+        {
+            try
+            {
+                var entity = await unitOfWork.GrammarPoints.GetByIdAsync(entityId, cancellationToken);
+                if (entity is null || entity.Status != ContentStatus.PendingReview)
+                    return ApiResponse<ContentReviewStatusResponse>.Fail("Không tìm thấy nội dung đang chờ duyệt.");
+
+                entity.Status = request.Approve ? ContentStatus.Published : ContentStatus.Rejected;
+                entity.ReviewedByName = await GetReviewerNameAsync(adminId, cancellationToken);
+                entity.ReviewNote = request.ReviewNote;
+                entity.ReviewedDate = DateTime.UtcNow;
+
+                unitOfWork.GrammarPoints.Update(entity);
+                await unitOfWork.SaveChangesAsync(cancellationToken);
+
+                return ApiResponse<ContentReviewStatusResponse>.Success(MapGrammarToResponse(entity));
+            }
+            catch (Exception ex)
+            {
+                return ApiResponse<ContentReviewStatusResponse>.Fail($"Không thể duyệt nội dung: {ex.Message}");
+            }
+        }
+
+        private async Task<ApiResponse<ContentReviewStatusResponse>> ReviewPracticeTestAsync(
+            int adminId, int entityId, ReviewContentRequest request, CancellationToken cancellationToken)
+        {
+            try
+            {
+                var entity = await unitOfWork.PracticeTests.GetByIdAsync(entityId, cancellationToken);
+                if (entity is null || entity.Status != ContentStatus.PendingReview)
+                    return ApiResponse<ContentReviewStatusResponse>.Fail("Không tìm thấy nội dung đang chờ duyệt.");
+
+                entity.Status = request.Approve ? ContentStatus.Published : ContentStatus.Rejected;
+                entity.ReviewedByName = await GetReviewerNameAsync(adminId, cancellationToken);
+                entity.ReviewNote = request.ReviewNote;
+                entity.ReviewedDate = DateTime.UtcNow;
+
+                unitOfWork.PracticeTests.Update(entity);
+                await unitOfWork.SaveChangesAsync(cancellationToken);
+
+                return ApiResponse<ContentReviewStatusResponse>.Success(MapPracticeTestToResponse(entity));
+            }
+            catch (Exception ex)
+            {
+                return ApiResponse<ContentReviewStatusResponse>.Fail($"Không thể duyệt nội dung: {ex.Message}");
+            }
+        }
+
+        // ================= Mapping (1 method riêng / loại, không qua interface) =================
+
+        private static ContentReviewStatusResponse MapLessonToResponse(Lesson e) => new()
+        {
+            Id = e.Id,
+            EntityType = ContentEntityType.Lesson,
+            Title = e.Title,
+            Status = e.Status,
+            ContentAuthorId = e.ContentAuthorId,
+            ReviewNote = e.ReviewNote,
+            ReviewedDate = e.ReviewedDate,
+            ReviewedByName = e.ReviewedByName
+        };
+
+        private static ContentReviewStatusResponse MapKanjiToResponse(KanjiEntry e) => new()
+        {
+            Id = e.Id,
+            EntityType = ContentEntityType.KanjiEntry,
+            Title = e.Character,
+            Status = e.Status,
+            ContentAuthorId = e.ContentAuthorId,
+            ReviewNote = e.ReviewNote,
+            ReviewedDate = e.ReviewedDate,
+            ReviewedByName = e.ReviewedByName
+        };
+
+        private static ContentReviewStatusResponse MapVocabularyToResponse(VocabularyEntry e) => new()
+        {
+            Id = e.Id,
+            EntityType = ContentEntityType.VocabularyEntry,
+            Title = e.Word,
+            Status = e.Status,
+            ContentAuthorId = e.ContentAuthorId,
+            ReviewNote = e.ReviewNote,
+            ReviewedDate = e.ReviewedDate,
+            ReviewedByName = e.ReviewedByName
+        };
+
+        private static ContentReviewStatusResponse MapGrammarToResponse(GrammarPoint e) => new()
+        {
+            Id = e.Id,
+            EntityType = ContentEntityType.GrammarPoint,
+            Title = e.Title,
+            Status = e.Status,
+            ContentAuthorId = e.ContentAuthorId,
+            ReviewNote = e.ReviewNote,
+            ReviewedDate = e.ReviewedDate,
+            ReviewedByName = e.ReviewedByName
+        };
+
+        private static ContentReviewStatusResponse MapPracticeTestToResponse(PracticeTest e) => new()
+        {
+            Id = e.Id,
+            EntityType = ContentEntityType.PracticeTest,
+            Title = e.Title,
+            Status = e.Status,
+            ContentAuthorId = e.ContentAuthorId,
+            ReviewNote = e.ReviewNote,
+            ReviewedDate = e.ReviewedDate,
+            ReviewedByName = e.ReviewedByName
+        };
 
         private static string GetRequired(ParsedContentRow row, string key)
             => row.Fields.TryGetValue(key, out var v) && !string.IsNullOrWhiteSpace(v)

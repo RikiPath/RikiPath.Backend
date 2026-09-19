@@ -48,8 +48,10 @@ namespace RikiPath.Domain
         public string ClientId { get; set; } = string.Empty;
         public string ApiKey { get; set; } = string.Empty;
         public string ChecksumKey { get; set; } = string.Empty;
-        public string ReturnUrl { get; set; } = string.Empty;
-        public string CancelUrl { get; set; } = string.Empty;
+        public string WebReturnUrl { get; set; } = string.Empty;
+        public string WebCancelUrl { get; set; } = string.Empty;
+
+        public string MobileLandingBaseUrl { get; set; } = string.Empty;
     }
 
     public class SupabaseSettings

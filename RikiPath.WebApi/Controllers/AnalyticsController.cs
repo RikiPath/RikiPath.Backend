@@ -27,8 +27,7 @@ namespace RikiPath.WebApi.Controllers
         [HttpGet("study-streak")]
         public async Task<IActionResult> GetStudyStreak(CancellationToken cancellationToken)
         {
-            var userId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
-            var result = await analyticsService.GetStudyStreakAsync(userId, cancellationToken);
+            var result = await analyticsService.GetStudyStreakAsync(cancellationToken);
             return StatusCode((int)result.StatusCode, result);
         }
 
@@ -49,8 +48,7 @@ namespace RikiPath.WebApi.Controllers
         [HttpGet("completion-stats")]
         public async Task<IActionResult> GetCompletionStats(CancellationToken cancellationToken)
         {
-            var userId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
-            var result = await analyticsService.GetCompletionStatsAsync(userId, cancellationToken);
+            var result = await analyticsService.GetCompletionStatsAsync(cancellationToken);
             return StatusCode((int)result.StatusCode, result);
         }
 
@@ -71,8 +69,7 @@ namespace RikiPath.WebApi.Controllers
         [HttpGet("skill-breakdown")]
         public async Task<IActionResult> GetSkillBreakdown(CancellationToken cancellationToken)
         {
-            var userId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
-            var result = await analyticsService.GetSkillBreakdownAsync(userId, cancellationToken);
+            var result = await analyticsService.GetSkillBreakdownAsync(cancellationToken);
             return StatusCode((int)result.StatusCode, result);
         }
     }

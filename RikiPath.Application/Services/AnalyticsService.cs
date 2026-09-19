@@ -14,12 +14,13 @@ namespace RikiPath.Application.Services
     //     lọc theo Course.JlptLevelId == user.TargetJlptLevelId nếu user đã set mục tiêu
     //   IPracticeTestSectionResultRepository.GetSkillBreakdownAsync(userId)
     //     -> List<(string SkillName, double AverageScore, int AttemptCount)>, GROUP BY Skill.Name
-    public class AnalyticsService(IUnitOfWork unitOfWork) : IAnalyticsService
+    public class AnalyticsService(IUnitOfWork unitOfWork, IClaimService claimService) : IAnalyticsService
     {
-        public async Task<ApiResponse<StudyStreakResponse>> GetStudyStreakAsync(int userId, CancellationToken cancellationToken)
+        public async Task<ApiResponse<StudyStreakResponse>> GetStudyStreakAsync(CancellationToken cancellationToken)
         {
             try
             {
+                var userId = claimService.GetUserClaim().Id;
                 var lessonDates = await unitOfWork.LessonProgresses.GetActivityDatesAsync(userId);
                 var reviewDates = await unitOfWork.ReviewLogs.GetActivityDatesAsync(userId);
                 var testDates = await unitOfWork.PracticeTestAttempts.GetActivityDatesAsync(userId);
@@ -89,10 +90,11 @@ namespace RikiPath.Application.Services
             }
         }
 
-        public async Task<ApiResponse<CompletionStatsResponse>> GetCompletionStatsAsync(int userId, CancellationToken cancellationToken)
+        public async Task<ApiResponse<CompletionStatsResponse>> GetCompletionStatsAsync(CancellationToken cancellationToken)
         {
             try
             {
+                var userId = claimService.GetUserClaim().Id;
                 var (total, completed) = await unitOfWork.Lessons.GetCompletionStatsAsync(userId);
                 var percent = total == 0 ? 0d : Math.Round(completed * 100d / total, 2);
 
@@ -110,10 +112,11 @@ namespace RikiPath.Application.Services
             }
         }
 
-        public async Task<ApiResponse<List<SkillBreakdownItem>>> GetSkillBreakdownAsync(int userId, CancellationToken cancellationToken)
+        public async Task<ApiResponse<List<SkillBreakdownItem>>> GetSkillBreakdownAsync(CancellationToken cancellationToken)
         {
             try
             {
+                var userId = claimService.GetUserClaim().Id;
                 var breakdown = await unitOfWork.PracticeTestSectionResults.GetSkillBreakdownAsync(userId);
 
                 var result = breakdown

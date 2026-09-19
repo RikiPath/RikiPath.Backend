@@ -13,13 +13,6 @@ namespace RikiPath.Infrastructure.Repositories
         {
         }
 
-        public async Task<List<Lesson>> GetByCourseAsync(int courseId)
-            => await _context.Lessons
-                .Include(x => x.Skill)
-                .Where(x => x.CourseId == courseId)
-                .OrderBy(x => x.SortOrder)
-                .ToListAsync();
-
         public async Task<Lesson?> GetWithBankLinksAsync(int lessonId)
             => await _context.Lessons
                 .Include(x => x.LessonKanjis).ThenInclude(x => x.KanjiEntry)
