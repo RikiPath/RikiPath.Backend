@@ -17,7 +17,7 @@ namespace RikiPath.Infrastructure.Repositories
         private IQueryable<GrammarPoint> BuildSearchQuery(int? jlptLevelId, ContentStatus? status, string? keyword)
         {
             IQueryable<GrammarPoint> query = _context.GrammarPoints.AsQueryable();
-            if (jlptLevelId.HasValue) query = query.Where(x => x.JlptLevelId == jlptLevelId.Value);
+            if (jlptLevelId.HasValue) query = query.Where(x => x.CertificationLevelId == jlptLevelId.Value);
             if (status.HasValue) query = query.Where(x => x.Status == status.Value);
             if (!string.IsNullOrEmpty(keyword))
                 query = query.Where(x => x.Title.ToLower().Contains(keyword.ToLower()) || x.Structure.ToLower().Contains(keyword.ToLower()));
@@ -32,12 +32,12 @@ namespace RikiPath.Infrastructure.Repositories
     int pageSize)
         {
             var query = _context.GrammarPoints
-                .Include(g => g.JlptLevel)
+                .Include(g => g.CertificationLevel)
                 .AsQueryable();
 
             if (jlptLevelId.HasValue)
             {
-                query = query.Where(g => g.JlptLevelId == jlptLevelId.Value);
+                query = query.Where(g => g.CertificationLevelId == jlptLevelId.Value);
             }
 
             if (status.HasValue)

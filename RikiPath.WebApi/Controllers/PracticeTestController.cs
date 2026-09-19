@@ -29,8 +29,8 @@ namespace RikiPath.WebApi.Controllers
         [HttpPost("{practiceTestId:int}/start")]
         public async Task<IActionResult> StartAttempt(int practiceTestId, CancellationToken cancellationToken)
         {
-            var userId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
-            var result = await practiceTestService.StartAttemptAsync(userId, practiceTestId, cancellationToken);
+
+            var result = await practiceTestService.StartAttemptAsync(practiceTestId, cancellationToken);
             return StatusCode((int)result.StatusCode, result);
         }
 
@@ -53,8 +53,8 @@ namespace RikiPath.WebApi.Controllers
         [HttpPost("attempts/{attemptId:int}/submit")]
         public async Task<IActionResult> SubmitAttempt(int attemptId, [FromBody] SubmitAttemptRequest request, CancellationToken cancellationToken)
         {
-            var userId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
-            var result = await practiceTestService.SubmitAttemptAsync(userId, attemptId, request, cancellationToken);
+
+            var result = await practiceTestService.SubmitAttemptAsync(attemptId, request, cancellationToken);
             return StatusCode((int)result.StatusCode, result);
         }
 
@@ -76,8 +76,8 @@ namespace RikiPath.WebApi.Controllers
         [HttpGet("attempts/{attemptId:int}")]
         public async Task<IActionResult> GetAttemptResult(int attemptId, CancellationToken cancellationToken)
         {
-            var userId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
-            var result = await practiceTestService.GetAttemptResultAsync(userId, attemptId, cancellationToken);
+
+            var result = await practiceTestService.GetAttemptResultAsync(attemptId, cancellationToken);
             return StatusCode((int)result.StatusCode, result);
         }
 
@@ -120,8 +120,8 @@ namespace RikiPath.WebApi.Controllers
         [HttpGet("attempts/{attemptId:int}/detailed")]
         public async Task<IActionResult> GetDetailedResult(int attemptId, CancellationToken cancellationToken)
         {
-            var userId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
-            var result = await practiceTestService.GetDetailedResultAsync(userId, attemptId, cancellationToken);
+
+            var result = await practiceTestService.GetDetailedResultAsync(attemptId, cancellationToken);
             return StatusCode((int)result.StatusCode, result);
         }
     }

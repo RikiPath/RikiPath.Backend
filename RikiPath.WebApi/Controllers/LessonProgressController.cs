@@ -29,8 +29,8 @@ namespace RikiPath.WebApi.Controllers
         [HttpGet("lessons/{lessonId:int}")]
         public async Task<IActionResult> GetLessonDetail(int lessonId, CancellationToken cancellationToken)
         {
-            var userId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
-            var result = await lessonProgressService.GetLessonDetailAsync(userId, lessonId, cancellationToken);
+
+            var result = await lessonProgressService.GetLessonDetailAsync(lessonId, cancellationToken);
             return StatusCode((int)result.StatusCode, result);
         }
 
@@ -54,8 +54,8 @@ namespace RikiPath.WebApi.Controllers
         [HttpPatch("lessons/{lessonId:int}/playback-position")]
         public async Task<IActionResult> UpdatePlaybackPosition(int lessonId, [FromBody] UpdatePlaybackPositionRequest request, CancellationToken cancellationToken)
         {
-            var userId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
-            var result = await lessonProgressService.UpdatePlaybackPositionAsync(userId, lessonId, request, cancellationToken);
+
+            var result = await lessonProgressService.UpdatePlaybackPositionAsync(lessonId, request, cancellationToken);
             return StatusCode((int)result.StatusCode, result);
         }
     }

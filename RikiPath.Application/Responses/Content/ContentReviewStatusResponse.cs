@@ -17,6 +17,6 @@ namespace RikiPath.Application.Responses.Content
         public int ContentAuthorId { get; set; }
         public string? ReviewNote { get; set; }
         public DateTime? ReviewedDate { get; set; }
-        public int? ReviewedById { get; set; }
+        public string? ReviewedByName { get; set; }
     }
 }

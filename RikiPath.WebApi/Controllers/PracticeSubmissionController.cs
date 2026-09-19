@@ -30,8 +30,8 @@ namespace RikiPath.WebApi.Controllers
         [Authorize(Roles = "Learner")]
         public async Task<IActionResult> Submit([FromBody] SubmitPracticeRequest request, CancellationToken cancellationToken)
         {
-            var userId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
-            var result = await practiceSubmissionService.SubmitAsync(userId, request, cancellationToken);
+
+            var result = await practiceSubmissionService.SubmitAsync(request, cancellationToken);
             return StatusCode((int)result.StatusCode, result);
         }
 
@@ -54,8 +54,8 @@ namespace RikiPath.WebApi.Controllers
         [Authorize]
         public async Task<IActionResult> GetById(int submissionId, CancellationToken cancellationToken)
         {
-            var userId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
-            var result = await practiceSubmissionService.GetByIdAsync(userId, submissionId, cancellationToken);
+
+            var result = await practiceSubmissionService.GetByIdAsync(submissionId, cancellationToken);
             return StatusCode((int)result.StatusCode, result);
         }
 
@@ -75,8 +75,8 @@ namespace RikiPath.WebApi.Controllers
         [Authorize(Roles = "Learner")]
         public async Task<IActionResult> GetMyHistory(CancellationToken cancellationToken)
         {
-            var userId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
-            var result = await practiceSubmissionService.GetMyHistoryAsync(userId, cancellationToken);
+
+            var result = await practiceSubmissionService.GetMyHistoryAsync(cancellationToken);
             return StatusCode((int)result.StatusCode, result);
         }
 
@@ -101,8 +101,8 @@ namespace RikiPath.WebApi.Controllers
         [Authorize(Roles = "Learner")]
         public async Task<IActionResult> Regrade(int submissionId, CancellationToken cancellationToken)
         {
-            var userId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
-            var result = await practiceSubmissionService.RegradeAsync(userId, submissionId, cancellationToken);
+
+            var result = await practiceSubmissionService.RegradeAsync(submissionId, cancellationToken);
             return StatusCode((int)result.StatusCode, result);
         }
     }

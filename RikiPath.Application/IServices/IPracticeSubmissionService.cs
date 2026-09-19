@@ -7,17 +7,13 @@ namespace RikiPath.Application.IServices
 {
     public interface IPracticeSubmissionService
     {
-        Task<ApiResponse<PracticeSubmissionResponse>> SubmitAsync(
-            int userId, SubmitPracticeRequest request, CancellationToken cancellationToken);
+        Task<ApiResponse<PracticeSubmissionResponse>> SubmitAsync(SubmitPracticeRequest request, CancellationToken cancellationToken);
 
-        Task<ApiResponse<PracticeSubmissionResponse>> GetByIdAsync(
-            int userId, int submissionId, CancellationToken cancellationToken);
+        Task<ApiResponse<PracticeSubmissionResponse>> GetByIdAsync(int submissionId, CancellationToken cancellationToken);
 
-        Task<ApiResponse<List<PracticeSubmissionResponse>>> GetMyHistoryAsync(
-            int userId, CancellationToken cancellationToken);
+        Task<ApiResponse<List<PracticeSubmissionResponse>>> GetMyHistoryAsync(CancellationToken cancellationToken);
 
         // Cho phép chấm lại nếu lần chấm trước lỗi (AI timeout, v.v.)
-        Task<ApiResponse<PracticeSubmissionResponse>> RegradeAsync(
-            int userId, int submissionId, CancellationToken cancellationToken);
+        Task<ApiResponse<PracticeSubmissionResponse>> RegradeAsync(int submissionId, CancellationToken cancellationToken);
     }
 }

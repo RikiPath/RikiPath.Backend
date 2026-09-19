@@ -7,18 +7,14 @@ namespace RikiPath.Application.IServices
 {
     public interface IUserProfileService
     {
-        Task<ApiResponse<UserProfileResponse>> GetProfileAsync(int userId, CancellationToken cancellationToken);
+        Task<ApiResponse<UserProfileResponse>> GetProfileAsync(CancellationToken cancellationToken);
 
-        Task<ApiResponse<UserProfileResponse>> UpdateProfileAsync(
-            int userId, UpdateProfileRequest request, CancellationToken cancellationToken);
+        Task<ApiResponse<UserProfileResponse>> UpdateProfileAsync(UpdateProfileRequest request, CancellationToken cancellationToken);
 
-        Task<ApiResponse<UserProfileResponse>> UpdateAvatarAsync(
-            int userId, IFormFile avatarFile, CancellationToken cancellationToken);
+        Task<ApiResponse<UserProfileResponse>> UpdateAvatarAsync(IFormFile avatarFile, CancellationToken cancellationToken);
 
-        Task<ApiResponse<UserProfileResponse>> SetJlptGoalAsync(
-            int userId, SetJlptGoalRequest request, CancellationToken cancellationToken);
+        Task<ApiResponse<UserProfileResponse>> SetJlptGoalAsync(SetJlptGoalRequest request, CancellationToken cancellationToken);
 
-        Task<ApiResponse<UserProfileResponse>> UpdateNotificationSettingsAsync(
-            int userId, UpdateNotificationSettingsRequest request, CancellationToken cancellationToken);
+        Task<ApiResponse<UserProfileResponse>> UpdateNotificationSettingsAsync(UpdateNotificationSettingsRequest request, CancellationToken cancellationToken);
     }
 }

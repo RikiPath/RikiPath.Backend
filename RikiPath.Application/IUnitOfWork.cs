@@ -1,25 +1,25 @@
-using System.Threading.Tasks;
 using RikiPath.Application.IRepositories;
 
 namespace RikiPath.Application
 {
     public interface IUnitOfWork
     {
-        // Users
+        // 1. Users & Core Auth
         IUserAccountRepository UserAccounts { get; }
+        IEmailVerificationRepository EmailVerifications { get; }
+        INotificationRepository Notifications { get; }
 
-        // Catalog / master data
-        IJlptLevelRepository JlptLevels { get; }
+        // 2. Master Data / Certifications & Skills
+        ICertificationRepository Certifications { get; }
+        ICertificationLevelRepository CertificationLevels { get; }
         ISkillRepository Skills { get; }
-        ICourseCategoryRepository CourseCategories { get; }
+        ICertificationLevelSkillRepository CertificationLevelSkills { get; }
 
-        // Content
-        ICourseRepository Courses { get; }
-        ICoursePurchaseRepository CoursePurchases { get; }
+        // 3. Lessons & Learning Progress
         ILessonRepository Lessons { get; }
         ILessonProgressRepository LessonProgresses { get; }
 
-        // Banks
+        // 4. Content Banks
         IKanjiEntryRepository KanjiEntries { get; }
         IVocabularyEntryRepository VocabularyEntries { get; }
         IGrammarPointRepository GrammarPoints { get; }
@@ -27,11 +27,11 @@ namespace RikiPath.Application
         ILessonVocabularyRepository LessonVocabularies { get; }
         ILessonGrammarRepository LessonGrammars { get; }
 
-        // Personal vocabulary notebook
+        // 5. Personal Vocabulary Notebook
         IVocabularyListRepository VocabularyLists { get; }
         IVocabularyNoteEntryRepository VocabularyNoteEntries { get; }
 
-        // Mock JLPT practice tests
+        // 6. JLPT Practice Tests & Submissions
         IPracticeTestRepository PracticeTests { get; }
         IPracticeTestSectionRepository PracticeTestSections { get; }
         IPracticeQuestionRepository PracticeQuestions { get; }
@@ -39,27 +39,28 @@ namespace RikiPath.Application
         IPracticeTestAttemptRepository PracticeTestAttempts { get; }
         IPracticeTestAnswerRepository PracticeTestAnswers { get; }
         IPracticeTestSectionResultRepository PracticeTestSectionResults { get; }
-
-        // AI learning path & AI grading
-        ILearningPathSuggestionRepository LearningPathSuggestions { get; }
         IPracticeSubmissionRepository PracticeSubmissions { get; }
         IGradingResultRepository GradingResults { get; }
 
-        // Consultation package
+        // 7. Spaced-Repetition Review Queue (SM-2)
+        IReviewItemRepository ReviewItems { get; }
+        IReviewLogRepository ReviewLogs { get; }
+
+        // 8. Subscriptions, Monetization & AI Advisory
+        ISubscriptionPlanRepository SubscriptionPlans { get; }
+        IUserSubscriptionRepository UserSubscriptions { get; }
+        IAiCreditTopUpRepository AiCreditTopUps { get; }
+        ILearningPathSuggestionRepository LearningPathSuggestions { get; }
+
+        // 9. Paid Consultation 1-1 Service
         IConsultationPackageRepository ConsultationPackages { get; }
         IConsultationPurchaseRepository ConsultationPurchases { get; }
         IConsultationRequestRepository ConsultationRequests { get; }
         IConsultationAnswerRepository ConsultationAnswers { get; }
         IConsultantAvailabilityRepository ConsultantAvailabilities { get; }
 
-        // Spaced-repetition review queue
-        IReviewItemRepository ReviewItems { get; }
-        IReviewLogRepository ReviewLogs { get; }
-
-        IEmailVerificationRepository EmailVerifications { get; }
-        INotificationRepository Notifications { get; }
-
-        Task SaveChangesAsync();
+        // Db Helpers
+        Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
         Task<T> ExecuteScalarAsync<T>(string sql);
         Task ExecuteRawSqlAsync(string sql);
     }

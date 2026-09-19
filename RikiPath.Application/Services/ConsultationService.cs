@@ -7,14 +7,14 @@ using RikiPath.Application.Responses.Consultations;
 
 namespace RikiPath.Application.Services
 {
-    public class ConsultationService(IUnitOfWork unitOfWork) : IConsultationService
+    public class ConsultationService(IUnitOfWork unitOfWork, IClaimService claimService) : IConsultationService
     {
-        public async Task<ApiResponse<ConsultationRequestResponse>> BookMeetingAsync(
-            int learnerId, BookMeetingRequest request, CancellationToken cancellationToken)
+        public async Task<ApiResponse<ConsultationRequestResponse>> BookMeetingAsync(BookMeetingRequest request, CancellationToken cancellationToken)
         {
             try
             {
-                var (purchase, error) = await ValidatePurchaseAsync(learnerId, request.ConsultationPurchaseId, ConsultationType.Meeting);
+                var userId = claimService.GetUserClaim().Id;
+                var (purchase, error) = await ValidatePurchaseAsync(userId, request.ConsultationPurchaseId, ConsultationType.Meeting);
                 if (error is not null)
                     return ApiResponse<ConsultationRequestResponse>.Fail(error);
 
@@ -38,7 +38,7 @@ namespace RikiPath.Application.Services
 
                 await unitOfWork.ConsultationRequests.AddAsync(consultationRequest);
                 unitOfWork.ConsultantAvailabilities.Update(slot);
-                await unitOfWork.SaveChangesAsync();
+                await unitOfWork.SaveChangesAsync(cancellationToken);
 
                 return ApiResponse<ConsultationRequestResponse>.Success(
                     await MapToResponseAsync(consultationRequest, cancellationToken));
@@ -50,11 +50,12 @@ namespace RikiPath.Application.Services
         }
 
         public async Task<ApiResponse<ConsultationRequestResponse>> SubmitTicketAsync(
-            int learnerId, SubmitTicketRequest request, CancellationToken cancellationToken)
+            SubmitTicketRequest request, CancellationToken cancellationToken)
         {
             try
             {
-                var (purchase, error) = await ValidatePurchaseAsync(learnerId, request.ConsultationPurchaseId, ConsultationType.WrittenAnswer);
+                var userId = claimService.GetUserClaim().Id;
+                var (purchase, error) = await ValidatePurchaseAsync(userId, request.ConsultationPurchaseId, ConsultationType.WrittenAnswer);
                 if (error is not null)
                     return ApiResponse<ConsultationRequestResponse>.Fail(error);
 
@@ -69,7 +70,7 @@ namespace RikiPath.Application.Services
                 };
 
                 await unitOfWork.ConsultationRequests.AddAsync(consultationRequest);
-                await unitOfWork.SaveChangesAsync();
+                await unitOfWork.SaveChangesAsync(cancellationToken);
 
                 return ApiResponse<ConsultationRequestResponse>.Success(
                     await MapToResponseAsync(consultationRequest, cancellationToken));
@@ -80,12 +81,12 @@ namespace RikiPath.Application.Services
             }
         }
 
-        public async Task<ApiResponse<List<ConsultationRequestResponse>>> GetMyRequestsAsync(
-            int learnerId, CancellationToken cancellationToken)
+        public async Task<ApiResponse<List<ConsultationRequestResponse>>> GetMyRequestsAsync(CancellationToken cancellationToken)
         {
             try
             {
-                var purchases = await unitOfWork.ConsultationPurchases.FindAsync(p => p.UserId == learnerId);
+                var userId = claimService.GetUserClaim().Id;
+                var purchases = await unitOfWork.ConsultationPurchases.FindAsync(p => p.UserId == userId);
                 var purchaseIds = purchases.Select(p => p.Id).ToHashSet();
 
                 var requests = await unitOfWork.ConsultationRequests
@@ -103,11 +104,11 @@ namespace RikiPath.Application.Services
             }
         }
 
-        public async Task<ApiResponse<ConsultantQueueResponse>> GetConsultantQueueAsync(
-            int consultantId, CancellationToken cancellationToken)
+        public async Task<ApiResponse<ConsultantQueueResponse>> GetConsultantQueueAsync(CancellationToken cancellationToken)
         {
             try
             {
+                var consultantId = claimService.GetUserClaim().Id;
                 // Hàng đợi = ticket chưa ai nhận (Learner mới gửi) + các request đã gán cho chính consultant này
                 var unclaimedTickets = await unitOfWork.ConsultationRequests
                     .FindAsync(r => r.ConsultantId == null && r.Status == ConsultationStatus.PendingAssignment);
@@ -167,10 +168,11 @@ namespace RikiPath.Application.Services
         }
 
         public async Task<ApiResponse<ConsultationRequestResponse>> ClaimTicketAsync(
-            int consultantId, int requestId, CancellationToken cancellationToken)
+            int requestId, CancellationToken cancellationToken)
         {
             try
             {
+                var consultantId = claimService.GetUserClaim().Id;
                 var request = await unitOfWork.ConsultationRequests.GetByIdAsync(requestId);
                 if (request is null || request.ConsultantId is not null || request.Status != ConsultationStatus.PendingAssignment)
                     return ApiResponse<ConsultationRequestResponse>.Fail("Ticket không còn khả dụng để nhận.");
@@ -179,7 +181,7 @@ namespace RikiPath.Application.Services
                 request.Status = ConsultationStatus.Assigned;
 
                 unitOfWork.ConsultationRequests.Update(request);
-                await unitOfWork.SaveChangesAsync();
+                await unitOfWork.SaveChangesAsync(cancellationToken);
 
                 return ApiResponse<ConsultationRequestResponse>.Success(
                     await MapToResponseAsync(request, cancellationToken));
@@ -191,10 +193,11 @@ namespace RikiPath.Application.Services
         }
 
         public async Task<ApiResponse<ConsultationRequestResponse>> SubmitAnswerAsync(
-            int consultantId, int requestId, SubmitAnswerRequest request, CancellationToken cancellationToken)
+            int requestId, SubmitAnswerRequest request, CancellationToken cancellationToken)
         {
             try
             {
+                var consultantId = claimService.GetUserClaim().Id;
                 var consultationRequest = await unitOfWork.ConsultationRequests.GetByIdAsync(requestId);
                 if (consultationRequest is null || consultationRequest.ConsultantId != consultantId)
                     return ApiResponse<ConsultationRequestResponse>.Fail("Không tìm thấy yêu cầu tư vấn.");
@@ -207,7 +210,7 @@ namespace RikiPath.Application.Services
                 consultationRequest.Status = ConsultationStatus.Completed;
                 consultationRequest.CompletedAt = DateTime.UtcNow;
                 unitOfWork.ConsultationRequests.Update(consultationRequest);
-                await unitOfWork.SaveChangesAsync();
+                await unitOfWork.SaveChangesAsync(cancellationToken);
 
                 return ApiResponse<ConsultationRequestResponse>.Success(
                     await MapToResponseAsync(consultationRequest, cancellationToken));
@@ -219,10 +222,11 @@ namespace RikiPath.Application.Services
         }
 
         public async Task<ApiResponse<ConsultationRequestResponse>> LogMeetingNoteAsync(
-            int consultantId, int requestId, LogMeetingNoteRequest request, CancellationToken cancellationToken)
+            int requestId, LogMeetingNoteRequest request, CancellationToken cancellationToken)
         {
             try
             {
+                var consultantId = claimService.GetUserClaim().Id;
                 var consultationRequest = await unitOfWork.ConsultationRequests.GetByIdAsync(requestId);
                 if (consultationRequest is null || consultationRequest.ConsultantId != consultantId)
                     return ApiResponse<ConsultationRequestResponse>.Fail("Không tìm thấy buổi tư vấn.");
@@ -232,7 +236,7 @@ namespace RikiPath.Application.Services
                 consultationRequest.Status = ConsultationStatus.Completed;
                 consultationRequest.CompletedAt = DateTime.UtcNow;
                 unitOfWork.ConsultationRequests.Update(consultationRequest);
-                await unitOfWork.SaveChangesAsync();
+                await unitOfWork.SaveChangesAsync(cancellationToken);
 
                 return ApiResponse<ConsultationRequestResponse>.Success(
                     await MapToResponseAsync(consultationRequest, cancellationToken));

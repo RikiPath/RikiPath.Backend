@@ -4,22 +4,19 @@ using Microsoft.EntityFrameworkCore;
 
 namespace RikiPath.Infrastructure
 {
-    public class AppDbContext : DbContext
+    public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(options)
     {
-        public AppDbContext(DbContextOptions<AppDbContext> options) : base(options)
-        {
-        }
 
         // Users
         public DbSet<UserAccount> Users { get; set; }
 
         // Catalog / master data
-        public DbSet<JlptLevel> JlptLevels { get; set; }
+        public DbSet<Certification> Certifications { get; set; }
+        public DbSet<CertificationLevel> CertificationLevels { get; set; }
+        public DbSet<CertificationLevelSkill> CertificationLevelSkills { get; set; }
         public DbSet<Skill> Skills { get; set; }
-        public DbSet<CourseCategory> CourseCategories { get; set; }
 
         // Content
-        public DbSet<Course> Courses { get; set; }
         public DbSet<Lesson> Lessons { get; set; }
         public DbSet<LessonProgress> LessonProgresses { get; set; }
 
@@ -35,7 +32,7 @@ namespace RikiPath.Infrastructure
         public DbSet<VocabularyList> VocabularyLists { get; set; }
         public DbSet<VocabularyNoteEntry> VocabularyNoteEntries { get; set; }
 
-        // Mock JLPT practice tests
+        // Mock JLPT-family practice tests
         public DbSet<PracticeTest> PracticeTests { get; set; }
         public DbSet<PracticeTestSection> PracticeTestSections { get; set; }
         public DbSet<PracticeQuestion> PracticeQuestions { get; set; }
@@ -52,10 +49,14 @@ namespace RikiPath.Infrastructure
         // Consultation package
         public DbSet<ConsultationPackage> ConsultationPackages { get; set; }
         public DbSet<ConsultationPurchase> ConsultationPurchases { get; set; }
-        public DbSet<CoursePurchase> CoursePurchases { get; set; }
         public DbSet<ConsultationRequest> ConsultationRequests { get; set; }
         public DbSet<ConsultationAnswer> ConsultationAnswers { get; set; }
         public DbSet<ConsultantAvailability> ConsultantAvailabilities { get; set; }
+
+        // Subscription / payments
+        public DbSet<SubscriptionPlan> SubscriptionPlans { get; set; }
+        public DbSet<UserSubscription> UserSubscriptions { get; set; }
+        public DbSet<AiCreditTopUp> AiCreditTopUps { get; set; }
 
         // Spaced-repetition review queue
         public DbSet<ReviewItem> ReviewItems { get; set; }
@@ -68,11 +69,11 @@ namespace RikiPath.Infrastructure
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             modelBuilder.ApplyConfiguration(new UserConfig());
-            modelBuilder.ApplyConfiguration(new JlptLevelConfig());
+            modelBuilder.ApplyConfiguration(new CertificationConfig());
+            modelBuilder.ApplyConfiguration(new CertificationLevelConfig());
+            modelBuilder.ApplyConfiguration(new CertificationLevelSkillConfig());
             modelBuilder.ApplyConfiguration(new SkillConfig());
-            modelBuilder.ApplyConfiguration(new CourseCategoryConfig());
 
-            modelBuilder.ApplyConfiguration(new CourseConfig());
             modelBuilder.ApplyConfiguration(new LessonConfig());
             modelBuilder.ApplyConfiguration(new LessonProgressConfig());
 
@@ -103,6 +104,10 @@ namespace RikiPath.Infrastructure
             modelBuilder.ApplyConfiguration(new ConsultationRequestConfig());
             modelBuilder.ApplyConfiguration(new ConsultationAnswerConfig());
             modelBuilder.ApplyConfiguration(new ConsultantAvailabilityConfig());
+
+            modelBuilder.ApplyConfiguration(new SubscriptionPlanConfig());
+            modelBuilder.ApplyConfiguration(new UserSubscriptionConfig());
+            modelBuilder.ApplyConfiguration(new AiCreditTopUpConfig());
 
             modelBuilder.ApplyConfiguration(new ReviewItemConfig());
             modelBuilder.ApplyConfiguration(new ReviewLogConfig());

@@ -2,7 +2,7 @@
 {
     public enum ContentEntityType
     {
-        Course,
+        Lesson,
         KanjiEntry,
         VocabularyEntry,
         GrammarPoint,

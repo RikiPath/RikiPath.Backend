@@ -11,5 +11,6 @@ namespace RikiPath.Domain.Entities
 
         public List<Lesson>? Lessons { get; set; }
         public List<PracticeTestSection>? PracticeTestSections { get; set; }
+        public List<CertificationLevelSkill>? CertificationLevelSkills { get; set; }
     }
 }

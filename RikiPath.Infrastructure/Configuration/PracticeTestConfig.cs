@@ -11,13 +11,19 @@ namespace RikiPath.Infrastructure.Configuration
             builder.HasKey(x => x.Id);
             builder.Property(x => x.Title).IsRequired().HasMaxLength(300);
             builder.Property(x => x.Status).HasConversion<string>().HasMaxLength(20);
+            builder.Property(x => x.ReviewedByName).HasMaxLength(200);
 
-            builder.HasOne(x => x.JlptLevel)
+            builder.HasOne(x => x.CertificationLevel)
                 .WithMany(x => x.PracticeTests)
-                .HasForeignKey(x => x.JlptLevelId)
+                .HasForeignKey(x => x.CertificationLevelId)
                 .OnDelete(DeleteBehavior.Restrict);
 
-            // ContentAuthor / ReviewedBy relationships configured from UserConfig.
+            builder.HasOne(x => x.ContentAuthor)
+                .WithMany(x => x.AuthoredPracticeTests)
+                .HasForeignKey(x => x.ContentAuthorId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            builder.HasIndex(x => new { x.CertificationLevelId, x.Status });
         }
     }
 }

@@ -9,15 +9,15 @@ namespace RikiPath.Application.Services
 {
     // NOTE: cần thêm cột Lesson.AttachmentUrl (string?) và
     // LessonProgress.ResumePositionSeconds (int, default 0) nếu chưa có.
-    public class LessonProgressService(IUnitOfWork unitOfWork) : ILessonProgressService
+    public class LessonProgressService(IUnitOfWork unitOfWork, IClaimService claimService) : ILessonProgressService
     {
         private const int AutoCompleteThresholdPercent = 95;
 
-        public async Task<ApiResponse<LessonDetailResponse>> GetLessonDetailAsync(
-            int userId, int lessonId, CancellationToken cancellationToken)
+        public async Task<ApiResponse<LessonDetailResponse>> GetLessonDetailAsync(int lessonId, CancellationToken cancellationToken)
         {
             try
             {
+                var userId = claimService.GetUserClaim().Id;
                 var lesson = await unitOfWork.Lessons.GetByIdAsync(lessonId);
                 if (lesson is null)
                     return ApiResponse<LessonDetailResponse>.NotFound($"Không tìm thấy bài học Id = {lessonId}.");
@@ -34,11 +34,11 @@ namespace RikiPath.Application.Services
             }
         }
 
-        public async Task<ApiResponse<LessonDetailResponse>> UpdatePlaybackPositionAsync(
-            int userId, int lessonId, UpdatePlaybackPositionRequest request, CancellationToken cancellationToken)
+        public async Task<ApiResponse<LessonDetailResponse>> UpdatePlaybackPositionAsync(int lessonId, UpdatePlaybackPositionRequest request, CancellationToken cancellationToken)
         {
             try
             {
+                var userId = claimService.GetUserClaim().Id;
                 if (request.DurationSeconds <= 0)
                     return ApiResponse<LessonDetailResponse>.Fail("Thời lượng video không hợp lệ.");
 
@@ -96,7 +96,6 @@ namespace RikiPath.Application.Services
         private static LessonDetailResponse MapToResponse(Lesson lesson, LessonProgress? progress) => new()
         {
             LessonId = lesson.Id,
-            CourseId = lesson.CourseId,
             Title = lesson.Title,
             Content = lesson.Description,
             VideoUrl = lesson.VideoUrl,

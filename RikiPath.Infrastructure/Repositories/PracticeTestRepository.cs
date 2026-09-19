@@ -17,7 +17,7 @@ namespace RikiPath.Infrastructure.Repositories
         private IQueryable<PracticeTest> BuildSearchQuery(int? jlptLevelId, ContentStatus? status, string? keyword)
         {
             IQueryable<PracticeTest> query = _context.PracticeTests.AsQueryable();
-            if (jlptLevelId.HasValue) query = query.Where(x => x.JlptLevelId == jlptLevelId.Value);
+            if (jlptLevelId.HasValue) query = query.Where(x => x.CertificationLevelId == jlptLevelId.Value);
             if (status.HasValue) query = query.Where(x => x.Status == status.Value);
             if (!string.IsNullOrEmpty(keyword)) query = query.Where(x => x.Title.ToLower().Contains(keyword.ToLower()));
             return query;
@@ -25,7 +25,7 @@ namespace RikiPath.Infrastructure.Repositories
 
         public async Task<List<PracticeTest>> SearchAsync(int? jlptLevelId, ContentStatus? status, string? keyword, int pageIndex, int pageSize)
             => await BuildSearchQuery(jlptLevelId, status, keyword)
-                .Include(x => x.JlptLevel)
+                .Include(x => x.CertificationLevel)
                 .OrderByDescending(x => x.CreatedDate)
                 .Skip((pageIndex - 1) * pageSize)
                 .Take(pageSize)
@@ -48,8 +48,8 @@ namespace RikiPath.Infrastructure.Repositories
         public async Task<List<PracticeTest>> GetByLevelAsync(int jlptLevelId)
         {
             return await _context.PracticeTests
-                .Include(t => t.JlptLevel)
-                .Where(t => t.JlptLevelId == jlptLevelId && t.Status == ContentStatus.Published)
+                .Include(t => t.CertificationLevel)
+                .Where(t => t.CertificationLevelId == jlptLevelId && t.Status == ContentStatus.Published)
                 .ToListAsync();
         }
     }

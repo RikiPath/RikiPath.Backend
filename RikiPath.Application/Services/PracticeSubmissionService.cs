@@ -12,20 +12,22 @@ using System.Text.Json;
 
 namespace RikiPath.Application.Services
 {
-    public class PracticeSubmissionService(IUnitOfWork unitOfWork, IAiGradingClient aiGradingClient)
+    public class PracticeSubmissionService(IUnitOfWork unitOfWork, IAiGradingClient aiGradingClient, IClaimService claimService)
         : IPracticeSubmissionService
     {
-        public async Task<ApiResponse<PracticeSubmissionResponse>> SubmitAsync(
-            int userId, SubmitPracticeRequest request, CancellationToken cancellationToken)
+        public async Task<ApiResponse<PracticeSubmissionResponse>> SubmitAsync(SubmitPracticeRequest request, CancellationToken cancellationToken)
         {
             try
             {
+                var userId = claimService.GetUserClaim().Id;
                 if (string.IsNullOrWhiteSpace(request.TextContent) && string.IsNullOrWhiteSpace(request.ImageUrl))
                     return ApiResponse<PracticeSubmissionResponse>.Fail("Bài nộp phải có nội dung văn bản hoặc ảnh.");
 
-                var jlptLevel = await unitOfWork.JlptLevels.GetByIdAsync(request.JlptLevelId);
-                if (jlptLevel is null)
-                    return ApiResponse<PracticeSubmissionResponse>.Fail("Cấp độ JLPT không hợp lệ.");
+                // NOTE: request.JlptLevelId giữ nguyên tên field từ SubmitPracticeRequest (chưa thấy file
+                // gốc nên chưa đổi tên) - giá trị vẫn dùng bình thường, chỉ đổi phía entity/UnitOfWork.
+                var certificationLevel = await unitOfWork.CertificationLevels.GetByIdAsync(request.JlptLevelId);
+                if (certificationLevel is null)
+                    return ApiResponse<PracticeSubmissionResponse>.Fail("Cấp độ chứng chỉ không hợp lệ.");
 
                 var submission = new PracticeSubmission
                 {
@@ -33,7 +35,7 @@ namespace RikiPath.Application.Services
                     Type = request.Type,
                     TextContent = request.TextContent,
                     ImageUrl = request.ImageUrl,
-                    JlptLevelId = request.JlptLevelId,
+                    CertificationLevelId = request.JlptLevelId,
                     SubmittedAt = DateTime.UtcNow
                 };
 
@@ -42,7 +44,7 @@ namespace RikiPath.Application.Services
 
                 // Chấm điểm đồng bộ ngay sau khi lưu bài nộp. Nếu muốn phản hồi nhanh hơn cho learner,
                 // tách phần này ra background job/queue và để FE poll trạng thái (Grading == null).
-                await GradeInternalAsync(submission, jlptLevel.Name, cancellationToken);
+                await GradeInternalAsync(submission, certificationLevel.Code, cancellationToken);
 
                 return ApiResponse<PracticeSubmissionResponse>.Success(
                     await MapToResponseAsync(submission, cancellationToken));
@@ -53,11 +55,11 @@ namespace RikiPath.Application.Services
             }
         }
 
-        public async Task<ApiResponse<PracticeSubmissionResponse>> GetByIdAsync(
-            int userId, int submissionId, CancellationToken cancellationToken)
+        public async Task<ApiResponse<PracticeSubmissionResponse>> GetByIdAsync(int submissionId, CancellationToken cancellationToken)
         {
             try
             {
+                var userId = claimService.GetUserClaim().Id;
                 var submission = await unitOfWork.PracticeSubmissions.GetByIdAsync(submissionId);
                 if (submission is null || submission.UserId != userId)
                     return ApiResponse<PracticeSubmissionResponse>.Fail("Không tìm thấy bài nộp.");
@@ -70,11 +72,11 @@ namespace RikiPath.Application.Services
             }
         }
 
-        public async Task<ApiResponse<List<PracticeSubmissionResponse>>> GetMyHistoryAsync(
-            int userId, CancellationToken cancellationToken)
+        public async Task<ApiResponse<List<PracticeSubmissionResponse>>> GetMyHistoryAsync(CancellationToken cancellationToken)
         {
             try
             {
+                var userId = claimService.GetUserClaim().Id;
                 var submissions = await unitOfWork.PracticeSubmissions.FindAsync(s => s.UserId == userId);
 
                 var result = new List<PracticeSubmissionResponse>();
@@ -89,17 +91,17 @@ namespace RikiPath.Application.Services
             }
         }
 
-        public async Task<ApiResponse<PracticeSubmissionResponse>> RegradeAsync(
-            int userId, int submissionId, CancellationToken cancellationToken)
+        public async Task<ApiResponse<PracticeSubmissionResponse>> RegradeAsync(int submissionId, CancellationToken cancellationToken)
         {
             try
             {
+                var userId = claimService.GetUserClaim().Id;
                 var submission = await unitOfWork.PracticeSubmissions.GetByIdAsync(submissionId);
                 if (submission is null || submission.UserId != userId)
                     return ApiResponse<PracticeSubmissionResponse>.Fail("Không tìm thấy bài nộp.");
 
-                var jlptLevel = await unitOfWork.JlptLevels.GetByIdAsync(submission.JlptLevelId);
-                await GradeInternalAsync(submission, jlptLevel?.Name ?? "N3", cancellationToken);
+                var certificationLevel = await unitOfWork.CertificationLevels.GetByIdAsync(submission.CertificationLevelId);
+                await GradeInternalAsync(submission, certificationLevel?.Code ?? "N3", cancellationToken);
 
                 return ApiResponse<PracticeSubmissionResponse>.Success(
                     await MapToResponseAsync(submission, cancellationToken));
@@ -110,11 +112,11 @@ namespace RikiPath.Application.Services
             }
         }
 
-        private async Task GradeInternalAsync(PracticeSubmission submission, string jlptLevelName, CancellationToken cancellationToken)
+        private async Task GradeInternalAsync(PracticeSubmission submission, string certificationLevelCode, CancellationToken cancellationToken)
         {
             try
             {
-                var promptText = BuildGradingPrompt(submission, jlptLevelName);
+                var promptText = BuildGradingPrompt(submission, certificationLevelCode);
 
                 // submission.UserId: chỉnh lại tên property này nếu entity PracticeSubmission của bạn
                 // đặt tên khác (vd LearnerId) - đây là user cần tính quota, không phải id của bài nộp.
@@ -161,10 +163,10 @@ namespace RikiPath.Application.Services
 
         // Ghép prompt text gửi cho AI. Yêu cầu model trả JSON đúng shape mô tả ở đầu file
         // (bắt buộc có "overallScore" ở top-level).
-        private static string BuildGradingPrompt(PracticeSubmission submission, string jlptLevelName)
+        private static string BuildGradingPrompt(PracticeSubmission submission, string certificationLevelCode)
         {
             var sb = new StringBuilder();
-            sb.AppendLine($"Bạn là giám khảo chấm bài luyện tập tiếng Nhật trình độ JLPT {jlptLevelName}.");
+            sb.AppendLine($"Bạn là giám khảo chấm bài luyện tập tiếng Nhật trình độ {certificationLevelCode}.");
             sb.AppendLine($"Loại bài luyện tập: {submission.Type}.");
 
             if (!string.IsNullOrWhiteSpace(submission.TextContent))
@@ -205,9 +207,9 @@ namespace RikiPath.Application.Services
 
         private async Task<PracticeSubmissionResponse> MapToResponseAsync(PracticeSubmission s, CancellationToken cancellationToken)
         {
-            var jlptLevel = await unitOfWork.JlptLevels.GetByIdAsync(s.JlptLevelId);
+            var certificationLevel = await unitOfWork.CertificationLevels.GetByIdAsync(s.CertificationLevelId, cancellationToken);
             var grading = (await unitOfWork.GradingResults
-                .FindAsync(g => g.PracticeSubmissionId == s.Id)).FirstOrDefault();
+                .FindAsync(g => g.PracticeSubmissionId == s.Id, cancellationToken)).FirstOrDefault();
 
             return new PracticeSubmissionResponse
             {
@@ -215,8 +217,11 @@ namespace RikiPath.Application.Services
                 Type = s.Type,
                 TextContent = s.TextContent,
                 ImageUrl = s.ImageUrl,
-                JlptLevelId = s.JlptLevelId,
-                JlptLevelName = jlptLevel?.Name ?? "N/A",
+                // NOTE: property response vẫn tên JlptLevelId/JlptLevelName (từ trước khi đổi model) -
+                // giữ tên field để không vỡ FE, nhưng lấy giá trị từ CertificationLevelId/Code. Nên đổi
+                // tên 2 field này trong PracticeSubmissionResponse khi bạn tiện cập nhật FE.
+                JlptLevelId = s.CertificationLevelId,
+                JlptLevelName = certificationLevel?.Code ?? "N/A",
                 SubmittedAt = s.SubmittedAt,
                 Grading = grading is null
                     ? null

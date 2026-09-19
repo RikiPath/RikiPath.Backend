@@ -35,6 +35,9 @@ var appSettings = configuration.GetSection("AppSettings").Get<AppSettings>()
 builder.Services.Configure<AppSettings>(configuration.GetSection("AppSettings"));
 builder.Services.AddSingleton(appSettings);
 
+builder.Services.Configure<PayOsSettings>(configuration.GetSection("PayOs"));
+builder.Services.Configure<AiSettings>(configuration.GetSection("Ai"));
+
 // 2. Database Context - Npgsql using ConnectionStrings:DefaultConnection
 builder.Services.AddDbContext<AppDbContext>(options =>
 {
@@ -57,11 +60,8 @@ AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true);
 // 3. Infrastructure & Helpers
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddHttpClient();
-
-// AiUsageQuotaService (Infrastructure/Services) cần IMemoryCache để đếm quota AI/ngày theo
-// user - THIẾU dòng này chính là nguyên nhân lỗi "Unable to resolve service for type
-// IMemoryCache" khi DI cố dựng AiUsageQuotaService lúc app start.
 builder.Services.AddMemoryCache();
+
 
 // Helper: kiểm tra 1 class có implement 1 interface không, hỗ trợ cả open generic
 // interface (vd IGenericRepository<T>) vốn không hoạt động đúng với IsAssignableFrom thông thường.
@@ -142,15 +142,11 @@ var allImplementations = applicationAssembly.GetTypes()
 
 foreach (var iface in serviceInterfaces)
 {
-    // Quy ước đặt tên: IXxxService -> XxxService (vd IAuthService -> AuthService,
-    // IAiUsageQuotaService -> AiUsageQuotaService)
     var expectedName = iface.Name.TrimStart('I');
     var candidates = allImplementations
         .Where(t => ImplementsInterface(t, iface))
         .ToList();
 
-    // Ưu tiên đúng tên; nếu không có, chỉ chấp nhận khi CHỈ CÓ 1 ứng viên (vd IFileStorageService
-    // được implement bởi 1 class duy nhất bên Infrastructure với tên khác quy ước).
     var impl = candidates.FirstOrDefault(t => t.Name == expectedName)
                ?? (candidates.Count == 1 ? candidates[0] : null);
 
@@ -168,9 +164,6 @@ foreach (var iface in serviceInterfaces)
     builder.Services.AddScoped(iface, impl);
 }
 
-// 6. IClients Registration
-// 6a. Client cần cấu hình HttpClient riêng (BaseAddress, header,...) - đăng ký thủ công, KHÔNG
-//     đưa vào vòng quét tự động 6b để tránh bị override bởi AddScoped thường (mất cấu hình HttpClient).
 var manuallyRegisteredClientInterfaces = new[] { typeof(IPaymentGatewayClient), typeof(IAiLearningPathClient), typeof(IAiGradingClient) };
 
 if (Type.GetType("RikiPath.Infrastructure.Clients.PayOsClient, RikiPath.Infrastructure") != null)
@@ -187,8 +180,6 @@ if (Type.GetType("RikiPath.Infrastructure.Clients.AiLearningPathClient, RikiPath
 {
     builder.Services.AddHttpClient<IAiLearningPathClient, AiLearningPathClient>(client =>
     {
-        // Đọc từ AppSettings.Ai (đã bind ở bước 1), KHÔNG còn đọc "OpenAI:BaseUrl"/"OpenAI:ApiKey"
-        // rời rạc từ configuration nữa - đúng yêu cầu "mọi key/model đều qua AppSettings.cs".
         var baseUrl = appSettings?.Ai?.BaseUrl;
         if (!string.IsNullOrEmpty(baseUrl)) client.BaseAddress = new Uri(baseUrl);
         client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
@@ -201,9 +192,6 @@ if (Type.GetType("RikiPath.Infrastructure.Clients.AiLearningPathClient, RikiPath
 
 if (Type.GetType("RikiPath.Infrastructure.Clients.AiGradingClient, RikiPath.Infrastructure") != null)
 {
-    // Dùng chung AppSettings.Ai.BaseUrl/ApiKey với AiLearningPathClient - model thì mỗi client tự
-    // đọc GradingModel/LearningPathModel riêng bên trong class (xem AiGradingClient.cs).
-    // Nếu sau này muốn tách provider/khoá riêng cho chấm bài, thêm 1 section riêng trong AiSettings.
     builder.Services.AddHttpClient<IAiGradingClient, AiGradingClient>(client =>
     {
         var baseUrl = appSettings?.Ai?.BaseUrl;
@@ -216,13 +204,6 @@ if (Type.GetType("RikiPath.Infrastructure.Clients.AiGradingClient, RikiPath.Infr
     });
 }
 
-// 6b. Các IClients còn lại (không cần HttpClient tuỳ biến, vd IExcelParser) - quét tự động giống
-//     IRepositories/IServices ở trên. Quy ước đặt tên: IXxxClient -> XxxClient.
-//     LƯU Ý: KHÔNG throw cứng khi thiếu implementation (khác với repo/service) - vì trong lúc dev,
-//     có thể có 1 client interface đã khai báo xong nhưng class implement chưa viết xong (vd
-//     IAiGradingClient). Throw cứng ở đây sẽ chặn toàn bộ app không start được dù các phần khác đã
-//     xong. Thay vào đó chỉ log cảnh báo; nếu 1 service thực sự cần client đó, DI sẽ báo lỗi ngay
-//     lúc validate service đó (rõ ràng, đúng chỗ) thay vì Program.cs throw chung chung.
 var clientInterfaces = applicationAssembly.GetTypes()
     .Where(t => t.IsInterface && t.Namespace != null && t.Namespace.EndsWith(".IClients"))
     .Where(t => !manuallyRegisteredClientInterfaces.Contains(t));
@@ -290,7 +271,7 @@ builder.Services
             {
                 var accessToken = context.Request.Query["access_token"].FirstOrDefault();
                 if (!string.IsNullOrEmpty(accessToken) &&
-                    context.HttpContext.Request.Path.StartsWithSegments("/signalrHub"))
+                    context.HttpContext.Request.Path.StartsWithSegments("/hubs/consultation-call"))
                 {
                     context.Token = accessToken;
                 }
@@ -347,12 +328,12 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("DefaultCorsPolicy", policy =>
     {
-        policy.AllowAnyOrigin()
+        policy.WithOrigins("http://localhost:5173") // Đổi AllowAnyOrigin() thành domain cụ thể của Frontend
               .AllowAnyHeader()
-              .AllowAnyMethod();
+              .AllowAnyMethod()
+              .AllowCredentials(); // Bắt buộc phải có để SignalR hoạt động
     });
 });
-
 var app = builder.Build();
 
 // 10. Middleware Pipeline
@@ -377,6 +358,6 @@ app.UseCors("DefaultCorsPolicy");
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
-app.MapHub<ConsultationCallHub>("/signalrHub");
+app.MapHub<ConsultationCallHub>("/hubs/consultation-call");
 
 app.Run();

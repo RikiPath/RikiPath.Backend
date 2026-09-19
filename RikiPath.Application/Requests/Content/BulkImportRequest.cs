@@ -6,7 +6,7 @@ namespace RikiPath.Application.Requests.Content
     {
         public ContentEntityType EntityType { get; set; }
         public Stream FileStream { get; set; } = null!;
-        public int JlptLevelId { get; set; }
+        public int CertificationLevelId { get; set; }
         public int? TargetPracticeTestSectionId { get; set; }
     }
 }

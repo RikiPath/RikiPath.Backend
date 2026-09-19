@@ -41,7 +41,7 @@ namespace RikiPath.Application.Services
                 };
 
                 await unitOfWork.UserAccounts.AddAsync(user);
-                await unitOfWork.SaveChangesAsync();
+                await unitOfWork.SaveChangesAsync(cancellationToken);
 
                 var verificationCode = GenerateVerificationCode();
                 await unitOfWork.EmailVerifications.AddAsync(new EmailVerification
@@ -51,7 +51,7 @@ namespace RikiPath.Application.Services
                     ExpiresAt = DateTime.UtcNow.AddMinutes(30),
                     IsUsed = false,
                 });
-                await unitOfWork.SaveChangesAsync();
+                await unitOfWork.SaveChangesAsync(cancellationToken);
 
                 var emailContent = $"Xin chào {user.FirstName},<br/>Mã xác thực email của bạn là: " +
                                     $"<strong>{verificationCode}</strong>.<br/>Mã có hiệu lực trong 30 phút.";
@@ -61,7 +61,7 @@ namespace RikiPath.Application.Services
                     return ApiResponse<RegisterResponse>.Fail(
                         "Tạo tài khoản thành công nhưng gửi email xác thực thất bại: " + emailResult.ErrorMessage);
 
-                return ApiResponse<RegisterResponse>.Created(new RegisterResponse { FullName = $"{user.FirstName} {user.LastName}".Trim(), Email = user.Email });
+                return ApiResponse<RegisterResponse>.Created(new RegisterResponse { UserId = user.Id, FullName = $"{user.FirstName} {user.LastName}".Trim(), Email = user.Email });
             }
             catch (Exception ex)
             {
@@ -91,7 +91,7 @@ namespace RikiPath.Application.Services
                 user.IsEmailVerified = true;
                 unitOfWork.UserAccounts.Update(user);
 
-                await unitOfWork.SaveChangesAsync();
+                await unitOfWork.SaveChangesAsync(cancellationToken);
 
                 return ApiResponse.Success();
             }
@@ -154,7 +154,7 @@ namespace RikiPath.Application.Services
                     ExpiresAt = DateTime.UtcNow.AddMinutes(30),
                     IsUsed = false,
                 });
-                await unitOfWork.SaveChangesAsync();
+                await unitOfWork.SaveChangesAsync(cancellationToken);
 
                 var emailContent = $"Mã xác thực email mới của bạn là: <strong>{verificationCode}</strong>." +
                                     "<br/>Mã có hiệu lực trong 30 phút.";
@@ -187,7 +187,7 @@ namespace RikiPath.Application.Services
                 user.PasswordSalt = salt;
                 unitOfWork.UserAccounts.Update(user);
 
-                await unitOfWork.SaveChangesAsync();
+                await unitOfWork.SaveChangesAsync(cancellationToken);
 
                 return ApiResponse.Success();
             }
