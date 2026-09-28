@@ -15,9 +15,9 @@ namespace RikiPath.Application.Responses.Analytics
         public double CompletionPercent { get; set; }
     }
 
-    public class SkillBreakdownItem
+    public class LanguageSkillBreakdownItem
     {
-        public string SkillName { get; set; } = string.Empty;
+        public string LanguageSkillName { get; set; } = string.Empty;
         public double AverageScore { get; set; } // 0-100
         public int AttemptCount { get; set; }
     }

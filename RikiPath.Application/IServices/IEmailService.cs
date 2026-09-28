@@ -1,4 +1,4 @@
-﻿namespace RikiPath.Application.IServices
+namespace RikiPath.Application.IServices
 {
     public class EmailSendResult
     {

@@ -1,17 +1,17 @@
-﻿namespace RikiPath.Application.Models
+namespace RikiPath.Application.Models
 {
     public readonly struct LearningPathPromptContext(
     string targetJlptLevel,
     IReadOnlyList<(string LessonTitle, int ProgressPercent)> lessonProgress,
     IReadOnlyList<string> notebookWords,
     double? latestTestScorePercent,
-    IReadOnlyDictionary<string, double>? latestTestSkillBreakdown)
+    IReadOnlyDictionary<string, double>? latestTestLanguageSkillBreakdown)
     {
         public string TargetJlptLevel { get; } = targetJlptLevel;
         public IReadOnlyList<(string LessonTitle, int ProgressPercent)> LessonProgress { get; } = lessonProgress;
         public IReadOnlyList<string> NotebookWords { get; } = notebookWords;
         public double? LatestTestScorePercent { get; } = latestTestScorePercent;
-        public IReadOnlyDictionary<string, double>? LatestTestSkillBreakdown { get; } = latestTestSkillBreakdown;
+        public IReadOnlyDictionary<string, double>? LatestTestLanguageSkillBreakdown { get; } = latestTestLanguageSkillBreakdown;
 
         public string ToPromptText()
         {
@@ -23,8 +23,8 @@
                 ? "Sổ tay trống."
                 : string.Join(", ", NotebookWords.Take(50)); // giới hạn tránh prompt quá dài
 
-            var skillSummary = LatestTestSkillBreakdown is { Count: > 0 }
-                ? string.Join("; ", LatestTestSkillBreakdown.Select(kv => $"{kv.Key}: {kv.Value:F0}%"))
+            var skillSummary = LatestTestLanguageSkillBreakdown is { Count: > 0 }
+                ? string.Join("; ", LatestTestLanguageSkillBreakdown.Select(kv => $"{kv.Key}: {kv.Value:F0}%"))
                 : "Chưa có dữ liệu bài thi thử.";
 
             return $$"""

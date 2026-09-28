@@ -1,6 +1,6 @@
 namespace RikiPath.Application.Responses.Notebook
 {
-    public class VocabularyListResponse
+    public class LearnerNoteResponse
     {
         public int Id { get; set; }
         public string Name { get; set; } = string.Empty;
@@ -12,7 +12,7 @@ namespace RikiPath.Application.Responses.Notebook
     public class NotebookEntryResponse
     {
         public int NoteEntryId { get; set; }
-        public int? ReviewItemId { get; set; }
+        public int? ReviewCardId { get; set; }
         public string ContentType { get; set; } = string.Empty; // "vocabulary" | "kanji" | "manual"
         public string Term { get; set; } = string.Empty;
         public string? Reading { get; set; }
@@ -23,8 +23,8 @@ namespace RikiPath.Application.Responses.Notebook
 
     public class GrammarBookmarkResponse
     {
-        public int ReviewItemId { get; set; }
-        public int GrammarPointId { get; set; }
+        public int ReviewCardId { get; set; }
+        public int GrammarPatternId { get; set; }
         public string GrammarTitle { get; set; } = string.Empty;
     }
 }

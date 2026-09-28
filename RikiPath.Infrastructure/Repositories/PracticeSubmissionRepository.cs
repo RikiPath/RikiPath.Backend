@@ -1,19 +1,12 @@
 using RikiPath.Application.IRepositories;
 using RikiPath.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
-using Domain.Enums;
+using RikiPath.Domain.Enums;
 
 namespace RikiPath.Infrastructure.Repositories
 {
-    public class PracticeSubmissionRepository : GenericRepository<PracticeSubmission>, IPracticeSubmissionRepository
+    public class PracticeSubmissionRepository(AppDbContext context) : GenericRepository<PracticeSubmission>(context), IPracticeSubmissionRepository
     {
-        public PracticeSubmissionRepository(AppDbContext context) : base(context)
-        {
-        }
-
         public async Task<List<PracticeSubmission>> GetByUserAsync(int userId, SubmissionType? type)
         {
             IQueryable<PracticeSubmission> query = _context.PracticeSubmissions.Where(x => x.UserId == userId);

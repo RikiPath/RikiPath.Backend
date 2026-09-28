@@ -15,12 +15,12 @@ namespace RikiPath.Infrastructure.Repositories
 
         public async Task<List<LessonKanji>> GetByLessonIdAsync(int lessonId)
             => await _context.LessonKanjis
-                .Include(x => x.KanjiEntry)
+                .Include(x => x.Kanji)
                 .Where(x => x.LessonId == lessonId)
                 .ToListAsync();
 
         public async Task<bool> ExistsAsync(int lessonId, int kanjiEntryId)
             => await _context.LessonKanjis
-                .AnyAsync(x => x.LessonId == lessonId && x.KanjiEntryId == kanjiEntryId);
+                .AnyAsync(x => x.LessonId == lessonId && x.KanjiId == kanjiEntryId);
     }
 }

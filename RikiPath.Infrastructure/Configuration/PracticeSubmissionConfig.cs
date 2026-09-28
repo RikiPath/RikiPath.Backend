@@ -9,11 +9,12 @@ namespace RikiPath.Infrastructure.Configuration
         public void Configure(EntityTypeBuilder<PracticeSubmission> builder)
         {
             builder.HasKey(x => x.Id);
+            builder.Property(x => x.CertificateLevelId).HasColumnName("CertificationLevelId");
             builder.Property(x => x.Type).HasConversion<string>().HasMaxLength(20);
 
-            builder.HasOne(x => x.CertificationLevel)
+            builder.HasOne(x => x.CertificateLevel)
                 .WithMany(x => x.PracticeSubmissions)
-                .HasForeignKey(x => x.CertificationLevelId)
+                .HasForeignKey(x => x.CertificateLevelId)
                 .OnDelete(DeleteBehavior.Restrict);
 
             // UserAccount side (Cascade) configured in UserConfig.

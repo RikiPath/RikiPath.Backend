@@ -1,7 +1,7 @@
-namespace RikiPath.Application.Responses.PracticeTests
+namespace RikiPath.Application.Responses.MockTests
 {
 
-    public class QuestionReviewItem
+    public class QuestionReviewCard
     {
         public int QuestionId { get; set; }
         public string QuestionText { get; set; } = string.Empty;

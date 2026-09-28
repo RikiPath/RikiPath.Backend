@@ -1,4 +1,4 @@
-﻿namespace RikiPath.Application.Responses.Payments
+namespace RikiPath.Application.Responses.Payments
 {
     public class ConsultationPaymentResponse
     {

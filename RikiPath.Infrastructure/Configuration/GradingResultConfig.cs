@@ -15,8 +15,12 @@ namespace RikiPath.Infrastructure.Configuration
                 .WithOne(x => x.GradingResult)
                 .HasForeignKey<GradingResult>(x => x.PracticeSubmissionId)
                 .OnDelete(DeleteBehavior.Cascade);
-
+            builder.HasOne(x => x.HomeworkSubmission)
+                .WithOne(x => x.GradingResult)
+                .HasForeignKey<GradingResult>(x => x.HomeworkSubmissionId)
+                .OnDelete(DeleteBehavior.Cascade);
             builder.HasIndex(x => x.PracticeSubmissionId).IsUnique();
+            builder.HasIndex(x => x.HomeworkSubmissionId).IsUnique();
         }
     }
 }

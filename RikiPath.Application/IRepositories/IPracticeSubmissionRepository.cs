@@ -1,5 +1,5 @@
 using RikiPath.Domain.Entities;
-using Domain.Enums;
+using RikiPath.Domain.Enums;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 

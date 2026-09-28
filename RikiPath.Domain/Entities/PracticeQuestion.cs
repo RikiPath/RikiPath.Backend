@@ -1,21 +1,14 @@
-using System.Collections.Generic;
+namespace RikiPath.Domain.Entities;
 
-namespace RikiPath.Domain.Entities
+/// <summary>A question in a practice exercise.</summary>
+public class PracticeQuestion : Base
 {
-    /// <summary>A single practice-test question. AudioUrl for listening, ImageUrl for reading/visual questions.</summary>
-    public class PracticeQuestion : Base
-    {
-        public int Id { get; set; }
-        public string QuestionText { get; set; }
-        public string? AudioUrl { get; set; }
-        public string? ImageUrl { get; set; }
-        public string? Explanation { get; set; }
-        public int SortOrder { get; set; }
-
-        public int PracticeTestSectionId { get; set; }
-        public PracticeTestSection PracticeTestSection { get; set; }
-
-        public List<PracticeQuestionOption>? Options { get; set; }
-        public List<PracticeTestAnswer>? Answers { get; set; }
-    }
+    public int Id { get; set; }
+    public string QuestionText { get; set; } = string.Empty;
+    public string? Explanation { get; set; }
+    public int SortOrder { get; set; }
+    public int PracticeExerciseId { get; set; }
+    public PracticeExercise PracticeExercise { get; set; } = null!;
+    public List<PracticeQuestionOption>? Options { get; set; }
+    public List<LearnerPracticeAnswer>? Answers { get; set; }
 }

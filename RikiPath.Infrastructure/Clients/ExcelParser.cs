@@ -1,4 +1,4 @@
-﻿using ClosedXML.Excel;
+using ClosedXML.Excel;
 using RikiPath.Application.DTOs.Content;
 using RikiPath.Application.IClients;
 

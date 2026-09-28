@@ -1,7 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using RikiPath.Application.IServices;
-using RikiPath.Application.Requests.PracticeTests;
+using RikiPath.Application.Requests.MockTests;
 using System.Security.Claims;
 
 namespace RikiPath.WebApi.Controllers
@@ -9,7 +9,7 @@ namespace RikiPath.WebApi.Controllers
     [Route("api/[controller]")]
     [ApiController]
     [Authorize(Roles = "Learner")]
-    public class PracticeTestController(IPracticeTestService practiceTestService) : ControllerBase
+    public class MockTestController(IMockTestService practiceTestService) : ControllerBase
     {
         /// <summary>
         /// Bắt đầu một lần làm bài kiểm tra (practice test) cho user.

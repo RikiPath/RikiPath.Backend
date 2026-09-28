@@ -1,5 +1,5 @@
-﻿using RikiPath.Domain.Entities;
-using Domain.Enums;
+using RikiPath.Domain.Entities;
+using RikiPath.Domain.Enums;
 using RikiPath.Application.IServices;
 using RikiPath.Application.Requests.Reviews;
 using RikiPath.Application.Responses;
@@ -16,7 +16,7 @@ namespace RikiPath.Application.Services
         {
             try
             {
-                var dueItems = await unitOfWork.ReviewItems.GetDueForReviewAsync(userId, DateTime.UtcNow);
+                var dueItems = await unitOfWork.ReviewCards.GetDueForReviewAsync(userId, DateTime.UtcNow);
                 var items = dueItems.Select(MapToQueueItem).ToList();
 
                 var result = new DailyReviewQueueResponse
@@ -41,10 +41,10 @@ namespace RikiPath.Application.Services
         {
             try
             {
-                var reviewItem = await unitOfWork.ReviewItems.GetByIdAsync(request.ReviewItemId);
+                var reviewItem = await unitOfWork.ReviewCards.GetByIdAsync(request.ReviewCardId);
                 if (reviewItem is null)
                     return ApiResponse<SubmitReviewResultResponse>.NotFound(
-                        $"Không tìm thấy ReviewItem có Id = {request.ReviewItemId}.");
+                        $"Không tìm thấy ReviewCard có Id = {request.ReviewCardId}.");
 
                 if (reviewItem.UserId != userId)
                     return ApiResponse<SubmitReviewResultResponse>.Fail(
@@ -52,22 +52,22 @@ namespace RikiPath.Application.Services
                         HttpStatusCode.Forbidden);
 
                 ApplySm2Algorithm(reviewItem, request.Quality);
-                unitOfWork.ReviewItems.Update(reviewItem);
+                unitOfWork.ReviewCards.Update(reviewItem);
 
-                var log = new ReviewLog
+                var log = new ReviewHistory
                 {
-                    ReviewItemId = reviewItem.Id,
+                    ReviewCardId = reviewItem.Id,
                     Quality = request.Quality,
                     Rating = MapQualityToRating(request.Quality),
                     ReviewedAt = DateTime.UtcNow,
                 };
-                await unitOfWork.ReviewLogs.AddAsync(log);
+                await unitOfWork.ReviewHistories.AddAsync(log);
 
                 await unitOfWork.SaveChangesAsync();
 
                 var result = new SubmitReviewResultResponse
                 {
-                    ReviewItemId = reviewItem.Id,
+                    ReviewCardId = reviewItem.Id,
                     QualitySubmitted = request.Quality,
                     NewEaseFactor = reviewItem.EaseFactor,
                     NewIntervalDays = reviewItem.IntervalDays,
@@ -86,7 +86,7 @@ namespace RikiPath.Application.Services
             }
         }
 
-        private static void ApplySm2Algorithm(ReviewItem item, int quality)
+        private static void ApplySm2Algorithm(ReviewCard item, int quality)
         {
             if (quality < 3)
             {
@@ -119,25 +119,25 @@ namespace RikiPath.Application.Services
             _ => ReviewRating.Easy,
         };
 
-        private static ReviewQueueItemResponse MapToQueueItem(ReviewItem item)
+        private static ReviewQueueItemResponse MapToQueueItem(ReviewCard item)
         {
-            if (item.VocabularyNoteEntry is { } note)
+            if (item.LearnerNoteEntry is { } note)
             {
-                var isFromBank = note.VocabularyEntry is not null;
-                var isKanjiNote = note.KanjiEntry is not null;
+                var isFromBank = note.Vocabulary is not null;
+                var isKanjiNote = note.Kanji is not null;
 
                 return new ReviewQueueItemResponse
                 {
-                    ReviewItemId = item.Id,
+                    ReviewCardId = item.Id,
                     ContentType = isKanjiNote ? ReviewContentType.Kanji : ReviewContentType.Vocabulary,
-                    Term = isFromBank ? note.VocabularyEntry!.Word
-                         : isKanjiNote ? note.KanjiEntry!.Character
+                    Term = isFromBank ? note.Vocabulary!.Word
+                         : isKanjiNote ? note.Kanji!.Character
                          : note.ManualWord ?? string.Empty,
-                    Reading = isFromBank ? note.VocabularyEntry!.Reading
-                            : isKanjiNote ? note.KanjiEntry!.OnYomi
+                    Reading = isFromBank ? note.Vocabulary!.Reading
+                            : isKanjiNote ? note.Kanji!.OnYomi
                             : note.ManualReading,
-                    Meaning = isFromBank ? note.VocabularyEntry!.Meaning
-                            : isKanjiNote ? note.KanjiEntry!.Meaning
+                    Meaning = isFromBank ? note.Vocabulary!.Meaning
+                            : isKanjiNote ? note.Kanji!.Meaning
                             : note.ManualMeaning ?? string.Empty,
                     Note = note.Note,
                     Repetitions = item.Repetitions,
@@ -145,11 +145,11 @@ namespace RikiPath.Application.Services
                 };
             }
 
-            if (item.KanjiEntry is { } kanji)
+            if (item.Kanji is { } kanji)
             {
                 return new ReviewQueueItemResponse
                 {
-                    ReviewItemId = item.Id,
+                    ReviewCardId = item.Id,
                     ContentType = ReviewContentType.Kanji,
                     Term = kanji.Character,
                     Reading = kanji.OnYomi,
@@ -159,10 +159,10 @@ namespace RikiPath.Application.Services
                 };
             }
 
-            var grammar = item.GrammarPoint!; // ràng buộc: 1 trong 3 nguồn luôn có giá trị
+            var grammar = item.GrammarPattern!; // ràng buộc: 1 trong 3 nguồn luôn có giá trị
             return new ReviewQueueItemResponse
             {
-                ReviewItemId = item.Id,
+                ReviewCardId = item.Id,
                 ContentType = ReviewContentType.Grammar,
                 Term = grammar.Title,
                 Meaning = grammar.Structure,

@@ -1,4 +1,4 @@
-﻿using RikiPath.Application.Requests.Reviews;
+using RikiPath.Application.Requests.Reviews;
 using RikiPath.Application.Responses;
 using RikiPath.Application.Responses.Reviews;
 

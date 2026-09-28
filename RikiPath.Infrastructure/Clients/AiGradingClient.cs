@@ -1,4 +1,4 @@
-﻿using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Options;
 using RikiPath.Application.Exceptions;
 using RikiPath.Application.IClients;
 using RikiPath.Application.IServices;

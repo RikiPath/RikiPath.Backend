@@ -1,4 +1,4 @@
-﻿using Domain.Enums;
+using RikiPath.Domain.Enums;
 
 namespace RikiPath.Application.Requests.Practice
 {
@@ -7,6 +7,7 @@ namespace RikiPath.Application.Requests.Practice
         public SubmissionType Type { get; set; }
         public string? TextContent { get; set; }
         public string? ImageUrl { get; set; }
+        public string? AudioUrl { get; set; }
 
         public int JlptLevelId { get; set; }
     }

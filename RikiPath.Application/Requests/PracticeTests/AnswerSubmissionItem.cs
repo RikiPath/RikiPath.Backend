@@ -1,4 +1,4 @@
-﻿namespace RikiPath.Application.Requests.PracticeTests
+namespace RikiPath.Application.Requests.MockTests
 {
     public class AnswerSubmissionItem
     {

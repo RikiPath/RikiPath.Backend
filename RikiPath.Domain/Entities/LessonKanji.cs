@@ -5,7 +5,7 @@ namespace RikiPath.Domain.Entities
     {
         public int LessonId { get; set; }
         public Lesson Lesson { get; set; }
-        public int KanjiEntryId { get; set; }
-        public KanjiEntry KanjiEntry { get; set; }
+        public int KanjiId { get; set; }
+        public Kanji Kanji { get; set; }
     }
 }

@@ -7,16 +7,16 @@ namespace RikiPath.Application.Requests.Consultations
         public string CancelUrl { get; set; } = string.Empty;
     }
 
-    public class BookConsultationRequest
+    public class BookMentorBooking
     {
-        public int ConsultationPurchaseId { get; set; }
-        public int ConsultantAvailabilityId { get; set; }
+        public int UserSubscriptionId { get; set; }
+        public int MentorAvailabilityId { get; set; }
         public string Topic { get; set; } = string.Empty;
     }
 
     public class SubmitTicketRequest
     {
-        public int ConsultationPurchaseId { get; set; }
+        public int UserSubscriptionId { get; set; }
         public string Question { get; set; }
     }
 
@@ -27,8 +27,8 @@ namespace RikiPath.Application.Requests.Consultations
 
     public class BookMeetingRequest
     {
-        public int ConsultationPurchaseId { get; set; }
-        public int ConsultantAvailabilityId { get; set; }
+        public int UserSubscriptionId { get; set; }
+        public int MentorAvailabilityId { get; set; }
         public string? Note { get; set; }
     }
 

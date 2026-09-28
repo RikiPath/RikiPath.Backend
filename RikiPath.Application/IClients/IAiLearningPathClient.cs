@@ -1,4 +1,4 @@
-﻿namespace RikiPath.Application.IClients
+namespace RikiPath.Application.IClients
 {
     public interface IAiLearningPathClient
     {

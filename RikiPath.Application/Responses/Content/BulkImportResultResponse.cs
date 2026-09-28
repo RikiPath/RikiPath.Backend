@@ -1,4 +1,4 @@
-﻿
+
 
 namespace RikiPath.Application.Responses.Content
 {

@@ -1,4 +1,4 @@
-using Domain.Enums;
+using RikiPath.Domain.Enums;
 
 namespace RikiPath.Domain.Entities
 {
@@ -9,8 +9,10 @@ namespace RikiPath.Domain.Entities
         public byte[] PasswordSalt { get; set; }
         public string? FirstName { get; set; }
         public string? LastName { get; set; }
-        public string Email { get; set; }
+        public string? Email { get; set; }
         public string? PhoneNumber { get; set; }
+        public string? FirebaseUid { get; set; }
+        public bool IsPhoneVerified { get; set; } = false;
         public bool IsEmailVerified { get; set; } = false;
         public Role Role { get; set; }
         public string? AvatarUrl { get; set; }
@@ -20,8 +22,8 @@ namespace RikiPath.Domain.Entities
         public int DailyStudyMinutes { get; set; } = 30;
 
         /// <summary>Which certification level the learner is currently targeting — e.g. "JLPT N4".</summary>
-        public int? TargetCertificationLevelId { get; set; }
-        public CertificationLevel? TargetCertificationLevel { get; set; }
+        public int? TargetCertificateLevelId { get; set; }
+        public CertificateLevel? TargetCertificateLevel { get; set; }
         public string? StudyTimePreference { get; set; }
 
         // Learning history / streaks
@@ -33,29 +35,27 @@ namespace RikiPath.Domain.Entities
 
         // As a Content Author
         public List<Lesson>? AuthoredLessons { get; set; }
-        public List<KanjiEntry>? AuthoredKanjiEntries { get; set; }
-        public List<VocabularyEntry>? AuthoredVocabularyEntries { get; set; }
-        public List<GrammarPoint>? AuthoredGrammarPoints { get; set; }
-        public List<PracticeTest>? AuthoredPracticeTests { get; set; }
+        public List<Kanji>? AuthoredKanjis { get; set; }
+        public List<Vocabulary>? AuthoredVocabularies { get; set; }
+        public List<GrammarPattern>? AuthoredGrammarPatterns { get; set; }
+        public List<MockTest>? AuthoredMockTests { get; set; }
 
-        // As Admin reviewer: KHÔNG dùng FK nữa — Lesson/KanjiEntry/VocabularyEntry/GrammarPoint/
-        // PracticeTest lưu thẳng ReviewedByName (string) vì hệ thống chỉ có 1 Admin duy nhất.
+        // As Admin reviewer: KHÔNG dùng FK nữa — Lesson/Kanji/Vocabulary/GrammarPattern/
+        // MockTest lưu thẳng ReviewedByName (string) vì hệ thống chỉ có 1 Admin duy nhất.
 
         // As a Learner
         public List<LessonProgress>? LessonProgresses { get; set; }
-        public List<VocabularyList>? VocabularyLists { get; set; }
-        public List<PracticeTestAttempt>? PracticeTestAttempts { get; set; }
-        public List<LearningPathSuggestion>? LearningPathSuggestions { get; set; }
+        public List<LearnerNote>? LearnerNotes { get; set; }
+        public List<MockTestAttempt>? MockTestAttempts { get; set; }
+        public List<RecommendedLearningPath>? RecommendedLearningPaths { get; set; }
         public List<PracticeSubmission>? PracticeSubmissions { get; set; }
-        public List<ConsultationPurchase>? ConsultationPurchases { get; set; }
-        public List<ReviewItem>? ReviewItems { get; set; }
+        public List<ReviewCard>? ReviewCards { get; set; }
         public List<UserSubscription>? UserSubscriptions { get; set; }
         public List<AiCreditTopUp>? AiCreditTopUps { get; set; }
 
-        // As a Consultant
-        public List<ConsultationRequest>? ConsultationRequestsAsConsultant { get; set; }
-        public List<ConsultationAnswer>? ConsultationAnswers { get; set; }
-        public List<ConsultantAvailability>? ConsultantAvailabilities { get; set; }
+        // As a Mentor
+        public List<Note>? Notes { get; set; }
+        public List<MentorAvailability>? MentorAvailabilities { get; set; }
 
         // Shared
         public List<EmailVerification>? EmailVerifications { get; set; }

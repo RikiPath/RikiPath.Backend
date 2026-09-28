@@ -1,4 +1,4 @@
-﻿//using RikiPath.Domain.Entities;
+//using RikiPath.Domain.Entities;
 //using RikiPath.Application.Exceptions;
 //using RikiPath.Application.IClients;
 //using RikiPath.Application.IServices;
@@ -75,7 +75,7 @@
 
 //            try
 //            {
-//                var suggestion = new LearningPathSuggestion
+//                var suggestion = new RecommendedLearningPath
 //                {
 //                    UserId = userId,
 //                    GeneratedAt = DateTime.UtcNow,
@@ -83,7 +83,7 @@
 //                    Summary = aiResult.Summary,
 //                    IsViewed = false,
 //                };
-//                await unitOfWork.LearningPathSuggestions.AddAsync(suggestion);
+//                await unitOfWork.RecommendedLearningPaths.AddAsync(suggestion);
 //                await unitOfWork.SaveChangesAsync();
 
 //                var result = new LearningPathResponse
@@ -109,27 +109,27 @@
 //        private async Task<LearningPathPromptContext> BuildPromptContextAsync(int userId, UserAccount user)
 //        {
 //            var lessonProgresses = await unitOfWork.LessonProgresses.GetByUserAsync(userId);
-//            var notebookEntries = await unitOfWork.VocabularyNoteEntries.GetByUserAsync(userId, vocabularyListId: null);
-//            var attempts = await unitOfWork.PracticeTestAttempts.GetByUserAsync(userId);
+//            var notebookEntries = await unitOfWork.LearnerNoteEntries.GetByUserAsync(userId, vocabularyListId: null);
+//            var attempts = await unitOfWork.MockTestAttempts.GetByUserAsync(userId);
 
 //            var latestAttempt = attempts.FirstOrDefault(a => a.IsCompleted);
 //            IReadOnlyDictionary<string, double>? skillBreakdown = null;
 //            if (latestAttempt is not null)
 //            {
-//                var withBreakdown = await unitOfWork.PracticeTestAttempts.GetWithBreakdownAsync(latestAttempt.Id);
+//                var withBreakdown = await unitOfWork.MockTestAttempts.GetWithBreakdownAsync(latestAttempt.Id);
 //                skillBreakdown = withBreakdown?.SectionResults
-//                    .ToDictionary(r => r.PracticeTestSection.Title, r => r.ScorePercent);
+//                    .ToDictionary(r => r.MockTestSection.Title, r => r.ScorePercent);
 //            }
 
 //            return new LearningPathPromptContext(
 //                targetJlptLevel: user.TargetJlptLevel?.Name ?? "chưa xác định",
 //                lessonProgress: lessonProgresses.Select(p => (p.Lesson.Title, p.ProgressPercent)).ToList(),
 //                notebookWords: notebookEntries
-//                    .Select(n => n.VocabularyEntry?.Word ?? n.KanjiEntry?.Character ?? n.ManualWord ?? string.Empty)
+//                    .Select(n => n.Vocabulary?.Word ?? n.Kanji?.Character ?? n.ManualWord ?? string.Empty)
 //                    .Where(w => !string.IsNullOrEmpty(w))
 //                    .ToList(),
 //                latestTestScorePercent: latestAttempt?.TotalScore,
-//                latestTestSkillBreakdown: skillBreakdown);
+//                latestTestLanguageSkillBreakdown: skillBreakdown);
 //        }
 
 //        private static (string Summary, List<string> FocusTopics, List<SuggestedLessonResponse> SuggestedLessons) ParseAiResponse(string rawJson)

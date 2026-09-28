@@ -1,10 +1,10 @@
-using RikiPath.Application.Requests.PracticeTests;
+using RikiPath.Application.Requests.MockTests;
 using RikiPath.Application.Responses;
-using RikiPath.Application.Responses.PracticeTests;
+using RikiPath.Application.Responses.MockTests;
 
 namespace RikiPath.Application.IServices
 {
-    public interface IPracticeTestService
+    public interface IMockTestService
     {
         Task<ApiResponse<StartAttemptResponse>> StartAttemptAsync(int practiceTestId, CancellationToken cancellationToken = default);
 
@@ -16,6 +16,6 @@ namespace RikiPath.Application.IServices
 
         Task<ApiResponse<DetailedAttemptResultResponse>> GetDetailedResultAsync(int attemptId, CancellationToken cancellationToken = default);
 
-        Task<ApiResponse<List<QuestionReviewItem>>> GetWrongQuestionsReviewSessionAsync(int? practiceTestId = null, CancellationToken cancellationToken = default);
+        Task<ApiResponse<List<QuestionReviewCard>>> GetWrongQuestionsReviewSessionAsync(int? practiceTestId = null, CancellationToken cancellationToken = default);
     }
 }

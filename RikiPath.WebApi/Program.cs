@@ -1,3 +1,5 @@
+using FirebaseAdmin;
+using Google.Apis.Auth.OAuth2;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -62,6 +64,23 @@ builder.Services.AddHttpContextAccessor();
 builder.Services.AddHttpClient();
 builder.Services.AddMemoryCache();
 
+// 3b. Firebase Admin SDK — dùng để verify idToken do React (Firebase Phone Auth) gửi lên.
+// File service-account.json tải từ Firebase Console > Project Settings > Service Accounts,
+// KHÔNG commit vào git (đặt path trong appsettings.json: "Firebase:ServiceAccountPath").
+//var firebaseCredentialPath = configuration["Firebase:ServiceAccountPath"];
+//if (string.IsNullOrWhiteSpace(firebaseCredentialPath))
+//{
+//    throw new InvalidOperationException("Thiếu cấu hình Firebase:ServiceAccountPath trong appsettings.");
+//}
+
+// Guard tránh init 2 lần (vd. khi hot-reload) — FirebaseApp.Create ném exception nếu đã có DefaultInstance.
+//if (FirebaseApp.DefaultInstance == null)
+//{
+//    FirebaseApp.Create(new AppOptions
+//    {
+//        Credential = GoogleCredential.FromFile(firebaseCredentialPath),
+//    });
+//}
 
 // Helper: kiểm tra 1 class có implement 1 interface không, hỗ trợ cả open generic
 // interface (vd IGenericRepository<T>) vốn không hoạt động đúng với IsAssignableFrom thông thường.
@@ -128,7 +147,7 @@ foreach (var iface in repoInterfaces)
 }
 
 // 5. Service Registration (Quét cả Application và Infrastructure để tự động nhận IFileStorageService,
-//    IAiUsageQuotaService,...)
+//    IAiUsageQuotaService, IFirebaseAuthService,...)
 var applicationAssembly = typeof(ILessonProgressService).Assembly; // RikiPath.Application
 var infrastructureAssembly = typeof(UnitOfWork).Assembly;           // RikiPath.Infrastructure
 
@@ -295,6 +314,11 @@ builder.Services.AddControllers()
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
 {
+    var xmlFile = $"{Assembly.GetExecutingAssembly().GetName().Name}.xml";
+    var xmlPath = Path.Combine(AppContext.BaseDirectory, xmlFile);
+
+    // Truyền true vào parameter includeControllerXmlComments để hiển thị cả comment của Controller Class
+    c.IncludeXmlComments(xmlPath, includeControllerXmlComments: true);
     c.SwaggerDoc("v1", new OpenApiInfo { Title = "RikiPath API", Version = "v1" });
 
     var securityScheme = new OpenApiSecurityScheme
@@ -358,6 +382,5 @@ app.UseCors("DefaultCorsPolicy");
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
-app.MapHub<ConsultationCallHub>("/hubs/consultation-call");
 
 app.Run();

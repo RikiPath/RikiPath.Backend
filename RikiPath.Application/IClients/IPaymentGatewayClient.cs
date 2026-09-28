@@ -1,4 +1,4 @@
-﻿using RikiPath.Application.Requests.Payments;
+using RikiPath.Application.Requests.Payments;
 
 namespace RikiPath.Application.IClients
 {

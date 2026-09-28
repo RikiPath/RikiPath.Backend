@@ -1,4 +1,4 @@
-﻿namespace RikiPath.Application.Exceptions
+namespace RikiPath.Application.Exceptions
 {
     public class ForbiddenAccessException : Exception
     {

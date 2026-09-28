@@ -56,7 +56,7 @@ namespace RikiPath.WebApi.Controllers
         /// Lấy phân tích theo kỹ năng (skill breakdown) của người học.
         /// </summary>
         /// <remarks>
-        /// - Màn hình sử dụng: Trang chi tiết năng lực / Skill Insights trong ứng dụng Learner.
+        /// - Màn hình sử dụng: Trang chi tiết năng lực / LanguageSkill Insights trong ứng dụng Learner.
         /// - Luồng xử lý: Server tổng hợp điểm/tiến độ theo từng kỹ năng từ CSDL; không gọi AI. Có thể trả theo dạng danh sách {skill, score, progress}.
         /// - Lưu ý cho FE: Yêu cầu Bearer Token (Role = Learner). Kết quả có thể được cache; FE nên support cập nhật khi user làm mới dữ liệu.
         /// </remarks>
@@ -67,9 +67,9 @@ namespace RikiPath.WebApi.Controllers
         /// <response code="403">Không có quyền: Token không có role Learner.</response>
         /// <response code="500">Lỗi server khi tổng hợp hoặc truy vấn dữ liệu.</response>
         [HttpGet("skill-breakdown")]
-        public async Task<IActionResult> GetSkillBreakdown(CancellationToken cancellationToken)
+        public async Task<IActionResult> GetLanguageSkillBreakdown(CancellationToken cancellationToken)
         {
-            var result = await analyticsService.GetSkillBreakdownAsync(cancellationToken);
+            var result = await analyticsService.GetLanguageSkillBreakdownAsync(cancellationToken);
             return StatusCode((int)result.StatusCode, result);
         }
     }

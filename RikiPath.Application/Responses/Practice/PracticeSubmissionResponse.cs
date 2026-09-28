@@ -1,4 +1,4 @@
-﻿using Domain.Enums;
+using RikiPath.Domain.Enums;
 using RikiPath.Application.Responses.Grading;
 
 namespace RikiPath.Application.Responses.Practice
@@ -9,6 +9,7 @@ namespace RikiPath.Application.Responses.Practice
         public SubmissionType Type { get; set; }
         public string? TextContent { get; set; }
         public string? ImageUrl { get; set; }
+        public string? AudioUrl { get; set; }
 
         public int JlptLevelId { get; set; }
         public string JlptLevelName { get; set; } = string.Empty;

@@ -1,4 +1,4 @@
-﻿namespace RikiPath.Application.Responses.Auth
+namespace RikiPath.Application.Responses.Auth
 {
     public class LoginResponse
     {
@@ -6,6 +6,7 @@
         public int UserId { get; set; }
         public string Email { get; set; } = string.Empty;
         public string FullName { get; set; } = string.Empty;
+        public string? PhoneNumber { get; set; }
         public string Role { get; set; } = string.Empty;
     }
 }

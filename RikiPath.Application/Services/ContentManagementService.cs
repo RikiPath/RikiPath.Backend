@@ -1,5 +1,5 @@
 using RikiPath.Domain.Entities;
-using Domain.Enums;
+using RikiPath.Domain.Enums;
 using RikiPath.Application.DTOs.Content;
 using RikiPath.Application.IClients;
 using RikiPath.Application.IRepositories;
@@ -11,7 +11,7 @@ using RikiPath.Application.Responses.Content;
 namespace RikiPath.Application.Services
 {
     // Đã bỏ IReviewableContent + generic dispatch qua Expression.Property. Đổi lại: mỗi loại nội
-    // dung (Lesson/KanjiEntry/VocabularyEntry/GrammarPoint/PracticeTest) có bộ method riêng, code
+    // dung (Lesson/Kanji/Vocabulary/GrammarPattern/MockTest) có bộ method riêng, code
     // dài hơn nhưng thẳng, không còn "ảo thuật" generic/reflection nào - dễ đọc, dễ debug độc lập
     // từng loại, không có rủi ro EF Core dịch sai LINQ expression qua interface.
     //
@@ -27,9 +27,19 @@ namespace RikiPath.Application.Services
             {
                 var authorId = claimService.GetUserClaim().Id;
 
-                if (request.EntityType is ContentEntityType.Lesson or ContentEntityType.PracticeTest)
+                if (request.EntityType is ContentEntityType.Lesson or ContentEntityType.MockTest)
                     return ApiResponse<BulkImportResultResponse>.Fail(
                         "Loại nội dung này không hỗ trợ import hàng loạt, hãy tạo thủ công.");
+
+                if (request.EntityType == ContentEntityType.MockQuestion)
+                {
+                    if (request.TargetMockTestSectionId is null)
+                        return ApiResponse<BulkImportResultResponse>.Fail("Thiếu TargetMockTestSectionId để import câu hỏi.");
+                    var section = await unitOfWork.MockTestSections.GetByIdAsync(request.TargetMockTestSectionId.Value, cancellationToken);
+                    var test = section is null ? null : await unitOfWork.MockTests.GetByIdAsync(section.MockTestId, cancellationToken);
+                    if (test is null || test.IsDeleted || test.ContentAuthorId != authorId || test.Status is not (ContentStatus.Draft or ContentStatus.Rejected))
+                        return ApiResponse<BulkImportResultResponse>.Fail("Bạn chỉ import câu hỏi vào bài thi Draft/Rejected do mình tạo.");
+                }
 
                 var parseResult = await excelParser.ParseAsync(request.FileStream, request.EntityType, cancellationToken);
                 if (!parseResult.Success && parseResult.Rows.Count == 0)
@@ -45,8 +55,8 @@ namespace RikiPath.Application.Services
                     {
                         switch (request.EntityType)
                         {
-                            case ContentEntityType.KanjiEntry:
-                                await unitOfWork.KanjiEntries.AddAsync(new KanjiEntry
+                            case ContentEntityType.Kanji:
+                                await unitOfWork.Kanjis.AddAsync(new Kanji
                                 {
                                     Character = GetRequired(row, "Character"),
                                     Meaning = GetRequired(row, "Meaning"),
@@ -54,54 +64,54 @@ namespace RikiPath.Application.Services
                                     OnYomi = GetOptional(row, "OnYomi"),
                                     KunYomi = GetOptional(row, "KunYomi"),
                                     StrokeCount = int.Parse(GetRequired(row, "StrokeCount")),
-                                    CertificationLevelId = request.CertificationLevelId,
+                                    CertificateLevelId = request.CertificateLevelId,
                                     ContentAuthorId = authorId,
                                     Status = ContentStatus.Draft
                                 }, cancellationToken);
                                 break;
 
-                            case ContentEntityType.VocabularyEntry:
-                                await unitOfWork.VocabularyEntries.AddAsync(new VocabularyEntry
+                            case ContentEntityType.Vocabulary:
+                                await unitOfWork.Vocabularies.AddAsync(new Vocabulary
                                 {
                                     Word = GetRequired(row, "Word"),
                                     Reading = GetRequired(row, "Reading"),
                                     Meaning = GetRequired(row, "Meaning"),
                                     ExampleSentence = GetOptional(row, "ExampleSentence"),
                                     ExampleSentenceMeaning = GetOptional(row, "ExampleSentenceMeaning"),
-                                    CertificationLevelId = request.CertificationLevelId,
+                                    CertificateLevelId = request.CertificateLevelId,
                                     ContentAuthorId = authorId,
                                     Status = ContentStatus.Draft
                                 }, cancellationToken);
                                 break;
 
-                            case ContentEntityType.GrammarPoint:
-                                await unitOfWork.GrammarPoints.AddAsync(new GrammarPoint
+                            case ContentEntityType.GrammarPattern:
+                                await unitOfWork.GrammarPatterns.AddAsync(new GrammarPattern
                                 {
                                     Title = GetRequired(row, "Title"),
                                     Structure = GetRequired(row, "Structure"),
                                     UsageNotes = GetOptional(row, "UsageNotes"),
                                     ExampleSentence = GetOptional(row, "ExampleSentence"),
                                     ExampleSentenceMeaning = GetOptional(row, "ExampleSentenceMeaning"),
-                                    CertificationLevelId = request.CertificationLevelId,
+                                    CertificateLevelId = request.CertificateLevelId,
                                     ContentAuthorId = authorId,
                                     Status = ContentStatus.Draft
                                 }, cancellationToken);
                                 break;
 
-                            case ContentEntityType.PracticeQuestion:
-                                if (request.TargetPracticeTestSectionId is null)
+                            case ContentEntityType.MockQuestion:
+                                if (request.TargetMockTestSectionId is null)
                                 {
-                                    errors.Add($"Dòng {row.RowNumber}: thiếu TargetPracticeTestSectionId để import câu hỏi.");
+                                    errors.Add($"Dòng {row.RowNumber}: thiếu TargetMockTestSectionId để import câu hỏi.");
                                     continue;
                                 }
 
-                                await unitOfWork.PracticeQuestions.AddAsync(new PracticeQuestion
+                                await unitOfWork.MockQuestions.AddAsync(new MockQuestion
                                 {
                                     QuestionText = GetRequired(row, "QuestionText"),
                                     Explanation = GetOptional(row, "Explanation"),
                                     AudioUrl = GetOptional(row, "AudioUrl"),
                                     ImageUrl = GetOptional(row, "ImageUrl"),
-                                    PracticeTestSectionId = request.TargetPracticeTestSectionId.Value,
+                                    MockTestSectionId = request.TargetMockTestSectionId.Value,
                                     SortOrder = row.RowNumber
                                 }, cancellationToken);
                                 break;
@@ -145,10 +155,11 @@ namespace RikiPath.Application.Services
             return entityType switch
             {
                 ContentEntityType.Lesson => SubmitLessonForReviewAsync(authorId, entityId, cancellationToken),
-                ContentEntityType.KanjiEntry => SubmitKanjiForReviewAsync(authorId, entityId, cancellationToken),
-                ContentEntityType.VocabularyEntry => SubmitVocabularyForReviewAsync(authorId, entityId, cancellationToken),
-                ContentEntityType.GrammarPoint => SubmitGrammarForReviewAsync(authorId, entityId, cancellationToken),
-                ContentEntityType.PracticeTest => SubmitPracticeTestForReviewAsync(authorId, entityId, cancellationToken),
+                ContentEntityType.Kanji => SubmitKanjiForReviewAsync(authorId, entityId, cancellationToken),
+                ContentEntityType.Vocabulary => SubmitVocabularyForReviewAsync(authorId, entityId, cancellationToken),
+                ContentEntityType.GrammarPattern => SubmitGrammarForReviewAsync(authorId, entityId, cancellationToken),
+                ContentEntityType.MockTest => SubmitMockTestForReviewAsync(authorId, entityId, cancellationToken),
+                ContentEntityType.PracticeExercise => SubmitPracticeExerciseForReviewAsync(authorId, entityId, cancellationToken),
                 _ => Task.FromResult(ApiResponse<ContentReviewStatusResponse>.Fail("Loại nội dung không hỗ trợ gửi duyệt."))
             };
         }
@@ -159,13 +170,15 @@ namespace RikiPath.Application.Services
             try
             {
                 var entity = await unitOfWork.Lessons.GetByIdAsync(entityId, cancellationToken);
-                if (entity is null || entity.ContentAuthorId != authorId)
+                if (entity is null || entity.IsDeleted || entity.ContentAuthorId != authorId)
                     return ApiResponse<ContentReviewStatusResponse>.Fail("Không tìm thấy nội dung.");
 
                 if (entity.Status is not (ContentStatus.Draft or ContentStatus.Rejected))
                     return ApiResponse<ContentReviewStatusResponse>.Fail("Chỉ có thể gửi duyệt nội dung Draft hoặc Rejected.");
 
                 entity.Status = ContentStatus.PendingReview;
+                entity.IsApproved = false;
+                entity.ReviewedByName = null;
                 entity.ReviewNote = null;
                 entity.ReviewedDate = null;
 
@@ -185,18 +198,20 @@ namespace RikiPath.Application.Services
         {
             try
             {
-                var entity = await unitOfWork.KanjiEntries.GetByIdAsync(entityId, cancellationToken);
-                if (entity is null || entity.ContentAuthorId != authorId)
+                var entity = await unitOfWork.Kanjis.GetByIdAsync(entityId, cancellationToken);
+                if (entity is null || entity.IsDeleted || entity.ContentAuthorId != authorId)
                     return ApiResponse<ContentReviewStatusResponse>.Fail("Không tìm thấy nội dung.");
 
                 if (entity.Status is not (ContentStatus.Draft or ContentStatus.Rejected))
                     return ApiResponse<ContentReviewStatusResponse>.Fail("Chỉ có thể gửi duyệt nội dung Draft hoặc Rejected.");
 
                 entity.Status = ContentStatus.PendingReview;
+                entity.IsApproved = false;
+                entity.ReviewedByName = null;
                 entity.ReviewNote = null;
                 entity.ReviewedDate = null;
 
-                unitOfWork.KanjiEntries.Update(entity);
+                unitOfWork.Kanjis.Update(entity);
                 await unitOfWork.SaveChangesAsync(cancellationToken);
 
                 return ApiResponse<ContentReviewStatusResponse>.Success(MapKanjiToResponse(entity));
@@ -212,18 +227,20 @@ namespace RikiPath.Application.Services
         {
             try
             {
-                var entity = await unitOfWork.VocabularyEntries.GetByIdAsync(entityId, cancellationToken);
-                if (entity is null || entity.ContentAuthorId != authorId)
+                var entity = await unitOfWork.Vocabularies.GetByIdAsync(entityId, cancellationToken);
+                if (entity is null || entity.IsDeleted || entity.ContentAuthorId != authorId)
                     return ApiResponse<ContentReviewStatusResponse>.Fail("Không tìm thấy nội dung.");
 
                 if (entity.Status is not (ContentStatus.Draft or ContentStatus.Rejected))
                     return ApiResponse<ContentReviewStatusResponse>.Fail("Chỉ có thể gửi duyệt nội dung Draft hoặc Rejected.");
 
                 entity.Status = ContentStatus.PendingReview;
+                entity.IsApproved = false;
+                entity.ReviewedByName = null;
                 entity.ReviewNote = null;
                 entity.ReviewedDate = null;
 
-                unitOfWork.VocabularyEntries.Update(entity);
+                unitOfWork.Vocabularies.Update(entity);
                 await unitOfWork.SaveChangesAsync(cancellationToken);
 
                 return ApiResponse<ContentReviewStatusResponse>.Success(MapVocabularyToResponse(entity));
@@ -239,18 +256,20 @@ namespace RikiPath.Application.Services
         {
             try
             {
-                var entity = await unitOfWork.GrammarPoints.GetByIdAsync(entityId, cancellationToken);
-                if (entity is null || entity.ContentAuthorId != authorId)
+                var entity = await unitOfWork.GrammarPatterns.GetByIdAsync(entityId, cancellationToken);
+                if (entity is null || entity.IsDeleted || entity.ContentAuthorId != authorId)
                     return ApiResponse<ContentReviewStatusResponse>.Fail("Không tìm thấy nội dung.");
 
                 if (entity.Status is not (ContentStatus.Draft or ContentStatus.Rejected))
                     return ApiResponse<ContentReviewStatusResponse>.Fail("Chỉ có thể gửi duyệt nội dung Draft hoặc Rejected.");
 
                 entity.Status = ContentStatus.PendingReview;
+                entity.IsApproved = false;
+                entity.ReviewedByName = null;
                 entity.ReviewNote = null;
                 entity.ReviewedDate = null;
 
-                unitOfWork.GrammarPoints.Update(entity);
+                unitOfWork.GrammarPatterns.Update(entity);
                 await unitOfWork.SaveChangesAsync(cancellationToken);
 
                 return ApiResponse<ContentReviewStatusResponse>.Success(MapGrammarToResponse(entity));
@@ -261,26 +280,28 @@ namespace RikiPath.Application.Services
             }
         }
 
-        private async Task<ApiResponse<ContentReviewStatusResponse>> SubmitPracticeTestForReviewAsync(
+        private async Task<ApiResponse<ContentReviewStatusResponse>> SubmitMockTestForReviewAsync(
             int authorId, int entityId, CancellationToken cancellationToken)
         {
             try
             {
-                var entity = await unitOfWork.PracticeTests.GetByIdAsync(entityId, cancellationToken);
-                if (entity is null || entity.ContentAuthorId != authorId)
+                var entity = await unitOfWork.MockTests.GetByIdAsync(entityId, cancellationToken);
+                if (entity is null || entity.IsDeleted || entity.ContentAuthorId != authorId)
                     return ApiResponse<ContentReviewStatusResponse>.Fail("Không tìm thấy nội dung.");
 
                 if (entity.Status is not (ContentStatus.Draft or ContentStatus.Rejected))
                     return ApiResponse<ContentReviewStatusResponse>.Fail("Chỉ có thể gửi duyệt nội dung Draft hoặc Rejected.");
 
                 entity.Status = ContentStatus.PendingReview;
+                entity.IsApproved = false;
+                entity.ReviewedByName = null;
                 entity.ReviewNote = null;
                 entity.ReviewedDate = null;
 
-                unitOfWork.PracticeTests.Update(entity);
+                unitOfWork.MockTests.Update(entity);
                 await unitOfWork.SaveChangesAsync(cancellationToken);
 
-                return ApiResponse<ContentReviewStatusResponse>.Success(MapPracticeTestToResponse(entity));
+                return ApiResponse<ContentReviewStatusResponse>.Success(MapMockTestToResponse(entity));
             }
             catch (Exception ex)
             {
@@ -289,6 +310,29 @@ namespace RikiPath.Application.Services
         }
 
         // ================= GetMyContentAsync =================
+
+        private async Task<ApiResponse<ContentReviewStatusResponse>> SubmitPracticeExerciseForReviewAsync(
+            int authorId, int entityId, CancellationToken cancellationToken)
+        {
+            try
+            {
+                var entity = await unitOfWork.PracticeExercises.GetByIdAsync(entityId, cancellationToken);
+                if (entity is null || entity.IsDeleted || entity.ContentAuthorId != authorId)
+                    return ApiResponse<ContentReviewStatusResponse>.Fail("Không tìm thấy nội dung.");
+                if (entity.Status is not (ContentStatus.Draft or ContentStatus.Rejected))
+                    return ApiResponse<ContentReviewStatusResponse>.Fail("Chỉ có thể gửi duyệt nội dung Draft hoặc Rejected.");
+
+                entity.Status = ContentStatus.PendingReview;
+                entity.IsApproved = false;
+                entity.ReviewedByName = null;
+                entity.ReviewNote = null;
+                entity.ReviewedDate = null;
+                unitOfWork.PracticeExercises.Update(entity);
+                await unitOfWork.SaveChangesAsync(cancellationToken);
+                return ApiResponse<ContentReviewStatusResponse>.Success(MapPracticeExerciseToResponse(entity));
+            }
+            catch (Exception ex) { return ApiResponse<ContentReviewStatusResponse>.Fail($"Không thể gửi duyệt: {ex.Message}"); }
+        }
 
         public async Task<ApiResponse<List<ContentReviewStatusResponse>>> GetMyContentAsync(
             ContentEntityType entityType, CancellationToken cancellationToken)
@@ -299,16 +343,18 @@ namespace RikiPath.Application.Services
 
                 List<ContentReviewStatusResponse> result = entityType switch
                 {
-                    ContentEntityType.Lesson => (await unitOfWork.Lessons.FindAsync(e => e.ContentAuthorId == authorId, cancellationToken))
+                    ContentEntityType.Lesson => (await unitOfWork.Lessons.FindAsync(e => !e.IsDeleted && e.ContentAuthorId == authorId, cancellationToken))
                         .Select(MapLessonToResponse).ToList(),
-                    ContentEntityType.KanjiEntry => (await unitOfWork.KanjiEntries.FindAsync(e => e.ContentAuthorId == authorId, cancellationToken))
+                    ContentEntityType.Kanji => (await unitOfWork.Kanjis.FindAsync(e => !e.IsDeleted && e.ContentAuthorId == authorId, cancellationToken))
                         .Select(MapKanjiToResponse).ToList(),
-                    ContentEntityType.VocabularyEntry => (await unitOfWork.VocabularyEntries.FindAsync(e => e.ContentAuthorId == authorId, cancellationToken))
+                    ContentEntityType.Vocabulary => (await unitOfWork.Vocabularies.FindAsync(e => !e.IsDeleted && e.ContentAuthorId == authorId, cancellationToken))
                         .Select(MapVocabularyToResponse).ToList(),
-                    ContentEntityType.GrammarPoint => (await unitOfWork.GrammarPoints.FindAsync(e => e.ContentAuthorId == authorId, cancellationToken))
+                    ContentEntityType.GrammarPattern => (await unitOfWork.GrammarPatterns.FindAsync(e => !e.IsDeleted && e.ContentAuthorId == authorId, cancellationToken))
                         .Select(MapGrammarToResponse).ToList(),
-                    ContentEntityType.PracticeTest => (await unitOfWork.PracticeTests.FindAsync(e => e.ContentAuthorId == authorId, cancellationToken))
-                        .Select(MapPracticeTestToResponse).ToList(),
+                    ContentEntityType.MockTest => (await unitOfWork.MockTests.FindAsync(e => !e.IsDeleted && e.ContentAuthorId == authorId, cancellationToken))
+                        .Select(MapMockTestToResponse).ToList(),
+                    ContentEntityType.PracticeExercise => (await unitOfWork.PracticeExercises.FindAsync(e => !e.IsDeleted && e.ContentAuthorId == authorId, cancellationToken))
+                        .Select(MapPracticeExerciseToResponse).ToList(),
                     _ => throw new InvalidOperationException("Loại nội dung không hợp lệ.")
                 };
 
@@ -329,16 +375,18 @@ namespace RikiPath.Application.Services
             {
                 List<ContentReviewStatusResponse> result = entityType switch
                 {
-                    ContentEntityType.Lesson => (await unitOfWork.Lessons.FindAsync(e => e.Status == ContentStatus.PendingReview, cancellationToken))
+                    ContentEntityType.Lesson => (await unitOfWork.Lessons.FindAsync(e => !e.IsDeleted && e.Status == ContentStatus.PendingReview, cancellationToken))
                         .Select(MapLessonToResponse).ToList(),
-                    ContentEntityType.KanjiEntry => (await unitOfWork.KanjiEntries.FindAsync(e => e.Status == ContentStatus.PendingReview, cancellationToken))
+                    ContentEntityType.Kanji => (await unitOfWork.Kanjis.FindAsync(e => !e.IsDeleted && e.Status == ContentStatus.PendingReview, cancellationToken))
                         .Select(MapKanjiToResponse).ToList(),
-                    ContentEntityType.VocabularyEntry => (await unitOfWork.VocabularyEntries.FindAsync(e => e.Status == ContentStatus.PendingReview, cancellationToken))
+                    ContentEntityType.Vocabulary => (await unitOfWork.Vocabularies.FindAsync(e => !e.IsDeleted && e.Status == ContentStatus.PendingReview, cancellationToken))
                         .Select(MapVocabularyToResponse).ToList(),
-                    ContentEntityType.GrammarPoint => (await unitOfWork.GrammarPoints.FindAsync(e => e.Status == ContentStatus.PendingReview, cancellationToken))
+                    ContentEntityType.GrammarPattern => (await unitOfWork.GrammarPatterns.FindAsync(e => !e.IsDeleted && e.Status == ContentStatus.PendingReview, cancellationToken))
                         .Select(MapGrammarToResponse).ToList(),
-                    ContentEntityType.PracticeTest => (await unitOfWork.PracticeTests.FindAsync(e => e.Status == ContentStatus.PendingReview, cancellationToken))
-                        .Select(MapPracticeTestToResponse).ToList(),
+                    ContentEntityType.MockTest => (await unitOfWork.MockTests.FindAsync(e => !e.IsDeleted && e.Status == ContentStatus.PendingReview, cancellationToken))
+                        .Select(MapMockTestToResponse).ToList(),
+                    ContentEntityType.PracticeExercise => (await unitOfWork.PracticeExercises.FindAsync(e => !e.IsDeleted && e.Status == ContentStatus.PendingReview, cancellationToken))
+                        .Select(MapPracticeExerciseToResponse).ToList(),
                     _ => throw new InvalidOperationException("Loại nội dung không hợp lệ.")
                 };
 
@@ -359,10 +407,11 @@ namespace RikiPath.Application.Services
             return entityType switch
             {
                 ContentEntityType.Lesson => ReviewLessonAsync(adminId, entityId, request, cancellationToken),
-                ContentEntityType.KanjiEntry => ReviewKanjiAsync(adminId, entityId, request, cancellationToken),
-                ContentEntityType.VocabularyEntry => ReviewVocabularyAsync(adminId, entityId, request, cancellationToken),
-                ContentEntityType.GrammarPoint => ReviewGrammarAsync(adminId, entityId, request, cancellationToken),
-                ContentEntityType.PracticeTest => ReviewPracticeTestAsync(adminId, entityId, request, cancellationToken),
+                ContentEntityType.Kanji => ReviewKanjiAsync(adminId, entityId, request, cancellationToken),
+                ContentEntityType.Vocabulary => ReviewVocabularyAsync(adminId, entityId, request, cancellationToken),
+                ContentEntityType.GrammarPattern => ReviewGrammarAsync(adminId, entityId, request, cancellationToken),
+                ContentEntityType.MockTest => ReviewMockTestAsync(adminId, entityId, request, cancellationToken),
+                ContentEntityType.PracticeExercise => ReviewPracticeExerciseAsync(adminId, entityId, request, cancellationToken),
                 _ => Task.FromResult(ApiResponse<ContentReviewStatusResponse>.Fail("Loại nội dung không hỗ trợ duyệt."))
             };
         }
@@ -383,10 +432,11 @@ namespace RikiPath.Application.Services
             try
             {
                 var entity = await unitOfWork.Lessons.GetByIdAsync(entityId, cancellationToken);
-                if (entity is null || entity.Status != ContentStatus.PendingReview)
+                if (entity is null || entity.IsDeleted || entity.Status != ContentStatus.PendingReview)
                     return ApiResponse<ContentReviewStatusResponse>.Fail("Không tìm thấy nội dung đang chờ duyệt.");
 
                 entity.Status = request.Approve ? ContentStatus.Published : ContentStatus.Rejected;
+                entity.IsApproved = request.Approve;
                 entity.ReviewedByName = await GetReviewerNameAsync(adminId, cancellationToken);
                 entity.ReviewNote = request.ReviewNote;
                 entity.ReviewedDate = DateTime.UtcNow;
@@ -407,16 +457,17 @@ namespace RikiPath.Application.Services
         {
             try
             {
-                var entity = await unitOfWork.KanjiEntries.GetByIdAsync(entityId, cancellationToken);
-                if (entity is null || entity.Status != ContentStatus.PendingReview)
+                var entity = await unitOfWork.Kanjis.GetByIdAsync(entityId, cancellationToken);
+                if (entity is null || entity.IsDeleted || entity.Status != ContentStatus.PendingReview)
                     return ApiResponse<ContentReviewStatusResponse>.Fail("Không tìm thấy nội dung đang chờ duyệt.");
 
                 entity.Status = request.Approve ? ContentStatus.Published : ContentStatus.Rejected;
+                entity.IsApproved = request.Approve;
                 entity.ReviewedByName = await GetReviewerNameAsync(adminId, cancellationToken);
                 entity.ReviewNote = request.ReviewNote;
                 entity.ReviewedDate = DateTime.UtcNow;
 
-                unitOfWork.KanjiEntries.Update(entity);
+                unitOfWork.Kanjis.Update(entity);
                 await unitOfWork.SaveChangesAsync(cancellationToken);
 
                 return ApiResponse<ContentReviewStatusResponse>.Success(MapKanjiToResponse(entity));
@@ -432,16 +483,17 @@ namespace RikiPath.Application.Services
         {
             try
             {
-                var entity = await unitOfWork.VocabularyEntries.GetByIdAsync(entityId, cancellationToken);
-                if (entity is null || entity.Status != ContentStatus.PendingReview)
+                var entity = await unitOfWork.Vocabularies.GetByIdAsync(entityId, cancellationToken);
+                if (entity is null || entity.IsDeleted || entity.Status != ContentStatus.PendingReview)
                     return ApiResponse<ContentReviewStatusResponse>.Fail("Không tìm thấy nội dung đang chờ duyệt.");
 
                 entity.Status = request.Approve ? ContentStatus.Published : ContentStatus.Rejected;
+                entity.IsApproved = request.Approve;
                 entity.ReviewedByName = await GetReviewerNameAsync(adminId, cancellationToken);
                 entity.ReviewNote = request.ReviewNote;
                 entity.ReviewedDate = DateTime.UtcNow;
 
-                unitOfWork.VocabularyEntries.Update(entity);
+                unitOfWork.Vocabularies.Update(entity);
                 await unitOfWork.SaveChangesAsync(cancellationToken);
 
                 return ApiResponse<ContentReviewStatusResponse>.Success(MapVocabularyToResponse(entity));
@@ -457,16 +509,17 @@ namespace RikiPath.Application.Services
         {
             try
             {
-                var entity = await unitOfWork.GrammarPoints.GetByIdAsync(entityId, cancellationToken);
-                if (entity is null || entity.Status != ContentStatus.PendingReview)
+                var entity = await unitOfWork.GrammarPatterns.GetByIdAsync(entityId, cancellationToken);
+                if (entity is null || entity.IsDeleted || entity.Status != ContentStatus.PendingReview)
                     return ApiResponse<ContentReviewStatusResponse>.Fail("Không tìm thấy nội dung đang chờ duyệt.");
 
                 entity.Status = request.Approve ? ContentStatus.Published : ContentStatus.Rejected;
+                entity.IsApproved = request.Approve;
                 entity.ReviewedByName = await GetReviewerNameAsync(adminId, cancellationToken);
                 entity.ReviewNote = request.ReviewNote;
                 entity.ReviewedDate = DateTime.UtcNow;
 
-                unitOfWork.GrammarPoints.Update(entity);
+                unitOfWork.GrammarPatterns.Update(entity);
                 await unitOfWork.SaveChangesAsync(cancellationToken);
 
                 return ApiResponse<ContentReviewStatusResponse>.Success(MapGrammarToResponse(entity));
@@ -477,29 +530,51 @@ namespace RikiPath.Application.Services
             }
         }
 
-        private async Task<ApiResponse<ContentReviewStatusResponse>> ReviewPracticeTestAsync(
+        private async Task<ApiResponse<ContentReviewStatusResponse>> ReviewMockTestAsync(
             int adminId, int entityId, ReviewContentRequest request, CancellationToken cancellationToken)
         {
             try
             {
-                var entity = await unitOfWork.PracticeTests.GetByIdAsync(entityId, cancellationToken);
-                if (entity is null || entity.Status != ContentStatus.PendingReview)
+                var entity = await unitOfWork.MockTests.GetByIdAsync(entityId, cancellationToken);
+                if (entity is null || entity.IsDeleted || entity.Status != ContentStatus.PendingReview)
                     return ApiResponse<ContentReviewStatusResponse>.Fail("Không tìm thấy nội dung đang chờ duyệt.");
 
                 entity.Status = request.Approve ? ContentStatus.Published : ContentStatus.Rejected;
+                entity.IsApproved = request.Approve;
                 entity.ReviewedByName = await GetReviewerNameAsync(adminId, cancellationToken);
                 entity.ReviewNote = request.ReviewNote;
                 entity.ReviewedDate = DateTime.UtcNow;
 
-                unitOfWork.PracticeTests.Update(entity);
+                unitOfWork.MockTests.Update(entity);
                 await unitOfWork.SaveChangesAsync(cancellationToken);
 
-                return ApiResponse<ContentReviewStatusResponse>.Success(MapPracticeTestToResponse(entity));
+                return ApiResponse<ContentReviewStatusResponse>.Success(MapMockTestToResponse(entity));
             }
             catch (Exception ex)
             {
                 return ApiResponse<ContentReviewStatusResponse>.Fail($"Không thể duyệt nội dung: {ex.Message}");
             }
+        }
+
+        private async Task<ApiResponse<ContentReviewStatusResponse>> ReviewPracticeExerciseAsync(
+            int adminId, int entityId, ReviewContentRequest request, CancellationToken cancellationToken)
+        {
+            try
+            {
+                var entity = await unitOfWork.PracticeExercises.GetByIdAsync(entityId, cancellationToken);
+                if (entity is null || entity.IsDeleted || entity.Status != ContentStatus.PendingReview)
+                    return ApiResponse<ContentReviewStatusResponse>.Fail("Không tìm thấy nội dung đang chờ duyệt.");
+
+                entity.Status = request.Approve ? ContentStatus.Published : ContentStatus.Rejected;
+                entity.IsApproved = request.Approve;
+                entity.ReviewedByName = await GetReviewerNameAsync(adminId, cancellationToken);
+                entity.ReviewNote = request.Approve ? null : request.ReviewNote;
+                entity.ReviewedDate = DateTime.UtcNow;
+                unitOfWork.PracticeExercises.Update(entity);
+                await unitOfWork.SaveChangesAsync(cancellationToken);
+                return ApiResponse<ContentReviewStatusResponse>.Success(MapPracticeExerciseToResponse(entity));
+            }
+            catch (Exception ex) { return ApiResponse<ContentReviewStatusResponse>.Fail($"Không thể duyệt nội dung: {ex.Message}"); }
         }
 
         // ================= Mapping (1 method riêng / loại, không qua interface) =================
@@ -516,10 +591,10 @@ namespace RikiPath.Application.Services
             ReviewedByName = e.ReviewedByName
         };
 
-        private static ContentReviewStatusResponse MapKanjiToResponse(KanjiEntry e) => new()
+        private static ContentReviewStatusResponse MapKanjiToResponse(Kanji e) => new()
         {
             Id = e.Id,
-            EntityType = ContentEntityType.KanjiEntry,
+            EntityType = ContentEntityType.Kanji,
             Title = e.Character,
             Status = e.Status,
             ContentAuthorId = e.ContentAuthorId,
@@ -528,10 +603,10 @@ namespace RikiPath.Application.Services
             ReviewedByName = e.ReviewedByName
         };
 
-        private static ContentReviewStatusResponse MapVocabularyToResponse(VocabularyEntry e) => new()
+        private static ContentReviewStatusResponse MapVocabularyToResponse(Vocabulary e) => new()
         {
             Id = e.Id,
-            EntityType = ContentEntityType.VocabularyEntry,
+            EntityType = ContentEntityType.Vocabulary,
             Title = e.Word,
             Status = e.Status,
             ContentAuthorId = e.ContentAuthorId,
@@ -540,10 +615,10 @@ namespace RikiPath.Application.Services
             ReviewedByName = e.ReviewedByName
         };
 
-        private static ContentReviewStatusResponse MapGrammarToResponse(GrammarPoint e) => new()
+        private static ContentReviewStatusResponse MapGrammarToResponse(GrammarPattern e) => new()
         {
             Id = e.Id,
-            EntityType = ContentEntityType.GrammarPoint,
+            EntityType = ContentEntityType.GrammarPattern,
             Title = e.Title,
             Status = e.Status,
             ContentAuthorId = e.ContentAuthorId,
@@ -552,10 +627,22 @@ namespace RikiPath.Application.Services
             ReviewedByName = e.ReviewedByName
         };
 
-        private static ContentReviewStatusResponse MapPracticeTestToResponse(PracticeTest e) => new()
+        private static ContentReviewStatusResponse MapMockTestToResponse(MockTest e) => new()
         {
             Id = e.Id,
-            EntityType = ContentEntityType.PracticeTest,
+            EntityType = ContentEntityType.MockTest,
+            Title = e.Title,
+            Status = e.Status,
+            ContentAuthorId = e.ContentAuthorId,
+            ReviewNote = e.ReviewNote,
+            ReviewedDate = e.ReviewedDate,
+            ReviewedByName = e.ReviewedByName
+        };
+
+        private static ContentReviewStatusResponse MapPracticeExerciseToResponse(PracticeExercise e) => new()
+        {
+            Id = e.Id,
+            EntityType = ContentEntityType.PracticeExercise,
             Title = e.Title,
             Status = e.Status,
             ContentAuthorId = e.ContentAuthorId,

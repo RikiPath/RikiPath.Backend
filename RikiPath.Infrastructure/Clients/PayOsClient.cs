@@ -1,4 +1,4 @@
-﻿using RikiPath.Application.IClients;
+using RikiPath.Application.IClients;
 using RikiPath.Application.Requests.Payments;
 using RikiPath.Domain;
 using System.Net.Http.Json;

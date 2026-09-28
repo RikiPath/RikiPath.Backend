@@ -104,8 +104,8 @@ namespace RikiPath.Application.Services
                 if (request.DailyStudyMinutes < 0 || request.DailyStudyMinutes > 1440)
                     return ApiResponse<UserProfileResponse>.Fail("Thời gian học/ngày không hợp lệ.");
 
-                // Đã chuyển đổi sang CertificationLevels
-                var certificationLevel = await unitOfWork.CertificationLevels.GetByIdAsync(request.TargetJlptLevelId, cancellationToken);
+                // Đã chuyển đổi sang CertificateLevels
+                var certificationLevel = await unitOfWork.CertificateLevels.GetByIdAsync(request.TargetJlptLevelId, cancellationToken);
                 if (certificationLevel is null)
                     return ApiResponse<UserProfileResponse>.NotFound(
                         $"Không tìm thấy cấp độ Id = {request.TargetJlptLevelId}.");
@@ -114,7 +114,7 @@ namespace RikiPath.Application.Services
                 if (user is null)
                     return ApiResponse<UserProfileResponse>.NotFound("Không tìm thấy người dùng.");
 
-                user.TargetCertificationLevelId = certificationLevel.Id;
+                user.TargetCertificateLevelId = certificationLevel.Id;
                 user.DailyStudyMinutes = request.DailyStudyMinutes;
                 unitOfWork.UserAccounts.Update(user);
                 await unitOfWork.SaveChangesAsync(cancellationToken);
@@ -151,7 +151,7 @@ namespace RikiPath.Application.Services
             }
         }
 
-        private static UserProfileResponse MapToResponse(UserAccount user, CertificationLevel? level = null) => new()
+        private static UserProfileResponse MapToResponse(UserAccount user, CertificateLevel? level = null) => new()
         {
             UserId = user.Id,
             Email = user.Email,
@@ -160,8 +160,8 @@ namespace RikiPath.Application.Services
             AvatarUrl = user.AvatarUrl,
             Role = user.Role.ToString(),
             IsEmailVerified = user.IsEmailVerified,
-            TargetJlptLevelId = user.TargetCertificationLevelId,
-            TargetJlptLevelName = level?.Code ?? user.TargetCertificationLevel?.Code,
+            TargetJlptLevelId = user.TargetCertificateLevelId,
+            TargetJlptLevelName = level?.Code ?? user.TargetCertificateLevel?.Code,
             DailyStudyMinutes = user.DailyStudyMinutes,
             EmailNotificationsEnabled = user.EmailNotificationsEnabled,
             SystemNotificationsEnabled = user.SystemNotificationsEnabled,

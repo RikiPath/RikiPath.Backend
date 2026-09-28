@@ -1,4 +1,4 @@
-﻿namespace RikiPath.Application.Requests.Content
+namespace RikiPath.Application.Requests.Content
 {
     public class ReviewContentRequest
     {

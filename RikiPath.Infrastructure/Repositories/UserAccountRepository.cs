@@ -1,22 +1,17 @@
 using RikiPath.Application.IRepositories;
-using RikiPath.Infrastructure;
 using RikiPath.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
-using Domain.Enums;
+using RikiPath.Domain.Enums;
 
 namespace RikiPath.Infrastructure.Repositories
 {
-    public class UserAccountRepository : GenericRepository<UserAccount>, IUserAccountRepository
+    public class UserAccountRepository(AppDbContext context) : GenericRepository<UserAccount>(context), IUserAccountRepository
     {
-        public UserAccountRepository(AppDbContext context) : base(context)
-        {
-        }
-
         public async Task<UserAccount?> GetByEmailAsync(string email)
-            => await _context.Users.FirstOrDefaultAsync(x => x.Email.ToLower() == email.ToLower());
+        {
+            var normalizedEmail = email.Trim().ToLower();
+            return await _context.Users.FirstOrDefaultAsync(x => x.Email == normalizedEmail);
+        }
 
         public async Task<List<UserAccount>> GetByRoleAsync(Role role, int pageIndex, int pageSize)
             => await _context.Users

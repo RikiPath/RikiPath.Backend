@@ -8,10 +8,10 @@ namespace RikiPath.Application.IServices
 {
     public interface IContentManagementService
     {
-        // Bulk import: KanjiEntry / VocabularyEntry / GrammarPoint / PracticeQuestion
+        // Bulk import: Kanji / Vocabulary / GrammarPattern / MockQuestion
         Task<ApiResponse<BulkImportResultResponse>> BulkImportAsync(BulkImportRequest request, CancellationToken cancellationToken);
 
-        // Author: gửi duyệt 1 entity (Course/KanjiEntry/VocabularyEntry/GrammarPoint/PracticeTest)
+        // Author: gửi duyệt 1 entity (Course/Kanji/Vocabulary/GrammarPattern/MockTest)
         Task<ApiResponse<ContentReviewStatusResponse>> SubmitForReviewAsync(ContentEntityType entityType, int entityId, CancellationToken cancellationToken);
 
         Task<ApiResponse<List<ContentReviewStatusResponse>>> GetMyContentAsync(ContentEntityType entityType, CancellationToken cancellationToken);

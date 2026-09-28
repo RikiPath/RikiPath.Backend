@@ -1,4 +1,4 @@
-﻿namespace RikiPath.Application.Requests.CoursePurchases
+namespace RikiPath.Application.Requests.CoursePurchases
 {
     public class CreateCoursePurchaseRequest
     {

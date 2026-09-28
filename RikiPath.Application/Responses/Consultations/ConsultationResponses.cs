@@ -1,5 +1,5 @@
 using RikiPath.Domain.Entities;
-using Domain.Enums;
+using RikiPath.Domain.Enums;
 
 namespace RikiPath.Application.Responses.Consultations
 {
@@ -14,8 +14,8 @@ namespace RikiPath.Application.Responses.Consultations
 
     public class BookingResponse
     {
-        public int ConsultationRequestId { get; set; }
-        public int ConsultantAvailabilityId { get; set; }
+        public int MentorBookingId { get; set; }
+        public int MentorAvailabilityId { get; set; }
         public string Status { get; set; } = string.Empty;
         public DateTime AvailableDate { get; set; }
         public TimeSpan StartTime { get; set; }
@@ -24,13 +24,13 @@ namespace RikiPath.Application.Responses.Consultations
 
     public class SubmitTicketResponse
     {
-        public int ConsultationRequestId { get; set; }
+        public int MentorBookingId { get; set; }
         public string Status { get; set; } = string.Empty;
     }
 
     public class TicketQueueItem
     {
-        public int ConsultationRequestId { get; set; }
+        public int MentorBookingId { get; set; }
         public int UserId { get; set; }
         public string Topic { get; set; } = string.Empty;
         public string Content { get; set; } = string.Empty;
@@ -39,7 +39,7 @@ namespace RikiPath.Application.Responses.Consultations
 
     public class AnswerTicketResponse
     {
-        public int ConsultationRequestId { get; set; }
+        public int MentorBookingId { get; set; }
         public string AnswerText { get; set; } = string.Empty;
         public DateTime AnsweredAt { get; set; }
     }
@@ -51,12 +51,12 @@ namespace RikiPath.Application.Responses.Consultations
         public DateTime? SubmittedAt { get; set; }
     }
 
-    public class ConsultationRequestResponse
+    public class MentorBookingResponse
     {
         public int Id { get; set; }
         public ConsultationType Type { get; set; }
         public ConsultationStatus Status { get; set; }
-        public int? ConsultantId { get; set; }
+        public int? MentorId { get; set; }
         public DateTime? ScheduledAt { get; set; }
         public string? MeetingLink { get; set; }
         public string? Question { get; set; }
@@ -65,7 +65,7 @@ namespace RikiPath.Application.Responses.Consultations
         public DateTime? CompletedAt { get; set; }
     }
 
-    public class ConsultantQueueItem
+    public class MentorQueueItem
     {
         public int RequestId { get; set; }
         public int LearnerId { get; set; }
@@ -77,8 +77,8 @@ namespace RikiPath.Application.Responses.Consultations
         public List<MockTestSummary> RecentMockTestResults { get; set; } = new();
     }
 
-    public class ConsultantQueueResponse
+    public class MentorQueueResponse
     {
-        public List<ConsultantQueueItem> Items { get; set; } = new();
+        public List<MentorQueueItem> Items { get; set; } = new();
     }
 }

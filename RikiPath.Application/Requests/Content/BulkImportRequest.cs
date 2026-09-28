@@ -1,4 +1,4 @@
-﻿using RikiPath.Application.DTOs.Content;
+using RikiPath.Application.DTOs.Content;
 
 namespace RikiPath.Application.Requests.Content
 {
@@ -6,7 +6,7 @@ namespace RikiPath.Application.Requests.Content
     {
         public ContentEntityType EntityType { get; set; }
         public Stream FileStream { get; set; } = null!;
-        public int CertificationLevelId { get; set; }
-        public int? TargetPracticeTestSectionId { get; set; }
+        public int CertificateLevelId { get; set; }
+        public int? TargetMockTestSectionId { get; set; }
     }
 }

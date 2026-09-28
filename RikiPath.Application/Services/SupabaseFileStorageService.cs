@@ -1,4 +1,4 @@
-﻿using RikiPath.Application.IServices;
+using RikiPath.Application.IServices;
 using RikiPath.Domain;
 using System;
 using System.Collections.Generic;

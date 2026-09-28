@@ -1,4 +1,4 @@
-﻿using RikiPath.Application.DTOs.Content;
+using RikiPath.Application.DTOs.Content;
 
 namespace RikiPath.Application.IClients
 {

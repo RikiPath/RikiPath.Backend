@@ -7,13 +7,13 @@ namespace RikiPath.Application.Services
 {
     // NOTE: cần các hàm repo sau (không cần entity mới, chỉ query lại dữ liệu đã có):
     //   ILessonProgressRepository.GetActivityDatesAsync(userId) -> distinct DateOnly từ CompletedAt
-    //   IReviewLogRepository.GetActivityDatesAsync(userId) -> distinct DateOnly từ ReviewedAt
-    //     (cần join qua ReviewItem để lọc theo userId)
-    //   IPracticeTestAttemptRepository.GetActivityDatesAsync(userId) -> distinct DateOnly từ SubmittedAt
+    //   IReviewHistoryRepository.GetActivityDatesAsync(userId) -> distinct DateOnly từ ReviewedAt
+    //     (cần join qua ReviewCard để lọc theo userId)
+    //   IMockTestAttemptRepository.GetActivityDatesAsync(userId) -> distinct DateOnly từ SubmittedAt
     //   ILessonRepository.GetCompletionStatsAsync(userId) -> (int TotalLessons, int CompletedLessons),
     //     lọc theo Course.JlptLevelId == user.TargetJlptLevelId nếu user đã set mục tiêu
-    //   IPracticeTestSectionResultRepository.GetSkillBreakdownAsync(userId)
-    //     -> List<(string SkillName, double AverageScore, int AttemptCount)>, GROUP BY Skill.Name
+    //   IMockTestSectionResultRepository.GetLanguageSkillBreakdownAsync(userId)
+    //     -> List<(string LanguageSkillName, double AverageScore, int AttemptCount)>, GROUP BY LanguageSkill.Name
     public class AnalyticsService(IUnitOfWork unitOfWork, IClaimService claimService) : IAnalyticsService
     {
         public async Task<ApiResponse<StudyStreakResponse>> GetStudyStreakAsync(CancellationToken cancellationToken)
@@ -22,8 +22,8 @@ namespace RikiPath.Application.Services
             {
                 var userId = claimService.GetUserClaim().Id;
                 var lessonDates = await unitOfWork.LessonProgresses.GetActivityDatesAsync(userId);
-                var reviewDates = await unitOfWork.ReviewLogs.GetActivityDatesAsync(userId);
-                var testDates = await unitOfWork.PracticeTestAttempts.GetActivityDatesAsync(userId);
+                var reviewDates = await unitOfWork.ReviewHistories.GetActivityDatesAsync(userId);
+                var testDates = await unitOfWork.MockTestAttempts.GetActivityDatesAsync(userId);
 
                 var allDates = lessonDates.Concat(reviewDates).Concat(testDates)
                     .Select(d => d.Date)
@@ -112,29 +112,29 @@ namespace RikiPath.Application.Services
             }
         }
 
-        public async Task<ApiResponse<List<SkillBreakdownItem>>> GetSkillBreakdownAsync(CancellationToken cancellationToken)
+        public async Task<ApiResponse<List<LanguageSkillBreakdownItem>>> GetLanguageSkillBreakdownAsync(CancellationToken cancellationToken)
         {
             try
             {
                 var userId = claimService.GetUserClaim().Id;
-                var breakdown = await unitOfWork.PracticeTestSectionResults.GetSkillBreakdownAsync(userId);
+                var breakdown = await unitOfWork.MockTestSectionResults.GetLanguageSkillBreakdownAsync(userId);
 
                 var result = breakdown
-                 .Where(b => b.PracticeTestSection?.Skill != null)
-                 .GroupBy(b => b.PracticeTestSection.Skill.Name)
-                 .Select(g => new SkillBreakdownItem
+                 .Where(b => b.MockTestSection?.LanguageSkill != null)
+                 .GroupBy(b => b.MockTestSection.LanguageSkill.Name)
+                 .Select(g => new LanguageSkillBreakdownItem
                  {
-                     SkillName = g.Key,
+                     LanguageSkillName = g.Key,
                      AverageScore = Math.Round(g.Average(x => x.ScorePercent), 2),
                      AttemptCount = g.Count(),
                  })
                  .ToList();
 
-                return ApiResponse<List<SkillBreakdownItem>>.Success(result);
+                return ApiResponse<List<LanguageSkillBreakdownItem>>.Success(result);
             }
             catch (Exception ex)
             {
-                return ApiResponse<List<SkillBreakdownItem>>.Fail(
+                return ApiResponse<List<LanguageSkillBreakdownItem>>.Fail(
                     "Không thể tải phân tích điểm mạnh/yếu.", HttpStatusCode.InternalServerError, errors: BuildDebugErrors(ex));
             }
         }
