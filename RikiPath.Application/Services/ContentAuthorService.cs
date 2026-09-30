@@ -24,6 +24,7 @@ public class ContentAuthorService(IUnitOfWork unitOfWork, IClaimService claimSer
             {
                 ContentEntityType.Lesson => Map(await unitOfWork.Lessons.GetByIdAsync(id, cancellationToken), type, ownerId, e => new() { Title=e.Title, Description=e.Description, VideoUrl=e.VideoUrl, DurationSeconds=e.DurationSeconds, SortOrder=e.SortOrder, CertificateLevelId=e.CertificateLevelId, LanguageSkillId=e.LanguageSkillId, Status=e.Status, ReviewNote=e.ReviewNote, ReviewedDate=e.ReviewedDate, ReviewedByName=e.ReviewedByName }),
                 ContentEntityType.Kanji => Map(await unitOfWork.Kanjis.GetByIdAsync(id, cancellationToken), type, ownerId, e => new() { Title=e.Character, Character=e.Character, Meaning=e.Meaning, SinoVietnamese=e.SinoVietnamese, OnYomi=e.OnYomi, KunYomi=e.KunYomi, StrokeCount=e.StrokeCount, StrokeOrderImageUrl=e.StrokeOrderImageUrl, AudioUrl=e.AudioUrl, CertificateLevelId=e.CertificateLevelId, Status=e.Status, ReviewNote=e.ReviewNote, ReviewedDate=e.ReviewedDate, ReviewedByName=e.ReviewedByName }),
+                ContentEntityType.KanaCharacter => Map(await unitOfWork.KanaCharacters.GetByIdAsync(id, cancellationToken), type, ownerId, e => new() { Title=e.Character, Character=e.Character, KanaType=e.Type, Romaji=e.Romaji, StrokeCount=e.StrokeCount, StrokeOrderImageUrl=e.StrokeOrderImageUrl, AudioUrl=e.AudioUrl, Status=e.Status, ReviewNote=e.ReviewNote, ReviewedDate=e.ReviewedDate, ReviewedByName=e.ReviewedByName }),
                 ContentEntityType.Vocabulary => Map(await unitOfWork.Vocabularies.GetByIdAsync(id, cancellationToken), type, ownerId, e => new() { Title=e.Word, Word=e.Word, Reading=e.Reading, Meaning=e.Meaning, ExampleSentence=e.ExampleSentence, ExampleSentenceMeaning=e.ExampleSentenceMeaning, AudioUrl=e.AudioUrl, CertificateLevelId=e.CertificateLevelId, Status=e.Status, ReviewNote=e.ReviewNote, ReviewedDate=e.ReviewedDate, ReviewedByName=e.ReviewedByName }),
                 ContentEntityType.GrammarPattern => Map(await unitOfWork.GrammarPatterns.GetByIdAsync(id, cancellationToken), type, ownerId, e => new() { Title=e.Title, Structure=e.Structure, UsageNotes=e.UsageNotes, ExampleSentence=e.ExampleSentence, ExampleSentenceMeaning=e.ExampleSentenceMeaning, CertificateLevelId=e.CertificateLevelId, Status=e.Status, ReviewNote=e.ReviewNote, ReviewedDate=e.ReviewedDate, ReviewedByName=e.ReviewedByName }),
                 ContentEntityType.MockTest => MapMockTest(await unitOfWork.MockTests.GetWithSectionsAndQuestionsAsync(id), type, ownerId),
@@ -44,6 +45,7 @@ public class ContentAuthorService(IUnitOfWork unitOfWork, IClaimService claimSer
             {
                 ContentEntityType.Lesson => await SaveLessonAsync(authorId, id, request, cancellationToken),
                 ContentEntityType.Kanji => await SaveKanjiAsync(authorId, id, request, cancellationToken),
+                ContentEntityType.KanaCharacter => await SaveKanaAsync(authorId, id, request, cancellationToken),
                 ContentEntityType.Vocabulary => await SaveVocabularyAsync(authorId, id, request, cancellationToken),
                 ContentEntityType.GrammarPattern => await SaveGrammarAsync(authorId, id, request, cancellationToken),
                 ContentEntityType.MockTest => await SaveMockTestAsync(authorId, id, request, cancellationToken),
@@ -74,6 +76,7 @@ public class ContentAuthorService(IUnitOfWork unitOfWork, IClaimService claimSer
             {
                 ContentEntityType.Lesson => await DeleteAsync(await unitOfWork.Lessons.GetByIdAsync(id, cancellationToken), authorId, unitOfWork.Lessons.Update),
                 ContentEntityType.Kanji => await DeleteAsync(await unitOfWork.Kanjis.GetByIdAsync(id, cancellationToken), authorId, unitOfWork.Kanjis.Update),
+                ContentEntityType.KanaCharacter => await DeleteAsync(await unitOfWork.KanaCharacters.GetByIdAsync(id, cancellationToken), authorId, unitOfWork.KanaCharacters.Update),
                 ContentEntityType.Vocabulary => await DeleteAsync(await unitOfWork.Vocabularies.GetByIdAsync(id, cancellationToken), authorId, unitOfWork.Vocabularies.Update),
                 ContentEntityType.GrammarPattern => await DeleteAsync(await unitOfWork.GrammarPatterns.GetByIdAsync(id, cancellationToken), authorId, unitOfWork.GrammarPatterns.Update),
                 ContentEntityType.MockTest => await DeleteAsync(await unitOfWork.MockTests.GetByIdAsync(id, cancellationToken), authorId, unitOfWork.MockTests.Update),
@@ -107,6 +110,21 @@ public class ContentAuthorService(IUnitOfWork unitOfWork, IClaimService claimSer
         if (id is null) await unitOfWork.Kanjis.AddAsync(e, ct); else unitOfWork.Kanjis.Update(e);
         await unitOfWork.SaveChangesAsync(ct);
         return Map(e.Id, ContentEntityType.Kanji, e.Character, authorId, e.Status, e.ReviewNote, e.ReviewedDate, e.ReviewedByName);
+    }
+
+    private async Task<ContentReviewStatusResponse> SaveKanaAsync(int authorId, int? id, AuthorContentRequest r, CancellationToken ct)
+    {
+        if (r.KanaType is null || !Enum.IsDefined(r.KanaType.Value)) throw new InvalidOperationException("KanaType phải là Hiragana hoặc Katakana.");
+        var e = id is null ? new KanaCharacter { ContentAuthorId = authorId } : await EditableAsync(await unitOfWork.KanaCharacters.GetByIdAsync(id.Value, ct), authorId);
+        e.Character = Required(r.Character, nameof(r.Character));
+        if (System.Globalization.StringInfo.ParseCombiningCharacters(e.Character).Length != 1)
+            throw new InvalidOperationException("Character phải chứa đúng một ký tự Kana.");
+        e.Type = r.KanaType.Value;
+        e.Romaji = Required(r.Romaji, nameof(r.Romaji)); e.StrokeCount = r.StrokeCount is > 0 ? r.StrokeCount.Value : throw new InvalidOperationException("StrokeCount phải lớn hơn 0.");
+        e.StrokeOrderImageUrl = r.StrokeOrderImageUrl; e.AudioUrl = r.AudioUrl; Prepare(e);
+        if (id is null) await unitOfWork.KanaCharacters.AddAsync(e, ct); else unitOfWork.KanaCharacters.Update(e);
+        await unitOfWork.SaveChangesAsync(ct);
+        return Map(e.Id, ContentEntityType.KanaCharacter, e.Character, authorId, e.Status, e.ReviewNote, e.ReviewedDate, e.ReviewedByName);
     }
 
     private async Task<ContentReviewStatusResponse> SaveVocabularyAsync(int authorId, int? id, AuthorContentRequest r, CancellationToken ct)
@@ -151,8 +169,8 @@ public class ContentAuthorService(IUnitOfWork unitOfWork, IClaimService claimSer
     private static async Task<T> EditableAsync<T>(T? entity, int authorId) where T : Base
     {
         if (entity is null || entity.IsDeleted) throw new InvalidOperationException("Không tìm thấy nội dung.");
-        var contentAuthorId = entity switch { Lesson x => x.ContentAuthorId, Kanji x => x.ContentAuthorId, Vocabulary x => x.ContentAuthorId, GrammarPattern x => x.ContentAuthorId, MockTest x => x.ContentAuthorId, PracticeExercise x => x.ContentAuthorId, _ => 0 };
-        var status = entity switch { Lesson x => x.Status, Kanji x => x.Status, Vocabulary x => x.Status, GrammarPattern x => x.Status, MockTest x => x.Status, PracticeExercise x => x.Status, _ => ContentStatus.Published };
+        var contentAuthorId = entity switch { Lesson x => x.ContentAuthorId, Kanji x => x.ContentAuthorId, KanaCharacter x => x.ContentAuthorId, Vocabulary x => x.ContentAuthorId, GrammarPattern x => x.ContentAuthorId, MockTest x => x.ContentAuthorId, PracticeExercise x => x.ContentAuthorId, _ => 0 };
+        var status = entity switch { Lesson x => x.Status, Kanji x => x.Status, KanaCharacter x => x.Status, Vocabulary x => x.Status, GrammarPattern x => x.Status, MockTest x => x.Status, PracticeExercise x => x.Status, _ => ContentStatus.Published };
         if (contentAuthorId != authorId || status is not (ContentStatus.Draft or ContentStatus.Rejected))
             throw new InvalidOperationException("Bạn chỉ sửa được nội dung của mình đang Draft hoặc bị từ chối.");
         return await Task.FromResult(entity);
@@ -167,6 +185,7 @@ public class ContentAuthorService(IUnitOfWork unitOfWork, IClaimService claimSer
 
     private static void Prepare(Lesson e) { e.Status = ContentStatus.Draft; e.IsApproved = false; e.ReviewNote = null; e.ReviewedDate = null; e.ReviewedByName = null; e.ModifiedDate = DateTime.UtcNow; }
     private static void Prepare(Kanji e) { e.Status = ContentStatus.Draft; e.IsApproved = false; e.ReviewNote = null; e.ReviewedDate = null; e.ReviewedByName = null; e.ModifiedDate = DateTime.UtcNow; }
+    private static void Prepare(KanaCharacter e) { e.Status = ContentStatus.Draft; e.IsApproved = false; e.ReviewNote = null; e.ReviewedDate = null; e.ReviewedByName = null; e.ModifiedDate = DateTime.UtcNow; }
     private static void Prepare(Vocabulary e) { e.Status = ContentStatus.Draft; e.IsApproved = false; e.ReviewNote = null; e.ReviewedDate = null; e.ReviewedByName = null; e.ModifiedDate = DateTime.UtcNow; }
     private static void Prepare(GrammarPattern e) { e.Status = ContentStatus.Draft; e.IsApproved = false; e.ReviewNote = null; e.ReviewedDate = null; e.ReviewedByName = null; e.ModifiedDate = DateTime.UtcNow; }
     private static void Prepare(MockTest e) { e.Status = ContentStatus.Draft; e.IsApproved = false; e.ReviewNote = null; e.ReviewedDate = null; e.ReviewedByName = null; e.ModifiedDate = DateTime.UtcNow; }
@@ -182,8 +201,8 @@ public class ContentAuthorService(IUnitOfWork unitOfWork, IClaimService claimSer
         var result = map(entity); result.Id = GetId(entity); result.EntityType = type; result.ContentAuthorId = GetAuthorId(entity); return result;
     }
 
-    private static int GetId(Base e) => e switch { Lesson x => x.Id, Kanji x => x.Id, Vocabulary x => x.Id, GrammarPattern x => x.Id, _ => 0 };
-    private static int GetAuthorId(Base e) => e switch { Lesson x => x.ContentAuthorId, Kanji x => x.ContentAuthorId, Vocabulary x => x.ContentAuthorId, GrammarPattern x => x.ContentAuthorId, MockTest x => x.ContentAuthorId, PracticeExercise x => x.ContentAuthorId, _ => 0 };
+    private static int GetId(Base e) => e switch { Lesson x => x.Id, Kanji x => x.Id, KanaCharacter x => x.Id, Vocabulary x => x.Id, GrammarPattern x => x.Id, _ => 0 };
+    private static int GetAuthorId(Base e) => e switch { Lesson x => x.ContentAuthorId, Kanji x => x.ContentAuthorId, KanaCharacter x => x.ContentAuthorId, Vocabulary x => x.ContentAuthorId, GrammarPattern x => x.ContentAuthorId, MockTest x => x.ContentAuthorId, PracticeExercise x => x.ContentAuthorId, _ => 0 };
     private static AuthorContentDetailsResponse? MapMockTest(MockTest? e, ContentEntityType type, int? ownerId) => e is null || e.IsDeleted || (ownerId is not null && e.ContentAuthorId != ownerId) ? null : new()
     {
         Id=e.Id, EntityType=type, Title=e.Title, Description=e.Description, TimeLimitMinutes=e.TimeLimitMinutes, CertificateLevelId=e.CertificateLevelId,

@@ -22,6 +22,9 @@ namespace RikiPath.Infrastructure
 
         // Banks
         public DbSet<Kanji> Kanjis { get; set; }
+        public DbSet<KanaCharacter> KanaCharacters { get; set; }
+        public DbSet<KanaWritingPracticeCard> KanaWritingPracticeCards { get; set; }
+        public DbSet<KanaWritingPracticeHistory> KanaWritingPracticeHistories { get; set; }
         public DbSet<Vocabulary> Vocabularies { get; set; }
         public DbSet<GrammarPattern> GrammarPatterns { get; set; }
         public DbSet<LessonKanji> LessonKanjis { get; set; }
@@ -84,6 +87,9 @@ namespace RikiPath.Infrastructure
             modelBuilder.ApplyConfiguration(new LessonProgressConfig());
 
             modelBuilder.ApplyConfiguration(new KanjiConfig());
+            modelBuilder.ApplyConfiguration(new KanaCharacterConfig());
+            modelBuilder.ApplyConfiguration(new KanaWritingPracticeCardConfig());
+            modelBuilder.ApplyConfiguration(new KanaWritingPracticeHistoryConfig());
             modelBuilder.ApplyConfiguration(new VocabularyConfig());
             modelBuilder.ApplyConfiguration(new GrammarPatternConfig());
             modelBuilder.ApplyConfiguration(new LessonKanjiConfig());

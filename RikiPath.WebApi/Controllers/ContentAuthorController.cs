@@ -17,13 +17,21 @@ public class ContentAuthorController(IContentAuthorService authorService, IConte
     [HttpGet("lookups")]
     public async Task<IActionResult> GetLookups(CancellationToken cancellationToken)
     {
-        var types = (await uow.CertificateTypes.GetAllAsync(cancellationToken)).Where(x => !x.IsDeleted).Select(x => new { x.Id, x.Name }).ToList();
-        var levels = (await uow.CertificateLevels.GetAllAsync(cancellationToken)).Where(x => !x.IsDeleted).Select(x => new { x.Id, x.Code, x.CertificateTypeId }).ToList();
+        var types = (await uow.CertificateTypes.GetAllAsync(cancellationToken))
+            .Where(x => !x.IsDeleted && x.IsActive)
+            .Select(x => new { x.Id, x.Name, CertificateType = x.Name })
+            .ToList();
+        var activeTypeIds = types.Select(x => x.Id).ToHashSet();
+        var typeNames = types.ToDictionary(x => x.Id, x => x.Name);
+        var levels = (await uow.CertificateLevels.GetAllAsync(cancellationToken))
+            .Where(x => !x.IsDeleted && activeTypeIds.Contains(x.CertificateTypeId))
+            .Select(x => new { x.Id, x.Code, CertificateLevel = x.Code, x.CertificateTypeId, CertificateType = typeNames[x.CertificateTypeId] })
+            .ToList();
         var skills = (await uow.LanguageSkills.GetAllAsync(cancellationToken)).Where(x => !x.IsDeleted).Select(x => new { x.Id, x.Name }).ToList();
         return Ok(new { CertificateTypes = types, CertificateLevels = levels, LanguageSkills = skills });
     }
     /// <summary>Lấy danh sách nội dung của Content Author hiện tại theo loại nội dung.</summary>
-    /// <param name="type">Loại nội dung, ví dụ Lesson, Kanji, Vocabulary, GrammarPattern, MockTest hoặc PracticeExercise.</param>
+    /// <param name="type">Loại nội dung, ví dụ Lesson, Kanji, KanaCharacter, Vocabulary, GrammarPattern, MockTest hoặc PracticeExercise.</param>
     /// <param name="cancellationToken">Token hủy request.</param>
     [HttpGet("content/{type}")]
     public async Task<IActionResult> GetMine(ContentEntityType type, CancellationToken cancellationToken)

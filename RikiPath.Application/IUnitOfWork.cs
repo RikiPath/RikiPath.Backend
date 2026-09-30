@@ -21,6 +21,9 @@ namespace RikiPath.Application
 
         // 4. Content Banks
         IKanjiRepository Kanjis { get; }
+        IKanaCharacterRepository KanaCharacters { get; }
+        IKanaWritingPracticeCardRepository KanaWritingPracticeCards { get; }
+        IKanaWritingPracticeHistoryRepository KanaWritingPracticeHistories { get; }
         IVocabularyRepository Vocabularies { get; }
         IGrammarPatternRepository GrammarPatterns { get; }
         ILessonKanjiRepository LessonKanjis { get; }

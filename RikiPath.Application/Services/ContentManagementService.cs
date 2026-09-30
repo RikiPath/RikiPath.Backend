@@ -7,6 +7,7 @@ using RikiPath.Application.IServices;
 using RikiPath.Application.Requests.Content;
 using RikiPath.Application.Responses;
 using RikiPath.Application.Responses.Content;
+using System.Globalization;
 
 namespace RikiPath.Application.Services
 {
@@ -26,84 +27,282 @@ namespace RikiPath.Application.Services
             try
             {
                 var authorId = claimService.GetUserClaim().Id;
-
-                if (request.EntityType is ContentEntityType.Lesson or ContentEntityType.MockTest)
-                    return ApiResponse<BulkImportResultResponse>.Fail(
-                        "Loại nội dung này không hỗ trợ import hàng loạt, hãy tạo thủ công.");
-
-                if (request.EntityType == ContentEntityType.MockQuestion)
-                {
-                    if (request.TargetMockTestSectionId is null)
-                        return ApiResponse<BulkImportResultResponse>.Fail("Thiếu TargetMockTestSectionId để import câu hỏi.");
-                    var section = await unitOfWork.MockTestSections.GetByIdAsync(request.TargetMockTestSectionId.Value, cancellationToken);
-                    var test = section is null ? null : await unitOfWork.MockTests.GetByIdAsync(section.MockTestId, cancellationToken);
-                    if (test is null || test.IsDeleted || test.ContentAuthorId != authorId || test.Status is not (ContentStatus.Draft or ContentStatus.Rejected))
-                        return ApiResponse<BulkImportResultResponse>.Fail("Bạn chỉ import câu hỏi vào bài thi Draft/Rejected do mình tạo.");
-                }
-
-                var parseResult = await excelParser.ParseAsync(request.FileStream, request.EntityType, cancellationToken);
+                var parseResult = await excelParser.ParseAsync(request.FileStream, cancellationToken);
                 if (!parseResult.Success && parseResult.Rows.Count == 0)
                     return ApiResponse<BulkImportResultResponse>.Fail(
                         "Không đọc được file, vui lòng kiểm tra định dạng.", errors: parseResult.Errors);
 
+                var certificateTypes = await unitOfWork.CertificateTypes.GetAllAsync(cancellationToken);
+                var certificateLevels = await unitOfWork.CertificateLevels.GetAllAsync(cancellationToken);
                 var errors = new List<string>(parseResult.Errors);
                 var successCount = 0;
+                Lesson? currentLesson = null;
+                var queuedKanjiLinks = new HashSet<(Lesson Lesson, Kanji Kanji)>();
+                var queuedVocabularyLinks = new HashSet<(Lesson Lesson, Vocabulary Vocabulary)>();
+                var queuedGrammarLinks = new HashSet<(Lesson Lesson, GrammarPattern Grammar)>();
 
                 foreach (var row in parseResult.Rows)
                 {
                     try
                     {
-                        switch (request.EntityType)
+                        var typeValue = GetRequired(row, "Type");
+                        if (!Enum.GetNames<ContentEntityType>().Contains(typeValue, StringComparer.OrdinalIgnoreCase)
+                            || !Enum.TryParse<ContentEntityType>(typeValue, true, out var entityType))
+                            throw new InvalidOperationException("Type không hợp lệ. Giá trị hỗ trợ: Lesson, Kanji, KanaCharacter, Vocabulary, GrammarPattern, MockTest, MockQuestion, PracticeExercise.");
+
+                        var certificateLevelId = 0;
+                        if (entityType is not (ContentEntityType.MockQuestion or ContentEntityType.KanaCharacter))
                         {
-                            case ContentEntityType.Kanji:
-                                await unitOfWork.Kanjis.AddAsync(new Kanji
+                            certificateLevelId = ResolveCertificateLevelId(row, certificateTypes, certificateLevels);
+                        }
+
+                        switch (entityType)
+                        {
+                            case ContentEntityType.Lesson:
+                            {
+                                currentLesson = null;
+                                var languageSkillId = GetRequiredInt(row, "LanguageSkillId");
+                                var skill = await unitOfWork.LanguageSkills.GetByIdAsync(languageSkillId, cancellationToken);
+                                if (skill is null || skill.IsDeleted)
+                                    throw new InvalidOperationException($"LanguageSkillId {languageSkillId} không tồn tại hoặc đã bị xóa.");
+
+                                var title = GetRequired(row, "Title");
+                                var description = GetOptional(row, "Description");
+                                var videoUrl = GetOptional(row, "VideoUrl") ?? string.Empty;
+                                var durationSeconds = GetOptionalInt(row, "DurationSeconds") ?? 0;
+                                var sortOrder = GetOptionalInt(row, "SortOrder") ?? row.RowNumber;
+                                var lesson = await unitOfWork.Lessons.FirstOrDefaultAsync(
+                                    x => !x.IsDeleted && x.ContentAuthorId == authorId
+                                        && (x.Status == ContentStatus.Draft || x.Status == ContentStatus.Rejected)
+                                        && x.CertificateLevelId == certificateLevelId
+                                        && x.LanguageSkillId == languageSkillId && x.Title == title
+                                        && x.Description == description && x.VideoUrl == videoUrl
+                                        && x.DurationSeconds == durationSeconds && x.SortOrder == sortOrder,
+                                    cancellationToken);
+
+                                lesson ??= new Lesson
                                 {
-                                    Character = GetRequired(row, "Character"),
-                                    Meaning = GetRequired(row, "Meaning"),
-                                    SinoVietnamese = GetOptional(row, "SinoVietnamese"),
-                                    OnYomi = GetOptional(row, "OnYomi"),
-                                    KunYomi = GetOptional(row, "KunYomi"),
-                                    StrokeCount = int.Parse(GetRequired(row, "StrokeCount")),
-                                    CertificateLevelId = request.CertificateLevelId,
+                                    Title = title,
+                                    Description = description,
+                                    VideoUrl = videoUrl,
+                                    DurationSeconds = durationSeconds,
+                                    SortOrder = sortOrder,
+                                    CertificateLevelId = certificateLevelId,
+                                    LanguageSkillId = languageSkillId,
                                     ContentAuthorId = authorId,
                                     Status = ContentStatus.Draft
+                                };
+                                if (lesson.Id == 0)
+                                    await unitOfWork.Lessons.AddAsync(lesson, cancellationToken);
+                                currentLesson = lesson;
+                                break;
+                            }
+                            case ContentEntityType.Kanji:
+                            {
+                                var lesson = currentLesson;
+
+                                var character = GetRequired(row, "Character");
+                                var meaning = GetRequired(row, "Meaning");
+                                var sinoVietnamese = GetOptional(row, "SinoVietnamese");
+                                var onYomi = GetOptional(row, "OnYomi");
+                                var kunYomi = GetOptional(row, "KunYomi");
+                                var strokeCount = GetRequiredInt(row, "StrokeCount");
+                                var strokeOrderImageUrl = GetOptional(row, "StrokeOrderImageUrl");
+                                var audioUrl = GetOptional(row, "AudioUrl");
+
+                                var kanji = lesson is null ? null : await unitOfWork.Kanjis.FirstOrDefaultAsync(
+                                    x => !x.IsDeleted && x.ContentAuthorId == authorId
+                                        && x.CertificateLevelId == certificateLevelId
+                                        && x.Character == character && x.Meaning == meaning
+                                        && x.SinoVietnamese == sinoVietnamese && x.OnYomi == onYomi
+                                        && x.KunYomi == kunYomi && x.StrokeCount == strokeCount
+                                        && x.StrokeOrderImageUrl == strokeOrderImageUrl && x.AudioUrl == audioUrl,
+                                    cancellationToken);
+
+                                kanji ??= new Kanji
+                                {
+                                    Character = character,
+                                    Meaning = meaning,
+                                    SinoVietnamese = sinoVietnamese,
+                                    OnYomi = onYomi,
+                                    KunYomi = kunYomi,
+                                    StrokeCount = strokeCount,
+                                    StrokeOrderImageUrl = strokeOrderImageUrl,
+                                    AudioUrl = audioUrl,
+                                    CertificateLevelId = certificateLevelId,
+                                    ContentAuthorId = authorId,
+                                    Status = ContentStatus.Draft
+                                };
+                                if (kanji.Id == 0)
+                                    await unitOfWork.Kanjis.AddAsync(kanji, cancellationToken);
+                                if (lesson is not null)
+                                {
+                                    if (queuedKanjiLinks.Add((lesson, kanji))
+                                        && !await unitOfWork.LessonKanjis.AnyAsync(
+                                            x => x.LessonId == lesson.Id && x.KanjiId == kanji.Id, cancellationToken))
+                                    {
+                                        await unitOfWork.LessonKanjis.AddAsync(
+                                            new LessonKanji { Lesson = lesson, Kanji = kanji }, cancellationToken);
+                                    }
+                                }
+                                break;
+                            }
+                            case ContentEntityType.KanaCharacter:
+                            {
+                                if (!Enum.TryParse<RikiPath.Domain.Enums.KanaCharacterType>(GetRequired(row, "KanaType"), true, out var kanaType)
+                                    || !Enum.IsDefined(kanaType))
+                                    throw new InvalidOperationException("KanaType chỉ nhận Hiragana hoặc Katakana.");
+                                var character = GetRequired(row, "Character");
+                                if (System.Globalization.StringInfo.ParseCombiningCharacters(character).Length != 1)
+                                    throw new InvalidOperationException("Character phải chứa đúng một ký tự Kana.");
+                                var strokeCount = GetRequiredInt(row, "StrokeCount");
+                                if (strokeCount <= 0) throw new InvalidOperationException("StrokeCount phải lớn hơn 0.");
+                                await unitOfWork.KanaCharacters.AddAsync(new KanaCharacter
+                                {
+                                    Character = character,
+                                    Type = kanaType, Romaji = GetRequired(row, "Romaji"), StrokeCount = strokeCount,
+                                    StrokeOrderImageUrl = GetOptional(row, "StrokeOrderImageUrl"), AudioUrl = GetOptional(row, "AudioUrl"),
+                                    ContentAuthorId = authorId, Status = ContentStatus.Draft
                                 }, cancellationToken);
                                 break;
+                            }
 
                             case ContentEntityType.Vocabulary:
-                                await unitOfWork.Vocabularies.AddAsync(new Vocabulary
+                            {
+                                var lesson = currentLesson;
+
+                                var word = GetRequired(row, "Word");
+                                var reading = GetRequired(row, "Reading");
+                                var meaning = GetRequired(row, "Meaning");
+                                var exampleSentence = GetOptional(row, "ExampleSentence");
+                                var exampleSentenceMeaning = GetOptional(row, "ExampleSentenceMeaning");
+                                var audioUrl = GetOptional(row, "AudioUrl");
+
+                                var vocabulary = lesson is null ? null : await unitOfWork.Vocabularies.FirstOrDefaultAsync(
+                                    x => !x.IsDeleted && x.ContentAuthorId == authorId
+                                        && x.CertificateLevelId == certificateLevelId
+                                        && x.Word == word && x.Reading == reading && x.Meaning == meaning
+                                        && x.ExampleSentence == exampleSentence
+                                        && x.ExampleSentenceMeaning == exampleSentenceMeaning && x.AudioUrl == audioUrl,
+                                    cancellationToken);
+
+                                vocabulary ??= new Vocabulary
                                 {
-                                    Word = GetRequired(row, "Word"),
-                                    Reading = GetRequired(row, "Reading"),
-                                    Meaning = GetRequired(row, "Meaning"),
-                                    ExampleSentence = GetOptional(row, "ExampleSentence"),
-                                    ExampleSentenceMeaning = GetOptional(row, "ExampleSentenceMeaning"),
-                                    CertificateLevelId = request.CertificateLevelId,
+                                    Word = word,
+                                    Reading = reading,
+                                    Meaning = meaning,
+                                    ExampleSentence = exampleSentence,
+                                    ExampleSentenceMeaning = exampleSentenceMeaning,
+                                    AudioUrl = audioUrl,
+                                    CertificateLevelId = certificateLevelId,
                                     ContentAuthorId = authorId,
                                     Status = ContentStatus.Draft
-                                }, cancellationToken);
+                                };
+                                if (vocabulary.Id == 0)
+                                    await unitOfWork.Vocabularies.AddAsync(vocabulary, cancellationToken);
+                                if (lesson is not null)
+                                {
+                                    if (queuedVocabularyLinks.Add((lesson, vocabulary))
+                                        && !await unitOfWork.LessonVocabularies.AnyAsync(
+                                            x => x.LessonId == lesson.Id && x.VocabularyId == vocabulary.Id, cancellationToken))
+                                    {
+                                        await unitOfWork.LessonVocabularies.AddAsync(
+                                            new LessonVocabulary { Lesson = lesson, Vocabulary = vocabulary }, cancellationToken);
+                                    }
+                                }
                                 break;
+                            }
 
                             case ContentEntityType.GrammarPattern:
-                                await unitOfWork.GrammarPatterns.AddAsync(new GrammarPattern
+                            {
+                                var lesson = currentLesson;
+
+                                var title = GetRequired(row, "Title");
+                                var structure = GetRequired(row, "Structure");
+                                var usageNotes = GetOptional(row, "UsageNotes");
+                                var exampleSentence = GetOptional(row, "ExampleSentence");
+                                var exampleSentenceMeaning = GetOptional(row, "ExampleSentenceMeaning");
+
+                                var grammarPattern = lesson is null ? null : await unitOfWork.GrammarPatterns.FirstOrDefaultAsync(
+                                    x => !x.IsDeleted && x.ContentAuthorId == authorId
+                                        && x.CertificateLevelId == certificateLevelId
+                                        && x.Title == title && x.Structure == structure
+                                        && x.UsageNotes == usageNotes && x.ExampleSentence == exampleSentence
+                                        && x.ExampleSentenceMeaning == exampleSentenceMeaning,
+                                    cancellationToken);
+
+                                grammarPattern ??= new GrammarPattern
+                                {
+                                    Title = title,
+                                    Structure = structure,
+                                    UsageNotes = usageNotes,
+                                    ExampleSentence = exampleSentence,
+                                    ExampleSentenceMeaning = exampleSentenceMeaning,
+                                    CertificateLevelId = certificateLevelId,
+                                    ContentAuthorId = authorId,
+                                    Status = ContentStatus.Draft
+                                };
+                                if (grammarPattern.Id == 0)
+                                    await unitOfWork.GrammarPatterns.AddAsync(grammarPattern, cancellationToken);
+                                if (lesson is not null)
+                                {
+                                    if (queuedGrammarLinks.Add((lesson, grammarPattern))
+                                        && !await unitOfWork.LessonGrammars.AnyAsync(
+                                            x => x.LessonId == lesson.Id && x.GrammarPatternId == grammarPattern.Id, cancellationToken))
+                                    {
+                                        await unitOfWork.LessonGrammars.AddAsync(
+                                            new LessonGrammar { Lesson = lesson, GrammarPattern = grammarPattern }, cancellationToken);
+                                    }
+                                }
+                                break;
+                            }
+
+                            case ContentEntityType.MockTest:
+                                await unitOfWork.MockTests.AddAsync(new MockTest
                                 {
                                     Title = GetRequired(row, "Title"),
-                                    Structure = GetRequired(row, "Structure"),
-                                    UsageNotes = GetOptional(row, "UsageNotes"),
-                                    ExampleSentence = GetOptional(row, "ExampleSentence"),
-                                    ExampleSentenceMeaning = GetOptional(row, "ExampleSentenceMeaning"),
-                                    CertificateLevelId = request.CertificateLevelId,
+                                    Description = GetOptional(row, "Description"),
+                                    TimeLimitMinutes = GetRequiredInt(row, "TimeLimitMinutes"),
+                                    CertificateLevelId = certificateLevelId,
                                     ContentAuthorId = authorId,
                                     Status = ContentStatus.Draft
                                 }, cancellationToken);
                                 break;
 
-                            case ContentEntityType.MockQuestion:
-                                if (request.TargetMockTestSectionId is null)
+                            case ContentEntityType.PracticeExercise:
+                            {
+                                var lesson = currentLesson;
+                                if (lesson is null)
+                                    throw new InvalidOperationException("Phải đặt dòng PracticeExercise bên dưới một dòng Lesson trong cùng file.");
+                                if (lesson.CertificateLevelId != certificateLevelId)
+                                    throw new InvalidOperationException("CertificateType/CertificateLevel phải khớp với Lesson gần nhất phía trên.");
+
+                                var languageSkillId = GetRequiredInt(row, "LanguageSkillId");
+                                var skill = await unitOfWork.LanguageSkills.GetByIdAsync(languageSkillId, cancellationToken);
+                                if (skill is null || skill.IsDeleted)
+                                    throw new InvalidOperationException($"LanguageSkillId {languageSkillId} không tồn tại hoặc đã bị xóa.");
+
+                                await unitOfWork.PracticeExercises.AddAsync(new PracticeExercise
                                 {
-                                    errors.Add($"Dòng {row.RowNumber}: thiếu TargetMockTestSectionId để import câu hỏi.");
-                                    continue;
-                                }
+                                    Title = GetRequired(row, "Title"),
+                                    Description = GetOptional(row, "Description"),
+                                    Lesson = lesson,
+                                    LanguageSkillId = languageSkillId,
+                                    CertificateLevelId = lesson.CertificateLevelId,
+                                    SortOrder = GetOptionalInt(row, "SortOrder") ?? row.RowNumber,
+                                    ContentAuthorId = authorId,
+                                    Status = ContentStatus.Draft
+                                }, cancellationToken);
+                                break;
+                            }
+
+                            case ContentEntityType.MockQuestion:
+                            {
+                                var sectionId = GetRequiredInt(row, "MockTestSectionId");
+                                var section = await unitOfWork.MockTestSections.GetByIdAsync(sectionId, cancellationToken);
+                                var test = section is null ? null : await unitOfWork.MockTests.GetByIdAsync(section.MockTestId, cancellationToken);
+                                if (test is null || test.IsDeleted || test.ContentAuthorId != authorId || test.Status is not (ContentStatus.Draft or ContentStatus.Rejected))
+                                    throw new InvalidOperationException("MockTestSectionId phải thuộc Mock Test Draft/Rejected do chính bạn tạo.");
 
                                 await unitOfWork.MockQuestions.AddAsync(new MockQuestion
                                 {
@@ -111,14 +310,14 @@ namespace RikiPath.Application.Services
                                     Explanation = GetOptional(row, "Explanation"),
                                     AudioUrl = GetOptional(row, "AudioUrl"),
                                     ImageUrl = GetOptional(row, "ImageUrl"),
-                                    MockTestSectionId = request.TargetMockTestSectionId.Value,
-                                    SortOrder = row.RowNumber
+                                    MockTestSectionId = sectionId,
+                                    SortOrder = GetOptionalInt(row, "SortOrder") ?? row.RowNumber
                                 }, cancellationToken);
                                 break;
+                            }
 
                             default:
-                                errors.Add($"Dòng {row.RowNumber}: loại nội dung không được hỗ trợ import hàng loạt.");
-                                continue;
+                                throw new InvalidOperationException("Loại nội dung này chưa được hỗ trợ trong Excel import.");
                         }
 
                         successCount++;
@@ -156,6 +355,7 @@ namespace RikiPath.Application.Services
             {
                 ContentEntityType.Lesson => SubmitLessonForReviewAsync(authorId, entityId, cancellationToken),
                 ContentEntityType.Kanji => SubmitKanjiForReviewAsync(authorId, entityId, cancellationToken),
+                ContentEntityType.KanaCharacter => SubmitKanaForReviewAsync(authorId, entityId, cancellationToken),
                 ContentEntityType.Vocabulary => SubmitVocabularyForReviewAsync(authorId, entityId, cancellationToken),
                 ContentEntityType.GrammarPattern => SubmitGrammarForReviewAsync(authorId, entityId, cancellationToken),
                 ContentEntityType.MockTest => SubmitMockTestForReviewAsync(authorId, entityId, cancellationToken),
@@ -220,6 +420,20 @@ namespace RikiPath.Application.Services
             {
                 return ApiResponse<ContentReviewStatusResponse>.Fail($"Không thể gửi duyệt: {ex.Message}");
             }
+        }
+
+        private async Task<ApiResponse<ContentReviewStatusResponse>> SubmitKanaForReviewAsync(int authorId, int entityId, CancellationToken ct)
+        {
+            try
+            {
+                var entity = await unitOfWork.KanaCharacters.GetByIdAsync(entityId, ct);
+                if (entity is null || entity.IsDeleted || entity.ContentAuthorId != authorId) return ApiResponse<ContentReviewStatusResponse>.Fail("Không tìm thấy nội dung.");
+                if (entity.Status is not (ContentStatus.Draft or ContentStatus.Rejected)) return ApiResponse<ContentReviewStatusResponse>.Fail("Chỉ có thể gửi duyệt nội dung Draft hoặc Rejected.");
+                entity.Status = ContentStatus.PendingReview; entity.IsApproved = false; entity.ReviewedByName = null; entity.ReviewNote = null; entity.ReviewedDate = null;
+                unitOfWork.KanaCharacters.Update(entity); await unitOfWork.SaveChangesAsync(ct);
+                return ApiResponse<ContentReviewStatusResponse>.Success(MapKanaToResponse(entity));
+            }
+            catch (Exception ex) { return ApiResponse<ContentReviewStatusResponse>.Fail($"Không thể gửi duyệt: {ex.Message}"); }
         }
 
         private async Task<ApiResponse<ContentReviewStatusResponse>> SubmitVocabularyForReviewAsync(
@@ -347,6 +561,8 @@ namespace RikiPath.Application.Services
                         .Select(MapLessonToResponse).ToList(),
                     ContentEntityType.Kanji => (await unitOfWork.Kanjis.FindAsync(e => !e.IsDeleted && e.ContentAuthorId == authorId, cancellationToken))
                         .Select(MapKanjiToResponse).ToList(),
+                    ContentEntityType.KanaCharacter => (await unitOfWork.KanaCharacters.FindAsync(e => !e.IsDeleted && e.ContentAuthorId == authorId, cancellationToken))
+                        .Select(MapKanaToResponse).ToList(),
                     ContentEntityType.Vocabulary => (await unitOfWork.Vocabularies.FindAsync(e => !e.IsDeleted && e.ContentAuthorId == authorId, cancellationToken))
                         .Select(MapVocabularyToResponse).ToList(),
                     ContentEntityType.GrammarPattern => (await unitOfWork.GrammarPatterns.FindAsync(e => !e.IsDeleted && e.ContentAuthorId == authorId, cancellationToken))
@@ -379,6 +595,8 @@ namespace RikiPath.Application.Services
                         .Select(MapLessonToResponse).ToList(),
                     ContentEntityType.Kanji => (await unitOfWork.Kanjis.FindAsync(e => !e.IsDeleted && e.Status == ContentStatus.PendingReview, cancellationToken))
                         .Select(MapKanjiToResponse).ToList(),
+                    ContentEntityType.KanaCharacter => (await unitOfWork.KanaCharacters.FindAsync(e => !e.IsDeleted && e.Status == ContentStatus.PendingReview, cancellationToken))
+                        .Select(MapKanaToResponse).ToList(),
                     ContentEntityType.Vocabulary => (await unitOfWork.Vocabularies.FindAsync(e => !e.IsDeleted && e.Status == ContentStatus.PendingReview, cancellationToken))
                         .Select(MapVocabularyToResponse).ToList(),
                     ContentEntityType.GrammarPattern => (await unitOfWork.GrammarPatterns.FindAsync(e => !e.IsDeleted && e.Status == ContentStatus.PendingReview, cancellationToken))
@@ -408,6 +626,7 @@ namespace RikiPath.Application.Services
             {
                 ContentEntityType.Lesson => ReviewLessonAsync(adminId, entityId, request, cancellationToken),
                 ContentEntityType.Kanji => ReviewKanjiAsync(adminId, entityId, request, cancellationToken),
+                ContentEntityType.KanaCharacter => ReviewKanaAsync(adminId, entityId, request, cancellationToken),
                 ContentEntityType.Vocabulary => ReviewVocabularyAsync(adminId, entityId, request, cancellationToken),
                 ContentEntityType.GrammarPattern => ReviewGrammarAsync(adminId, entityId, request, cancellationToken),
                 ContentEntityType.MockTest => ReviewMockTestAsync(adminId, entityId, request, cancellationToken),
@@ -476,6 +695,21 @@ namespace RikiPath.Application.Services
             {
                 return ApiResponse<ContentReviewStatusResponse>.Fail($"Không thể duyệt nội dung: {ex.Message}");
             }
+        }
+
+        private async Task<ApiResponse<ContentReviewStatusResponse>> ReviewKanaAsync(int adminId, int entityId, ReviewContentRequest request, CancellationToken ct)
+        {
+            try
+            {
+                var entity = await unitOfWork.KanaCharacters.GetByIdAsync(entityId, ct);
+                if (entity is null || entity.IsDeleted || entity.Status != ContentStatus.PendingReview) return ApiResponse<ContentReviewStatusResponse>.Fail("Không tìm thấy nội dung đang chờ duyệt.");
+                entity.Status = request.Approve ? ContentStatus.Published : ContentStatus.Rejected;
+                entity.IsApproved = request.Approve; entity.ReviewedByName = await GetReviewerNameAsync(adminId, ct);
+                entity.ReviewNote = request.Approve ? null : request.ReviewNote; entity.ReviewedDate = DateTime.UtcNow;
+                unitOfWork.KanaCharacters.Update(entity); await unitOfWork.SaveChangesAsync(ct);
+                return ApiResponse<ContentReviewStatusResponse>.Success(MapKanaToResponse(entity));
+            }
+            catch (Exception ex) { return ApiResponse<ContentReviewStatusResponse>.Fail($"Không thể duyệt nội dung: {ex.Message}"); }
         }
 
         private async Task<ApiResponse<ContentReviewStatusResponse>> ReviewVocabularyAsync(
@@ -603,6 +837,13 @@ namespace RikiPath.Application.Services
             ReviewedByName = e.ReviewedByName
         };
 
+        private static ContentReviewStatusResponse MapKanaToResponse(KanaCharacter e) => new()
+        {
+            Id = e.Id, EntityType = ContentEntityType.KanaCharacter, Title = e.Character,
+            Status = e.Status, ContentAuthorId = e.ContentAuthorId, ReviewNote = e.ReviewNote,
+            ReviewedDate = e.ReviewedDate, ReviewedByName = e.ReviewedByName
+        };
+
         private static ContentReviewStatusResponse MapVocabularyToResponse(Vocabulary e) => new()
         {
             Id = e.Id,
@@ -657,6 +898,48 @@ namespace RikiPath.Application.Services
                 : throw new InvalidOperationException($"Thiếu trường bắt buộc '{key}'.");
 
         private static string? GetOptional(ParsedContentRow row, string key)
-            => row.Fields.TryGetValue(key, out var v) ? v : null;
+            => row.Fields.TryGetValue(key, out var v) && !string.IsNullOrWhiteSpace(v) ? v : null;
+
+        private static int GetRequiredInt(ParsedContentRow row, string key)
+        {
+            var value = GetRequired(row, key);
+            if (!int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed))
+                throw new InvalidOperationException($"Trường '{key}' phải là số nguyên hợp lệ.");
+            return parsed;
+        }
+
+        private static int? GetOptionalInt(ParsedContentRow row, string key)
+        {
+            var value = GetOptional(row, key);
+            if (value is null) return null;
+            if (!int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed))
+                throw new InvalidOperationException($"Trường '{key}' phải là số nguyên hợp lệ.");
+            return parsed;
+        }
+
+        private static int ResolveCertificateLevelId(
+            ParsedContentRow row,
+            IReadOnlyList<CertificateType> certificateTypes,
+            IReadOnlyList<CertificateLevel> certificateLevels)
+        {
+            var certificateTypeName = GetRequired(row, "CertificateType").Trim();
+            var certificateLevelCode = GetRequired(row, "CertificateLevel").Trim();
+
+            var certificateType = certificateTypes.FirstOrDefault(x =>
+                !x.IsDeleted && x.IsActive &&
+                string.Equals(x.Name, certificateTypeName, StringComparison.OrdinalIgnoreCase));
+            if (certificateType is null)
+                throw new InvalidOperationException($"CertificateType '{certificateTypeName}' không tồn tại, đã bị xóa hoặc không hoạt động.");
+
+            var certificateLevel = certificateLevels.FirstOrDefault(x =>
+                !x.IsDeleted
+                && x.CertificateTypeId == certificateType.Id
+                && string.Equals(x.Code?.Trim(), certificateLevelCode, StringComparison.OrdinalIgnoreCase));
+            if (certificateLevel is null)
+                throw new InvalidOperationException($"Không tìm thấy CertificateLevel '{certificateLevelCode}' thuộc CertificateType '{certificateTypeName}' hoặc cấp độ đã bị xóa.");
+
+            return certificateLevel.Id;
+        }
+
     }
 }

@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using RikiPath.Infrastructure;
@@ -11,9 +12,11 @@ using RikiPath.Infrastructure;
 namespace RikiPath.Infrastructure.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260929140058_AddKanaPractice")]
+    partial class AddKanaPractice
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -135,58 +138,6 @@ namespace RikiPath.Infrastructure.Migrations
                         .IsUnique();
 
                     b.ToTable("CertificateLevels");
-
-                    b.HasData(
-                        new
-                        {
-                            Id = 1,
-                            CertificateTypeId = 1,
-                            Code = "N5",
-                            CreatedDate = new DateTime(2026, 9, 29, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Description = "JLPT N5",
-                            IsDeleted = false,
-                            SortOrder = 1
-                        },
-                        new
-                        {
-                            Id = 2,
-                            CertificateTypeId = 1,
-                            Code = "N4",
-                            CreatedDate = new DateTime(2026, 9, 29, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Description = "JLPT N4",
-                            IsDeleted = false,
-                            SortOrder = 2
-                        },
-                        new
-                        {
-                            Id = 3,
-                            CertificateTypeId = 1,
-                            Code = "N3",
-                            CreatedDate = new DateTime(2026, 9, 29, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Description = "JLPT N3",
-                            IsDeleted = false,
-                            SortOrder = 3
-                        },
-                        new
-                        {
-                            Id = 4,
-                            CertificateTypeId = 1,
-                            Code = "N2",
-                            CreatedDate = new DateTime(2026, 9, 29, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Description = "JLPT N2",
-                            IsDeleted = false,
-                            SortOrder = 4
-                        },
-                        new
-                        {
-                            Id = 5,
-                            CertificateTypeId = 1,
-                            Code = "N1",
-                            CreatedDate = new DateTime(2026, 9, 29, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Description = "JLPT N1",
-                            IsDeleted = false,
-                            SortOrder = 5
-                        });
                 });
 
             modelBuilder.Entity("RikiPath.Domain.Entities.CertificateType", b =>
@@ -232,18 +183,6 @@ namespace RikiPath.Infrastructure.Migrations
                         .IsUnique();
 
                     b.ToTable("CertificateTypes");
-
-                    b.HasData(
-                        new
-                        {
-                            Id = 1,
-                            CreatedDate = new DateTime(2026, 9, 29, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Description = "Japanese-Language Proficiency Test",
-                            IsActive = true,
-                            IsDeleted = false,
-                            Name = "JLPT",
-                            SortOrder = 1
-                        });
                 });
 
             modelBuilder.Entity("RikiPath.Domain.Entities.CertificationLevelSkill", b =>
@@ -870,48 +809,6 @@ namespace RikiPath.Infrastructure.Migrations
                         .IsUnique();
 
                     b.ToTable("LanguageSkills");
-
-                    b.HasData(
-                        new
-                        {
-                            Id = 1,
-                            CreatedDate = new DateTime(2026, 9, 29, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Description = "Japanese vocabulary learning skill.",
-                            IsDeleted = false,
-                            Name = "Vocabulary"
-                        },
-                        new
-                        {
-                            Id = 2,
-                            CreatedDate = new DateTime(2026, 9, 29, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Description = "Japanese kanji learning skill.",
-                            IsDeleted = false,
-                            Name = "Kanji"
-                        },
-                        new
-                        {
-                            Id = 3,
-                            CreatedDate = new DateTime(2026, 9, 29, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Description = "Japanese grammar learning skill.",
-                            IsDeleted = false,
-                            Name = "Grammar"
-                        },
-                        new
-                        {
-                            Id = 4,
-                            CreatedDate = new DateTime(2026, 9, 29, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Description = "Japanese listening comprehension skill.",
-                            IsDeleted = false,
-                            Name = "Listening"
-                        },
-                        new
-                        {
-                            Id = 5,
-                            CreatedDate = new DateTime(2026, 9, 29, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Description = "Japanese reading comprehension skill.",
-                            IsDeleted = false,
-                            Name = "Reading"
-                        });
                 });
 
             modelBuilder.Entity("RikiPath.Domain.Entities.LearnerNote", b =>

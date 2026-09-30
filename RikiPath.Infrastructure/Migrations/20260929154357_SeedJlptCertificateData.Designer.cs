@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using RikiPath.Infrastructure;
@@ -11,9 +12,11 @@ using RikiPath.Infrastructure;
 namespace RikiPath.Infrastructure.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260929154357_SeedJlptCertificateData")]
+    partial class SeedJlptCertificateData
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -871,47 +874,6 @@ namespace RikiPath.Infrastructure.Migrations
 
                     b.ToTable("LanguageSkills");
 
-                    b.HasData(
-                        new
-                        {
-                            Id = 1,
-                            CreatedDate = new DateTime(2026, 9, 29, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Description = "Japanese vocabulary learning skill.",
-                            IsDeleted = false,
-                            Name = "Vocabulary"
-                        },
-                        new
-                        {
-                            Id = 2,
-                            CreatedDate = new DateTime(2026, 9, 29, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Description = "Japanese kanji learning skill.",
-                            IsDeleted = false,
-                            Name = "Kanji"
-                        },
-                        new
-                        {
-                            Id = 3,
-                            CreatedDate = new DateTime(2026, 9, 29, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Description = "Japanese grammar learning skill.",
-                            IsDeleted = false,
-                            Name = "Grammar"
-                        },
-                        new
-                        {
-                            Id = 4,
-                            CreatedDate = new DateTime(2026, 9, 29, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Description = "Japanese listening comprehension skill.",
-                            IsDeleted = false,
-                            Name = "Listening"
-                        },
-                        new
-                        {
-                            Id = 5,
-                            CreatedDate = new DateTime(2026, 9, 29, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Description = "Japanese reading comprehension skill.",
-                            IsDeleted = false,
-                            Name = "Reading"
-                        });
                 });
 
             modelBuilder.Entity("RikiPath.Domain.Entities.LearnerNote", b =>

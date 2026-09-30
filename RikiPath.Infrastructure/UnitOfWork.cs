@@ -27,6 +27,9 @@ namespace RikiPath.Infrastructure
 
         // 4. Content Banks
         public IKanjiRepository Kanjis { get; }
+        public IKanaCharacterRepository KanaCharacters { get; }
+        public IKanaWritingPracticeCardRepository KanaWritingPracticeCards { get; }
+        public IKanaWritingPracticeHistoryRepository KanaWritingPracticeHistories { get; }
         public IVocabularyRepository Vocabularies { get; }
         public IGrammarPatternRepository GrammarPatterns { get; }
         public ILessonKanjiRepository LessonKanjis { get; }
@@ -89,6 +92,9 @@ namespace RikiPath.Infrastructure
             LessonProgresses = new LessonProgressRepository(_context);
 
             Kanjis = new KanjiRepository(_context);
+            KanaCharacters = new KanaCharacterRepository(_context);
+            KanaWritingPracticeCards = new KanaWritingPracticeCardRepository(_context);
+            KanaWritingPracticeHistories = new KanaWritingPracticeHistoryRepository(_context);
             Vocabularies = new VocabularyRepository(_context);
             GrammarPatterns = new GrammarPatternRepository(_context);
             LessonKanjis = new LessonKanjiRepository(_context);

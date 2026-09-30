@@ -11,6 +11,17 @@ namespace RikiPath.Infrastructure.Configuration
             builder.HasKey(x => x.Id);
             builder.Property(x => x.Name).IsRequired().HasMaxLength(100);
             builder.HasIndex(x => x.Name).IsUnique();
+
+            builder.HasData(new CertificateType
+            {
+                Id = 1,
+                Name = "JLPT",
+                Description = "Japanese-Language Proficiency Test",
+                IsActive = true,
+                SortOrder = 1,
+                CreatedDate = new DateTime(2026, 9, 29, 0, 0, 0, DateTimeKind.Utc),
+                IsDeleted = false
+            });
         }
     }
 }

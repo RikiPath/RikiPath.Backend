@@ -24,31 +24,38 @@ public class ContentManagementController(IContentManagementService contentManage
         return StatusCode(result.StatusCode, result);
     }
 
-    /// <summary>Import nội dung từ file Excel vào ngân hàng nội dung của Content Author.</summary>
-    /// <param name="file">File Excel cần import.</param>
-    /// <param name="entityType">Loại nội dung sẽ được tạo.</param>
-    /// <param name="certificateLevelId">Cấp độ chứng chỉ áp dụng cho nội dung import.</param>
-    /// <param name="targetMockTestSectionId">Section đích nếu import câu hỏi vào một đề thi; có thể bỏ trống với loại nội dung khác.</param>
+    /// <summary>Import nhiều loại nội dung từ một sheet Excel; cột Type xác định loại của từng dòng.</summary>
+    /// <remarks>
+    /// Type nhận Lesson, Kanji, KanaCharacter, Vocabulary, GrammarPattern, MockTest, MockQuestion hoặc PracticeExercise.
+    /// Các loại Lesson, Kanji, Vocabulary, GrammarPattern, MockTest và PracticeExercise cần cột CertificateType (tên loại trong DB)
+    /// và CertificateLevel (mã cấp độ thuộc loại đó, ví dụ JLPT/N5). Cột bắt buộc khác: Lesson = Title, LanguageSkillId;
+    /// Kanji = Character, Meaning, StrokeCount; KanaCharacter = Character, KanaType (Hiragana/Katakana), Romaji, StrokeCount;
+    /// Vocabulary = Word, Reading, Meaning; GrammarPattern = Title, Structure.
+    /// Các dòng Kanji, Vocabulary, GrammarPattern và PracticeExercise được gắn với dòng Lesson gần nhất phía trên
+    /// trong cùng file, cho đến khi gặp dòng Lesson tiếp theo. Hệ thống tự dùng ID Lesson do database sinh ra;
+    /// không cần cột LessonId trong Excel. Các dòng nội dung này đặt trước Lesson sẽ không được gắn vào Lesson.
+    /// MockTest = Title, TimeLimitMinutes; PracticeExercise = Title, LanguageSkillId.
+    /// MockQuestion = QuestionText, MockTestSectionId (lấy cấp độ từ đề thi cha).
+    /// LanguageSkillId và MockTestSectionId phải là ID đã có trong DB.
+    /// MockQuestion dùng MockTestSectionId có sẵn thuộc đề thi của tác giả.
+    /// Dữ liệu import ở trạng thái Draft. Các cột không áp dụng cho loại dòng đó được bỏ qua.
+    /// </remarks>
+    /// <param name="file">File Excel .xlsx cần import.</param>
     /// <param name="cancellationToken">Token hủy request.</param>
     [HttpPost("bulk-import")]
     [Authorize(Roles = "ContentAuthor")]
     [Consumes("multipart/form-data")]
-    public async Task<IActionResult> BulkImport(IFormFile file,
-        [FromForm] ContentEntityType entityType,
-        [FromForm] int certificateLevelId,
-        [FromForm] int? targetMockTestSectionId,
-        CancellationToken cancellationToken)
+    public async Task<IActionResult> BulkImport(IFormFile file, CancellationToken cancellationToken)
     {
         if (file is null || file.Length == 0)
             return BadRequest(new { error = "Vui lòng chọn file import." });
+        if (!string.Equals(Path.GetExtension(file.FileName), ".xlsx", StringComparison.OrdinalIgnoreCase))
+            return BadRequest(new { error = "Chỉ hỗ trợ file Excel .xlsx." });
 
         await using var stream = file.OpenReadStream();
         var result = await contentManagementService.BulkImportAsync(new BulkImportRequest
         {
-            FileStream = stream,
-            EntityType = entityType,
-            CertificateLevelId = certificateLevelId,
-            TargetMockTestSectionId = targetMockTestSectionId
+            FileStream = stream
         }, cancellationToken);
         return StatusCode(result.StatusCode, result);
     }

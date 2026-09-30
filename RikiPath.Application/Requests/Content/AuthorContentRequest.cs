@@ -12,6 +12,8 @@ public class AuthorContentRequest
     public int? LanguageSkillId { get; set; }
 
     public string? Character { get; set; }
+    public RikiPath.Domain.Enums.KanaCharacterType? KanaType { get; set; }
+    public string? Romaji { get; set; }
     public string? Meaning { get; set; }
     public string? SinoVietnamese { get; set; }
     public string? OnYomi { get; set; }

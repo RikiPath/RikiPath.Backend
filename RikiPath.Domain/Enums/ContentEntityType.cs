@@ -4,6 +4,7 @@ namespace RikiPath.Application.DTOs.Content
     {
         Lesson,
         Kanji,
+        KanaCharacter,
         Vocabulary,
         GrammarPattern,
         MockTest,
