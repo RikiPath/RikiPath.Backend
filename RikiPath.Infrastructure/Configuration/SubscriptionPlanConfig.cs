@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using RikiPath.Domain.Entities;
 
@@ -11,6 +11,8 @@ namespace RikiPath.Infrastructure.Configuration
             builder.HasKey(x => x.Id);
             builder.Property(x => x.Name).IsRequired().HasMaxLength(150);
             builder.Property(x => x.Price).HasColumnType("decimal(18,0)");
+            builder.HasMany(x => x.Features)
+                .WithMany(x => x.SubscriptionPlans);
         }
     }
 }

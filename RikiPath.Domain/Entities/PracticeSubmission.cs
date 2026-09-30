@@ -1,6 +1,4 @@
-using System;
-
-using Domain.Enums;
+using RikiPath.Domain.Enums;
 
 namespace RikiPath.Domain.Entities
 {
@@ -19,9 +17,10 @@ namespace RikiPath.Domain.Entities
         public SubmissionType Type { get; set; }
         public string? TextContent { get; set; }
         public string? ImageUrl { get; set; }
+        public string? AudioUrl { get; set; }
 
-        public int CertificationLevelId { get; set; }
-        public CertificationLevel CertificationLevel { get; set; }
+        public int CertificateLevelId { get; set; }
+        public CertificateLevel CertificateLevel { get; set; }
 
         public DateTime SubmittedAt { get; set; }
 

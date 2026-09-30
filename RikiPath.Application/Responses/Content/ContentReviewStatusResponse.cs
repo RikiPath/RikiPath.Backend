@@ -1,4 +1,4 @@
-﻿using Domain.Enums;
+using RikiPath.Domain.Enums;
 using RikiPath.Application.DTOs.Content;
 using System;
 using System.Collections.Generic;

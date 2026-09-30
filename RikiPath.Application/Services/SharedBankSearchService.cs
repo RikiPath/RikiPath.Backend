@@ -8,12 +8,12 @@ using System.Net;
 
 namespace RikiPath.Application.Services
 {
-    // NOTE: cần thêm cột VocabularyEntry.AudioUrl (string?), KanjiEntry.SinoVietnamese (string?),
-    // KanjiEntry.StrokeOrderUrl (string?), KanjiEntry.AudioUrl (string?) nếu chưa có.
+    // NOTE: cần thêm cột Vocabulary.AudioUrl (string?), Kanji.SinoVietnamese (string?),
+    // Kanji.StrokeOrderUrl (string?), Kanji.AudioUrl (string?) nếu chưa có.
     // Cần các hàm repo paged-search (filter + keyword, trả về (items, totalCount)):
-    //   IVocabularyEntryRepository.SearchAsync(jlptLevelId, keyword, page, pageSize)
-    //   IKanjiEntryRepository.SearchAsync(jlptLevelId, keyword, minStroke, maxStroke, page, pageSize)
-    //   IGrammarPointRepository.SearchAsync(jlptLevelId, keyword, page, pageSize)
+    //   IVocabularyRepository.SearchAsync(jlptLevelId, keyword, page, pageSize)
+    //   IKanjiRepository.SearchAsync(jlptLevelId, keyword, minStroke, maxStroke, page, pageSize)
+    //   IGrammarPatternRepository.SearchAsync(jlptLevelId, keyword, page, pageSize)
     public class SharedBankSearchService(IUnitOfWork unitOfWork) : ISharedBankSearchService
     {
         private const int MaxPageSize = 100;
@@ -25,7 +25,7 @@ namespace RikiPath.Application.Services
             {
                 Normalize(filter);
 
-                var (items, total) = await unitOfWork.VocabularyEntries.SearchAsync(
+                var (items, total) = await unitOfWork.Vocabularies.SearchAsync(
                     filter.JlptLevelId, null, filter.Keyword, filter.Page, filter.PageSize);
 
                 var result = new PagedResult<VocabularyCardResponse>
@@ -49,7 +49,7 @@ namespace RikiPath.Application.Services
         {
             try
             {
-                var entry = await unitOfWork.VocabularyEntries.GetByIdAsync(id);
+                var entry = await unitOfWork.Vocabularies.GetByIdAsync(id);
                 if (entry is null)
                     return ApiResponse<VocabularyCardResponse>.NotFound($"Không tìm thấy từ vựng Id = {id}.");
 
@@ -69,7 +69,7 @@ namespace RikiPath.Application.Services
             {
                 Normalize(filter);
 
-                var (items, total) = await unitOfWork.KanjiEntries.SearchAsync(
+                var (items, total) = await unitOfWork.Kanjis.SearchAsync(
                     filter.JlptLevelId, null, filter.Keyword, filter.MinStrokeCount, filter.MaxStrokeCount,
                     filter.Page, filter.PageSize);
 
@@ -94,7 +94,7 @@ namespace RikiPath.Application.Services
         {
             try
             {
-                var entry = await unitOfWork.KanjiEntries.GetByIdAsync(id);
+                var entry = await unitOfWork.Kanjis.GetByIdAsync(id);
                 if (entry is null)
                     return ApiResponse<KanjiCardResponse>.NotFound($"Không tìm thấy Kanji Id = {id}.");
 
@@ -114,7 +114,7 @@ namespace RikiPath.Application.Services
             {
                 Normalize(filter);
 
-                var (items, total) = await unitOfWork.GrammarPoints.SearchAsync(
+                var (items, total) = await unitOfWork.GrammarPatterns.SearchAsync(
                     filter.JlptLevelId, null, filter.Keyword, filter.Page, filter.PageSize);
 
                 var result = new PagedResult<GrammarCardResponse>
@@ -138,7 +138,7 @@ namespace RikiPath.Application.Services
         {
             try
             {
-                var entry = await unitOfWork.GrammarPoints.GetByIdAsync(id);
+                var entry = await unitOfWork.GrammarPatterns.GetByIdAsync(id);
                 if (entry is null)
                     return ApiResponse<GrammarCardResponse>.NotFound($"Không tìm thấy ngữ pháp Id = {id}.");
 
@@ -158,7 +158,7 @@ namespace RikiPath.Application.Services
             if (filter.PageSize > MaxPageSize) filter.PageSize = MaxPageSize;
         }
 
-        private static VocabularyCardResponse MapVocabulary(VocabularyEntry e) => new()
+        private static VocabularyCardResponse MapVocabulary(Vocabulary e) => new()
         {
             Id = e.Id,
             Word = e.Word,
@@ -166,10 +166,10 @@ namespace RikiPath.Application.Services
             Meaning = e.Meaning,
             ExampleSentence = e.ExampleSentence,
             AudioUrl = e.AudioUrl,
-            JlptLevelName = e.CertificationLevel?.Code ?? string.Empty,
+            JlptLevelName = e.CertificateLevel?.Code ?? string.Empty,
         };
 
-        private static KanjiCardResponse MapKanji(KanjiEntry k) => new()
+        private static KanjiCardResponse MapKanji(Kanji k) => new()
         {
             Id = k.Id,
             Character = k.Character,
@@ -180,17 +180,17 @@ namespace RikiPath.Application.Services
             StrokeCount = k.StrokeCount,
             StrokeOrderUrl = k.StrokeOrderImageUrl,
             AudioUrl = k.AudioUrl,
-            JlptLevelName = k.CertificationLevel?.Code ?? string.Empty,
+            JlptLevelName = k.CertificateLevel?.Code ?? string.Empty,
         };
 
-        private static GrammarCardResponse MapGrammar(GrammarPoint g) => new()
+        private static GrammarCardResponse MapGrammar(GrammarPattern g) => new()
         {
             Id = g.Id,
             Title = g.Title,
             Structure = g.Structure,
             Explanation = g.UsageNotes,
             ExampleSentence = g.ExampleSentence,
-            JlptLevelName = g.CertificationLevel?.Code ?? string.Empty,
+            JlptLevelName = g.CertificateLevel?.Code ?? string.Empty,
         };
 
         private static List<string> BuildDebugErrors(Exception ex)

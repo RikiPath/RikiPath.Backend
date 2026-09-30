@@ -1,10 +1,10 @@
-﻿namespace RikiPath.Domain.Entities
+namespace RikiPath.Domain.Entities
 {
     public class CertificationLevelSkill
     {
-        public int CertificationLevelId { get; set; }
-        public CertificationLevel CertificationLevel { get; set; }
-        public int SkillId { get; set; }
-        public Skill Skill { get; set; }
+        public int CertificateLevelId { get; set; }
+        public CertificateLevel CertificateLevel { get; set; }
+        public int LanguageSkillId { get; set; }
+        public LanguageSkill LanguageSkill { get; set; }
     }
 }

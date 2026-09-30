@@ -19,14 +19,14 @@ namespace RikiPath.WebApi.Controllers
         /// - Luồng xử lý: Lưu danh sách vào CSDL liên kết với user; không gọi AI.
         /// - Lưu ý cho FE: Yêu cầu Bearer Token (Role = Learner). Trường Title là Required; Items có thể optional. Response trả nhanh.
         /// </remarks>
-        /// <param name="request">CreateVocabularyListRequest: Title (Required), Description (Optional), Items (Optional).</param>
+        /// <param name="request">CreateLearnerNoteRequest: Title (Required), Description (Optional), Items (Optional).</param>
         /// <param name="cancellationToken">Token hủy request (Optional).</param>
         /// <response code="200">Thành công: Trả về danh sách đã tạo.</response>
         /// <response code="400">Dữ liệu không hợp lệ: thiếu Title hoặc format Items sai.</response>
         /// <response code="401">Chưa xác thực: Thiếu Bearer Token.</response>
         /// <response code="500">Lỗi server khi lưu danh sách.</response>
         [HttpPost("lists")]
-        public async Task<IActionResult> CreateList([FromBody] CreateVocabularyListRequest request, CancellationToken cancellationToken)
+        public async Task<IActionResult> CreateList([FromBody] CreateLearnerNoteRequest request, CancellationToken cancellationToken)
         {
             var result = await notebookService.CreateListAsync(request, cancellationToken);
             return StatusCode((int)result.StatusCode, result);
@@ -60,7 +60,7 @@ namespace RikiPath.WebApi.Controllers
         /// - Lưu ý cho FE: Yêu cầu Bearer Token. Trường Title nếu thay đổi phải không rỗng.
         /// </remarks>
         /// <param name="listId">ID danh sách (Required).</param>
-        /// <param name="request">UpdateVocabularyListRequest: Title (Optional), Items (Optional).</param>
+        /// <param name="request">UpdateLearnerNoteRequest: Title (Optional), Items (Optional).</param>
         /// <param name="cancellationToken">Token hủy request (Optional).</param>
         /// <response code="200">Thành công: Danh sách đã được cập nhật.</response>
         /// <response code="400">Dữ liệu không hợp lệ.</response>
@@ -69,7 +69,7 @@ namespace RikiPath.WebApi.Controllers
         /// <response code="404">Không tìm thấy list.</response>
         /// <response code="500">Lỗi server khi cập nhật dữ liệu.</response>
         [HttpPut("lists/{listId:int}")]
-        public async Task<IActionResult> UpdateList(int listId, [FromBody] UpdateVocabularyListRequest request, CancellationToken cancellationToken)
+        public async Task<IActionResult> UpdateList(int listId, [FromBody] UpdateLearnerNoteRequest request, CancellationToken cancellationToken)
         {
             var result = await notebookService.UpdateListAsync(listId, request, cancellationToken);
             return StatusCode((int)result.StatusCode, result);

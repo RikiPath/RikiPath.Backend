@@ -15,9 +15,9 @@ namespace RikiPath.Infrastructure.Repositories
 
         public async Task<Lesson?> GetWithBankLinksAsync(int lessonId)
             => await _context.Lessons
-                .Include(x => x.LessonKanjis).ThenInclude(x => x.KanjiEntry)
-                .Include(x => x.LessonVocabularies).ThenInclude(x => x.VocabularyEntry)
-                .Include(x => x.LessonGrammars).ThenInclude(x => x.GrammarPoint)
+                .Include(x => x.LessonKanjis).ThenInclude(x => x.Kanji)
+                .Include(x => x.LessonVocabularies).ThenInclude(x => x.Vocabulary)
+                .Include(x => x.LessonGrammars).ThenInclude(x => x.GrammarPattern)
                 .FirstOrDefaultAsync(x => x.Id == lessonId);
 
         public async Task<(int Total, int Completed)> GetCompletionStatsAsync(int userId)

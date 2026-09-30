@@ -1,5 +1,5 @@
-﻿using RikiPath.Domain.Entities;
-using Domain.Enums;
+using RikiPath.Domain.Entities;
+using RikiPath.Domain.Enums;
 using Microsoft.IdentityModel.Tokens;
 using RikiPath.Application.IRepositories;
 using RikiPath.Application.IServices;
@@ -17,7 +17,8 @@ namespace RikiPath.Application.Services
     public class AuthService(
         IUnitOfWork unitOfWork,
         AppSettings appSettings,
-        IEmailService emailService) : IAuthService
+        IEmailService emailService,
+        IFirebaseAuthService firebaseAuthService) : IAuthService
     {
         public async Task<ApiResponse<RegisterResponse>> RegisterAsync(RegisterRequest request, CancellationToken cancellationToken)
         {
@@ -40,7 +41,7 @@ namespace RikiPath.Application.Services
                     IsEmailVerified = false,
                 };
 
-                await unitOfWork.UserAccounts.AddAsync(user);
+                await unitOfWork.UserAccounts.AddAsync(user, cancellationToken);
                 await unitOfWork.SaveChangesAsync(cancellationToken);
 
                 var verificationCode = GenerateVerificationCode();
@@ -50,7 +51,7 @@ namespace RikiPath.Application.Services
                     VerificationCode = verificationCode,
                     ExpiresAt = DateTime.UtcNow.AddMinutes(30),
                     IsUsed = false,
-                });
+                }, cancellationToken);
                 await unitOfWork.SaveChangesAsync(cancellationToken);
 
                 var emailContent = $"Xin chào {user.FirstName},<br/>Mã xác thực email của bạn là: " +
@@ -70,6 +71,45 @@ namespace RikiPath.Application.Services
             }
         }
 
+        public async Task<ApiResponse<RegisterResponse>> RegisterWithFirebasePhoneAsync(FirebasePhoneAuthRequest request, CancellationToken cancellationToken)
+        {
+            try
+            {
+                var verified = await firebaseAuthService.VerifyPhoneIdTokenAsync(request.IdToken, cancellationToken);
+
+                var existingUser = await unitOfWork.UserAccounts.FirstOrDefaultAsync(
+                    u => u.FirebaseUid == verified.Uid || u.PhoneNumber == verified.PhoneNumber,
+                    cancellationToken);
+
+                if (existingUser is not null)
+                    return ApiResponse<RegisterResponse>.Fail("Số điện thoại này đã được đăng ký, vui lòng đăng nhập.");
+
+                var user = new UserAccount
+                {
+                    PhoneNumber = verified.PhoneNumber,
+                    FirebaseUid = verified.Uid,
+                    IsPhoneVerified = true,
+                    Role = Role.Learner,
+                    IsEmailVerified = false,
+                };
+
+                await unitOfWork.UserAccounts.AddAsync(user, cancellationToken);
+                await unitOfWork.SaveChangesAsync(cancellationToken);
+
+                return ApiResponse<RegisterResponse>.Created(new RegisterResponse
+                {
+                    UserId = user.Id,
+                    FullName = $"{user.FirstName} {user.LastName}".Trim(),
+                    PhoneNumber = user.PhoneNumber,
+                });
+            }
+            catch (Exception ex)
+            {
+                return ApiResponse<RegisterResponse>.Fail(
+                    "Đăng ký bằng số điện thoại thất bại.", System.Net.HttpStatusCode.InternalServerError, errors: BuildDebugErrors(ex));
+            }
+        }
+
         public async Task<ApiResponse> VerifyEmailAsync(VerifyEmailRequest request, CancellationToken cancellationToken)
         {
             try
@@ -81,7 +121,7 @@ namespace RikiPath.Application.Services
                 if (record.ExpiresAt < DateTime.UtcNow)
                     return ApiResponse.Fail("Mã xác thực đã hết hạn.");
 
-                var user = await unitOfWork.UserAccounts.GetByIdAsync(request.UserId);
+                var user = await unitOfWork.UserAccounts.GetByIdAsync(request.UserId, cancellationToken);
                 if (user is null)
                     return ApiResponse.NotFound("Không tìm thấy người dùng.");
 
@@ -131,11 +171,48 @@ namespace RikiPath.Application.Services
             }
         }
 
+        public async Task<ApiResponse<LoginResponse>> LoginWithFirebasePhoneAsync(FirebasePhoneAuthRequest request, CancellationToken cancellationToken)
+        {
+            try
+            {
+                var verified = await firebaseAuthService.VerifyPhoneIdTokenAsync(request.IdToken, cancellationToken);
+
+                var user = await unitOfWork.UserAccounts.FirstOrDefaultAsync(
+                    u => u.FirebaseUid == verified.Uid || u.PhoneNumber == verified.PhoneNumber,
+                    cancellationToken);
+
+                if (user is null)
+                    return ApiResponse<LoginResponse>.Fail("Số điện thoại chưa được đăng ký, vui lòng đăng ký trước khi đăng nhập.");
+
+                // Đồng bộ lại FirebaseUid phòng trường hợp user đổi thiết bị/app re-verify OTP lần nữa.
+                user.FirebaseUid = verified.Uid;
+                unitOfWork.UserAccounts.Update(user);
+                await unitOfWork.SaveChangesAsync(cancellationToken);
+
+                var response = new LoginResponse
+                {
+                    AccessToken = CreateToken(user),
+                    UserId = user.Id,
+                    Email = user.Email,
+                    PhoneNumber = user.PhoneNumber,
+                    FullName = $"{user.FirstName} {user.LastName}".Trim(),
+                    Role = user.Role.ToString(),
+                };
+
+                return ApiResponse<LoginResponse>.Success(response);
+            }
+            catch (Exception ex)
+            {
+                return ApiResponse<LoginResponse>.Fail(
+                    "Đăng nhập bằng số điện thoại thất bại.", System.Net.HttpStatusCode.InternalServerError, errors: BuildDebugErrors(ex));
+            }
+        }
+
         public async Task<ApiResponse> UpdateEmailAsync(int userId, UpdateEmailRequest request, CancellationToken cancellationToken)
         {
             try
             {
-                var user = await unitOfWork.UserAccounts.GetByIdAsync(userId);
+                var user = await unitOfWork.UserAccounts.GetByIdAsync(userId, cancellationToken);
                 if (user is null)
                     return ApiResponse.NotFound("Không tìm thấy người dùng.");
 
@@ -153,7 +230,7 @@ namespace RikiPath.Application.Services
                     VerificationCode = verificationCode,
                     ExpiresAt = DateTime.UtcNow.AddMinutes(30),
                     IsUsed = false,
-                });
+                }, cancellationToken);
                 await unitOfWork.SaveChangesAsync(cancellationToken);
 
                 var emailContent = $"Mã xác thực email mới của bạn là: <strong>{verificationCode}</strong>." +
@@ -175,7 +252,7 @@ namespace RikiPath.Application.Services
         {
             try
             {
-                var user = await unitOfWork.UserAccounts.GetByIdAsync(userId);
+                var user = await unitOfWork.UserAccounts.GetByIdAsync(userId, cancellationToken);
                 if (user is null)
                     return ApiResponse.NotFound("Không tìm thấy người dùng.");
 
@@ -202,12 +279,12 @@ namespace RikiPath.Application.Services
 
         private string CreateToken(UserAccount user)
         {
-            var claims = new List<Claim>
-            {
+            List<Claim> claims =
+            [
                 new(ClaimTypes.NameIdentifier, user.Id.ToString()),
                 new(ClaimTypes.Email, user.Email),
                 new(ClaimTypes.Role, user.Role.ToString()),
-            };
+            ];
 
             var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(appSettings.SecretToken.Value));
             var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha512Signature);

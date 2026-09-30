@@ -1,4 +1,4 @@
-﻿namespace RikiPath.Application.Responses.LearningPaths
+namespace RikiPath.Application.Responses.LearningPaths
 {
     public class SuggestedLessonResponse
     {

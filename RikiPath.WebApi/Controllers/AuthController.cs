@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using RikiPath.Application.IServices;
 using RikiPath.Application.Requests.Auth;
@@ -26,6 +26,27 @@ namespace RikiPath.WebApi.Controllers
         public async Task<IActionResult> Register([FromBody] RegisterRequest request, CancellationToken cancellationToken)
         {
             var result = await authService.RegisterAsync(request, cancellationToken);
+            return StatusCode((int)result.StatusCode, result);
+        }
+
+        /// <summary>
+        /// Đăng ký tài khoản mới bằng số điện thoại qua Firebase Auth.
+        /// </summary>
+        /// <remarks>
+        /// - Màn hình sử dụng: Màn hình đăng ký / xác thực OTP số điện thoại.
+        /// - Luồng xử lý: Xác thực idToken từ Firebase, lấy FirebaseUid &amp; PhoneNumber chính chủ từ Firebase server, tạo tài khoản mới trong CSDL.
+        /// - Lưu ý cho FE: FE cần hoàn tất xác thực OTP qua Firebase Client SDK trước để lấy idToken, sau đó gửi idToken trong body. Không cần Bearer Token.
+        /// </remarks>
+        /// <param name="request">FirebasePhoneAuthRequest: IdToken từ Firebase SDK và thông tin bổ sung (FullName, TargetLevel...).</param>
+        /// <param name="cancellationToken">Token hủy request (Optional).</param>
+        /// <response code="200">Thành công: Tạo tài khoản thành công và trả về thông tin user/token.</response>
+        /// <response code="400">Dữ liệu không hợp lệ: Firebase idToken hết hạn/không hợp lệ hoặc số điện thoại đã được đăng ký.</response>
+        /// <response code="500">Lỗi server khi xác thực với Firebase hoặc tạo tài khoản.</response>
+        [HttpPost("firebase-phone-register")]
+        public async Task<IActionResult> RegisterWithFirebasePhone(
+    [FromBody] FirebasePhoneAuthRequest request, CancellationToken cancellationToken)
+        {
+            var result = await authService.RegisterWithFirebasePhoneAsync(request, cancellationToken);
             return StatusCode((int)result.StatusCode, result);
         }
 
@@ -72,6 +93,27 @@ namespace RikiPath.WebApi.Controllers
         }
 
         /// <summary>
+        /// Đăng nhập bằng số điện thoại qua Firebase Auth và nhận JWT token hệ thống.
+        /// </summary>
+        /// <remarks>
+        /// - Màn hình sử dụng: Màn hình đăng nhập bằng SĐT / OTP.
+        /// - Luồng xử lý: Xác thực idToken từ Firebase, đối chiếu FirebaseUid/SĐT trong CSDL, phát hành JWT Bearer Token của hệ thống.
+        /// - Lưu ý cho FE: FE xác thực OTP qua Firebase Client SDK trước để lấy idToken. Nếu tài khoản chưa tồn tại, API sẽ báo lỗi 404 để FE chuyển sang luồng Đăng ký.
+        /// </remarks>
+        /// <param name="request">FirebasePhoneAuthRequest: IdToken nhận từ Firebase SDK.</param>
+        /// <param name="cancellationToken">Token hủy request (Optional).</param>
+        /// <response code="200">Thành công: Trả về JWT token hệ thống và thông tin user.</response>
+        /// <response code="400">Dữ liệu không hợp lệ: Firebase idToken hết hạn hoặc không hợp lệ.</response>
+        /// <response code="404">Không tìm thấy tài khoản liên kết với số điện thoại này trong hệ thống.</response>
+        /// <response code="500">Lỗi server khi xác thực với Firebase.</response>
+        [HttpPost("firebase-phone-login")]
+        public async Task<IActionResult> LoginWithFirebasePhone(
+    [FromBody] FirebasePhoneAuthRequest request, CancellationToken cancellationToken)
+        {
+            var result = await authService.LoginWithFirebasePhoneAsync(request, cancellationToken);
+            return StatusCode((int)result.StatusCode, result);
+        }
+        /// <summary>
         /// Cập nhật địa chỉ email cho user (Admin hoặc chính chủ).
         /// </summary>
         /// <remarks>
@@ -116,5 +158,7 @@ namespace RikiPath.WebApi.Controllers
             var result = await authService.ChangePasswordAsync(userId, request, cancellationToken);
             return StatusCode((int)result.StatusCode, result);
         }
+
+
     }
 }

@@ -1,4 +1,4 @@
-﻿namespace RikiPath.Application.Responses.CoursePurchases
+namespace RikiPath.Application.Responses.CoursePurchases
 {
     public class PurchasedCourseResponse
     {

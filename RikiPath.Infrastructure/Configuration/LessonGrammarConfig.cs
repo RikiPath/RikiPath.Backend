@@ -8,16 +8,17 @@ namespace RikiPath.Infrastructure.Configuration
     {
         public void Configure(EntityTypeBuilder<LessonGrammar> builder)
         {
-            builder.HasKey(x => new { x.LessonId, x.GrammarPointId });
+            builder.HasKey(x => new { x.LessonId, x.GrammarPatternId });
+            builder.Property(x => x.GrammarPatternId).HasColumnName("GrammarPointId");
 
             builder.HasOne(x => x.Lesson)
                 .WithMany(x => x.LessonGrammars)
                 .HasForeignKey(x => x.LessonId)
                 .OnDelete(DeleteBehavior.Cascade);
 
-            builder.HasOne(x => x.GrammarPoint)
+            builder.HasOne(x => x.GrammarPattern)
                 .WithMany(x => x.LessonGrammars)
-                .HasForeignKey(x => x.GrammarPointId)
+                .HasForeignKey(x => x.GrammarPatternId)
                 .OnDelete(DeleteBehavior.Cascade);
         }
     }

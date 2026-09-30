@@ -1,4 +1,4 @@
-﻿namespace RikiPath.WebApi.Hubs
+namespace RikiPath.WebApi.Hubs
 {
     public class IceServerConfig
     {

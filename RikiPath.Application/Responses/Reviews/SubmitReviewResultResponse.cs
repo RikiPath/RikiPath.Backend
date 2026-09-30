@@ -1,8 +1,8 @@
-﻿namespace RikiPath.Application.Responses.Reviews
+namespace RikiPath.Application.Responses.Reviews
 {
     public class SubmitReviewResultResponse
     {
-        public int ReviewItemId { get; set; }
+        public int ReviewCardId { get; set; }
         public int QualitySubmitted { get; set; }
         public double NewEaseFactor { get; set; }
         public int NewIntervalDays { get; set; }

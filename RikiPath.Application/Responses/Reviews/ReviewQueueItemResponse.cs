@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -15,7 +15,7 @@ namespace RikiPath.Application.Responses.Reviews
 
     public class ReviewQueueItemResponse
     {
-        public int ReviewItemId { get; set; }
+        public int ReviewCardId { get; set; }
         public ReviewContentType ContentType { get; set; }
         public string Term { get; set; } = string.Empty;      // Kanji/Word/Grammar title
         public string? Reading { get; set; }                  // Hiragana (vocab/kanji)

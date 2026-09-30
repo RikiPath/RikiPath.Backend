@@ -1,4 +1,4 @@
-﻿using Domain.Enums;
+using RikiPath.Domain.Enums;
 
 namespace RikiPath.Domain.Entities
 {
@@ -22,5 +22,7 @@ namespace RikiPath.Domain.Entities
         public int AiGradingUsedCount { get; set; } = 0;
 
         public DateTime PurchasedAt { get; set; }
+
+        public List<MentorBooking>? MentorBookings { get; set; }
     }
 }

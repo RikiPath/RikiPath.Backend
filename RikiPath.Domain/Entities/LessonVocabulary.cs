@@ -5,7 +5,7 @@ namespace RikiPath.Domain.Entities
     {
         public int LessonId { get; set; }
         public Lesson Lesson { get; set; }
-        public int VocabularyEntryId { get; set; }
-        public VocabularyEntry VocabularyEntry { get; set; }
+        public int VocabularyId { get; set; }
+        public Vocabulary Vocabulary { get; set; }
     }
 }

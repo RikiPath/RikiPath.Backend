@@ -1,4 +1,4 @@
-﻿using RikiPath.Application.IServices;
+using RikiPath.Application.IServices;
 using RikiPath.Domain;
 using System.Net;
 using System.Net.Mail;

@@ -1,13 +1,13 @@
 using RikiPath.Domain.Entities;
 using RikiPath.Application.IServices;
-using RikiPath.Application.Requests.PracticeTests;
+using RikiPath.Application.Requests.MockTests;
 using RikiPath.Application.Responses;
-using RikiPath.Application.Responses.PracticeTests;
+using RikiPath.Application.Responses.MockTests;
 using System.Net;
 
 namespace RikiPath.Application.Services
 {
-    public class PracticeTestService(IUnitOfWork unitOfWork, IClaimService claimService) : IPracticeTestService
+    public class MockTestService(IUnitOfWork unitOfWork, IClaimService claimService) : IMockTestService
     {
         private const string StatusInProgress = "in_progress";
         private const string StatusCompleted = "completed";
@@ -17,47 +17,47 @@ namespace RikiPath.Application.Services
             try
             {
                 var userId = claimService.GetUserClaim().Id;
-                var test = await unitOfWork.PracticeTests.GetByIdAsync(practiceTestId);
+                var test = await unitOfWork.MockTests.GetByIdAsync(practiceTestId);
                 if (test is null)
                     return ApiResponse<StartAttemptResponse>.NotFound(
-                        $"Không tìm thấy PracticeTest có Id = {practiceTestId}.");
+                        $"Không tìm thấy MockTest có Id = {practiceTestId}.");
 
                 // --- Thuật toán Quizlet: Tìm câu hỏi bị làm sai ở lần thi trước ---
-                var previousAttempts = await unitOfWork.PracticeTestAttempts.FindAsync(a =>
-                    a.UserId == userId && a.PracticeTestId == practiceTestId && a.IsCompleted);
+                var previousAttempts = await unitOfWork.MockTestAttempts.FindAsync(a =>
+                    a.UserId == userId && a.MockTestId == practiceTestId && a.IsCompleted);
 
                 var previousAttemptIds = previousAttempts.Select(a => a.Id).ToList();
                 var previouslyWrongQuestionIds = new List<int>();
 
                 if (previousAttemptIds.Count > 0)
                 {
-                    var pastAnswers = await unitOfWork.PracticeTestAnswers.FindAsync(ans =>
-                        previousAttemptIds.Contains(ans.PracticeTestAttemptId));
+                    var pastAnswers = await unitOfWork.MockTestAnswers.FindAsync(ans =>
+                        previousAttemptIds.Contains(ans.MockTestAttemptId));
 
                     previouslyWrongQuestionIds = pastAnswers
-                        .GroupBy(ans => ans.PracticeQuestionId)
-                        .Where(g => !g.OrderByDescending(x => x.PracticeTestAttemptId).First().IsCorrect)
+                        .GroupBy(ans => ans.MockQuestionId)
+                        .Where(g => !g.OrderByDescending(x => x.MockTestAttemptId).First().IsCorrect)
                         .Select(g => g.Key)
                         .ToList();
                 }
 
-                var attempt = new PracticeTestAttempt
+                var attempt = new MockTestAttempt
                 {
                     UserId = userId,
-                    PracticeTestId = practiceTestId,
+                    MockTestId = practiceTestId,
                     StartedAt = DateTime.UtcNow,
                     SubmittedAt = null,
                     TotalScore = 0,
                     IsCompleted = false,
                 };
 
-                await unitOfWork.PracticeTestAttempts.AddAsync(attempt);
+                await unitOfWork.MockTestAttempts.AddAsync(attempt);
                 await unitOfWork.SaveChangesAsync();
 
                 var result = new StartAttemptResponse
                 {
                     AttemptId = attempt.Id,
-                    PracticeTestId = practiceTestId,
+                    MockTestId = practiceTestId,
                     StartedAt = attempt.StartedAt,
                     TimeLimitMinutes = test.TimeLimitMinutes,
                     TotalPreviouslyWrongQuestions = previouslyWrongQuestionIds.Count,
@@ -78,10 +78,10 @@ namespace RikiPath.Application.Services
             try
             {
                 var userId = claimService.GetUserClaim().Id;
-                var attempt = await unitOfWork.PracticeTestAttempts.GetByIdAsync(attemptId);
+                var attempt = await unitOfWork.MockTestAttempts.GetByIdAsync(attemptId);
                 if (attempt is null)
                     return ApiResponse<AttemptResultResponse>.NotFound(
-                        $"Không tìm thấy PracticeTestAttempt có Id = {attemptId}.");
+                        $"Không tìm thấy MockTestAttempt có Id = {attemptId}.");
 
                 if (attempt.UserId != userId)
                     return ApiResponse<AttemptResultResponse>.Fail(
@@ -97,7 +97,7 @@ namespace RikiPath.Application.Services
 
                 var questionIds = request.Answers.Select(a => a.QuestionId).Distinct().ToList();
 
-                var questions = await unitOfWork.PracticeQuestions.GetByIdsWithOptionsAsync(questionIds);
+                var questions = await unitOfWork.MockQuestions.GetByIdsWithOptionsAsync(questionIds);
 
                 var missingIds = questionIds.Except(questions.Select(q => q.Id)).ToList();
                 if (missingIds.Count > 0)
@@ -108,16 +108,16 @@ namespace RikiPath.Application.Services
 
                 var (answers, correctByQuestion) = GradeAnswers(attemptId, request.Answers, questionsById);
                 foreach (var answer in answers)
-                    await unitOfWork.PracticeTestAnswers.AddAsync(answer);
+                    await unitOfWork.MockTestAnswers.AddAsync(answer);
 
                 var sections = BuildSectionResults(attemptId, questions, correctByQuestion);
                 foreach (var section in sections.Entities)
-                    await unitOfWork.PracticeTestSectionResults.AddAsync(section);
+                    await unitOfWork.MockTestSectionResults.AddAsync(section);
 
                 attempt.SubmittedAt = DateTime.UtcNow;
                 attempt.IsCompleted = true;
                 attempt.TotalScore = sections.OverallScore;
-                unitOfWork.PracticeTestAttempts.Update(attempt);
+                unitOfWork.MockTestAttempts.Update(attempt);
 
                 await unitOfWork.SaveChangesAsync();
 
@@ -127,7 +127,7 @@ namespace RikiPath.Application.Services
                 var result = new AttemptResultResponse
                 {
                     AttemptId = attempt.Id,
-                    PracticeTestId = attempt.PracticeTestId,
+                    MockTestId = attempt.MockTestId,
                     Status = attempt.IsCompleted ? StatusCompleted : StatusInProgress,
                     StartedAt = attempt.StartedAt,
                     SubmittedAt = attempt.SubmittedAt,
@@ -150,10 +150,10 @@ namespace RikiPath.Application.Services
             try
             {
                 var userId = claimService.GetUserClaim().Id;
-                var attempt = await unitOfWork.PracticeTestAttempts.GetByIdAsync(attemptId);
+                var attempt = await unitOfWork.MockTestAttempts.GetByIdAsync(attemptId);
                 if (attempt is null)
                     return ApiResponse<AttemptResultResponse>.NotFound(
-                        $"Không tìm thấy PracticeTestAttempt có Id = {attemptId}.");
+                        $"Không tìm thấy MockTestAttempt có Id = {attemptId}.");
 
                 if (attempt.UserId != userId)
                     return ApiResponse<AttemptResultResponse>.Fail(
@@ -163,21 +163,21 @@ namespace RikiPath.Application.Services
                     return ApiResponse<AttemptResultResponse>.Fail(
                         "Lượt làm bài này chưa được nộp/chấm điểm.", HttpStatusCode.BadRequest);
 
-                var sectionResults = await unitOfWork.PracticeTestSectionResults.GetByAttemptIdAsync(attemptId);
+                var sectionResults = await unitOfWork.MockTestSectionResults.GetByAttemptIdAsync(attemptId);
 
                 var result = new AttemptResultResponse
                 {
                     AttemptId = attempt.Id,
-                    PracticeTestId = attempt.PracticeTestId,
+                    MockTestId = attempt.MockTestId,
                     Status = attempt.IsCompleted ? StatusCompleted : StatusInProgress,
                     StartedAt = attempt.StartedAt,
                     SubmittedAt = attempt.SubmittedAt,
                     TotalScore = attempt.TotalScore.Value,
                     Sections = sectionResults.Select(r => new SectionResultItem
                     {
-                        PracticeTestSectionId = r.PracticeTestSectionId,
-                        SectionTitle = r.PracticeTestSection.Title,
-                        SkillName = r.PracticeTestSection.Skill.Name,
+                        MockTestSectionId = r.MockTestSectionId,
+                        SectionTitle = r.MockTestSection.Title,
+                        LanguageSkillName = r.MockTestSection.LanguageSkill.Name,
                         CorrectCount = r.CorrectCount,
                         TotalCount = r.TotalCount,
                         Score = r.ScorePercent,
@@ -198,18 +198,18 @@ namespace RikiPath.Application.Services
         {
             try
             {
-                var tests = await unitOfWork.PracticeTests.GetByLevelAsync(certificationLevelId);
+                var tests = await unitOfWork.MockTests.GetByLevelAsync(certificationLevelId);
 
                 var result = tests.Select(t => new TestSummaryResponse
                 {
-                    PracticeTestId = t.Id,
+                    MockTestId = t.Id,
                     Title = t.Title,
                     Description = t.Description,
                     // NOTE: property response vẫn tên "JlptLevelName" (từ trước khi đổi model) - giữ tên
-                    // field để không vỡ FE, nhưng lấy giá trị từ CertificationLevel.Code (không còn Name).
-                    // Nên đổi tên field này thành CertificationLevelName trong Responses/PracticeTests
+                    // field để không vỡ FE, nhưng lấy giá trị từ CertificateLevel.Code (không còn Name).
+                    // Nên đổi tên field này thành CertificateLevelName trong Responses/MockTests
                     // khi bạn tiện cập nhật FE.
-                    JlptLevelName = t.CertificationLevel?.Code ?? string.Empty,
+                    JlptLevelName = t.CertificateLevel?.Code ?? string.Empty,
                     TimeLimitMinutes = t.TimeLimitMinutes,
                 }).ToList();
 
@@ -227,10 +227,10 @@ namespace RikiPath.Application.Services
             try
             {
                 var userId = claimService.GetUserClaim().Id;
-                var attempt = await unitOfWork.PracticeTestAttempts.GetByIdAsync(attemptId);
+                var attempt = await unitOfWork.MockTestAttempts.GetByIdAsync(attemptId);
                 if (attempt is null)
                     return ApiResponse<DetailedAttemptResultResponse>.NotFound(
-                        $"Không tìm thấy PracticeTestAttempt có Id = {attemptId}.");
+                        $"Không tìm thấy MockTestAttempt có Id = {attemptId}.");
 
                 if (attempt.UserId != userId)
                     return ApiResponse<DetailedAttemptResultResponse>.Fail(
@@ -240,17 +240,17 @@ namespace RikiPath.Application.Services
                     return ApiResponse<DetailedAttemptResultResponse>.Fail(
                         "Lượt làm bài này chưa được nộp/chấm điểm.", HttpStatusCode.BadRequest);
 
-                var answers = await unitOfWork.PracticeTestAnswers.GetByAttemptIdAsync(attemptId);
+                var answers = await unitOfWork.MockTestAnswers.GetByAttemptIdAsync(attemptId);
 
-                var questions = answers.Select(a => new QuestionReviewItem
+                var questions = answers.Select(a => new QuestionReviewCard
                 {
-                    QuestionId = a.PracticeQuestionId,
-                    QuestionText = a.PracticeQuestion.QuestionText,
-                    Explanation = a.PracticeQuestion.Explanation,
+                    QuestionId = a.MockQuestionId,
+                    QuestionText = a.MockQuestion.QuestionText,
+                    Explanation = a.MockQuestion.Explanation,
                     SelectedOptionId = a.SelectedOptionId,
                     IsCorrect = a.IsCorrect,
                     WasPreviouslyIncorrect = !a.IsCorrect,
-                    Options = a.PracticeQuestion.Options.Select(o => new QuestionOptionReview
+                    Options = a.MockQuestion.Options.Select(o => new QuestionOptionReview
                     {
                         OptionId = o.Id,
                         OptionText = o.OptionText,
@@ -261,7 +261,7 @@ namespace RikiPath.Application.Services
                 return ApiResponse<DetailedAttemptResultResponse>.Success(new DetailedAttemptResultResponse
                 {
                     AttemptId = attempt.Id,
-                    PracticeTestId = attempt.PracticeTestId,
+                    MockTestId = attempt.MockTestId,
                     TotalScore = attempt.TotalScore.Value,
                     Questions = questions,
                 });
@@ -275,31 +275,31 @@ namespace RikiPath.Application.Services
 
         // ---------------- Chế độ Ôn tập Câu hỏi Sai (Quizlet Review Mode) ----------------
 
-        public async Task<ApiResponse<List<QuestionReviewItem>>> GetWrongQuestionsReviewSessionAsync(int? practiceTestId = null, CancellationToken cancellationToken = default)
+        public async Task<ApiResponse<List<QuestionReviewCard>>> GetWrongQuestionsReviewSessionAsync(int? practiceTestId = null, CancellationToken cancellationToken = default)
         {
             try
             {
                 var userId = claimService.GetUserClaim().Id;
                 // 1. Lấy tất cả lượt làm bài đã hoàn thành
-                var attempts = await unitOfWork.PracticeTestAttempts.FindAsync(a =>
-                    a.UserId == userId && a.IsCompleted && (!practiceTestId.HasValue || a.PracticeTestId == practiceTestId.Value));
+                var attempts = await unitOfWork.MockTestAttempts.FindAsync(a =>
+                    a.UserId == userId && a.IsCompleted && (!practiceTestId.HasValue || a.MockTestId == practiceTestId.Value));
 
                 var attemptIds = attempts.Select(a => a.Id).ToList();
                 if (attemptIds.Count == 0)
                 {
-                    return ApiResponse<List<QuestionReviewItem>>.Success([]);
+                    return ApiResponse<List<QuestionReviewCard>>.Success([]);
                 }
 
                 // 2. Lấy tất cả câu trả lời của Learner trong các lượt làm bài đó
-                var pastAnswers = await unitOfWork.PracticeTestAnswers.FindAsync(ans => attemptIds.Contains(ans.PracticeTestAttemptId));
+                var pastAnswers = await unitOfWork.MockTestAnswers.FindAsync(ans => attemptIds.Contains(ans.MockTestAttemptId));
 
                 // 3. Nhóm câu hỏi & lọc câu mà lần trả lời gần đây nhất bị SAI
                 var wrongStats = pastAnswers
-                    .GroupBy(ans => ans.PracticeQuestionId)
+                    .GroupBy(ans => ans.MockQuestionId)
                     .Select(g => new
                     {
                         QuestionId = g.Key,
-                        LatestAnswer = g.OrderByDescending(x => x.PracticeTestAttemptId).FirstOrDefault(),
+                        LatestAnswer = g.OrderByDescending(x => x.MockTestAttemptId).FirstOrDefault(),
                         TimesWrong = g.Count(x => !x.IsCorrect)
                     })
                     .Where(x => x.LatestAnswer != null && !x.LatestAnswer.IsCorrect)
@@ -307,18 +307,18 @@ namespace RikiPath.Application.Services
 
                 if (wrongStats.Count == 0)
                 {
-                    return ApiResponse<List<QuestionReviewItem>>.Success([]);
+                    return ApiResponse<List<QuestionReviewCard>>.Success([]);
                 }
 
                 var wrongQuestionIds = wrongStats.Select(x => x.QuestionId).ToList();
-                var questions = await unitOfWork.PracticeQuestions.GetByIdsWithOptionsAsync(wrongQuestionIds);
+                var questions = await unitOfWork.MockQuestions.GetByIdsWithOptionsAsync(wrongQuestionIds);
                 var statsDict = wrongStats.ToDictionary(x => x.QuestionId);
 
                 // 4. Map câu hỏi kèm thống kê Quizlet (ưu tiên câu sai nhiều lần lên trước)
                 var reviewItems = questions.Select(q =>
                 {
                     var stat = statsDict.GetValueOrDefault(q.Id);
-                    return new QuestionReviewItem
+                    return new QuestionReviewCard
                     {
                         QuestionId = q.Id,
                         QuestionText = q.QuestionText,
@@ -336,23 +336,23 @@ namespace RikiPath.Application.Services
                     };
                 }).OrderByDescending(x => x.TimesAnsweredWrong).ToList();
 
-                return ApiResponse<List<QuestionReviewItem>>.Success(reviewItems);
+                return ApiResponse<List<QuestionReviewCard>>.Success(reviewItems);
             }
             catch (Exception ex)
             {
-                return ApiResponse<List<QuestionReviewItem>>.Fail(
+                return ApiResponse<List<QuestionReviewCard>>.Fail(
                     "Không thể tải danh sách câu hỏi cần ôn tập.", HttpStatusCode.InternalServerError, errors: BuildDebugErrors(ex));
             }
         }
 
         // ---------------- Helpers ----------------
 
-        private static (List<PracticeTestAnswer> Answers, Dictionary<int, bool> CorrectByQuestion) GradeAnswers(
+        private static (List<MockTestAnswer> Answers, Dictionary<int, bool> CorrectByQuestion) GradeAnswers(
             int attemptId,
             List<AnswerSubmissionItem> submitted,
-            Dictionary<int, PracticeQuestion> questionsById)
+            Dictionary<int, MockQuestion> questionsById)
         {
-            var answers = new List<PracticeTestAnswer>();
+            var answers = new List<MockTestAnswer>();
             var correctByQuestion = new Dictionary<int, bool>();
 
             foreach (var item in submitted)
@@ -365,10 +365,10 @@ namespace RikiPath.Application.Services
                 var isCorrect = selectedOption is not null && selectedOption.IsCorrect;
                 correctByQuestion[item.QuestionId] = isCorrect;
 
-                answers.Add(new PracticeTestAnswer
+                answers.Add(new MockTestAnswer
                 {
-                    PracticeTestAttemptId = attemptId,
-                    PracticeQuestionId = item.QuestionId,
+                    MockTestAttemptId = attemptId,
+                    MockQuestionId = item.QuestionId,
                     SelectedOptionId = item.SelectedOptionId,
                     IsCorrect = isCorrect,
                 });
@@ -377,14 +377,14 @@ namespace RikiPath.Application.Services
             return (answers, correctByQuestion);
         }
 
-        private static (List<PracticeTestSectionResult> Entities, List<SectionResultItem> Responses, double OverallScore)
+        private static (List<MockTestSectionResult> Entities, List<SectionResultItem> Responses, double OverallScore)
             BuildSectionResults(
                 int attemptId,
-                List<PracticeQuestion> questions,
+                List<MockQuestion> questions,
                 Dictionary<int, bool> correctByQuestion)
         {
             var grouped = questions
-                .GroupBy(q => q.PracticeTestSection)
+                .GroupBy(q => q.MockTestSection)
                 .Select(g =>
                 {
                     var total = g.Count();
@@ -394,10 +394,10 @@ namespace RikiPath.Application.Services
                 })
                 .ToList();
 
-            var entities = grouped.Select(g => new PracticeTestSectionResult
+            var entities = grouped.Select(g => new MockTestSectionResult
             {
-                PracticeTestAttemptId = attemptId,
-                PracticeTestSectionId = g.Section.Id,
+                MockTestAttemptId = attemptId,
+                MockTestSectionId = g.Section.Id,
                 CorrectCount = g.Correct,
                 TotalCount = g.Total,
                 ScorePercent = g.Score,
@@ -405,9 +405,9 @@ namespace RikiPath.Application.Services
 
             var responses = grouped.Select(g => new SectionResultItem
             {
-                PracticeTestSectionId = g.Section.Id,
+                MockTestSectionId = g.Section.Id,
                 SectionTitle = g.Section.Title,
-                SkillName = g.Section.Skill.Name,
+                LanguageSkillName = g.Section.LanguageSkill.Name,
                 CorrectCount = g.Correct,
                 TotalCount = g.Total,
                 Score = g.Score,

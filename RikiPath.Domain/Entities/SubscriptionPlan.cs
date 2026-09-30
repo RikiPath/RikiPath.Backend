@@ -1,4 +1,4 @@
-﻿namespace RikiPath.Domain.Entities
+namespace RikiPath.Domain.Entities
 {
     public class SubscriptionPlan : Base
     {
@@ -18,5 +18,6 @@
         public int SortOrder { get; set; }
 
         public List<UserSubscription>? UserSubscriptions { get; set; }
+        public List<Feature> Features { get; set; } = [];
     }
 }

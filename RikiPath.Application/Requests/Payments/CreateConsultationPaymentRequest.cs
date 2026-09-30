@@ -1,4 +1,4 @@
-﻿namespace RikiPath.Application.Requests.Payments
+namespace RikiPath.Application.Requests.Payments
 {
     public class CreateConsultationPaymentRequest
     {

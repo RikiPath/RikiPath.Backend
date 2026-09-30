@@ -1,4 +1,4 @@
-﻿namespace RikiPath.Application.Responses.PracticeTests
+namespace RikiPath.Application.Responses.MockTests
 {
 
     public class QuestionOptionReview

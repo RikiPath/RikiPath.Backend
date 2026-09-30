@@ -1,12 +1,14 @@
-﻿namespace RikiPath.Application.DTOs.Content
+namespace RikiPath.Application.DTOs.Content
 {
     public enum ContentEntityType
     {
         Lesson,
-        KanjiEntry,
-        VocabularyEntry,
-        GrammarPoint,
-        PracticeTest,
-        PracticeQuestion
+        Kanji,
+        KanaCharacter,
+        Vocabulary,
+        GrammarPattern,
+        MockTest,
+        MockQuestion,
+        PracticeExercise
     }
 }

@@ -8,10 +8,10 @@ using System.Net;
 namespace RikiPath.Application.Services
 {
     // NOTE: cần các hàm repo sau nếu chưa có:
-    //   IVocabularyListRepository.GetByUserAsync(userId), GetWithEntryCountAsync(listId)
-    //   IVocabularyNoteEntryRepository.GetByListIdAsync(listId)
-    //   IReviewItemRepository.GetByNoteEntryIdAsync(noteEntryId) — để xoá kèm khi bỏ bookmark
-    // Mọi bookmark (vocab/kanji/manual/grammar) đều tự tạo 1 ReviewItem để item xuất hiện ngay
+    //   ILearnerNoteRepository.GetByUserAsync(userId), GetWithEntryCountAsync(listId)
+    //   ILearnerNoteEntryRepository.GetByListIdAsync(listId)
+    //   IReviewCardRepository.GetByNoteEntryIdAsync(noteEntryId) — để xoá kèm khi bỏ bookmark
+    // Mọi bookmark (vocab/kanji/manual/grammar) đều tự tạo 1 ReviewCard để item xuất hiện ngay
     // trong hàng chờ ôn tập SM-2 (NextReviewDate = hôm nay, EaseFactor mặc định 2.5).
     public class NotebookService(
          IUnitOfWork unitOfWork,
@@ -19,82 +19,82 @@ namespace RikiPath.Application.Services
     {
         private const double DefaultEaseFactor = 2.5;
 
-        public async Task<ApiResponse<VocabularyListResponse>> CreateListAsync(CreateVocabularyListRequest request, CancellationToken cancellationToken)
+        public async Task<ApiResponse<LearnerNoteResponse>> CreateListAsync(CreateLearnerNoteRequest request, CancellationToken cancellationToken)
         {
             try
             {
                 var userId = claimService.GetUserClaim().Id;
 
                 if (string.IsNullOrWhiteSpace(request.Name))
-                    return ApiResponse<VocabularyListResponse>.Fail("Tên danh sách không được để trống.");
+                    return ApiResponse<LearnerNoteResponse>.Fail("Tên danh sách không được để trống.");
 
-                var list = new VocabularyList
+                var list = new LearnerNote
                 {
                     UserId = userId,
                     Name = request.Name.Trim(),
                     Description = request.Description,
                     CreatedDate = DateTime.UtcNow,
                 };
-                await unitOfWork.VocabularyLists.AddAsync(list);
+                await unitOfWork.LearnerNotes.AddAsync(list);
                 await unitOfWork.SaveChangesAsync();
 
-                return ApiResponse<VocabularyListResponse>.Created(MapList(list, 0));
+                return ApiResponse<LearnerNoteResponse>.Created(MapList(list, 0));
             }
             catch (Exception ex)
             {
-                return ApiResponse<VocabularyListResponse>.Fail(
+                return ApiResponse<LearnerNoteResponse>.Fail(
                     "Không thể tạo danh sách từ vựng.", HttpStatusCode.InternalServerError, errors: BuildDebugErrors(ex));
             }
         }
 
-        public async Task<ApiResponse<List<VocabularyListResponse>>> GetMyListsAsync(CancellationToken cancellationToken)
+        public async Task<ApiResponse<List<LearnerNoteResponse>>> GetMyListsAsync(CancellationToken cancellationToken)
         {
             try
             {
                 var userId = claimService.GetUserClaim().Id;
-                var lists = await unitOfWork.VocabularyLists.GetByUserIdAsync(userId);
-                var result = new List<VocabularyListResponse>();
+                var lists = await unitOfWork.LearnerNotes.GetByUserIdAsync(userId);
+                var result = new List<LearnerNoteResponse>();
                 foreach (var list in lists)
                 {
-                    var entries = await unitOfWork.VocabularyNoteEntries.GetByUserAsync(userId, list.Id);
+                    var entries = await unitOfWork.LearnerNoteEntries.GetByUserAsync(userId, list.Id);
                     result.Add(MapList(list, entries.Count));
                 }
 
-                return ApiResponse<List<VocabularyListResponse>>.Success(result);
+                return ApiResponse<List<LearnerNoteResponse>>.Success(result);
             }
             catch (Exception ex)
             {
-                return ApiResponse<List<VocabularyListResponse>>.Fail(
+                return ApiResponse<List<LearnerNoteResponse>>.Fail(
                     "Không thể tải danh sách sổ tay.", HttpStatusCode.InternalServerError, errors: BuildDebugErrors(ex));
             }
         }
 
-        public async Task<ApiResponse<VocabularyListResponse>> UpdateListAsync(
-            int listId, UpdateVocabularyListRequest request, CancellationToken cancellationToken)
+        public async Task<ApiResponse<LearnerNoteResponse>> UpdateListAsync(
+            int listId, UpdateLearnerNoteRequest request, CancellationToken cancellationToken)
         {
             try
             {
                 var userId = claimService.GetUserClaim().Id;
                 if (string.IsNullOrWhiteSpace(request.Name))
-                    return ApiResponse<VocabularyListResponse>.Fail("Tên danh sách không được để trống.");
+                    return ApiResponse<LearnerNoteResponse>.Fail("Tên danh sách không được để trống.");
 
-                var list = await unitOfWork.VocabularyLists.GetByIdAsync(listId);
+                var list = await unitOfWork.LearnerNotes.GetByIdAsync(listId);
                 if (list is null)
-                    return ApiResponse<VocabularyListResponse>.NotFound($"Không tìm thấy danh sách Id = {listId}.");
+                    return ApiResponse<LearnerNoteResponse>.NotFound($"Không tìm thấy danh sách Id = {listId}.");
                 if (list.UserId != userId)
-                    return ApiResponse<VocabularyListResponse>.Fail("Danh sách này không thuộc về bạn.", HttpStatusCode.Forbidden);
+                    return ApiResponse<LearnerNoteResponse>.Fail("Danh sách này không thuộc về bạn.", HttpStatusCode.Forbidden);
 
                 list.Name = request.Name.Trim();
                 list.Description = request.Description;
-                unitOfWork.VocabularyLists.Update(list);
+                unitOfWork.LearnerNotes.Update(list);
                 await unitOfWork.SaveChangesAsync();
 
-                var entries = await unitOfWork.VocabularyNoteEntries.GetByUserAsync(userId, list.Id);
-                return ApiResponse<VocabularyListResponse>.Success(MapList(list, entries.Count));
+                var entries = await unitOfWork.LearnerNoteEntries.GetByUserAsync(userId, list.Id);
+                return ApiResponse<LearnerNoteResponse>.Success(MapList(list, entries.Count));
             }
             catch (Exception ex)
             {
-                return ApiResponse<VocabularyListResponse>.Fail(
+                return ApiResponse<LearnerNoteResponse>.Fail(
                     "Không thể cập nhật danh sách.", HttpStatusCode.InternalServerError, errors: BuildDebugErrors(ex));
             }
         }
@@ -104,13 +104,13 @@ namespace RikiPath.Application.Services
             try
             {
                 var userId = claimService.GetUserClaim().Id;
-                var list = await unitOfWork.VocabularyLists.GetByIdAsync(listId);
+                var list = await unitOfWork.LearnerNotes.GetByIdAsync(listId);
                 if (list is null)
                     return ApiResponse.NotFound($"Không tìm thấy danh sách Id = {listId}.");
                 if (list.UserId != userId)
                     return ApiResponse.Fail("Danh sách này không thuộc về bạn.", HttpStatusCode.Forbidden);
 
-                unitOfWork.VocabularyLists.Remove(list); // giả định DB cascade xoá VocabularyNoteEntry + ReviewItem liên quan
+                unitOfWork.LearnerNotes.Remove(list); // giả định DB cascade xoá LearnerNoteEntry + ReviewCard liên quan
                 await unitOfWork.SaveChangesAsync();
 
                 return ApiResponse.Success();
@@ -127,13 +127,13 @@ namespace RikiPath.Application.Services
             try
             {
                 var userId = claimService.GetUserClaim().Id;
-                var list = await unitOfWork.VocabularyLists.GetByIdAsync(listId);
+                var list = await unitOfWork.LearnerNotes.GetByIdAsync(listId);
                 if (list is null)
                     return ApiResponse<List<NotebookEntryResponse>>.NotFound($"Không tìm thấy danh sách Id = {listId}.");
                 if (list.UserId != userId)
                     return ApiResponse<List<NotebookEntryResponse>>.Fail("Danh sách này không thuộc về bạn.", HttpStatusCode.Forbidden);
 
-                var entries = await unitOfWork.VocabularyNoteEntries.GetByUserAsync(userId, list.Id);
+                var entries = await unitOfWork.LearnerNoteEntries.GetByUserAsync(userId, list.Id);
                 return ApiResponse<List<NotebookEntryResponse>>.Success(entries.Select(MapEntry).ToList());
             }
             catch (Exception ex)
@@ -148,31 +148,31 @@ namespace RikiPath.Application.Services
             try
             {
                 var userId = claimService.GetUserClaim().Id;
-                var list = await unitOfWork.VocabularyLists.GetByIdAsync(request.VocabularyListId);
+                var list = await unitOfWork.LearnerNotes.GetByIdAsync(request.LearnerNoteId);
                 if (list is null)
                     return ApiResponse<NotebookEntryResponse>.NotFound("Không tìm thấy danh sách.");
                 if (list.UserId != userId)
                     return ApiResponse<NotebookEntryResponse>.Fail("Danh sách này không thuộc về bạn.", HttpStatusCode.Forbidden);
 
-                var vocab = await unitOfWork.VocabularyEntries.GetByIdAsync(request.VocabularyEntryId);
+                var vocab = await unitOfWork.Vocabularies.GetByIdAsync(request.VocabularyId);
                 if (vocab is null)
                     return ApiResponse<NotebookEntryResponse>.NotFound("Không tìm thấy từ vựng trong ngân hàng chung.");
 
-                var note = new VocabularyNoteEntry
+                var note = new LearnerNoteEntry
                 {
-                    VocabularyListId = list.Id,
-                    VocabularyEntryId = vocab.Id,
+                    LearnerNoteId = list.Id,
+                    VocabularyId = vocab.Id,
                     CreatedDate = DateTime.UtcNow,
                 };
-                await unitOfWork.VocabularyNoteEntries.AddAsync(note);
+                await unitOfWork.LearnerNoteEntries.AddAsync(note);
                 await unitOfWork.SaveChangesAsync();
 
                 var reviewItem = await EnrollIntoReviewQueueAsync(userId, noteEntry: note);
                 await unitOfWork.SaveChangesAsync();
 
-                note.VocabularyEntry = vocab;
+                note.Vocabulary = vocab;
                 var response = MapEntry(note);
-                response.ReviewItemId = reviewItem.Id;
+                response.ReviewCardId = reviewItem.Id;
                 return ApiResponse<NotebookEntryResponse>.Created(response);
             }
             catch (Exception ex)
@@ -187,31 +187,31 @@ namespace RikiPath.Application.Services
             try
             {
                 var userId = claimService.GetUserClaim().Id;
-                var list = await unitOfWork.VocabularyLists.GetByIdAsync(request.VocabularyListId);
+                var list = await unitOfWork.LearnerNotes.GetByIdAsync(request.LearnerNoteId);
                 if (list is null)
                     return ApiResponse<NotebookEntryResponse>.NotFound("Không tìm thấy danh sách.");
                 if (list.UserId != userId)
                     return ApiResponse<NotebookEntryResponse>.Fail("Danh sách này không thuộc về bạn.", HttpStatusCode.Forbidden);
 
-                var kanji = await unitOfWork.KanjiEntries.GetByIdAsync(request.KanjiEntryId);
+                var kanji = await unitOfWork.Kanjis.GetByIdAsync(request.KanjiId);
                 if (kanji is null)
                     return ApiResponse<NotebookEntryResponse>.NotFound("Không tìm thấy Kanji trong ngân hàng chung.");
 
-                var note = new VocabularyNoteEntry
+                var note = new LearnerNoteEntry
                 {
-                    VocabularyListId = list.Id,
-                    KanjiEntryId = kanji.Id,
+                    LearnerNoteId = list.Id,
+                    KanjiId = kanji.Id,
                     CreatedDate = DateTime.UtcNow,
                 };
-                await unitOfWork.VocabularyNoteEntries.AddAsync(note);
+                await unitOfWork.LearnerNoteEntries.AddAsync(note);
                 await unitOfWork.SaveChangesAsync();
 
                 var reviewItem = await EnrollIntoReviewQueueAsync(userId, noteEntry: note);
                 await unitOfWork.SaveChangesAsync();
 
-                note.KanjiEntry = kanji;
+                note.Kanji = kanji;
                 var response = MapEntry(note);
-                response.ReviewItemId = reviewItem.Id;
+                response.ReviewCardId = reviewItem.Id;
                 return ApiResponse<NotebookEntryResponse>.Created(response);
             }
             catch (Exception ex)
@@ -226,26 +226,26 @@ namespace RikiPath.Application.Services
             try
             {
                 var userId = claimService.GetUserClaim().Id;
-                var grammar = await unitOfWork.GrammarPoints.GetByIdAsync(grammarPointId);
+                var grammar = await unitOfWork.GrammarPatterns.GetByIdAsync(grammarPointId);
                 if (grammar is null)
                     return ApiResponse<GrammarBookmarkResponse>.NotFound("Không tìm thấy điểm ngữ pháp.");
 
-                var reviewItem = new ReviewItem
+                var reviewItem = new ReviewCard
                 {
                     UserId = userId,
-                    GrammarPoint = grammar,
+                    GrammarPattern = grammar,
                     Repetitions = 0,
                     EaseFactor = DefaultEaseFactor,
                     IntervalDays = 0,
                     NextReviewDate = DateTime.UtcNow.Date,
                 };
-                await unitOfWork.ReviewItems.AddAsync(reviewItem);
+                await unitOfWork.ReviewCards.AddAsync(reviewItem);
                 await unitOfWork.SaveChangesAsync();
 
                 return ApiResponse<GrammarBookmarkResponse>.Created(new GrammarBookmarkResponse
                 {
-                    ReviewItemId = reviewItem.Id,
-                    GrammarPointId = grammar.Id,
+                    ReviewCardId = reviewItem.Id,
+                    GrammarPatternId = grammar.Id,
                     GrammarTitle = grammar.Title,
                 });
             }
@@ -265,29 +265,29 @@ namespace RikiPath.Application.Services
                 if (string.IsNullOrWhiteSpace(request.Word) || string.IsNullOrWhiteSpace(request.Meaning))
                     return ApiResponse<NotebookEntryResponse>.Fail("Từ và nghĩa không được để trống.");
 
-                var list = await unitOfWork.VocabularyLists.GetByIdAsync(request.VocabularyListId);
+                var list = await unitOfWork.LearnerNotes.GetByIdAsync(request.LearnerNoteId);
                 if (list is null)
                     return ApiResponse<NotebookEntryResponse>.NotFound("Không tìm thấy danh sách.");
                 if (list.UserId != userId)
                     return ApiResponse<NotebookEntryResponse>.Fail("Danh sách này không thuộc về bạn.", HttpStatusCode.Forbidden);
 
-                var note = new VocabularyNoteEntry
+                var note = new LearnerNoteEntry
                 {
-                    VocabularyListId = list.Id,
+                    LearnerNoteId = list.Id,
                     ManualWord = request.Word.Trim(),
                     ManualReading = request.Reading?.Trim(),
                     ManualMeaning = request.Meaning.Trim(),
                     Note = request.Note,
                     CreatedDate = DateTime.UtcNow,
                 };
-                await unitOfWork.VocabularyNoteEntries.AddAsync(note);
+                await unitOfWork.LearnerNoteEntries.AddAsync(note);
                 await unitOfWork.SaveChangesAsync();
 
                 var reviewItem = await EnrollIntoReviewQueueAsync(userId, noteEntry: note);
                 await unitOfWork.SaveChangesAsync();
 
                 var response = MapEntry(note);
-                response.ReviewItemId = reviewItem.Id;
+                response.ReviewCardId = reviewItem.Id;
                 return ApiResponse<NotebookEntryResponse>.Created(response);
             }
             catch (Exception ex)
@@ -302,19 +302,19 @@ namespace RikiPath.Application.Services
             try
             {
                 var userId = claimService.GetUserClaim().Id;
-                var note = await unitOfWork.VocabularyNoteEntries.GetByIdAsync(noteEntryId);
+                var note = await unitOfWork.LearnerNoteEntries.GetByIdAsync(noteEntryId);
                 if (note is null)
                     return ApiResponse.NotFound($"Không tìm thấy mục sổ tay Id = {noteEntryId}.");
 
-                var list = await unitOfWork.VocabularyLists.GetByIdAsync(note.VocabularyListId);
+                var list = await unitOfWork.LearnerNotes.GetByIdAsync(note.LearnerNoteId);
                 if (list is null || list.UserId != userId)
                     return ApiResponse.Fail("Bạn không có quyền xoá mục này.", HttpStatusCode.Forbidden);
 
-                var linkedReviewItem = await unitOfWork.ReviewItems.GetByNoteEntryIdAsync(noteEntryId);
-                if (linkedReviewItem is not null)
-                    unitOfWork.ReviewItems.Remove(linkedReviewItem);
+                var linkedReviewCard = await unitOfWork.ReviewCards.GetByNoteEntryIdAsync(noteEntryId);
+                if (linkedReviewCard is not null)
+                    unitOfWork.ReviewCards.Remove(linkedReviewCard);
 
-                unitOfWork.VocabularyNoteEntries.Remove(note);
+                unitOfWork.LearnerNoteEntries.Remove(note);
                 await unitOfWork.SaveChangesAsync();
 
                 return ApiResponse.Success();
@@ -326,22 +326,22 @@ namespace RikiPath.Application.Services
             }
         }
 
-        private async Task<ReviewItem> EnrollIntoReviewQueueAsync(int userId, VocabularyNoteEntry noteEntry)
+        private async Task<ReviewCard> EnrollIntoReviewQueueAsync(int userId, LearnerNoteEntry noteEntry)
         {
-            var reviewItem = new ReviewItem
+            var reviewItem = new ReviewCard
             {
                 UserId = userId,
-                VocabularyNoteEntry = noteEntry,
+                LearnerNoteEntry = noteEntry,
                 Repetitions = 0,
                 EaseFactor = DefaultEaseFactor,
                 IntervalDays = 0,
                 NextReviewDate = DateTime.UtcNow.Date, // due ngay lần học đầu tiên
             };
-            await unitOfWork.ReviewItems.AddAsync(reviewItem);
+            await unitOfWork.ReviewCards.AddAsync(reviewItem);
             return reviewItem;
         }
 
-        private static VocabularyListResponse MapList(VocabularyList list, int entryCount) => new()
+        private static LearnerNoteResponse MapList(LearnerNote list, int entryCount) => new()
         {
             Id = list.Id,
             Name = list.Name,
@@ -350,23 +350,23 @@ namespace RikiPath.Application.Services
             CreatedAt = list.CreatedDate.Value,
         };
 
-        private static NotebookEntryResponse MapEntry(VocabularyNoteEntry note)
+        private static NotebookEntryResponse MapEntry(LearnerNoteEntry note)
         {
-            var isFromVocabBank = note.VocabularyEntry is not null;
-            var isFromKanjiBank = note.KanjiEntry is not null;
+            var isFromVocabBank = note.Vocabulary is not null;
+            var isFromKanjiBank = note.Kanji is not null;
 
             return new NotebookEntryResponse
             {
                 NoteEntryId = note.Id,
                 ContentType = isFromVocabBank ? "vocabulary" : isFromKanjiBank ? "kanji" : "manual",
-                Term = isFromVocabBank ? note.VocabularyEntry!.Word
-                     : isFromKanjiBank ? note.KanjiEntry!.Character
+                Term = isFromVocabBank ? note.Vocabulary!.Word
+                     : isFromKanjiBank ? note.Kanji!.Character
                      : note.ManualWord ?? string.Empty,
-                Reading = isFromVocabBank ? note.VocabularyEntry!.Reading
-                        : isFromKanjiBank ? note.KanjiEntry!.OnYomi
+                Reading = isFromVocabBank ? note.Vocabulary!.Reading
+                        : isFromKanjiBank ? note.Kanji!.OnYomi
                         : note.ManualReading,
-                Meaning = isFromVocabBank ? note.VocabularyEntry!.Meaning
-                        : isFromKanjiBank ? note.KanjiEntry!.Meaning
+                Meaning = isFromVocabBank ? note.Vocabulary!.Meaning
+                        : isFromKanjiBank ? note.Kanji!.Meaning
                         : note.ManualMeaning ?? string.Empty,
                 Note = note.Note,
                 AddedAt = note.CreatedDate.Value,

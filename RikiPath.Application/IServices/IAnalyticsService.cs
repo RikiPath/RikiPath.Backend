@@ -11,6 +11,6 @@ namespace RikiPath.Application.IServices
         Task<ApiResponse<CompletionStatsResponse>> GetCompletionStatsAsync(CancellationToken cancellationToken);
 
         /// <summary>Điểm trung bình theo từng kỹ năng (Từ vựng/Kanji, Đọc hiểu, Nghe) từ các bài thi thử.</summary>
-        Task<ApiResponse<List<SkillBreakdownItem>>> GetSkillBreakdownAsync(CancellationToken cancellationToken);
+        Task<ApiResponse<List<LanguageSkillBreakdownItem>>> GetLanguageSkillBreakdownAsync(CancellationToken cancellationToken);
     }
 }

@@ -1,4 +1,4 @@
-﻿using System.Runtime;
+using System.Runtime;
 
 namespace RikiPath.Domain
 {
@@ -12,6 +12,7 @@ namespace RikiPath.Domain
         public PayOsSettings PayOs { get; set; }
         public SupabaseSettings Supabase { get; set; }
         public AiSettings Ai { get; set; }
+        public AzureSpeechSettings AzureSpeech { get; set; }
     }
     public class ConnectionStrings
     {
@@ -87,4 +88,19 @@ namespace RikiPath.Domain
         // tối đa / user / ngày, tính riêng theo từng feature.
         public int MaxTokensPerUserPerDay { get; set; } = 50000;
     }
+
+    public class AzureSpeechSettings
+    {
+        // Region của resource Azure Speech Service (vd "southeastasia", "eastasia") - lấy trong
+        // Azure Portal > resource Speech > Keys and Endpoint. PHẢI khớp đúng region của resource,
+        // sai region sẽ báo lỗi 401/404 dù key đúng.
+        public string Region { get; set; } = string.Empty;
+
+        // 1 trong 2 key (KEY 1 hoặc KEY 2) trong Azure Portal > resource Speech > Keys and Endpoint.
+        public string SubscriptionKey { get; set; } = string.Empty;
+
+        // Locale nhận diện giọng nói - mặc định tiếng Nhật vì hệ thống luyện thi JLPT.
+        public string Language { get; set; } = "ja-JP";
+    }
+
 }

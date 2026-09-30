@@ -1,4 +1,4 @@
-﻿using RikiPath.Domain.Entities;
+using RikiPath.Domain.Entities;
 using System.ComponentModel.DataAnnotations;
 
 namespace RikiPath.Application.Requests.Auth

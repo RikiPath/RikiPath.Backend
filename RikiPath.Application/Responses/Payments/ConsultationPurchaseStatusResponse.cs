@@ -1,4 +1,4 @@
-﻿using Domain.Enums;
+using RikiPath.Domain.Enums;
 
 namespace RikiPath.Application.Responses.Payments
 {

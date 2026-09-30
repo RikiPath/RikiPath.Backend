@@ -22,49 +22,22 @@ namespace RikiPath.Infrastructure.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
-            modelBuilder.Entity("RikiPath.Domain.Entities.ConsultantAvailability", b =>
+            modelBuilder.Entity("FeatureSubscriptionPlan", b =>
                 {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
+                    b.Property<int>("FeaturesId")
                         .HasColumnType("integer");
 
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<int>("ConsultantId")
+                    b.Property<int>("SubscriptionPlansId")
                         .HasColumnType("integer");
 
-                    b.Property<Guid?>("CreatedBy")
-                        .HasColumnType("uuid");
+                    b.HasKey("FeaturesId", "SubscriptionPlansId");
 
-                    b.Property<DateTime?>("CreatedDate")
-                        .HasColumnType("timestamp without time zone");
+                    b.HasIndex("SubscriptionPlansId");
 
-                    b.Property<DateTime>("EndTime")
-                        .HasColumnType("timestamp without time zone");
-
-                    b.Property<bool>("IsBooked")
-                        .HasColumnType("boolean");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("boolean");
-
-                    b.Property<Guid?>("ModifiedBy")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime?>("ModifiedDate")
-                        .HasColumnType("timestamp without time zone");
-
-                    b.Property<DateTime>("StartTime")
-                        .HasColumnType("timestamp without time zone");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ConsultantId", "StartTime", "EndTime");
-
-                    b.ToTable("ConsultantAvailabilities");
+                    b.ToTable("FeatureSubscriptionPlan");
                 });
 
-            modelBuilder.Entity("RikiPath.Domain.Entities.ConsultationAnswer", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.AiCreditTopUp", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
@@ -72,109 +45,8 @@ namespace RikiPath.Infrastructure.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
-                    b.Property<string>("AnswerText")
-                        .HasColumnType("text");
-
-                    b.Property<DateTime>("AnsweredAt")
+                    b.Property<DateTime?>("ActivatedAt")
                         .HasColumnType("timestamp without time zone");
-
-                    b.Property<int>("ConsultantId")
-                        .HasColumnType("integer");
-
-                    b.Property<int>("ConsultationRequestId")
-                        .HasColumnType("integer");
-
-                    b.Property<Guid?>("CreatedBy")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime?>("CreatedDate")
-                        .HasColumnType("timestamp without time zone");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("boolean");
-
-                    b.Property<string>("MeetingNotes")
-                        .HasColumnType("text");
-
-                    b.Property<Guid?>("ModifiedBy")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime?>("ModifiedDate")
-                        .HasColumnType("timestamp without time zone");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ConsultantId");
-
-                    b.HasIndex("ConsultationRequestId")
-                        .IsUnique();
-
-                    b.ToTable("ConsultationAnswers");
-                });
-
-            modelBuilder.Entity("RikiPath.Domain.Entities.ConsultationPackage", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<Guid?>("CreatedBy")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime?>("CreatedDate")
-                        .HasColumnType("timestamp without time zone");
-
-                    b.Property<string>("Description")
-                        .HasColumnType("text");
-
-                    b.Property<int>("DurationMinutes")
-                        .HasColumnType("integer");
-
-                    b.Property<bool>("IsActive")
-                        .HasColumnType("boolean");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("boolean");
-
-                    b.Property<Guid?>("ModifiedBy")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime?>("ModifiedDate")
-                        .HasColumnType("timestamp without time zone");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
-
-                    b.Property<decimal>("Price")
-                        .HasColumnType("decimal(18,2)");
-
-                    b.Property<string>("Type")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("ConsultationPackages");
-                });
-
-            modelBuilder.Entity("RikiPath.Domain.Entities.ConsultationPurchase", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<decimal>("AmountPaid")
-                        .HasColumnType("decimal(18,2)");
-
-                    b.Property<int>("ConsultationPackageId")
-                        .HasColumnType("integer");
 
                     b.Property<Guid?>("CreatedBy")
                         .HasColumnType("uuid");
@@ -200,22 +72,26 @@ namespace RikiPath.Infrastructure.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
 
-                    b.Property<DateTime>("PurchasedAt")
-                        .HasColumnType("timestamp without time zone");
+                    b.Property<int>("Quantity")
+                        .HasColumnType("integer");
+
+                    b.Property<decimal>("TotalAmount")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal>("UnitPrice")
+                        .HasColumnType("decimal(18,2)");
 
                     b.Property<int>("UserId")
                         .HasColumnType("integer");
 
                     b.HasKey("Id");
 
-                    b.HasIndex("ConsultationPackageId");
+                    b.HasIndex("UserId", "PaymentStatus");
 
-                    b.HasIndex("UserId");
-
-                    b.ToTable("ConsultationPurchases");
+                    b.ToTable("AiCreditTopUps");
                 });
 
-            modelBuilder.Entity("RikiPath.Domain.Entities.ConsultationRequest", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.CertificateLevel", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
@@ -223,74 +99,14 @@ namespace RikiPath.Infrastructure.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
-                    b.Property<DateTime?>("CompletedAt")
-                        .HasColumnType("timestamp without time zone");
+                    b.Property<int>("CertificateTypeId")
+                        .HasColumnType("integer")
+                        .HasColumnName("CertificationId");
 
-                    b.Property<int?>("ConsultantAvailabilityId")
-                        .HasColumnType("integer");
-
-                    b.Property<int?>("ConsultantId")
-                        .HasColumnType("integer");
-
-                    b.Property<int>("ConsultationPurchaseId")
-                        .HasColumnType("integer");
-
-                    b.Property<Guid?>("CreatedBy")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime?>("CreatedDate")
-                        .HasColumnType("timestamp without time zone");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("boolean");
-
-                    b.Property<string>("MeetingLink")
-                        .HasMaxLength(500)
-                        .HasColumnType("character varying(500)");
-
-                    b.Property<Guid?>("ModifiedBy")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime?>("ModifiedDate")
-                        .HasColumnType("timestamp without time zone");
-
-                    b.Property<string>("Question")
-                        .HasColumnType("text");
-
-                    b.Property<DateTime?>("ScheduledAt")
-                        .HasColumnType("timestamp without time zone");
-
-                    b.Property<string>("Status")
+                    b.Property<string>("Code")
                         .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ConsultantAvailabilityId")
-                        .IsUnique();
-
-                    b.HasIndex("ConsultationPurchaseId")
-                        .IsUnique();
-
-                    b.HasIndex("ConsultantId", "Status");
-
-                    b.ToTable("ConsultationRequests");
-                });
-
-            modelBuilder.Entity("RikiPath.Domain.Entities.Course", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<int>("ContentAuthorId")
-                        .HasColumnType("integer");
-
-                    b.Property<int>("CourseCategoryId")
-                        .HasColumnType("integer");
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
 
                     b.Property<Guid?>("CreatedBy")
                         .HasColumnType("uuid");
@@ -304,54 +120,76 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
 
-                    b.Property<int>("JlptLevelId")
-                        .HasColumnType("integer");
-
                     b.Property<Guid?>("ModifiedBy")
                         .HasColumnType("uuid");
 
                     b.Property<DateTime?>("ModifiedDate")
                         .HasColumnType("timestamp without time zone");
 
-                    b.Property<decimal>("Price")
-                        .HasColumnType("numeric");
-
-                    b.Property<string>("ReviewNote")
-                        .HasColumnType("text");
-
-                    b.Property<int?>("ReviewedById")
+                    b.Property<int>("SortOrder")
                         .HasColumnType("integer");
-
-                    b.Property<DateTime?>("ReviewedDate")
-                        .HasColumnType("timestamp without time zone");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)");
-
-                    b.Property<string>("ThumbnailUrl")
-                        .HasColumnType("text");
-
-                    b.Property<string>("Title")
-                        .IsRequired()
-                        .HasMaxLength(300)
-                        .HasColumnType("character varying(300)");
 
                     b.HasKey("Id");
 
-                    b.HasIndex("ContentAuthorId");
+                    b.HasIndex("CertificateTypeId", "Code")
+                        .IsUnique();
 
-                    b.HasIndex("CourseCategoryId");
+                    b.ToTable("CertificateLevels");
 
-                    b.HasIndex("ReviewedById");
-
-                    b.HasIndex("JlptLevelId", "CourseCategoryId", "Status");
-
-                    b.ToTable("Courses");
+                    b.HasData(
+                        new
+                        {
+                            Id = 1,
+                            CertificateTypeId = 1,
+                            Code = "N5",
+                            CreatedDate = new DateTime(2026, 9, 29, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Description = "JLPT N5",
+                            IsDeleted = false,
+                            SortOrder = 1
+                        },
+                        new
+                        {
+                            Id = 2,
+                            CertificateTypeId = 1,
+                            Code = "N4",
+                            CreatedDate = new DateTime(2026, 9, 29, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Description = "JLPT N4",
+                            IsDeleted = false,
+                            SortOrder = 2
+                        },
+                        new
+                        {
+                            Id = 3,
+                            CertificateTypeId = 1,
+                            Code = "N3",
+                            CreatedDate = new DateTime(2026, 9, 29, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Description = "JLPT N3",
+                            IsDeleted = false,
+                            SortOrder = 3
+                        },
+                        new
+                        {
+                            Id = 4,
+                            CertificateTypeId = 1,
+                            Code = "N2",
+                            CreatedDate = new DateTime(2026, 9, 29, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Description = "JLPT N2",
+                            IsDeleted = false,
+                            SortOrder = 4
+                        },
+                        new
+                        {
+                            Id = 5,
+                            CertificateTypeId = 1,
+                            Code = "N1",
+                            CreatedDate = new DateTime(2026, 9, 29, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Description = "JLPT N1",
+                            IsDeleted = false,
+                            SortOrder = 5
+                        });
                 });
 
-            modelBuilder.Entity("RikiPath.Domain.Entities.CourseCategory", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.CertificateType", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
@@ -366,8 +204,10 @@ namespace RikiPath.Infrastructure.Migrations
                         .HasColumnType("timestamp without time zone");
 
                     b.Property<string>("Description")
-                        .HasMaxLength(500)
-                        .HasColumnType("character varying(500)");
+                        .HasColumnType("text");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
 
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
@@ -383,68 +223,44 @@ namespace RikiPath.Infrastructure.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
 
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("integer");
+
                     b.HasKey("Id");
 
                     b.HasIndex("Name")
                         .IsUnique();
 
-                    b.ToTable("CourseCategories");
+                    b.ToTable("CertificateTypes");
+
+                    b.HasData(
+                        new
+                        {
+                            Id = 1,
+                            CreatedDate = new DateTime(2026, 9, 29, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Description = "Japanese-Language Proficiency Test",
+                            IsActive = true,
+                            IsDeleted = false,
+                            Name = "JLPT",
+                            SortOrder = 1
+                        });
                 });
 
-            modelBuilder.Entity("RikiPath.Domain.Entities.CoursePurchase", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.CertificationLevelSkill", b =>
                 {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
+                    b.Property<int>("CertificateLevelId")
+                        .HasColumnType("integer")
+                        .HasColumnName("CertificationLevelId");
 
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+                    b.Property<int>("LanguageSkillId")
+                        .HasColumnType("integer")
+                        .HasColumnName("SkillId");
 
-                    b.Property<decimal>("AmountPaid")
-                        .HasColumnType("numeric");
+                    b.HasKey("CertificateLevelId", "LanguageSkillId");
 
-                    b.Property<int>("CourseId")
-                        .HasColumnType("integer");
+                    b.HasIndex("LanguageSkillId");
 
-                    b.Property<Guid?>("CreatedBy")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime?>("CreatedDate")
-                        .HasColumnType("timestamp without time zone");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("boolean");
-
-                    b.Property<Guid?>("ModifiedBy")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime?>("ModifiedDate")
-                        .HasColumnType("timestamp without time zone");
-
-                    b.Property<long>("OrderCode")
-                        .HasColumnType("bigint");
-
-                    b.Property<int>("PaymentStatus")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("PaymentTransactionId")
-                        .HasColumnType("text");
-
-                    b.Property<DateTime>("PurchasedAt")
-                        .HasColumnType("timestamp without time zone");
-
-                    b.Property<int>("UserAccountId")
-                        .HasColumnType("integer");
-
-                    b.Property<int>("UserId")
-                        .HasColumnType("integer");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("CourseId");
-
-                    b.HasIndex("UserAccountId");
-
-                    b.ToTable("CoursePurchases");
+                    b.ToTable("CertificationLevelSkills");
                 });
 
             modelBuilder.Entity("RikiPath.Domain.Entities.EmailVerification", b =>
@@ -475,126 +291,7 @@ namespace RikiPath.Infrastructure.Migrations
                     b.ToTable("EmailVerifications");
                 });
 
-            modelBuilder.Entity("RikiPath.Domain.Entities.GradingResult", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<Guid?>("CreatedBy")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime?>("CreatedDate")
-                        .HasColumnType("timestamp without time zone");
-
-                    b.Property<string>("FeedbackJson")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<DateTime>("GradedAt")
-                        .HasColumnType("timestamp without time zone");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("boolean");
-
-                    b.Property<Guid?>("ModifiedBy")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime?>("ModifiedDate")
-                        .HasColumnType("timestamp without time zone");
-
-                    b.Property<double>("OverallScore")
-                        .HasColumnType("double precision");
-
-                    b.Property<int>("PracticeSubmissionId")
-                        .HasColumnType("integer");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("PracticeSubmissionId")
-                        .IsUnique();
-
-                    b.ToTable("GradingResults");
-                });
-
-            modelBuilder.Entity("RikiPath.Domain.Entities.GrammarPoint", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<int>("ContentAuthorId")
-                        .HasColumnType("integer");
-
-                    b.Property<Guid?>("CreatedBy")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime?>("CreatedDate")
-                        .HasColumnType("timestamp without time zone");
-
-                    b.Property<string>("ExampleSentence")
-                        .HasColumnType("text");
-
-                    b.Property<string>("ExampleSentenceMeaning")
-                        .HasColumnType("text");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("boolean");
-
-                    b.Property<int>("JlptLevelId")
-                        .HasColumnType("integer");
-
-                    b.Property<Guid?>("ModifiedBy")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime?>("ModifiedDate")
-                        .HasColumnType("timestamp without time zone");
-
-                    b.Property<string>("ReviewNote")
-                        .HasColumnType("text");
-
-                    b.Property<int?>("ReviewedById")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTime?>("ReviewedDate")
-                        .HasColumnType("timestamp without time zone");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)");
-
-                    b.Property<string>("Structure")
-                        .IsRequired()
-                        .HasMaxLength(500)
-                        .HasColumnType("character varying(500)");
-
-                    b.Property<string>("Title")
-                        .IsRequired()
-                        .HasMaxLength(300)
-                        .HasColumnType("character varying(300)");
-
-                    b.Property<string>("UsageNotes")
-                        .HasColumnType("text");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ContentAuthorId");
-
-                    b.HasIndex("JlptLevelId");
-
-                    b.HasIndex("ReviewedById");
-
-                    b.HasIndex("Title", "JlptLevelId");
-
-                    b.ToTable("GrammarPoints");
-                });
-
-            modelBuilder.Entity("RikiPath.Domain.Entities.JlptLevel", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.Feature", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
@@ -623,21 +320,253 @@ namespace RikiPath.Infrastructure.Migrations
 
                     b.Property<string>("Name")
                         .IsRequired()
-                        .HasMaxLength(10)
-                        .HasColumnType("character varying(10)");
+                        .HasMaxLength(150)
+                        .HasColumnType("character varying(150)");
 
-                    b.Property<int>("SortOrder")
+                    b.HasKey("Id");
+
+                    b.ToTable("Features");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.GradingResult", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("CreatedDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("FeedbackJson")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("GradedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("HomeworkSubmissionId")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid?>("ModifiedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("ModifiedDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<double>("OverallScore")
+                        .HasColumnType("double precision");
+
+                    b.Property<int?>("PracticeSubmissionId")
                         .HasColumnType("integer");
 
                     b.HasKey("Id");
 
-                    b.HasIndex("Name")
+                    b.HasIndex("HomeworkSubmissionId")
                         .IsUnique();
 
-                    b.ToTable("JlptLevels");
+                    b.HasIndex("PracticeSubmissionId")
+                        .IsUnique();
+
+                    b.ToTable("GradingResults");
                 });
 
-            modelBuilder.Entity("RikiPath.Domain.Entities.KanjiEntry", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.GrammarPattern", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("CertificateLevelId")
+                        .HasColumnType("integer")
+                        .HasColumnName("CertificationLevelId");
+
+                    b.Property<int>("ContentAuthorId")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("CreatedDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("ExampleSentence")
+                        .HasColumnType("text");
+
+                    b.Property<string>("ExampleSentenceMeaning")
+                        .HasColumnType("text");
+
+                    b.Property<bool>("IsApproved")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid?>("ModifiedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("ModifiedDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("ReviewNote")
+                        .HasColumnType("text");
+
+                    b.Property<string>("ReviewedByName")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateTime?>("ReviewedDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<string>("Structure")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<string>("UsageNotes")
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ContentAuthorId");
+
+                    b.HasIndex("CertificateLevelId", "Status");
+
+                    b.ToTable("GrammarPatterns");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.HomeworkAssignment", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("CreatedDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<DateTime?>("DueAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("Instructions")
+                        .HasColumnType("text");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("LearnerId")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("LessonId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("MentorId")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid?>("ModifiedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("ModifiedDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LessonId");
+
+                    b.HasIndex("MentorId");
+
+                    b.HasIndex("LearnerId", "DueAt");
+
+                    b.ToTable("HomeworkAssignments");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.HomeworkSubmission", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("CreatedDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("FileUrl")
+                        .HasColumnType("text");
+
+                    b.Property<int>("HomeworkAssignmentId")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("LearnerId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("LessonId")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid?>("ModifiedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("ModifiedDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<DateTime>("SubmittedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("TextContent")
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("HomeworkAssignmentId")
+                        .IsUnique();
+
+                    b.HasIndex("LearnerId");
+
+                    b.HasIndex("LessonId");
+
+                    b.ToTable("HomeworkSubmissions");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.KanaCharacter", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
@@ -662,19 +591,204 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Property<DateTime?>("CreatedDate")
                         .HasColumnType("timestamp without time zone");
 
+                    b.Property<bool>("IsApproved")
+                        .HasColumnType("boolean");
+
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
 
-                    b.Property<int>("JlptLevelId")
+                    b.Property<Guid?>("ModifiedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("ModifiedDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("ReviewNote")
+                        .HasColumnType("text");
+
+                    b.Property<string>("ReviewedByName")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateTime?>("ReviewedDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("Romaji")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<int>("StrokeCount")
                         .HasColumnType("integer");
+
+                    b.Property<string>("StrokeOrderImageUrl")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ContentAuthorId");
+
+                    b.HasIndex("Character", "Type")
+                        .IsUnique();
+
+                    b.ToTable("KanaCharacters");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.KanaWritingPracticeCard", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("CreatedDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<double>("EaseFactor")
+                        .HasColumnType("double precision");
+
+                    b.Property<int>("IntervalDays")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("KanaCharacterId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("LastReviewedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<Guid?>("ModifiedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("ModifiedDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<DateTime>("NextReviewDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int>("Repetitions")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("KanaCharacterId");
+
+                    b.HasIndex("UserId", "KanaCharacterId")
+                        .IsUnique();
+
+                    b.HasIndex("UserId", "NextReviewDate");
+
+                    b.ToTable("KanaWritingPracticeCards");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.KanaWritingPracticeHistory", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("CreatedDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("KanaWritingPracticeCardId")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid?>("ModifiedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("ModifiedDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int>("Quality")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Rating")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<DateTime>("ReviewedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int>("TotalMistakes")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("KanaWritingPracticeCardId");
+
+                    b.ToTable("KanaWritingPracticeHistories");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.Kanji", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("AudioUrl")
+                        .HasColumnType("text");
+
+                    b.Property<int>("CertificateLevelId")
+                        .HasColumnType("integer")
+                        .HasColumnName("CertificationLevelId");
+
+                    b.Property<string>("Character")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)");
+
+                    b.Property<int>("ContentAuthorId")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("CreatedDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<bool>("IsApproved")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
 
                     b.Property<string>("KunYomi")
                         .HasColumnType("text");
 
                     b.Property<string>("Meaning")
                         .IsRequired()
-                        .HasMaxLength(500)
-                        .HasColumnType("character varying(500)");
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
 
                     b.Property<Guid?>("ModifiedBy")
                         .HasColumnType("uuid");
@@ -688,8 +802,9 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Property<string>("ReviewNote")
                         .HasColumnType("text");
 
-                    b.Property<int?>("ReviewedById")
-                        .HasColumnType("integer");
+                    b.Property<string>("ReviewedByName")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
 
                     b.Property<DateTime?>("ReviewedDate")
                         .HasColumnType("timestamp without time zone");
@@ -712,16 +827,12 @@ namespace RikiPath.Infrastructure.Migrations
 
                     b.HasIndex("ContentAuthorId");
 
-                    b.HasIndex("JlptLevelId");
+                    b.HasIndex("CertificateLevelId", "Status");
 
-                    b.HasIndex("ReviewedById");
-
-                    b.HasIndex("Character", "JlptLevelId");
-
-                    b.ToTable("KanjiEntries");
+                    b.ToTable("Kanjis");
                 });
 
-            modelBuilder.Entity("RikiPath.Domain.Entities.LearningPathSuggestion", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.LanguageSkill", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
@@ -735,13 +846,11 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Property<DateTime?>("CreatedDate")
                         .HasColumnType("timestamp without time zone");
 
-                    b.Property<DateTime>("GeneratedAt")
-                        .HasColumnType("timestamp without time zone");
+                    b.Property<string>("Description")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
 
                     b.Property<bool>("IsDeleted")
-                        .HasColumnType("boolean");
-
-                    b.Property<bool>("IsViewed")
                         .HasColumnType("boolean");
 
                     b.Property<Guid?>("ModifiedBy")
@@ -750,21 +859,211 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Property<DateTime?>("ModifiedDate")
                         .HasColumnType("timestamp without time zone");
 
-                    b.Property<string>("SuggestionJson")
+                    b.Property<string>("Name")
                         .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Name")
+                        .IsUnique();
+
+                    b.ToTable("LanguageSkills");
+
+                    b.HasData(
+                        new
+                        {
+                            Id = 1,
+                            CreatedDate = new DateTime(2026, 9, 29, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Description = "Japanese vocabulary learning skill.",
+                            IsDeleted = false,
+                            Name = "Vocabulary"
+                        },
+                        new
+                        {
+                            Id = 2,
+                            CreatedDate = new DateTime(2026, 9, 29, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Description = "Japanese kanji learning skill.",
+                            IsDeleted = false,
+                            Name = "Kanji"
+                        },
+                        new
+                        {
+                            Id = 3,
+                            CreatedDate = new DateTime(2026, 9, 29, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Description = "Japanese grammar learning skill.",
+                            IsDeleted = false,
+                            Name = "Grammar"
+                        },
+                        new
+                        {
+                            Id = 4,
+                            CreatedDate = new DateTime(2026, 9, 29, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Description = "Japanese listening comprehension skill.",
+                            IsDeleted = false,
+                            Name = "Listening"
+                        },
+                        new
+                        {
+                            Id = 5,
+                            CreatedDate = new DateTime(2026, 9, 29, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Description = "Japanese reading comprehension skill.",
+                            IsDeleted = false,
+                            Name = "Reading"
+                        });
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.LearnerNote", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("CreatedDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("Description")
                         .HasColumnType("text");
 
-                    b.Property<string>("Summary")
-                        .HasColumnType("text");
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid?>("ModifiedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("ModifiedDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
 
                     b.Property<int>("UserId")
                         .HasColumnType("integer");
 
                     b.HasKey("Id");
 
-                    b.HasIndex("UserId", "GeneratedAt");
+                    b.HasIndex("UserId", "Name");
 
-                    b.ToTable("LearningPathSuggestions");
+                    b.ToTable("LearnerNotes");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.LearnerNoteEntry", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("CreatedDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<int?>("KanjiId")
+                        .HasColumnType("integer")
+                        .HasColumnName("KanjiEntryId");
+
+                    b.Property<int>("LearnerNoteId")
+                        .HasColumnType("integer")
+                        .HasColumnName("VocabularyListId");
+
+                    b.Property<string>("ManualMeaning")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("ManualReading")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("ManualWord")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<Guid?>("ModifiedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("ModifiedDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("Note")
+                        .HasColumnType("text");
+
+                    b.Property<int?>("VocabularyId")
+                        .HasColumnType("integer")
+                        .HasColumnName("VocabularyEntryId");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("KanjiId");
+
+                    b.HasIndex("LearnerNoteId");
+
+                    b.HasIndex("VocabularyId");
+
+                    b.ToTable("LearnerNoteEntries");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.LearnerPracticeAnswer", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("CreatedDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<bool?>("IsCorrect")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid?>("ModifiedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("ModifiedDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int>("PracticeExerciseAttemptId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("PracticeQuestionId")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("SelectedOptionId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("TextAnswer")
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PracticeQuestionId");
+
+                    b.HasIndex("SelectedOptionId");
+
+                    b.HasIndex("PracticeExerciseAttemptId", "PracticeQuestionId")
+                        .IsUnique();
+
+                    b.ToTable("LearnerPracticeAnswers");
                 });
 
             modelBuilder.Entity("RikiPath.Domain.Entities.Lesson", b =>
@@ -775,7 +1074,11 @@ namespace RikiPath.Infrastructure.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
-                    b.Property<int>("CourseId")
+                    b.Property<int>("CertificateLevelId")
+                        .HasColumnType("integer")
+                        .HasColumnName("CertificationLevelId");
+
+                    b.Property<int>("ContentAuthorId")
                         .HasColumnType("integer");
 
                     b.Property<Guid?>("CreatedBy")
@@ -790,8 +1093,15 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Property<int>("DurationSeconds")
                         .HasColumnType("integer");
 
+                    b.Property<bool>("IsApproved")
+                        .HasColumnType("boolean");
+
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
+
+                    b.Property<int>("LanguageSkillId")
+                        .HasColumnType("integer")
+                        .HasColumnName("SkillId");
 
                     b.Property<Guid?>("ModifiedBy")
                         .HasColumnType("uuid");
@@ -799,8 +1109,15 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Property<DateTime?>("ModifiedDate")
                         .HasColumnType("timestamp without time zone");
 
-                    b.Property<int>("SkillId")
-                        .HasColumnType("integer");
+                    b.Property<string>("ReviewNote")
+                        .HasColumnType("text");
+
+                    b.Property<string>("ReviewedByName")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateTime?>("ReviewedDate")
+                        .HasColumnType("timestamp without time zone");
 
                     b.Property<int>("SortOrder")
                         .HasColumnType("integer");
@@ -817,14 +1134,15 @@ namespace RikiPath.Infrastructure.Migrations
 
                     b.Property<string>("VideoUrl")
                         .IsRequired()
-                        .HasMaxLength(1000)
-                        .HasColumnType("character varying(1000)");
+                        .HasColumnType("text");
 
                     b.HasKey("Id");
 
-                    b.HasIndex("SkillId");
+                    b.HasIndex("ContentAuthorId");
 
-                    b.HasIndex("CourseId", "SortOrder");
+                    b.HasIndex("LanguageSkillId");
+
+                    b.HasIndex("CertificateLevelId", "LanguageSkillId", "Status");
 
                     b.ToTable("Lessons");
                 });
@@ -834,12 +1152,13 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Property<int>("LessonId")
                         .HasColumnType("integer");
 
-                    b.Property<int>("GrammarPointId")
-                        .HasColumnType("integer");
+                    b.Property<int>("GrammarPatternId")
+                        .HasColumnType("integer")
+                        .HasColumnName("GrammarPointId");
 
-                    b.HasKey("LessonId", "GrammarPointId");
+                    b.HasKey("LessonId", "GrammarPatternId");
 
-                    b.HasIndex("GrammarPointId");
+                    b.HasIndex("GrammarPatternId");
 
                     b.ToTable("LessonGrammars");
                 });
@@ -849,12 +1168,13 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Property<int>("LessonId")
                         .HasColumnType("integer");
 
-                    b.Property<int>("KanjiEntryId")
-                        .HasColumnType("integer");
+                    b.Property<int>("KanjiId")
+                        .HasColumnType("integer")
+                        .HasColumnName("KanjiEntryId");
 
-                    b.HasKey("LessonId", "KanjiEntryId");
+                    b.HasKey("LessonId", "KanjiId");
 
-                    b.HasIndex("KanjiEntryId");
+                    b.HasIndex("KanjiId");
 
                     b.ToTable("LessonKanjis");
                 });
@@ -915,14 +1235,523 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Property<int>("LessonId")
                         .HasColumnType("integer");
 
-                    b.Property<int>("VocabularyEntryId")
-                        .HasColumnType("integer");
+                    b.Property<int>("VocabularyId")
+                        .HasColumnType("integer")
+                        .HasColumnName("VocabularyEntryId");
 
-                    b.HasKey("LessonId", "VocabularyEntryId");
+                    b.HasKey("LessonId", "VocabularyId");
 
-                    b.HasIndex("VocabularyEntryId");
+                    b.HasIndex("VocabularyId");
 
                     b.ToTable("LessonVocabularies");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.MentorAvailability", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("CreatedDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<DateTime>("EndTime")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<bool>("IsBooked")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("MentorId")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid?>("ModifiedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("ModifiedDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<DateTime>("StartTime")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MentorId", "StartTime", "EndTime");
+
+                    b.ToTable("MentorAvailabilities");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.MentorBooking", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime?>("CompletedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("CreatedDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("MeetingLink")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<int?>("MentorAvailabilityId")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid?>("ModifiedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("ModifiedDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("Question")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("ScheduledAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<int>("UserSubscriptionId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MentorAvailabilityId")
+                        .IsUnique();
+
+                    b.HasIndex("UserSubscriptionId", "Status");
+
+                    b.ToTable("MentorBookings");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.MockQuestion", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("AudioUrl")
+                        .HasColumnType("text");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("CreatedDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("Explanation")
+                        .HasColumnType("text");
+
+                    b.Property<string>("ImageUrl")
+                        .HasColumnType("text");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("MockTestSectionId")
+                        .HasColumnType("integer")
+                        .HasColumnName("PracticeTestSectionId");
+
+                    b.Property<Guid?>("ModifiedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("ModifiedDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("QuestionText")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MockTestSectionId");
+
+                    b.ToTable("MockQuestions");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.MockQuestionOption", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("CreatedDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<bool>("IsCorrect")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("MockQuestionId")
+                        .HasColumnType("integer")
+                        .HasColumnName("PracticeQuestionId");
+
+                    b.Property<Guid?>("ModifiedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("ModifiedDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("OptionText")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MockQuestionId");
+
+                    b.ToTable("MockQuestionOptions");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.MockTest", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("CertificateLevelId")
+                        .HasColumnType("integer")
+                        .HasColumnName("CertificationLevelId");
+
+                    b.Property<int>("ContentAuthorId")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("CreatedDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("Description")
+                        .HasColumnType("text");
+
+                    b.Property<bool>("IsApproved")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid?>("ModifiedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("ModifiedDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("ReviewNote")
+                        .HasColumnType("text");
+
+                    b.Property<string>("ReviewedByName")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateTime?>("ReviewedDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<int>("TimeLimitMinutes")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ContentAuthorId");
+
+                    b.HasIndex("CertificateLevelId", "Status");
+
+                    b.ToTable("MockTests");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.MockTestAnswer", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("CreatedDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<bool>("IsCorrect")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("MockQuestionId")
+                        .HasColumnType("integer")
+                        .HasColumnName("PracticeQuestionId");
+
+                    b.Property<int>("MockTestAttemptId")
+                        .HasColumnType("integer")
+                        .HasColumnName("PracticeTestAttemptId");
+
+                    b.Property<Guid?>("ModifiedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("ModifiedDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("SelectedOptionId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MockQuestionId");
+
+                    b.HasIndex("SelectedOptionId");
+
+                    b.HasIndex("MockTestAttemptId", "MockQuestionId")
+                        .IsUnique();
+
+                    b.ToTable("MockTestAnswers");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.MockTestAttempt", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("CreatedDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<bool>("IsCompleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("MockTestId")
+                        .HasColumnType("integer")
+                        .HasColumnName("PracticeTestId");
+
+                    b.Property<Guid?>("ModifiedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("ModifiedDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<DateTime>("StartedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<DateTime?>("SubmittedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<double?>("TotalScore")
+                        .HasColumnType("double precision");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MockTestId");
+
+                    b.HasIndex("UserId", "MockTestId");
+
+                    b.ToTable("MockTestAttempts");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.MockTestSection", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("CreatedDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("LanguageSkillId")
+                        .HasColumnType("integer")
+                        .HasColumnName("SkillId");
+
+                    b.Property<int>("MockTestId")
+                        .HasColumnType("integer")
+                        .HasColumnName("PracticeTestId");
+
+                    b.Property<Guid?>("ModifiedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("ModifiedDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LanguageSkillId");
+
+                    b.HasIndex("MockTestId");
+
+                    b.ToTable("MockTestSections");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.MockTestSectionResult", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("CorrectCount")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("CreatedDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("MockTestAttemptId")
+                        .HasColumnType("integer")
+                        .HasColumnName("PracticeTestAttemptId");
+
+                    b.Property<int>("MockTestSectionId")
+                        .HasColumnType("integer")
+                        .HasColumnName("PracticeTestSectionId");
+
+                    b.Property<Guid?>("ModifiedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("ModifiedDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<double>("ScorePercent")
+                        .HasColumnType("double precision");
+
+                    b.Property<int>("TotalCount")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MockTestSectionId");
+
+                    b.HasIndex("MockTestAttemptId", "MockTestSectionId")
+                        .IsUnique();
+
+                    b.ToTable("MockTestSectionResults");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.Note", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("AnswerText")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("AnsweredAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("CreatedDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("MeetingNotes")
+                        .HasColumnType("text");
+
+                    b.Property<int>("MentorBookingId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("MentorId")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid?>("ModifiedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("ModifiedDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MentorBookingId")
+                        .IsUnique();
+
+                    b.HasIndex("MentorId");
+
+                    b.ToTable("Notes");
                 });
 
             modelBuilder.Entity("RikiPath.Domain.Entities.Notification", b =>
@@ -978,6 +1807,134 @@ namespace RikiPath.Infrastructure.Migrations
                     b.ToTable("Notifications");
                 });
 
+            modelBuilder.Entity("RikiPath.Domain.Entities.PracticeExercise", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("CertificateLevelId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("ContentAuthorId")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("CreatedDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("Description")
+                        .HasColumnType("text");
+
+                    b.Property<bool>("IsApproved")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("LanguageSkillId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("LessonId")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid?>("ModifiedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("ModifiedDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("ReviewNote")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<string>("ReviewedByName")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateTime?>("ReviewedDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CertificateLevelId");
+
+                    b.HasIndex("ContentAuthorId");
+
+                    b.HasIndex("LanguageSkillId");
+
+                    b.HasIndex("LessonId", "LanguageSkillId", "Status");
+
+                    b.ToTable("PracticeExercises");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.PracticeExerciseAttempt", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("CreatedDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<bool>("IsCompleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid?>("ModifiedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("ModifiedDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int>("PracticeExerciseId")
+                        .HasColumnType("integer");
+
+                    b.Property<double?>("ScorePercent")
+                        .HasColumnType("double precision");
+
+                    b.Property<DateTime>("StartedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<DateTime?>("SubmittedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PracticeExerciseId");
+
+                    b.HasIndex("UserId", "PracticeExerciseId", "StartedAt");
+
+                    b.ToTable("PracticeExerciseAttempts");
+                });
+
             modelBuilder.Entity("RikiPath.Domain.Entities.PracticeQuestion", b =>
                 {
                     b.Property<int>("Id")
@@ -986,9 +1943,6 @@ namespace RikiPath.Infrastructure.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
-                    b.Property<string>("AudioUrl")
-                        .HasColumnType("text");
-
                     b.Property<Guid?>("CreatedBy")
                         .HasColumnType("uuid");
 
@@ -996,9 +1950,6 @@ namespace RikiPath.Infrastructure.Migrations
                         .HasColumnType("timestamp without time zone");
 
                     b.Property<string>("Explanation")
-                        .HasColumnType("text");
-
-                    b.Property<string>("ImageUrl")
                         .HasColumnType("text");
 
                     b.Property<bool>("IsDeleted")
@@ -1010,7 +1961,7 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Property<DateTime?>("ModifiedDate")
                         .HasColumnType("timestamp without time zone");
 
-                    b.Property<int>("PracticeTestSectionId")
+                    b.Property<int>("PracticeExerciseId")
                         .HasColumnType("integer");
 
                     b.Property<string>("QuestionText")
@@ -1022,7 +1973,7 @@ namespace RikiPath.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("PracticeTestSectionId");
+                    b.HasIndex("PracticeExerciseId");
 
                     b.ToTable("PracticeQuestions");
                 });
@@ -1055,8 +2006,8 @@ namespace RikiPath.Infrastructure.Migrations
 
                     b.Property<string>("OptionText")
                         .IsRequired()
-                        .HasMaxLength(500)
-                        .HasColumnType("character varying(500)");
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
 
                     b.Property<int>("PracticeQuestionId")
                         .HasColumnType("integer");
@@ -1079,6 +2030,13 @@ namespace RikiPath.Infrastructure.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
+                    b.Property<string>("AudioUrl")
+                        .HasColumnType("text");
+
+                    b.Property<int>("CertificateLevelId")
+                        .HasColumnType("integer")
+                        .HasColumnName("CertificationLevelId");
+
                     b.Property<Guid?>("CreatedBy")
                         .HasColumnType("uuid");
 
@@ -1090,9 +2048,6 @@ namespace RikiPath.Infrastructure.Migrations
 
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
-
-                    b.Property<int>("JlptLevelId")
-                        .HasColumnType("integer");
 
                     b.Property<Guid?>("ModifiedBy")
                         .HasColumnType("uuid");
@@ -1116,14 +2071,14 @@ namespace RikiPath.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("JlptLevelId");
+                    b.HasIndex("CertificateLevelId");
 
                     b.HasIndex("UserId", "Type", "SubmittedAt");
 
                     b.ToTable("PracticeSubmissions");
                 });
 
-            modelBuilder.Entity("RikiPath.Domain.Entities.PracticeTest", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.RecommendedLearningPath", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
@@ -1131,255 +2086,45 @@ namespace RikiPath.Infrastructure.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
-                    b.Property<int>("ContentAuthorId")
-                        .HasColumnType("integer");
-
                     b.Property<Guid?>("CreatedBy")
                         .HasColumnType("uuid");
 
                     b.Property<DateTime?>("CreatedDate")
                         .HasColumnType("timestamp without time zone");
 
-                    b.Property<string>("Description")
+                    b.Property<DateTime>("GeneratedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("IsViewed")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid?>("ModifiedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("ModifiedDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("SuggestionJson")
+                        .IsRequired()
                         .HasColumnType("text");
 
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("boolean");
-
-                    b.Property<int>("JlptLevelId")
-                        .HasColumnType("integer");
-
-                    b.Property<Guid?>("ModifiedBy")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime?>("ModifiedDate")
-                        .HasColumnType("timestamp without time zone");
-
-                    b.Property<string>("ReviewNote")
+                    b.Property<string>("Summary")
                         .HasColumnType("text");
-
-                    b.Property<int?>("ReviewedById")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTime?>("ReviewedDate")
-                        .HasColumnType("timestamp without time zone");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)");
-
-                    b.Property<int>("TimeLimitMinutes")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("Title")
-                        .IsRequired()
-                        .HasMaxLength(300)
-                        .HasColumnType("character varying(300)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ContentAuthorId");
-
-                    b.HasIndex("JlptLevelId");
-
-                    b.HasIndex("ReviewedById");
-
-                    b.ToTable("PracticeTests");
-                });
-
-            modelBuilder.Entity("RikiPath.Domain.Entities.PracticeTestAnswer", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<Guid?>("CreatedBy")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime?>("CreatedDate")
-                        .HasColumnType("timestamp without time zone");
-
-                    b.Property<bool>("IsCorrect")
-                        .HasColumnType("boolean");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("boolean");
-
-                    b.Property<Guid?>("ModifiedBy")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime?>("ModifiedDate")
-                        .HasColumnType("timestamp without time zone");
-
-                    b.Property<int>("PracticeQuestionId")
-                        .HasColumnType("integer");
-
-                    b.Property<int>("PracticeTestAttemptId")
-                        .HasColumnType("integer");
-
-                    b.Property<int?>("SelectedOptionId")
-                        .HasColumnType("integer");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("PracticeQuestionId");
-
-                    b.HasIndex("SelectedOptionId");
-
-                    b.HasIndex("PracticeTestAttemptId", "PracticeQuestionId")
-                        .IsUnique();
-
-                    b.ToTable("PracticeTestAnswers");
-                });
-
-            modelBuilder.Entity("RikiPath.Domain.Entities.PracticeTestAttempt", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<Guid?>("CreatedBy")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime?>("CreatedDate")
-                        .HasColumnType("timestamp without time zone");
-
-                    b.Property<bool>("IsCompleted")
-                        .HasColumnType("boolean");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("boolean");
-
-                    b.Property<Guid?>("ModifiedBy")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime?>("ModifiedDate")
-                        .HasColumnType("timestamp without time zone");
-
-                    b.Property<int>("PracticeTestId")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTime>("StartedAt")
-                        .HasColumnType("timestamp without time zone");
-
-                    b.Property<DateTime?>("SubmittedAt")
-                        .HasColumnType("timestamp without time zone");
-
-                    b.Property<double?>("TotalScore")
-                        .HasColumnType("double precision");
 
                     b.Property<int>("UserId")
                         .HasColumnType("integer");
 
                     b.HasKey("Id");
 
-                    b.HasIndex("PracticeTestId");
+                    b.HasIndex("UserId", "GeneratedAt");
 
-                    b.HasIndex("UserId", "PracticeTestId");
-
-                    b.ToTable("PracticeTestAttempts");
+                    b.ToTable("RecommendedLearningPaths");
                 });
 
-            modelBuilder.Entity("RikiPath.Domain.Entities.PracticeTestSection", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<Guid?>("CreatedBy")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime?>("CreatedDate")
-                        .HasColumnType("timestamp without time zone");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("boolean");
-
-                    b.Property<Guid?>("ModifiedBy")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime?>("ModifiedDate")
-                        .HasColumnType("timestamp without time zone");
-
-                    b.Property<int>("PracticeTestId")
-                        .HasColumnType("integer");
-
-                    b.Property<int>("SkillId")
-                        .HasColumnType("integer");
-
-                    b.Property<int>("SortOrder")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("Title")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("PracticeTestId");
-
-                    b.HasIndex("SkillId");
-
-                    b.ToTable("PracticeTestSections");
-                });
-
-            modelBuilder.Entity("RikiPath.Domain.Entities.PracticeTestSectionResult", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<int>("CorrectCount")
-                        .HasColumnType("integer");
-
-                    b.Property<Guid?>("CreatedBy")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime?>("CreatedDate")
-                        .HasColumnType("timestamp without time zone");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("boolean");
-
-                    b.Property<Guid?>("ModifiedBy")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime?>("ModifiedDate")
-                        .HasColumnType("timestamp without time zone");
-
-                    b.Property<int>("PracticeTestAttemptId")
-                        .HasColumnType("integer");
-
-                    b.Property<int>("PracticeTestSectionId")
-                        .HasColumnType("integer");
-
-                    b.Property<double>("ScorePercent")
-                        .HasColumnType("double precision");
-
-                    b.Property<int>("TotalCount")
-                        .HasColumnType("integer");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("PracticeTestSectionId");
-
-                    b.HasIndex("PracticeTestAttemptId", "PracticeTestSectionId")
-                        .IsUnique();
-
-                    b.ToTable("PracticeTestSectionResults");
-                });
-
-            modelBuilder.Entity("RikiPath.Domain.Entities.ReviewItem", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.ReviewCard", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
@@ -1396,8 +2141,9 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Property<double>("EaseFactor")
                         .HasColumnType("double precision");
 
-                    b.Property<int?>("GrammarPointId")
-                        .HasColumnType("integer");
+                    b.Property<int?>("GrammarPatternId")
+                        .HasColumnType("integer")
+                        .HasColumnName("GrammarPointId");
 
                     b.Property<int>("IntervalDays")
                         .HasColumnType("integer");
@@ -1405,11 +2151,19 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
 
-                    b.Property<int?>("KanjiEntryId")
-                        .HasColumnType("integer");
+                    b.Property<int?>("KanjiId")
+                        .HasColumnType("integer")
+                        .HasColumnName("KanjiEntryId");
 
                     b.Property<DateTime?>("LastReviewedAt")
                         .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("LearnerNoteEntryId")
+                        .HasColumnType("integer")
+                        .HasColumnName("VocabularyNoteEntryId");
+
+                    b.Property<int>("Mode")
+                        .HasColumnType("integer");
 
                     b.Property<Guid?>("ModifiedBy")
                         .HasColumnType("uuid");
@@ -1426,23 +2180,20 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Property<int>("UserId")
                         .HasColumnType("integer");
 
-                    b.Property<int?>("VocabularyNoteEntryId")
-                        .HasColumnType("integer");
-
                     b.HasKey("Id");
 
-                    b.HasIndex("GrammarPointId");
+                    b.HasIndex("GrammarPatternId");
 
-                    b.HasIndex("KanjiEntryId");
+                    b.HasIndex("KanjiId");
 
-                    b.HasIndex("VocabularyNoteEntryId");
+                    b.HasIndex("LearnerNoteEntryId");
 
                     b.HasIndex("UserId", "NextReviewDate");
 
-                    b.ToTable("ReviewItems");
+                    b.ToTable("ReviewCards");
                 });
 
-            modelBuilder.Entity("RikiPath.Domain.Entities.ReviewLog", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.ReviewHistory", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
@@ -1473,26 +2224,30 @@ namespace RikiPath.Infrastructure.Migrations
                         .HasMaxLength(10)
                         .HasColumnType("character varying(10)");
 
-                    b.Property<int>("ReviewItemId")
-                        .HasColumnType("integer");
+                    b.Property<int>("ReviewCardId")
+                        .HasColumnType("integer")
+                        .HasColumnName("ReviewItemId");
 
                     b.Property<DateTime>("ReviewedAt")
                         .HasColumnType("timestamp without time zone");
 
                     b.HasKey("Id");
 
-                    b.HasIndex("ReviewItemId");
+                    b.HasIndex("ReviewCardId");
 
-                    b.ToTable("ReviewLogs");
+                    b.ToTable("ReviewHistories");
                 });
 
-            modelBuilder.Entity("RikiPath.Domain.Entities.Skill", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.SubscriptionPlan", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("integer");
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("AiGradingQuota")
+                        .HasColumnType("integer");
 
                     b.Property<Guid?>("CreatedBy")
                         .HasColumnType("uuid");
@@ -1501,10 +2256,21 @@ namespace RikiPath.Infrastructure.Migrations
                         .HasColumnType("timestamp without time zone");
 
                     b.Property<string>("Description")
-                        .HasMaxLength(500)
-                        .HasColumnType("character varying(500)");
+                        .HasColumnType("text");
+
+                    b.Property<int>("DurationDays")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
 
                     b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("IsPopular")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("IsTrial")
                         .HasColumnType("boolean");
 
                     b.Property<Guid?>("ModifiedBy")
@@ -1515,15 +2281,18 @@ namespace RikiPath.Infrastructure.Migrations
 
                     b.Property<string>("Name")
                         .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)");
+                        .HasMaxLength(150)
+                        .HasColumnType("character varying(150)");
+
+                    b.Property<decimal>("Price")
+                        .HasColumnType("decimal(18,0)");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("integer");
 
                     b.HasKey("Id");
 
-                    b.HasIndex("Name")
-                        .IsUnique();
-
-                    b.ToTable("Skills");
+                    b.ToTable("SubscriptionPlans");
                 });
 
             modelBuilder.Entity("RikiPath.Domain.Entities.UserAccount", b =>
@@ -1535,7 +2304,8 @@ namespace RikiPath.Infrastructure.Migrations
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
                     b.Property<string>("AvatarUrl")
-                        .HasColumnType("text");
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
 
                     b.Property<Guid?>("CreatedBy")
                         .HasColumnType("uuid");
@@ -1550,12 +2320,13 @@ namespace RikiPath.Infrastructure.Migrations
                         .HasColumnType("integer");
 
                     b.Property<string>("Email")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("character varying(256)");
+                        .HasColumnType("text");
 
                     b.Property<bool>("EmailNotificationsEnabled")
                         .HasColumnType("boolean");
+
+                    b.Property<string>("FirebaseUid")
+                        .HasColumnType("text");
 
                     b.Property<string>("FirstName")
                         .HasMaxLength(100)
@@ -1565,6 +2336,9 @@ namespace RikiPath.Infrastructure.Migrations
                         .HasColumnType("boolean");
 
                     b.Property<bool>("IsEmailVerified")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("IsPhoneVerified")
                         .HasColumnType("boolean");
 
                     b.Property<string>("LastName")
@@ -1601,25 +2375,189 @@ namespace RikiPath.Infrastructure.Migrations
                         .HasColumnType("character varying(20)");
 
                     b.Property<string>("StudyTimePreference")
-                        .HasColumnType("text");
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
 
                     b.Property<bool>("SystemNotificationsEnabled")
                         .HasColumnType("boolean");
 
-                    b.Property<int?>("TargetJlptLevelId")
-                        .HasColumnType("integer");
+                    b.Property<int?>("TargetCertificateLevelId")
+                        .HasColumnType("integer")
+                        .HasColumnName("TargetCertificationLevelId");
 
                     b.HasKey("Id");
 
                     b.HasIndex("Email")
                         .IsUnique();
 
-                    b.HasIndex("TargetJlptLevelId");
+                    b.HasIndex("TargetCertificateLevelId");
 
                     b.ToTable("Users");
+
+                    b.HasData(
+                        new
+                        {
+                            Id = 900001,
+                            CreatedDate = new DateTime(2026, 9, 28, 0, 0, 0, 0, DateTimeKind.Utc),
+                            CurrentStreak = 0,
+                            DailyStudyMinutes = 30,
+                            Email = "admin@rikipath.local",
+                            EmailNotificationsEnabled = true,
+                            FirstName = "Admin",
+                            IsDeleted = false,
+                            IsEmailVerified = true,
+                            IsPhoneVerified = false,
+                            LastName = "System",
+                            LongestStreak = 0,
+                            PasswordHash = new byte[] { 91, 215, 217, 54, 239, 206, 181, 216, 143, 33, 82, 211, 9, 70, 197, 173, 197, 0, 72, 71, 59, 150, 46, 114, 96, 137, 52, 174, 137, 29, 196, 61, 50, 254, 249, 101, 114, 92, 149, 32, 55, 127, 205, 126, 216, 147, 197, 192, 248, 173, 158, 92, 104, 42, 195, 107, 150, 15, 3, 74, 103, 104, 3, 229 },
+                            PasswordSalt = new byte[] { 61, 240, 150, 172, 239, 48, 224, 17, 192, 54, 50, 58, 91, 100, 55, 168, 18, 69, 137, 112, 110, 59, 180, 37, 201, 241, 143, 238, 139, 33, 128, 70, 87, 158, 235, 219, 229, 184, 94, 72, 41, 160, 160, 197, 158, 217, 128, 188, 156, 255, 147, 13, 151, 37, 133, 164, 9, 252, 175, 124, 21, 15, 152, 196 },
+                            Role = "Admin",
+                            SystemNotificationsEnabled = true
+                        },
+                        new
+                        {
+                            Id = 900002,
+                            CreatedDate = new DateTime(2026, 9, 28, 0, 0, 0, 0, DateTimeKind.Utc),
+                            CurrentStreak = 0,
+                            DailyStudyMinutes = 30,
+                            Email = "mentor1@rikipath.local",
+                            EmailNotificationsEnabled = true,
+                            FirstName = "Mentor",
+                            IsDeleted = false,
+                            IsEmailVerified = true,
+                            IsPhoneVerified = false,
+                            LastName = "One",
+                            LongestStreak = 0,
+                            PasswordHash = new byte[] { 17, 253, 106, 25, 89, 176, 204, 31, 142, 252, 245, 31, 64, 101, 213, 135, 164, 116, 40, 46, 173, 175, 8, 0, 69, 101, 65, 4, 90, 25, 176, 223, 153, 237, 220, 94, 55, 133, 227, 181, 70, 97, 155, 122, 50, 139, 216, 136, 88, 52, 76, 98, 250, 64, 52, 71, 146, 221, 225, 137, 106, 6, 178, 239 },
+                            PasswordSalt = new byte[] { 233, 77, 244, 252, 171, 97, 38, 140, 50, 138, 10, 54, 122, 165, 186, 85, 129, 82, 49, 10, 98, 44, 165, 57, 50, 7, 238, 166, 142, 224, 94, 49, 134, 226, 247, 110, 154, 139, 99, 204, 95, 39, 171, 235, 212, 26, 217, 87, 139, 118, 253, 125, 241, 255, 57, 22, 140, 171, 11, 168, 174, 202, 32, 17 },
+                            Role = "Mentor",
+                            SystemNotificationsEnabled = true
+                        },
+                        new
+                        {
+                            Id = 900003,
+                            CreatedDate = new DateTime(2026, 9, 28, 0, 0, 0, 0, DateTimeKind.Utc),
+                            CurrentStreak = 0,
+                            DailyStudyMinutes = 30,
+                            Email = "mentor2@rikipath.local",
+                            EmailNotificationsEnabled = true,
+                            FirstName = "Mentor",
+                            IsDeleted = false,
+                            IsEmailVerified = true,
+                            IsPhoneVerified = false,
+                            LastName = "Two",
+                            LongestStreak = 0,
+                            PasswordHash = new byte[] { 93, 130, 109, 171, 238, 187, 245, 15, 202, 89, 247, 220, 95, 192, 246, 138, 5, 75, 250, 28, 208, 28, 51, 79, 127, 28, 214, 237, 93, 221, 108, 26, 152, 66, 73, 65, 11, 147, 154, 102, 113, 49, 51, 24, 51, 197, 248, 254, 22, 98, 87, 249, 250, 104, 131, 74, 16, 18, 179, 200, 3, 3, 79, 47 },
+                            PasswordSalt = new byte[] { 240, 155, 254, 183, 129, 162, 74, 247, 41, 9, 67, 242, 128, 8, 226, 85, 5, 104, 104, 72, 101, 75, 130, 95, 47, 101, 116, 89, 207, 23, 119, 178, 38, 180, 185, 145, 58, 115, 14, 30, 85, 216, 169, 133, 94, 115, 11, 117, 96, 87, 227, 240, 204, 48, 51, 144, 170, 248, 167, 56, 175, 194, 253, 135 },
+                            Role = "Mentor",
+                            SystemNotificationsEnabled = true
+                        },
+                        new
+                        {
+                            Id = 900004,
+                            CreatedDate = new DateTime(2026, 9, 28, 0, 0, 0, 0, DateTimeKind.Utc),
+                            CurrentStreak = 0,
+                            DailyStudyMinutes = 30,
+                            Email = "author1@rikipath.local",
+                            EmailNotificationsEnabled = true,
+                            FirstName = "Content",
+                            IsDeleted = false,
+                            IsEmailVerified = true,
+                            IsPhoneVerified = false,
+                            LastName = "Author One",
+                            LongestStreak = 0,
+                            PasswordHash = new byte[] { 168, 249, 82, 144, 178, 145, 94, 164, 34, 152, 2, 74, 204, 105, 84, 145, 96, 199, 153, 136, 110, 82, 114, 113, 22, 139, 117, 143, 50, 239, 197, 4, 51, 189, 137, 48, 175, 14, 104, 164, 218, 249, 148, 217, 33, 44, 202, 128, 237, 183, 110, 228, 185, 36, 209, 254, 183, 182, 55, 1, 78, 16, 234, 50 },
+                            PasswordSalt = new byte[] { 19, 216, 84, 143, 3, 184, 50, 39, 209, 137, 149, 82, 224, 206, 6, 240, 237, 242, 172, 27, 55, 92, 242, 101, 149, 76, 104, 38, 176, 43, 40, 8, 102, 202, 146, 224, 62, 43, 147, 132, 2, 158, 81, 170, 29, 103, 76, 248, 101, 105, 213, 205, 32, 51, 59, 39, 221, 11, 135, 250, 193, 8, 78, 219 },
+                            Role = "ContentAuthor",
+                            SystemNotificationsEnabled = true
+                        },
+                        new
+                        {
+                            Id = 900005,
+                            CreatedDate = new DateTime(2026, 9, 28, 0, 0, 0, 0, DateTimeKind.Utc),
+                            CurrentStreak = 0,
+                            DailyStudyMinutes = 30,
+                            Email = "author2@rikipath.local",
+                            EmailNotificationsEnabled = true,
+                            FirstName = "Content",
+                            IsDeleted = false,
+                            IsEmailVerified = true,
+                            IsPhoneVerified = false,
+                            LastName = "Author Two",
+                            LongestStreak = 0,
+                            PasswordHash = new byte[] { 189, 121, 9, 1, 230, 137, 43, 239, 79, 56, 195, 196, 66, 116, 42, 1, 137, 55, 54, 249, 55, 231, 79, 224, 182, 182, 199, 133, 100, 39, 138, 5, 223, 215, 48, 46, 60, 214, 49, 88, 42, 186, 232, 116, 237, 89, 55, 144, 4, 78, 215, 231, 237, 220, 96, 225, 202, 97, 61, 165, 246, 28, 126, 198 },
+                            PasswordSalt = new byte[] { 66, 178, 77, 56, 234, 206, 29, 78, 136, 190, 160, 142, 226, 249, 14, 17, 26, 101, 167, 36, 193, 55, 150, 94, 239, 81, 69, 54, 81, 171, 80, 22, 208, 38, 242, 2, 55, 171, 64, 38, 48, 224, 36, 216, 133, 132, 147, 100, 174, 32, 65, 134, 128, 35, 50, 138, 204, 59, 167, 96, 11, 128, 101, 102 },
+                            Role = "ContentAuthor",
+                            SystemNotificationsEnabled = true
+                        });
                 });
 
-            modelBuilder.Entity("RikiPath.Domain.Entities.VocabularyEntry", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.UserSubscription", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("AiGradingQuota")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("AiGradingUsedCount")
+                        .HasColumnType("integer");
+
+                    b.Property<decimal>("AmountPaid")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("CreatedDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<DateTime?>("EndDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid?>("ModifiedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("ModifiedDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("PaymentStatus")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<string>("PaymentTransactionId")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateTime>("PurchasedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<DateTime?>("StartDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int>("SubscriptionPlanId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SubscriptionPlanId");
+
+                    b.HasIndex("UserId", "PaymentStatus", "EndDate");
+
+                    b.ToTable("UserSubscriptions");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.Vocabulary", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
@@ -1629,6 +2567,10 @@ namespace RikiPath.Infrastructure.Migrations
 
                     b.Property<string>("AudioUrl")
                         .HasColumnType("text");
+
+                    b.Property<int>("CertificateLevelId")
+                        .HasColumnType("integer")
+                        .HasColumnName("CertificationLevelId");
 
                     b.Property<int>("ContentAuthorId")
                         .HasColumnType("integer");
@@ -1645,16 +2587,16 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Property<string>("ExampleSentenceMeaning")
                         .HasColumnType("text");
 
+                    b.Property<bool>("IsApproved")
+                        .HasColumnType("boolean");
+
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
 
-                    b.Property<int>("JlptLevelId")
-                        .HasColumnType("integer");
-
                     b.Property<string>("Meaning")
                         .IsRequired()
-                        .HasMaxLength(500)
-                        .HasColumnType("character varying(500)");
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
 
                     b.Property<Guid?>("ModifiedBy")
                         .HasColumnType("uuid");
@@ -1670,8 +2612,9 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Property<string>("ReviewNote")
                         .HasColumnType("text");
 
-                    b.Property<int?>("ReviewedById")
-                        .HasColumnType("integer");
+                    b.Property<string>("ReviewedByName")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
 
                     b.Property<DateTime?>("ReviewedDate")
                         .HasColumnType("timestamp without time zone");
@@ -1690,239 +2633,65 @@ namespace RikiPath.Infrastructure.Migrations
 
                     b.HasIndex("ContentAuthorId");
 
-                    b.HasIndex("JlptLevelId");
+                    b.HasIndex("CertificateLevelId", "Status");
 
-                    b.HasIndex("ReviewedById");
-
-                    b.HasIndex("Word", "JlptLevelId");
-
-                    b.ToTable("VocabularyEntries");
+                    b.ToTable("Vocabularies");
                 });
 
-            modelBuilder.Entity("RikiPath.Domain.Entities.VocabularyList", b =>
+            modelBuilder.Entity("FeatureSubscriptionPlan", b =>
                 {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<Guid?>("CreatedBy")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime?>("CreatedDate")
-                        .HasColumnType("timestamp without time zone");
-
-                    b.Property<string>("Description")
-                        .HasColumnType("text");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("boolean");
-
-                    b.Property<Guid?>("ModifiedBy")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime?>("ModifiedDate")
-                        .HasColumnType("timestamp without time zone");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
-
-                    b.Property<int>("UserId")
-                        .HasColumnType("integer");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("UserId", "Name");
-
-                    b.ToTable("VocabularyLists");
-                });
-
-            modelBuilder.Entity("RikiPath.Domain.Entities.VocabularyNoteEntry", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<Guid?>("CreatedBy")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime?>("CreatedDate")
-                        .HasColumnType("timestamp without time zone");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("boolean");
-
-                    b.Property<int?>("KanjiEntryId")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("ManualMeaning")
-                        .HasMaxLength(500)
-                        .HasColumnType("character varying(500)");
-
-                    b.Property<string>("ManualReading")
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
-
-                    b.Property<string>("ManualWord")
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
-
-                    b.Property<Guid?>("ModifiedBy")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime?>("ModifiedDate")
-                        .HasColumnType("timestamp without time zone");
-
-                    b.Property<string>("Note")
-                        .HasColumnType("text");
-
-                    b.Property<int?>("VocabularyEntryId")
-                        .HasColumnType("integer");
-
-                    b.Property<int>("VocabularyListId")
-                        .HasColumnType("integer");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("KanjiEntryId");
-
-                    b.HasIndex("VocabularyEntryId");
-
-                    b.HasIndex("VocabularyListId");
-
-                    b.ToTable("VocabularyNoteEntries");
-                });
-
-            modelBuilder.Entity("RikiPath.Domain.Entities.ConsultantAvailability", b =>
-                {
-                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "Consultant")
-                        .WithMany("ConsultantAvailabilities")
-                        .HasForeignKey("ConsultantId")
+                    b.HasOne("RikiPath.Domain.Entities.Feature", null)
+                        .WithMany()
+                        .HasForeignKey("FeaturesId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
-                    b.Navigation("Consultant");
-                });
-
-            modelBuilder.Entity("RikiPath.Domain.Entities.ConsultationAnswer", b =>
-                {
-                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "Consultant")
-                        .WithMany("ConsultationAnswers")
-                        .HasForeignKey("ConsultantId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("RikiPath.Domain.Entities.ConsultationRequest", "ConsultationRequest")
-                        .WithOne("ConsultationAnswer")
-                        .HasForeignKey("RikiPath.Domain.Entities.ConsultationAnswer", "ConsultationRequestId")
+                    b.HasOne("RikiPath.Domain.Entities.SubscriptionPlan", null)
+                        .WithMany()
+                        .HasForeignKey("SubscriptionPlansId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
-
-                    b.Navigation("Consultant");
-
-                    b.Navigation("ConsultationRequest");
                 });
 
-            modelBuilder.Entity("RikiPath.Domain.Entities.ConsultationPurchase", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.AiCreditTopUp", b =>
                 {
-                    b.HasOne("RikiPath.Domain.Entities.ConsultationPackage", "ConsultationPackage")
-                        .WithMany("Purchases")
-                        .HasForeignKey("ConsultationPackageId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
                     b.HasOne("RikiPath.Domain.Entities.UserAccount", "UserAccount")
-                        .WithMany("ConsultationPurchases")
+                        .WithMany("AiCreditTopUps")
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
-                    b.Navigation("ConsultationPackage");
-
                     b.Navigation("UserAccount");
                 });
 
-            modelBuilder.Entity("RikiPath.Domain.Entities.ConsultationRequest", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.CertificateLevel", b =>
                 {
-                    b.HasOne("RikiPath.Domain.Entities.ConsultantAvailability", "ConsultantAvailability")
-                        .WithOne("ConsultationRequest")
-                        .HasForeignKey("RikiPath.Domain.Entities.ConsultationRequest", "ConsultantAvailabilityId")
-                        .OnDelete(DeleteBehavior.SetNull);
-
-                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "Consultant")
-                        .WithMany("ConsultationRequestsAsConsultant")
-                        .HasForeignKey("ConsultantId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("RikiPath.Domain.Entities.ConsultationPurchase", "ConsultationPurchase")
-                        .WithOne("ConsultationRequest")
-                        .HasForeignKey("RikiPath.Domain.Entities.ConsultationRequest", "ConsultationPurchaseId")
-                        .OnDelete(DeleteBehavior.Cascade)
+                    b.HasOne("RikiPath.Domain.Entities.CertificateType", "CertificateType")
+                        .WithMany("Levels")
+                        .HasForeignKey("CertificateTypeId")
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
-                    b.Navigation("Consultant");
-
-                    b.Navigation("ConsultantAvailability");
-
-                    b.Navigation("ConsultationPurchase");
+                    b.Navigation("CertificateType");
                 });
 
-            modelBuilder.Entity("RikiPath.Domain.Entities.Course", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.CertificationLevelSkill", b =>
                 {
-                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "ContentAuthor")
-                        .WithMany("AuthoredCourses")
-                        .HasForeignKey("ContentAuthorId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("RikiPath.Domain.Entities.CourseCategory", "CourseCategory")
-                        .WithMany("Courses")
-                        .HasForeignKey("CourseCategoryId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("RikiPath.Domain.Entities.JlptLevel", "JlptLevel")
-                        .WithMany("Courses")
-                        .HasForeignKey("JlptLevelId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "ReviewedBy")
-                        .WithMany("ReviewedCourses")
-                        .HasForeignKey("ReviewedById")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.Navigation("ContentAuthor");
-
-                    b.Navigation("CourseCategory");
-
-                    b.Navigation("JlptLevel");
-
-                    b.Navigation("ReviewedBy");
-                });
-
-            modelBuilder.Entity("RikiPath.Domain.Entities.CoursePurchase", b =>
-                {
-                    b.HasOne("RikiPath.Domain.Entities.Course", "Course")
-                        .WithMany("Purchases")
-                        .HasForeignKey("CourseId")
+                    b.HasOne("RikiPath.Domain.Entities.CertificateLevel", "CertificateLevel")
+                        .WithMany("Sections")
+                        .HasForeignKey("CertificateLevelId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
-                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "UserAccount")
-                        .WithMany("CoursePurchases")
-                        .HasForeignKey("UserAccountId")
-                        .OnDelete(DeleteBehavior.Cascade)
+                    b.HasOne("RikiPath.Domain.Entities.LanguageSkill", "LanguageSkill")
+                        .WithMany("CertificationLevelSkills")
+                        .HasForeignKey("LanguageSkillId")
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
-                    b.Navigation("Course");
+                    b.Navigation("CertificateLevel");
 
-                    b.Navigation("UserAccount");
+                    b.Navigation("LanguageSkill");
                 });
 
             modelBuilder.Entity("RikiPath.Domain.Entities.EmailVerification", b =>
@@ -1938,71 +2707,157 @@ namespace RikiPath.Infrastructure.Migrations
 
             modelBuilder.Entity("RikiPath.Domain.Entities.GradingResult", b =>
                 {
+                    b.HasOne("RikiPath.Domain.Entities.HomeworkSubmission", "HomeworkSubmission")
+                        .WithOne("GradingResult")
+                        .HasForeignKey("RikiPath.Domain.Entities.GradingResult", "HomeworkSubmissionId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
                     b.HasOne("RikiPath.Domain.Entities.PracticeSubmission", "PracticeSubmission")
                         .WithOne("GradingResult")
                         .HasForeignKey("RikiPath.Domain.Entities.GradingResult", "PracticeSubmissionId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Cascade);
+
+                    b.Navigation("HomeworkSubmission");
 
                     b.Navigation("PracticeSubmission");
                 });
 
-            modelBuilder.Entity("RikiPath.Domain.Entities.GrammarPoint", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.GrammarPattern", b =>
                 {
+                    b.HasOne("RikiPath.Domain.Entities.CertificateLevel", "CertificateLevel")
+                        .WithMany("GrammarPatterns")
+                        .HasForeignKey("CertificateLevelId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
                     b.HasOne("RikiPath.Domain.Entities.UserAccount", "ContentAuthor")
-                        .WithMany("AuthoredGrammarPoints")
+                        .WithMany("AuthoredGrammarPatterns")
                         .HasForeignKey("ContentAuthorId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
-                    b.HasOne("RikiPath.Domain.Entities.JlptLevel", "JlptLevel")
-                        .WithMany("GrammarPoints")
-                        .HasForeignKey("JlptLevelId")
+                    b.Navigation("CertificateLevel");
+
+                    b.Navigation("ContentAuthor");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.HomeworkAssignment", b =>
+                {
+                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "Learner")
+                        .WithMany()
+                        .HasForeignKey("LearnerId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("RikiPath.Domain.Entities.Lesson", "Lesson")
+                        .WithMany()
+                        .HasForeignKey("LessonId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "Mentor")
+                        .WithMany()
+                        .HasForeignKey("MentorId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
-                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "ReviewedBy")
-                        .WithMany("ReviewedGrammarPoints")
-                        .HasForeignKey("ReviewedById")
-                        .OnDelete(DeleteBehavior.Restrict);
+                    b.Navigation("Learner");
 
-                    b.Navigation("ContentAuthor");
+                    b.Navigation("Lesson");
 
-                    b.Navigation("JlptLevel");
-
-                    b.Navigation("ReviewedBy");
+                    b.Navigation("Mentor");
                 });
 
-            modelBuilder.Entity("RikiPath.Domain.Entities.KanjiEntry", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.HomeworkSubmission", b =>
+                {
+                    b.HasOne("RikiPath.Domain.Entities.HomeworkAssignment", "HomeworkAssignment")
+                        .WithOne("Submission")
+                        .HasForeignKey("RikiPath.Domain.Entities.HomeworkSubmission", "HomeworkAssignmentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "Learner")
+                        .WithMany()
+                        .HasForeignKey("LearnerId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("RikiPath.Domain.Entities.Lesson", "Lesson")
+                        .WithMany()
+                        .HasForeignKey("LessonId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("HomeworkAssignment");
+
+                    b.Navigation("Learner");
+
+                    b.Navigation("Lesson");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.KanaCharacter", b =>
                 {
                     b.HasOne("RikiPath.Domain.Entities.UserAccount", "ContentAuthor")
-                        .WithMany("AuthoredKanjiEntries")
+                        .WithMany()
                         .HasForeignKey("ContentAuthorId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
-                    b.HasOne("RikiPath.Domain.Entities.JlptLevel", "JlptLevel")
-                        .WithMany("KanjiEntries")
-                        .HasForeignKey("JlptLevelId")
+                    b.Navigation("ContentAuthor");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.KanaWritingPracticeCard", b =>
+                {
+                    b.HasOne("RikiPath.Domain.Entities.KanaCharacter", "KanaCharacter")
+                        .WithMany("PracticeCards")
+                        .HasForeignKey("KanaCharacterId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
-                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "ReviewedBy")
-                        .WithMany("ReviewedKanjiEntries")
-                        .HasForeignKey("ReviewedById")
-                        .OnDelete(DeleteBehavior.Restrict);
+                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "UserAccount")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
 
-                    b.Navigation("ContentAuthor");
+                    b.Navigation("KanaCharacter");
 
-                    b.Navigation("JlptLevel");
-
-                    b.Navigation("ReviewedBy");
+                    b.Navigation("UserAccount");
                 });
 
-            modelBuilder.Entity("RikiPath.Domain.Entities.LearningPathSuggestion", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.KanaWritingPracticeHistory", b =>
+                {
+                    b.HasOne("RikiPath.Domain.Entities.KanaWritingPracticeCard", "Card")
+                        .WithMany("Histories")
+                        .HasForeignKey("KanaWritingPracticeCardId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Card");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.Kanji", b =>
+                {
+                    b.HasOne("RikiPath.Domain.Entities.CertificateLevel", "CertificateLevel")
+                        .WithMany("Kanjis")
+                        .HasForeignKey("CertificateLevelId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "ContentAuthor")
+                        .WithMany("AuthoredKanjis")
+                        .HasForeignKey("ContentAuthorId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("CertificateLevel");
+
+                    b.Navigation("ContentAuthor");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.LearnerNote", b =>
                 {
                     b.HasOne("RikiPath.Domain.Entities.UserAccount", "UserAccount")
-                        .WithMany("LearningPathSuggestions")
+                        .WithMany("LearnerNotes")
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
@@ -2010,30 +2865,89 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Navigation("UserAccount");
                 });
 
-            modelBuilder.Entity("RikiPath.Domain.Entities.Lesson", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.LearnerNoteEntry", b =>
                 {
-                    b.HasOne("RikiPath.Domain.Entities.Course", "Course")
-                        .WithMany("Lessons")
-                        .HasForeignKey("CourseId")
+                    b.HasOne("RikiPath.Domain.Entities.Kanji", "Kanji")
+                        .WithMany("LearnerNoteEntries")
+                        .HasForeignKey("KanjiId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("RikiPath.Domain.Entities.LearnerNote", "LearnerNote")
+                        .WithMany("LearnerNoteEntries")
+                        .HasForeignKey("LearnerNoteId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
-                    b.HasOne("RikiPath.Domain.Entities.Skill", "Skill")
-                        .WithMany("Lessons")
-                        .HasForeignKey("SkillId")
+                    b.HasOne("RikiPath.Domain.Entities.Vocabulary", "Vocabulary")
+                        .WithMany("LearnerNoteEntries")
+                        .HasForeignKey("VocabularyId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("Kanji");
+
+                    b.Navigation("LearnerNote");
+
+                    b.Navigation("Vocabulary");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.LearnerPracticeAnswer", b =>
+                {
+                    b.HasOne("RikiPath.Domain.Entities.PracticeExerciseAttempt", "PracticeExerciseAttempt")
+                        .WithMany("Answers")
+                        .HasForeignKey("PracticeExerciseAttemptId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("RikiPath.Domain.Entities.PracticeQuestion", "PracticeQuestion")
+                        .WithMany("Answers")
+                        .HasForeignKey("PracticeQuestionId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
-                    b.Navigation("Course");
+                    b.HasOne("RikiPath.Domain.Entities.PracticeQuestionOption", "SelectedOption")
+                        .WithMany()
+                        .HasForeignKey("SelectedOptionId")
+                        .OnDelete(DeleteBehavior.SetNull);
 
-                    b.Navigation("Skill");
+                    b.Navigation("PracticeExerciseAttempt");
+
+                    b.Navigation("PracticeQuestion");
+
+                    b.Navigation("SelectedOption");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.Lesson", b =>
+                {
+                    b.HasOne("RikiPath.Domain.Entities.CertificateLevel", "CertificateLevel")
+                        .WithMany("Lessons")
+                        .HasForeignKey("CertificateLevelId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "ContentAuthor")
+                        .WithMany("AuthoredLessons")
+                        .HasForeignKey("ContentAuthorId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("RikiPath.Domain.Entities.LanguageSkill", "LanguageSkill")
+                        .WithMany("Lessons")
+                        .HasForeignKey("LanguageSkillId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("CertificateLevel");
+
+                    b.Navigation("ContentAuthor");
+
+                    b.Navigation("LanguageSkill");
                 });
 
             modelBuilder.Entity("RikiPath.Domain.Entities.LessonGrammar", b =>
                 {
-                    b.HasOne("RikiPath.Domain.Entities.GrammarPoint", "GrammarPoint")
+                    b.HasOne("RikiPath.Domain.Entities.GrammarPattern", "GrammarPattern")
                         .WithMany("LessonGrammars")
-                        .HasForeignKey("GrammarPointId")
+                        .HasForeignKey("GrammarPatternId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
@@ -2043,16 +2957,16 @@ namespace RikiPath.Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
-                    b.Navigation("GrammarPoint");
+                    b.Navigation("GrammarPattern");
 
                     b.Navigation("Lesson");
                 });
 
             modelBuilder.Entity("RikiPath.Domain.Entities.LessonKanji", b =>
                 {
-                    b.HasOne("RikiPath.Domain.Entities.KanjiEntry", "KanjiEntry")
+                    b.HasOne("RikiPath.Domain.Entities.Kanji", "Kanji")
                         .WithMany("LessonKanjis")
-                        .HasForeignKey("KanjiEntryId")
+                        .HasForeignKey("KanjiId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
@@ -2062,7 +2976,7 @@ namespace RikiPath.Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
-                    b.Navigation("KanjiEntry");
+                    b.Navigation("Kanji");
 
                     b.Navigation("Lesson");
                 });
@@ -2094,15 +3008,187 @@ namespace RikiPath.Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
-                    b.HasOne("RikiPath.Domain.Entities.VocabularyEntry", "VocabularyEntry")
+                    b.HasOne("RikiPath.Domain.Entities.Vocabulary", "Vocabulary")
                         .WithMany("LessonVocabularies")
-                        .HasForeignKey("VocabularyEntryId")
+                        .HasForeignKey("VocabularyId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
                     b.Navigation("Lesson");
 
-                    b.Navigation("VocabularyEntry");
+                    b.Navigation("Vocabulary");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.MentorAvailability", b =>
+                {
+                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "Mentor")
+                        .WithMany("MentorAvailabilities")
+                        .HasForeignKey("MentorId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Mentor");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.MentorBooking", b =>
+                {
+                    b.HasOne("RikiPath.Domain.Entities.MentorAvailability", "MentorAvailability")
+                        .WithOne("MentorBooking")
+                        .HasForeignKey("RikiPath.Domain.Entities.MentorBooking", "MentorAvailabilityId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("RikiPath.Domain.Entities.UserSubscription", "UserSubscription")
+                        .WithMany("MentorBookings")
+                        .HasForeignKey("UserSubscriptionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("MentorAvailability");
+
+                    b.Navigation("UserSubscription");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.MockQuestion", b =>
+                {
+                    b.HasOne("RikiPath.Domain.Entities.MockTestSection", "MockTestSection")
+                        .WithMany("Questions")
+                        .HasForeignKey("MockTestSectionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("MockTestSection");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.MockQuestionOption", b =>
+                {
+                    b.HasOne("RikiPath.Domain.Entities.MockQuestion", "MockQuestion")
+                        .WithMany("Options")
+                        .HasForeignKey("MockQuestionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("MockQuestion");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.MockTest", b =>
+                {
+                    b.HasOne("RikiPath.Domain.Entities.CertificateLevel", "CertificateLevel")
+                        .WithMany("MockTests")
+                        .HasForeignKey("CertificateLevelId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "ContentAuthor")
+                        .WithMany("AuthoredMockTests")
+                        .HasForeignKey("ContentAuthorId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("CertificateLevel");
+
+                    b.Navigation("ContentAuthor");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.MockTestAnswer", b =>
+                {
+                    b.HasOne("RikiPath.Domain.Entities.MockQuestion", "MockQuestion")
+                        .WithMany("Answers")
+                        .HasForeignKey("MockQuestionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("RikiPath.Domain.Entities.MockTestAttempt", "MockTestAttempt")
+                        .WithMany("Answers")
+                        .HasForeignKey("MockTestAttemptId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("RikiPath.Domain.Entities.MockQuestionOption", "SelectedOption")
+                        .WithMany()
+                        .HasForeignKey("SelectedOptionId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("MockQuestion");
+
+                    b.Navigation("MockTestAttempt");
+
+                    b.Navigation("SelectedOption");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.MockTestAttempt", b =>
+                {
+                    b.HasOne("RikiPath.Domain.Entities.MockTest", "MockTest")
+                        .WithMany("Attempts")
+                        .HasForeignKey("MockTestId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "UserAccount")
+                        .WithMany("MockTestAttempts")
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("MockTest");
+
+                    b.Navigation("UserAccount");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.MockTestSection", b =>
+                {
+                    b.HasOne("RikiPath.Domain.Entities.LanguageSkill", "LanguageSkill")
+                        .WithMany("MockTestSections")
+                        .HasForeignKey("LanguageSkillId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("RikiPath.Domain.Entities.MockTest", "MockTest")
+                        .WithMany("Sections")
+                        .HasForeignKey("MockTestId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("LanguageSkill");
+
+                    b.Navigation("MockTest");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.MockTestSectionResult", b =>
+                {
+                    b.HasOne("RikiPath.Domain.Entities.MockTestAttempt", "MockTestAttempt")
+                        .WithMany("SectionResults")
+                        .HasForeignKey("MockTestAttemptId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("RikiPath.Domain.Entities.MockTestSection", "MockTestSection")
+                        .WithMany("SectionResults")
+                        .HasForeignKey("MockTestSectionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("MockTestAttempt");
+
+                    b.Navigation("MockTestSection");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.Note", b =>
+                {
+                    b.HasOne("RikiPath.Domain.Entities.MentorBooking", "MentorBooking")
+                        .WithOne("Note")
+                        .HasForeignKey("RikiPath.Domain.Entities.Note", "MentorBookingId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "Mentor")
+                        .WithMany("Notes")
+                        .HasForeignKey("MentorId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Mentor");
+
+                    b.Navigation("MentorBooking");
                 });
 
             modelBuilder.Entity("RikiPath.Domain.Entities.Notification", b =>
@@ -2116,15 +3202,69 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Navigation("UserAccount");
                 });
 
-            modelBuilder.Entity("RikiPath.Domain.Entities.PracticeQuestion", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.PracticeExercise", b =>
                 {
-                    b.HasOne("RikiPath.Domain.Entities.PracticeTestSection", "PracticeTestSection")
-                        .WithMany("Questions")
-                        .HasForeignKey("PracticeTestSectionId")
+                    b.HasOne("RikiPath.Domain.Entities.CertificateLevel", "CertificateLevel")
+                        .WithMany()
+                        .HasForeignKey("CertificateLevelId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "ContentAuthor")
+                        .WithMany()
+                        .HasForeignKey("ContentAuthorId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("RikiPath.Domain.Entities.LanguageSkill", "LanguageSkill")
+                        .WithMany()
+                        .HasForeignKey("LanguageSkillId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("RikiPath.Domain.Entities.Lesson", "Lesson")
+                        .WithMany()
+                        .HasForeignKey("LessonId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
-                    b.Navigation("PracticeTestSection");
+                    b.Navigation("CertificateLevel");
+
+                    b.Navigation("ContentAuthor");
+
+                    b.Navigation("LanguageSkill");
+
+                    b.Navigation("Lesson");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.PracticeExerciseAttempt", b =>
+                {
+                    b.HasOne("RikiPath.Domain.Entities.PracticeExercise", "PracticeExercise")
+                        .WithMany("Attempts")
+                        .HasForeignKey("PracticeExerciseId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "UserAccount")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("PracticeExercise");
+
+                    b.Navigation("UserAccount");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.PracticeQuestion", b =>
+                {
+                    b.HasOne("RikiPath.Domain.Entities.PracticeExercise", "PracticeExercise")
+                        .WithMany("Questions")
+                        .HasForeignKey("PracticeExerciseId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("PracticeExercise");
                 });
 
             modelBuilder.Entity("RikiPath.Domain.Entities.PracticeQuestionOption", b =>
@@ -2140,9 +3280,9 @@ namespace RikiPath.Infrastructure.Migrations
 
             modelBuilder.Entity("RikiPath.Domain.Entities.PracticeSubmission", b =>
                 {
-                    b.HasOne("RikiPath.Domain.Entities.JlptLevel", "JlptLevel")
+                    b.HasOne("RikiPath.Domain.Entities.CertificateLevel", "CertificateLevel")
                         .WithMany("PracticeSubmissions")
-                        .HasForeignKey("JlptLevelId")
+                        .HasForeignKey("CertificateLevelId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
@@ -2152,298 +3292,190 @@ namespace RikiPath.Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
-                    b.Navigation("JlptLevel");
+                    b.Navigation("CertificateLevel");
 
                     b.Navigation("UserAccount");
                 });
 
-            modelBuilder.Entity("RikiPath.Domain.Entities.PracticeTest", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.RecommendedLearningPath", b =>
                 {
-                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "ContentAuthor")
-                        .WithMany("AuthoredPracticeTests")
-                        .HasForeignKey("ContentAuthorId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("RikiPath.Domain.Entities.JlptLevel", "JlptLevel")
-                        .WithMany("PracticeTests")
-                        .HasForeignKey("JlptLevelId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "ReviewedBy")
-                        .WithMany("ReviewedPracticeTests")
-                        .HasForeignKey("ReviewedById")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.Navigation("ContentAuthor");
-
-                    b.Navigation("JlptLevel");
-
-                    b.Navigation("ReviewedBy");
-                });
-
-            modelBuilder.Entity("RikiPath.Domain.Entities.PracticeTestAnswer", b =>
-                {
-                    b.HasOne("RikiPath.Domain.Entities.PracticeQuestion", "PracticeQuestion")
-                        .WithMany("Answers")
-                        .HasForeignKey("PracticeQuestionId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("RikiPath.Domain.Entities.PracticeTestAttempt", "PracticeTestAttempt")
-                        .WithMany("Answers")
-                        .HasForeignKey("PracticeTestAttemptId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("RikiPath.Domain.Entities.PracticeQuestionOption", "SelectedOption")
-                        .WithMany()
-                        .HasForeignKey("SelectedOptionId")
-                        .OnDelete(DeleteBehavior.SetNull);
-
-                    b.Navigation("PracticeQuestion");
-
-                    b.Navigation("PracticeTestAttempt");
-
-                    b.Navigation("SelectedOption");
-                });
-
-            modelBuilder.Entity("RikiPath.Domain.Entities.PracticeTestAttempt", b =>
-                {
-                    b.HasOne("RikiPath.Domain.Entities.PracticeTest", "PracticeTest")
-                        .WithMany("Attempts")
-                        .HasForeignKey("PracticeTestId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
                     b.HasOne("RikiPath.Domain.Entities.UserAccount", "UserAccount")
-                        .WithMany("PracticeTestAttempts")
+                        .WithMany("RecommendedLearningPaths")
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
-
-                    b.Navigation("PracticeTest");
 
                     b.Navigation("UserAccount");
                 });
 
-            modelBuilder.Entity("RikiPath.Domain.Entities.PracticeTestSection", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.ReviewCard", b =>
                 {
-                    b.HasOne("RikiPath.Domain.Entities.PracticeTest", "PracticeTest")
-                        .WithMany("Sections")
-                        .HasForeignKey("PracticeTestId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("RikiPath.Domain.Entities.Skill", "Skill")
-                        .WithMany("PracticeTestSections")
-                        .HasForeignKey("SkillId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("PracticeTest");
-
-                    b.Navigation("Skill");
-                });
-
-            modelBuilder.Entity("RikiPath.Domain.Entities.PracticeTestSectionResult", b =>
-                {
-                    b.HasOne("RikiPath.Domain.Entities.PracticeTestAttempt", "PracticeTestAttempt")
-                        .WithMany("SectionResults")
-                        .HasForeignKey("PracticeTestAttemptId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("RikiPath.Domain.Entities.PracticeTestSection", "PracticeTestSection")
-                        .WithMany("SectionResults")
-                        .HasForeignKey("PracticeTestSectionId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("PracticeTestAttempt");
-
-                    b.Navigation("PracticeTestSection");
-                });
-
-            modelBuilder.Entity("RikiPath.Domain.Entities.ReviewItem", b =>
-                {
-                    b.HasOne("RikiPath.Domain.Entities.GrammarPoint", "GrammarPoint")
-                        .WithMany("ReviewItems")
-                        .HasForeignKey("GrammarPointId")
+                    b.HasOne("RikiPath.Domain.Entities.GrammarPattern", "GrammarPattern")
+                        .WithMany("ReviewCards")
+                        .HasForeignKey("GrammarPatternId")
                         .OnDelete(DeleteBehavior.Restrict);
 
-                    b.HasOne("RikiPath.Domain.Entities.KanjiEntry", "KanjiEntry")
-                        .WithMany("ReviewItems")
-                        .HasForeignKey("KanjiEntryId")
+                    b.HasOne("RikiPath.Domain.Entities.Kanji", "Kanji")
+                        .WithMany("ReviewCards")
+                        .HasForeignKey("KanjiId")
                         .OnDelete(DeleteBehavior.Restrict);
 
-                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "UserAccount")
-                        .WithMany("ReviewItems")
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("RikiPath.Domain.Entities.VocabularyNoteEntry", "VocabularyNoteEntry")
-                        .WithMany("ReviewItems")
-                        .HasForeignKey("VocabularyNoteEntryId")
+                    b.HasOne("RikiPath.Domain.Entities.LearnerNoteEntry", "LearnerNoteEntry")
+                        .WithMany("ReviewCards")
+                        .HasForeignKey("LearnerNoteEntryId")
                         .OnDelete(DeleteBehavior.Cascade);
 
-                    b.Navigation("GrammarPoint");
-
-                    b.Navigation("KanjiEntry");
-
-                    b.Navigation("UserAccount");
-
-                    b.Navigation("VocabularyNoteEntry");
-                });
-
-            modelBuilder.Entity("RikiPath.Domain.Entities.ReviewLog", b =>
-                {
-                    b.HasOne("RikiPath.Domain.Entities.ReviewItem", "ReviewItem")
-                        .WithMany("ReviewLogs")
-                        .HasForeignKey("ReviewItemId")
+                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "UserAccount")
+                        .WithMany("ReviewCards")
+                        .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
-                    b.Navigation("ReviewItem");
+                    b.Navigation("GrammarPattern");
+
+                    b.Navigation("Kanji");
+
+                    b.Navigation("LearnerNoteEntry");
+
+                    b.Navigation("UserAccount");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.ReviewHistory", b =>
+                {
+                    b.HasOne("RikiPath.Domain.Entities.ReviewCard", "ReviewCard")
+                        .WithMany("ReviewHistories")
+                        .HasForeignKey("ReviewCardId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("ReviewCard");
                 });
 
             modelBuilder.Entity("RikiPath.Domain.Entities.UserAccount", b =>
                 {
-                    b.HasOne("RikiPath.Domain.Entities.JlptLevel", "TargetJlptLevel")
+                    b.HasOne("RikiPath.Domain.Entities.CertificateLevel", "TargetCertificateLevel")
                         .WithMany("LearnersTargeting")
-                        .HasForeignKey("TargetJlptLevelId")
+                        .HasForeignKey("TargetCertificateLevelId")
                         .OnDelete(DeleteBehavior.SetNull);
 
-                    b.Navigation("TargetJlptLevel");
+                    b.Navigation("TargetCertificateLevel");
                 });
 
-            modelBuilder.Entity("RikiPath.Domain.Entities.VocabularyEntry", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.UserSubscription", b =>
                 {
-                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "ContentAuthor")
-                        .WithMany("AuthoredVocabularyEntries")
-                        .HasForeignKey("ContentAuthorId")
+                    b.HasOne("RikiPath.Domain.Entities.SubscriptionPlan", "SubscriptionPlan")
+                        .WithMany("UserSubscriptions")
+                        .HasForeignKey("SubscriptionPlanId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
-                    b.HasOne("RikiPath.Domain.Entities.JlptLevel", "JlptLevel")
-                        .WithMany("VocabularyEntries")
-                        .HasForeignKey("JlptLevelId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "ReviewedBy")
-                        .WithMany("ReviewedVocabularyEntries")
-                        .HasForeignKey("ReviewedById")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.Navigation("ContentAuthor");
-
-                    b.Navigation("JlptLevel");
-
-                    b.Navigation("ReviewedBy");
-                });
-
-            modelBuilder.Entity("RikiPath.Domain.Entities.VocabularyList", b =>
-                {
                     b.HasOne("RikiPath.Domain.Entities.UserAccount", "UserAccount")
-                        .WithMany("VocabularyLists")
+                        .WithMany("UserSubscriptions")
                         .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.Navigation("SubscriptionPlan");
 
                     b.Navigation("UserAccount");
                 });
 
-            modelBuilder.Entity("RikiPath.Domain.Entities.VocabularyNoteEntry", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.Vocabulary", b =>
                 {
-                    b.HasOne("RikiPath.Domain.Entities.KanjiEntry", "KanjiEntry")
-                        .WithMany("VocabularyNoteEntries")
-                        .HasForeignKey("KanjiEntryId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("RikiPath.Domain.Entities.VocabularyEntry", "VocabularyEntry")
-                        .WithMany("VocabularyNoteEntries")
-                        .HasForeignKey("VocabularyEntryId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("RikiPath.Domain.Entities.VocabularyList", "VocabularyList")
-                        .WithMany("VocabularyNoteEntries")
-                        .HasForeignKey("VocabularyListId")
-                        .OnDelete(DeleteBehavior.Cascade)
+                    b.HasOne("RikiPath.Domain.Entities.CertificateLevel", "CertificateLevel")
+                        .WithMany("Vocabularies")
+                        .HasForeignKey("CertificateLevelId")
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
-                    b.Navigation("KanjiEntry");
+                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "ContentAuthor")
+                        .WithMany("AuthoredVocabularies")
+                        .HasForeignKey("ContentAuthorId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
 
-                    b.Navigation("VocabularyEntry");
+                    b.Navigation("CertificateLevel");
 
-                    b.Navigation("VocabularyList");
+                    b.Navigation("ContentAuthor");
                 });
 
-            modelBuilder.Entity("RikiPath.Domain.Entities.ConsultantAvailability", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.CertificateLevel", b =>
                 {
-                    b.Navigation("ConsultationRequest");
-                });
+                    b.Navigation("GrammarPatterns");
 
-            modelBuilder.Entity("RikiPath.Domain.Entities.ConsultationPackage", b =>
-                {
-                    b.Navigation("Purchases");
-                });
-
-            modelBuilder.Entity("RikiPath.Domain.Entities.ConsultationPurchase", b =>
-                {
-                    b.Navigation("ConsultationRequest");
-                });
-
-            modelBuilder.Entity("RikiPath.Domain.Entities.ConsultationRequest", b =>
-                {
-                    b.Navigation("ConsultationAnswer");
-                });
-
-            modelBuilder.Entity("RikiPath.Domain.Entities.Course", b =>
-                {
-                    b.Navigation("Lessons");
-
-                    b.Navigation("Purchases");
-                });
-
-            modelBuilder.Entity("RikiPath.Domain.Entities.CourseCategory", b =>
-                {
-                    b.Navigation("Courses");
-                });
-
-            modelBuilder.Entity("RikiPath.Domain.Entities.GrammarPoint", b =>
-                {
-                    b.Navigation("LessonGrammars");
-
-                    b.Navigation("ReviewItems");
-                });
-
-            modelBuilder.Entity("RikiPath.Domain.Entities.JlptLevel", b =>
-                {
-                    b.Navigation("Courses");
-
-                    b.Navigation("GrammarPoints");
-
-                    b.Navigation("KanjiEntries");
+                    b.Navigation("Kanjis");
 
                     b.Navigation("LearnersTargeting");
 
+                    b.Navigation("Lessons");
+
+                    b.Navigation("MockTests");
+
                     b.Navigation("PracticeSubmissions");
 
-                    b.Navigation("PracticeTests");
+                    b.Navigation("Sections");
 
-                    b.Navigation("VocabularyEntries");
+                    b.Navigation("Vocabularies");
                 });
 
-            modelBuilder.Entity("RikiPath.Domain.Entities.KanjiEntry", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.CertificateType", b =>
                 {
+                    b.Navigation("Levels");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.GrammarPattern", b =>
+                {
+                    b.Navigation("LessonGrammars");
+
+                    b.Navigation("ReviewCards");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.HomeworkAssignment", b =>
+                {
+                    b.Navigation("Submission");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.HomeworkSubmission", b =>
+                {
+                    b.Navigation("GradingResult");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.KanaCharacter", b =>
+                {
+                    b.Navigation("PracticeCards");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.KanaWritingPracticeCard", b =>
+                {
+                    b.Navigation("Histories");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.Kanji", b =>
+                {
+                    b.Navigation("LearnerNoteEntries");
+
                     b.Navigation("LessonKanjis");
 
-                    b.Navigation("ReviewItems");
+                    b.Navigation("ReviewCards");
+                });
 
-                    b.Navigation("VocabularyNoteEntries");
+            modelBuilder.Entity("RikiPath.Domain.Entities.LanguageSkill", b =>
+                {
+                    b.Navigation("CertificationLevelSkills");
+
+                    b.Navigation("Lessons");
+
+                    b.Navigation("MockTestSections");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.LearnerNote", b =>
+                {
+                    b.Navigation("LearnerNoteEntries");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.LearnerNoteEntry", b =>
+                {
+                    b.Navigation("ReviewCards");
                 });
 
             modelBuilder.Entity("RikiPath.Domain.Entities.Lesson", b =>
@@ -2455,6 +3487,56 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Navigation("LessonProgresses");
 
                     b.Navigation("LessonVocabularies");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.MentorAvailability", b =>
+                {
+                    b.Navigation("MentorBooking");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.MentorBooking", b =>
+                {
+                    b.Navigation("Note");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.MockQuestion", b =>
+                {
+                    b.Navigation("Answers");
+
+                    b.Navigation("Options");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.MockTest", b =>
+                {
+                    b.Navigation("Attempts");
+
+                    b.Navigation("Sections");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.MockTestAttempt", b =>
+                {
+                    b.Navigation("Answers");
+
+                    b.Navigation("SectionResults");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.MockTestSection", b =>
+                {
+                    b.Navigation("Questions");
+
+                    b.Navigation("SectionResults");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.PracticeExercise", b =>
+                {
+                    b.Navigation("Attempts");
+
+                    b.Navigation("Questions");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.PracticeExerciseAttempt", b =>
+                {
+                    b.Navigation("Answers");
                 });
 
             modelBuilder.Entity("RikiPath.Domain.Entities.PracticeQuestion", b =>
@@ -2469,103 +3551,63 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Navigation("GradingResult");
                 });
 
-            modelBuilder.Entity("RikiPath.Domain.Entities.PracticeTest", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.ReviewCard", b =>
                 {
-                    b.Navigation("Attempts");
-
-                    b.Navigation("Sections");
+                    b.Navigation("ReviewHistories");
                 });
 
-            modelBuilder.Entity("RikiPath.Domain.Entities.PracticeTestAttempt", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.SubscriptionPlan", b =>
                 {
-                    b.Navigation("Answers");
-
-                    b.Navigation("SectionResults");
-                });
-
-            modelBuilder.Entity("RikiPath.Domain.Entities.PracticeTestSection", b =>
-                {
-                    b.Navigation("Questions");
-
-                    b.Navigation("SectionResults");
-                });
-
-            modelBuilder.Entity("RikiPath.Domain.Entities.ReviewItem", b =>
-                {
-                    b.Navigation("ReviewLogs");
-                });
-
-            modelBuilder.Entity("RikiPath.Domain.Entities.Skill", b =>
-                {
-                    b.Navigation("Lessons");
-
-                    b.Navigation("PracticeTestSections");
+                    b.Navigation("UserSubscriptions");
                 });
 
             modelBuilder.Entity("RikiPath.Domain.Entities.UserAccount", b =>
                 {
-                    b.Navigation("AuthoredCourses");
+                    b.Navigation("AiCreditTopUps");
 
-                    b.Navigation("AuthoredGrammarPoints");
+                    b.Navigation("AuthoredGrammarPatterns");
 
-                    b.Navigation("AuthoredKanjiEntries");
+                    b.Navigation("AuthoredKanjis");
 
-                    b.Navigation("AuthoredPracticeTests");
+                    b.Navigation("AuthoredLessons");
 
-                    b.Navigation("AuthoredVocabularyEntries");
+                    b.Navigation("AuthoredMockTests");
 
-                    b.Navigation("ConsultantAvailabilities");
-
-                    b.Navigation("ConsultationAnswers");
-
-                    b.Navigation("ConsultationPurchases");
-
-                    b.Navigation("ConsultationRequestsAsConsultant");
-
-                    b.Navigation("CoursePurchases");
+                    b.Navigation("AuthoredVocabularies");
 
                     b.Navigation("EmailVerifications");
 
-                    b.Navigation("LearningPathSuggestions");
+                    b.Navigation("LearnerNotes");
 
                     b.Navigation("LessonProgresses");
+
+                    b.Navigation("MentorAvailabilities");
+
+                    b.Navigation("MockTestAttempts");
+
+                    b.Navigation("Notes");
 
                     b.Navigation("Notifications");
 
                     b.Navigation("PracticeSubmissions");
 
-                    b.Navigation("PracticeTestAttempts");
+                    b.Navigation("RecommendedLearningPaths");
 
-                    b.Navigation("ReviewItems");
+                    b.Navigation("ReviewCards");
 
-                    b.Navigation("ReviewedCourses");
-
-                    b.Navigation("ReviewedGrammarPoints");
-
-                    b.Navigation("ReviewedKanjiEntries");
-
-                    b.Navigation("ReviewedPracticeTests");
-
-                    b.Navigation("ReviewedVocabularyEntries");
-
-                    b.Navigation("VocabularyLists");
+                    b.Navigation("UserSubscriptions");
                 });
 
-            modelBuilder.Entity("RikiPath.Domain.Entities.VocabularyEntry", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.UserSubscription", b =>
                 {
+                    b.Navigation("MentorBookings");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.Vocabulary", b =>
+                {
+                    b.Navigation("LearnerNoteEntries");
+
                     b.Navigation("LessonVocabularies");
-
-                    b.Navigation("VocabularyNoteEntries");
-                });
-
-            modelBuilder.Entity("RikiPath.Domain.Entities.VocabularyList", b =>
-                {
-                    b.Navigation("VocabularyNoteEntries");
-                });
-
-            modelBuilder.Entity("RikiPath.Domain.Entities.VocabularyNoteEntry", b =>
-                {
-                    b.Navigation("ReviewItems");
                 });
 #pragma warning restore 612, 618
         }

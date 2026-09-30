@@ -1,4 +1,4 @@
-﻿namespace RikiPath.Application.Responses.Reviews
+namespace RikiPath.Application.Responses.Reviews
 {
     public class DailyReviewQueueResponse
     {

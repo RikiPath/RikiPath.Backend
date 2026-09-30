@@ -9,10 +9,10 @@ namespace RikiPath.Application
         IEmailVerificationRepository EmailVerifications { get; }
         INotificationRepository Notifications { get; }
 
-        // 2. Master Data / Certifications & Skills
-        ICertificationRepository Certifications { get; }
-        ICertificationLevelRepository CertificationLevels { get; }
-        ISkillRepository Skills { get; }
+        // 2. Master Data / CertificateTypes & LanguageSkills
+        ICertificateTypeRepository CertificateTypes { get; }
+        ICertificateLevelRepository CertificateLevels { get; }
+        ILanguageSkillRepository LanguageSkills { get; }
         ICertificationLevelSkillRepository CertificationLevelSkills { get; }
 
         // 3. Lessons & Learning Progress
@@ -20,44 +20,53 @@ namespace RikiPath.Application
         ILessonProgressRepository LessonProgresses { get; }
 
         // 4. Content Banks
-        IKanjiEntryRepository KanjiEntries { get; }
-        IVocabularyEntryRepository VocabularyEntries { get; }
-        IGrammarPointRepository GrammarPoints { get; }
+        IKanjiRepository Kanjis { get; }
+        IKanaCharacterRepository KanaCharacters { get; }
+        IKanaWritingPracticeCardRepository KanaWritingPracticeCards { get; }
+        IKanaWritingPracticeHistoryRepository KanaWritingPracticeHistories { get; }
+        IVocabularyRepository Vocabularies { get; }
+        IGrammarPatternRepository GrammarPatterns { get; }
         ILessonKanjiRepository LessonKanjis { get; }
         ILessonVocabularyRepository LessonVocabularies { get; }
         ILessonGrammarRepository LessonGrammars { get; }
 
         // 5. Personal Vocabulary Notebook
-        IVocabularyListRepository VocabularyLists { get; }
-        IVocabularyNoteEntryRepository VocabularyNoteEntries { get; }
+        ILearnerNoteRepository LearnerNotes { get; }
+        ILearnerNoteEntryRepository LearnerNoteEntries { get; }
 
         // 6. JLPT Practice Tests & Submissions
-        IPracticeTestRepository PracticeTests { get; }
-        IPracticeTestSectionRepository PracticeTestSections { get; }
+        IMockTestRepository MockTests { get; }
+        IMockTestSectionRepository MockTestSections { get; }
+        IMockQuestionRepository MockQuestions { get; }
+        IMockQuestionOptionRepository MockQuestionOptions { get; }
+        IMockTestAttemptRepository MockTestAttempts { get; }
+        IMockTestAnswerRepository MockTestAnswers { get; }
+        IMockTestSectionResultRepository MockTestSectionResults { get; }
+        IPracticeExerciseRepository PracticeExercises { get; }
+        IPracticeExerciseAttemptRepository PracticeExerciseAttempts { get; }
         IPracticeQuestionRepository PracticeQuestions { get; }
         IPracticeQuestionOptionRepository PracticeQuestionOptions { get; }
-        IPracticeTestAttemptRepository PracticeTestAttempts { get; }
-        IPracticeTestAnswerRepository PracticeTestAnswers { get; }
-        IPracticeTestSectionResultRepository PracticeTestSectionResults { get; }
+        ILearnerPracticeAnswerRepository LearnerPracticeAnswers { get; }
+        IHomeworkAssignmentRepository HomeworkAssignments { get; }
+        IHomeworkSubmissionRepository HomeworkSubmissions { get; }
         IPracticeSubmissionRepository PracticeSubmissions { get; }
         IGradingResultRepository GradingResults { get; }
 
         // 7. Spaced-Repetition Review Queue (SM-2)
-        IReviewItemRepository ReviewItems { get; }
-        IReviewLogRepository ReviewLogs { get; }
+        IReviewCardRepository ReviewCards { get; }
+        IReviewHistoryRepository ReviewHistories { get; }
 
         // 8. Subscriptions, Monetization & AI Advisory
         ISubscriptionPlanRepository SubscriptionPlans { get; }
+        IFeatureRepository Features { get; }
         IUserSubscriptionRepository UserSubscriptions { get; }
         IAiCreditTopUpRepository AiCreditTopUps { get; }
-        ILearningPathSuggestionRepository LearningPathSuggestions { get; }
+        IRecommendedLearningPathRepository RecommendedLearningPaths { get; }
 
-        // 9. Paid Consultation 1-1 Service
-        IConsultationPackageRepository ConsultationPackages { get; }
-        IConsultationPurchaseRepository ConsultationPurchases { get; }
-        IConsultationRequestRepository ConsultationRequests { get; }
-        IConsultationAnswerRepository ConsultationAnswers { get; }
-        IConsultantAvailabilityRepository ConsultantAvailabilities { get; }
+        // 9. Paid Mentor 1-1 Service
+        IMentorBookingRepository MentorBookings { get; }
+        INoteRepository Notes { get; }
+        IMentorAvailabilityRepository MentorAvailabilities { get; }
 
         // Db Helpers
         Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);

@@ -1,4 +1,4 @@
-﻿using RikiPath.Application.Services;
+using RikiPath.Application.Services;
 
 namespace RikiPath.Application.IServices
 {

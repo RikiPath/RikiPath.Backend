@@ -7,8 +7,10 @@ namespace RikiPath.Domain.Entities
     {
         public int Id { get; set; }
 
-        public int PracticeSubmissionId { get; set; }
-        public PracticeSubmission PracticeSubmission { get; set; }
+        public int? PracticeSubmissionId { get; set; }
+        public PracticeSubmission? PracticeSubmission { get; set; }
+        public int? HomeworkSubmissionId { get; set; }
+        public HomeworkSubmission? HomeworkSubmission { get; set; }
 
         public double OverallScore { get; set; }
         public string FeedbackJson { get; set; }

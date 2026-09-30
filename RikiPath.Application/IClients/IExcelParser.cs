@@ -1,10 +1,10 @@
-﻿using RikiPath.Application.DTOs.Content;
+using RikiPath.Application.DTOs.Content;
 
 namespace RikiPath.Application.IClients
 {
     public interface IExcelParser
     {
-        Task<ExcelParseResult> ParseAsync(Stream fileStream, ContentEntityType entityType, CancellationToken cancellationToken);
+        Task<ExcelParseResult> ParseAsync(Stream fileStream, CancellationToken cancellationToken);
     }
 
     public class ParsedContentRow

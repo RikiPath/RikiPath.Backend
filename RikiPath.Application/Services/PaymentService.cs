@@ -1,5 +1,5 @@
-﻿using RikiPath.Domain.Entities;
-using Domain.Enums;
+using RikiPath.Domain.Entities;
+using RikiPath.Domain.Enums;
 using RikiPath.Application.IClients;
 using RikiPath.Application.IServices;
 using RikiPath.Application.Requests.Payments;
@@ -21,63 +21,6 @@ namespace RikiPath.Application.Services
     public class PaymentService(IUnitOfWork unitOfWork, IPaymentGatewayClient paymentGatewayClient, IClaimService claimService)
         : IPaymentService
     {
-        private const int MaxDescriptionLength = 25;
-
-        public async Task<ApiResponse<ConsultationPaymentResponse>> CreateConsultationPaymentAsync(CreateConsultationPaymentRequest request, CancellationToken cancellationToken)
-        {
-            try
-            {
-                var userId = claimService.GetUserClaim().Id;
-                var package = await unitOfWork.ConsultationPackages.GetByIdAsync(request.ConsultationPackageId);
-                if (package is null || !package.IsActive)
-                    return ApiResponse<ConsultationPaymentResponse>.Fail("Gói tư vấn không tồn tại hoặc đã ngừng bán.");
-
-                var amount = (int)Math.Round(package.Price, MidpointRounding.AwayFromZero);
-                if (amount <= 0)
-                    return ApiResponse<ConsultationPaymentResponse>.Fail("Giá gói tư vấn không hợp lệ.");
-
-                var purchase = new ConsultationPurchase
-                {
-                    UserId = userId,
-                    ConsultationPackageId = package.Id,
-                    AmountPaid = package.Price,
-                    PaymentStatus = PaymentStatus.Pending,
-                    PurchasedAt = DateTime.UtcNow
-                };
-
-                await unitOfWork.ConsultationPurchases.AddAsync(purchase);
-                await unitOfWork.SaveChangesAsync();
-                // Save trước để purchase.Id được DB sinh ra (identity) - dùng làm orderCode gửi PayOS.
-
-                var orderCode = purchase.Id;
-                var description = package.Name.Length > MaxDescriptionLength
-                    ? package.Name[..MaxDescriptionLength]
-                    : package.Name;
-
-                var link = await paymentGatewayClient.CreatePaymentLinkAsync(
-                    orderCode, amount, description, request.ReturnUrl, request.CancelUrl, cancellationToken);
-
-                purchase.PaymentTransactionId = link.PaymentLinkId;
-                unitOfWork.ConsultationPurchases.Update(purchase);
-                await unitOfWork.SaveChangesAsync();
-
-                return ApiResponse<ConsultationPaymentResponse>.Success(
-                    new ConsultationPaymentResponse
-                    {
-                        PurchaseId = purchase.Id,
-                        OrderCode = orderCode,
-                        CheckoutUrl = link.CheckoutUrl,
-                        PaymentLinkId = link.PaymentLinkId,
-                        QrCode = link.QrCode,
-                        Amount = package.Price
-                    });
-            }
-            catch (Exception ex)
-            {
-                return ApiResponse<ConsultationPaymentResponse>.Fail($"Không thể tạo thanh toán: {ex.Message}");
-            }
-        }
-
         public async Task<ApiResponse<bool>> HandlePayOsWebhookAsync(
             PayOsWebhookRequest webhook, CancellationToken cancellationToken)
         {
@@ -87,16 +30,7 @@ namespace RikiPath.Application.Services
                 if (!callback.IsValidSignature)
                     return ApiResponse<bool>.Fail("Chữ ký webhook không hợp lệ.");
 
-                var purchase = await unitOfWork.ConsultationPurchases.GetByIdAsync((int)callback.OrderCode);
-                if (purchase is null)
-                    return ApiResponse<bool>.Fail("Không tìm thấy giao dịch tương ứng với orderCode.");
 
-                // Idempotent: PayOS có thể gọi webhook nhiều lần cho cùng 1 giao dịch.
-                if (purchase.PaymentStatus == PaymentStatus.Paid)
-                    return ApiResponse<bool>.Success(true);
-
-                purchase.PaymentStatus = callback.IsSuccess ? PaymentStatus.Paid : PaymentStatus.Failed;
-                unitOfWork.ConsultationPurchases.Update(purchase);
                 await unitOfWork.SaveChangesAsync();
 
                 return ApiResponse<bool>.Success(true);
@@ -104,34 +38,6 @@ namespace RikiPath.Application.Services
             catch (Exception ex)
             {
                 return ApiResponse<bool>.Fail($"Lỗi xử lý webhook: {ex.Message}");
-            }
-        }
-
-        public async Task<ApiResponse<ConsultationPurchaseStatusResponse>> GetPurchaseStatusAsync(int purchaseId, CancellationToken cancellationToken)
-        {
-            try
-            {
-                var userId = claimService.GetUserClaim().Id;
-                var purchase = await unitOfWork.ConsultationPurchases.GetByIdAsync(purchaseId);
-                if (purchase is null || purchase.UserId != userId)
-                    return ApiResponse<ConsultationPurchaseStatusResponse>.Fail("Không tìm thấy giao dịch.");
-
-                var package = await unitOfWork.ConsultationPackages.GetByIdAsync(purchase.ConsultationPackageId);
-
-                return ApiResponse<ConsultationPurchaseStatusResponse>.Success(
-                    new ConsultationPurchaseStatusResponse
-                    {
-                        Id = purchase.Id,
-                        ConsultationPackageId = purchase.ConsultationPackageId,
-                        PackageName = package?.Name ?? "N/A",
-                        AmountPaid = purchase.AmountPaid,
-                        Status = purchase.PaymentStatus,
-                        PurchasedAt = purchase.PurchasedAt
-                    });
-            }
-            catch (Exception ex)
-            {
-                return ApiResponse<ConsultationPurchaseStatusResponse>.Fail($"Lỗi khi lấy trạng thái giao dịch: {ex.Message}");
             }
         }
     }
