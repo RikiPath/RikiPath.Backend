@@ -8,6 +8,7 @@ namespace RikiPath.Application.IServices
     {
         Task<ApiResponse<RegisterResponse>> RegisterAsync(RegisterRequest request, CancellationToken cancellationToken);
         Task<ApiResponse<RegisterResponse>> RegisterWithFirebasePhoneAsync(FirebasePhoneAuthRequest request, CancellationToken cancellationToken);
+        Task<ApiResponse> ResendVerificationEmailAsync(ResendVerificationEmailRequest request, CancellationToken cancellationToken);
         Task<ApiResponse> VerifyEmailAsync(VerifyEmailRequest request, CancellationToken cancellationToken);
         Task<ApiResponse<LoginResponse>> LoginAsync(LoginRequest request, CancellationToken cancellationToken);
         Task<ApiResponse<LoginResponse>> LoginWithFirebasePhoneAsync(FirebasePhoneAuthRequest request, CancellationToken cancellationToken);
