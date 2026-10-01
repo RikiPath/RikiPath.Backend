@@ -13,6 +13,7 @@ namespace RikiPath.Domain
         public SupabaseSettings Supabase { get; set; }
         public AiSettings Ai { get; set; }
         public AzureSpeechSettings AzureSpeech { get; set; }
+        public string FrontendBaseUrl { get; set; } = "http://localhost:5173";
     }
     public class ConnectionStrings
     {

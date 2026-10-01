@@ -11,6 +11,9 @@ namespace RikiPath.Domain.Entities
         /// <summary>Số lượt chấm AI Writing &amp; Speaking đi kèm gói, trong suốt DurationDays.</summary>
         public int AiGradingQuota { get; set; }
 
+        /// <summary>Number of mentor meeting sessions included. Zero means this is not a meeting package.</summary>
+        public int MeetingSessionCount { get; set; }
+
         /// <summary>Đánh dấu gói "phổ biến nhất" để FE highlight — hiện tại là gói 1 tháng.</summary>
         public bool IsPopular { get; set; } = false;
         public bool IsTrial { get; set; } = false;

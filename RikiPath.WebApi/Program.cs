@@ -35,9 +35,14 @@ var appSettings = configuration.GetSection("AppSettings").Get<AppSettings>()
                   ?? new AppSettings();
 
 builder.Services.Configure<AppSettings>(configuration.GetSection("AppSettings"));
+
+var payOsSection = configuration.GetSection("AppSettings:PayOs");
+if (!payOsSection.Exists()) payOsSection = configuration.GetSection("PayOsSettings");
+if (!payOsSection.Exists()) payOsSection = configuration.GetSection("PayOs");
+appSettings.PayOs = payOsSection.Get<PayOsSettings>() ?? appSettings.PayOs ?? new PayOsSettings();
 builder.Services.AddSingleton(appSettings);
 
-builder.Services.Configure<PayOsSettings>(configuration.GetSection("PayOs"));
+builder.Services.Configure<PayOsSettings>(payOsSection);
 builder.Services.Configure<AiSettings>(configuration.GetSection("Ai"));
 
 // 2. Database Context - Npgsql using ConnectionStrings:DefaultConnection
@@ -253,7 +258,7 @@ foreach (var iface in clientInterfaces)
     builder.Services.AddScoped(iface, impl);
 }
 
-// 6c. SignalR (WebRTC signaling cho video call tư vấn - ConsultationCallHub)
+// 6c. SignalR: the legacy Consultant signaling remains separate from the Mentor meeting hub.
 builder.Services.AddSignalR();
 builder.Services.AddSingleton<ICallConnectionTracker, CallConnectionTracker>();
 
@@ -290,7 +295,8 @@ builder.Services
             {
                 var accessToken = context.Request.Query["access_token"].FirstOrDefault();
                 if (!string.IsNullOrEmpty(accessToken) &&
-                    context.HttpContext.Request.Path.StartsWithSegments("/hubs/consultation-call"))
+                    (context.HttpContext.Request.Path.StartsWithSegments("/hubs/consultation-call")
+                     || context.HttpContext.Request.Path.StartsWithSegments("/hubs/mentor-meeting")))
                 {
                     context.Token = accessToken;
                 }
@@ -382,5 +388,6 @@ app.UseCors("DefaultCorsPolicy");
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
+app.MapHub<MentorMeetingHub>("/hubs/mentor-meeting");
 
 app.Run();

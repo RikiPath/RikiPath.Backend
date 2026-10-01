@@ -14,6 +14,11 @@ namespace RikiPath.Domain.Entities
         public DateTime EndTime { get; set; }
         public bool IsBooked { get; set; }
 
+        public bool IsApproved { get; set; } = false;
+        public string? AdminName { get; set; }
+        public string? RejectionReason { get; set; }
+        public DateTime? RejectedAt { get; set; }
+
         public MentorBooking? MentorBooking { get; set; }
     }
 }

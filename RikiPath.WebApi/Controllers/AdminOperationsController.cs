@@ -272,6 +272,7 @@ public class AdminOperationsController(IUnitOfWork uow) : ControllerBase
     {
         var booking = await uow.MentorBookings.GetByIdAsync(id, ct);
         if (booking is null || booking.IsDeleted) return NotFound();
+        var previousStatus = booking.Status;
         if (r.MentorAvailabilityId is int slotId)
         {
             var slot = await uow.MentorAvailabilities.GetByIdAsync(slotId, ct);
@@ -289,6 +290,15 @@ public class AdminOperationsController(IUnitOfWork uow) : ControllerBase
             var cancelledSlot = await uow.MentorAvailabilities.GetByIdAsync(cancelledSlotId, ct);
             if (cancelledSlot is not null) { cancelledSlot.IsBooked = false; uow.MentorAvailabilities.Update(cancelledSlot); }
             booking.MentorAvailabilityId = null;
+        }
+        if (r.Status == ConsultationStatus.Cancelled && previousStatus != ConsultationStatus.Cancelled)
+        {
+            var subscription = await uow.UserSubscriptions.GetByIdAsync(booking.UserSubscriptionId, ct);
+            if (subscription is not null && subscription.PaymentStatus == PaymentStatus.Paid)
+            {
+                subscription.MeetingSessionsUsed = Math.Max(0, subscription.MeetingSessionsUsed - 1);
+                uow.UserSubscriptions.Update(subscription);
+            }
         }
         booking.Status = r.Status; booking.ScheduledAt = r.ScheduledAt; booking.MeetingLink = r.MeetingLink;
         booking.ModifiedDate = DateTime.UtcNow; uow.MentorBookings.Update(booking); await uow.SaveChangesAsync(ct);
@@ -322,19 +332,19 @@ public class AdminOperationsController(IUnitOfWork uow) : ControllerBase
 
     private async Task<string?> ApplyPlanAsync(SubscriptionPlan plan, SaveSubscriptionPlanRequest r, CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(r.Name) || r.DurationDays < 0 || r.Price < 0 || r.AiGradingQuota < 0) return "Thông tin gói không hợp lệ.";
+        if (string.IsNullOrWhiteSpace(r.Name) || r.DurationDays < 0 || r.Price < 0 || r.AiGradingQuota < 0 || r.MeetingSessionCount < 0) return "Thông tin gói không hợp lệ.";
         var available = (await uow.Features.GetAllAsync(ct)).Where(x => !x.IsDeleted).ToList();
         var requested = r.FeatureIds.Distinct().ToHashSet();
         if (requested.Except(available.Select(x => x.Id)).Any()) return "Có Feature không tồn tại.";
         plan.Name = r.Name.Trim(); plan.Description = r.Description?.Trim(); plan.DurationDays = r.DurationDays; plan.Price = r.Price;
-        plan.AiGradingQuota = r.AiGradingQuota; plan.IsPopular = r.IsPopular; plan.IsTrial = r.IsTrial; plan.IsActive = r.IsActive; plan.SortOrder = r.SortOrder;
+        plan.AiGradingQuota = r.AiGradingQuota; plan.MeetingSessionCount = r.MeetingSessionCount; plan.IsPopular = r.IsPopular; plan.IsTrial = r.IsTrial; plan.IsActive = r.IsActive; plan.SortOrder = r.SortOrder;
         plan.Features = available.Where(x => requested.Contains(x.Id)).ToList();
         return null;
     }
 
     private static int Count<T>(IReadOnlyList<T> rows) where T : Base => rows.Count(x => !x.IsDeleted);
     private static object UserDto(UserAccount u) => new { u.Id, u.Email, u.FirstName, u.LastName, u.PhoneNumber, u.Role, u.IsEmailVerified, u.IsPhoneVerified, IsActive = !u.IsDeleted, u.CreatedDate };
-    private static object PlanDto(SubscriptionPlan p) => new { p.Id, p.Name, p.Description, p.DurationDays, p.Price, p.AiGradingQuota, p.IsPopular, p.IsTrial, p.IsActive, p.SortOrder, Features = p.Features.Select(FeatureDto) };
+    private static object PlanDto(SubscriptionPlan p) => new { p.Id, p.Name, p.Description, p.DurationDays, p.Price, p.AiGradingQuota, p.MeetingSessionCount, p.IsPopular, p.IsTrial, p.IsActive, p.SortOrder, Features = p.Features.Select(FeatureDto) };
     private static object FeatureDto(Feature f) => new { f.Id, f.Name, f.Description };
 }
 
@@ -365,6 +375,7 @@ public sealed class SaveSubscriptionPlanRequest
     public int DurationDays { get; set; }
     public decimal Price { get; set; }
     public int AiGradingQuota { get; set; }
+    public int MeetingSessionCount { get; set; }
     public bool IsPopular { get; set; }
     public bool IsTrial { get; set; }
     public bool IsActive { get; set; } = true;
