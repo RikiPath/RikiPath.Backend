@@ -11,6 +11,7 @@ namespace RikiPath.Infrastructure.Configuration
             builder.HasKey(x => x.Id);
             builder.Property(x => x.Status).HasConversion<string>().HasMaxLength(20);
             builder.Property(x => x.MeetingLink).HasMaxLength(500);
+            builder.HasIndex(x => x.RoomId).IsUnique().HasFilter("\"RoomId\" IS NOT NULL");
 
             builder.HasOne(x => x.UserSubscription)
                 .WithMany(x => x.MentorBookings)

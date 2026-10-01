@@ -13,6 +13,8 @@ namespace RikiPath.Infrastructure.Configuration
             builder.Property(x => x.AmountPaid).HasColumnType("decimal(18,2)");
             builder.Property(x => x.PaymentStatus).HasConversion<string>().HasMaxLength(20);
             builder.Property(x => x.PaymentTransactionId).HasMaxLength(200);
+            builder.Property(x => x.MeetingSessionsIncluded).HasDefaultValue(0);
+            builder.Property(x => x.MeetingSessionsUsed).HasDefaultValue(0);
 
             builder.HasOne(x => x.UserAccount)
                 .WithMany(x => x.UserSubscriptions)

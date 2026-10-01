@@ -21,8 +21,13 @@ namespace RikiPath.Domain.Entities
         public int AiGradingQuota { get; set; }
         public int AiGradingUsedCount { get; set; } = 0;
 
+        /// <summary>Meeting sessions included at purchase time; snapshots the plan value.</summary>
+        public int MeetingSessionsIncluded { get; set; }
+        public int MeetingSessionsUsed { get; set; }
+        public DateTime? PaymentExpiresAt { get; set; }
+
         public DateTime PurchasedAt { get; set; }
 
-        public List<MentorBooking>? MentorBookings { get; set; }
+        public List<MentorBooking> MentorBookings { get; set; } = [];
     }
 }

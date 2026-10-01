@@ -23,6 +23,8 @@ namespace RikiPath.Domain.Entities
         public string? Question { get; set; }
         public DateTime? ScheduledAt { get; set; }
         public string? MeetingLink { get; set; }
+        /// <summary>Opaque unique room key used to form the meeting URL and authorize room access.</summary>
+        public Guid? RoomId { get; set; }
         public DateTime? CompletedAt { get; set; }
 
         public Note? Note { get; set; }
