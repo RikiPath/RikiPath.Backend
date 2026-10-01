@@ -11,6 +11,7 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
+using Microsoft.Extensions.Caching.Memory;
 
 namespace RikiPath.Application.Services
 {
@@ -18,8 +19,13 @@ namespace RikiPath.Application.Services
         IUnitOfWork unitOfWork,
         AppSettings appSettings,
         IEmailService emailService,
-        IFirebaseAuthService firebaseAuthService) : IAuthService
+        IFirebaseAuthService firebaseAuthService,
+        IMemoryCache memoryCache) : IAuthService
     {
+        private const int VerificationCodeLifetimeMinutes = 30;
+        private const int ResendCooldownSeconds = 60;
+        private const int MaxResendsPerHour = 5;
+
         public async Task<ApiResponse<RegisterResponse>> RegisterAsync(RegisterRequest request, CancellationToken cancellationToken)
         {
             try
@@ -110,6 +116,84 @@ namespace RikiPath.Application.Services
             }
         }
 
+        public async Task<ApiResponse> ResendVerificationEmailAsync(
+            ResendVerificationEmailRequest request,
+            CancellationToken cancellationToken)
+        {
+            try
+            {
+                var normalizedEmail = request.Email.Trim().ToLowerInvariant();
+                var rateLimitKey = $"email-verification-resend:{normalizedEmail}";
+
+                if (memoryCache.TryGetValue<ResendAttemptState>(rateLimitKey, out var state) && state is not null)
+                {
+                    if (DateTime.UtcNow < state.NextAllowedAt)
+                        return ApiResponse.Fail(
+                            $"Vui lòng chờ {Math.Ceiling((state.NextAllowedAt - DateTime.UtcNow).TotalSeconds)} giây trước khi gửi lại.");
+
+                    if (state.Attempts.Count >= MaxResendsPerHour)
+                        return ApiResponse.Fail("Bạn đã vượt quá số lần gửi lại email trong 1 giờ. Vui lòng thử lại sau.");
+                }
+
+                var user = await unitOfWork.UserAccounts.GetByEmailAsync(normalizedEmail);
+                if (user is null)
+                    return ApiResponse.Fail("Không thể gửi email xác thực. Vui lòng kiểm tra lại địa chỉ email.");
+
+                if (user.IsEmailVerified)
+                    return ApiResponse.Fail("Email này đã được xác thực.");
+
+                var pendingVerifications = await unitOfWork.EmailVerifications.FindAsync(
+                    x => x.UserId == user.Id && !x.IsUsed,
+                    cancellationToken);
+                foreach (var verification in pendingVerifications)
+                    verification.IsUsed = true;
+
+                if (pendingVerifications.Count > 0)
+                    unitOfWork.EmailVerifications.UpdateRange(pendingVerifications);
+
+                var verificationCode = GenerateVerificationCode();
+                await unitOfWork.EmailVerifications.AddAsync(new EmailVerification
+                {
+                    UserId = user.Id,
+                    VerificationCode = verificationCode,
+                    ExpiresAt = DateTime.UtcNow.AddMinutes(VerificationCodeLifetimeMinutes),
+                    IsUsed = false,
+                }, cancellationToken);
+                await unitOfWork.SaveChangesAsync(cancellationToken);
+
+                var now = DateTime.UtcNow;
+                var attempts = state?.Attempts
+                    .Where(attempt => attempt > now.AddHours(-1))
+                    .ToList() ?? [];
+                attempts.Add(now);
+                memoryCache.Set(
+                    rateLimitKey,
+                    new ResendAttemptState(now.AddSeconds(ResendCooldownSeconds), attempts),
+                    TimeSpan.FromHours(1));
+
+                var emailContent = $"Xin chào {user.FirstName},<br/>Mã xác thực email của bạn là: " +
+                                   $"<strong>{verificationCode}</strong>.<br/>Mã có hiệu lực trong {VerificationCodeLifetimeMinutes} phút.";
+                var emailResult = await emailService.SendValidationEmailAsync(
+                    user.Email!,
+                    emailContent,
+                    cancellationToken);
+
+                if (!emailResult.IsSuccess)
+                    return ApiResponse.Fail(
+                        "Không thể gửi email xác thực: " + emailResult.ErrorMessage,
+                        System.Net.HttpStatusCode.BadRequest);
+
+                return ApiResponse.Success();
+            }
+            catch (Exception ex)
+            {
+                return ApiResponse.Fail(
+                    "Gửi lại email xác thực thất bại.",
+                    System.Net.HttpStatusCode.InternalServerError,
+                    errors: BuildDebugErrors(ex));
+            }
+        }
+
         public async Task<ApiResponse> VerifyEmailAsync(VerifyEmailRequest request, CancellationToken cancellationToken)
         {
             try
@@ -141,6 +225,8 @@ namespace RikiPath.Application.Services
                     "Xác thực email thất bại.", System.Net.HttpStatusCode.InternalServerError, errors: BuildDebugErrors(ex));
             }
         }
+
+        private sealed record ResendAttemptState(DateTime NextAllowedAt, List<DateTime> Attempts);
 
         public async Task<ApiResponse<LoginResponse>> LoginAsync(LoginRequest request, CancellationToken cancellationToken)
         {

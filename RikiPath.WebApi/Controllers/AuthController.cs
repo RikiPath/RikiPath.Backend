@@ -30,6 +30,21 @@ namespace RikiPath.WebApi.Controllers
         }
 
         /// <summary>
+        /// Gửi lại mã xác thực email cho tài khoản chưa xác thực.
+        /// </summary>
+        /// <remarks>
+        /// Mỗi email được gửi lại tối đa 5 lần trong 1 giờ và cách nhau ít nhất 60 giây.
+        /// </remarks>
+        [HttpPost("resend-verification-email")]
+        public async Task<IActionResult> ResendVerificationEmail(
+            [FromBody] ResendVerificationEmailRequest request,
+            CancellationToken cancellationToken)
+        {
+            var result = await authService.ResendVerificationEmailAsync(request, cancellationToken);
+            return StatusCode((int)result.StatusCode, result);
+        }
+
+        /// <summary>
         /// Đăng ký tài khoản mới bằng số điện thoại qua Firebase Auth.
         /// </summary>
         /// <remarks>
