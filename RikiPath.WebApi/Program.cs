@@ -259,7 +259,7 @@ foreach (var iface in clientInterfaces)
 }
 
 // 6c. SignalR: the legacy Consultant signaling remains separate from the Mentor meeting hub.
-builder.Services.AddSignalR();
+builder.Services.AddSignalR(o => o.EnableDetailedErrors = builder.Environment.IsDevelopment());
 builder.Services.AddSingleton<ICallConnectionTracker, CallConnectionTracker>();
 
 // 7. JWT Authentication & Authorization

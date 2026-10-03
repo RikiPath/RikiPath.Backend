@@ -8,12 +8,8 @@ using RikiPath.Domain.Enums;
 
 namespace RikiPath.Infrastructure.Repositories
 {
-    public class MentorBookingRepository : GenericRepository<MentorBooking>, IMentorBookingRepository
+    public class MentorBookingRepository(AppDbContext context) : GenericRepository<MentorBooking>(context), IMentorBookingRepository
     {
-        public MentorBookingRepository(AppDbContext context) : base(context)
-        {
-        }
-
         public async Task<List<MentorBooking>> GetQueueForMentorAsync(int mentorId)
             => await _context.MentorBookings
                 .Include(x => x.MentorAvailability)
@@ -24,7 +20,7 @@ namespace RikiPath.Infrastructure.Repositories
 
         public async Task<List<MentorBooking>> GetPendingAssignmentAsync()
             => await _context.MentorBookings
-                .Where(x => x.Status == ConsultationStatus.PendingAssignment)
+                .Where(x => x.Status == MentorStatus.PendingAssignment)
                 .OrderBy(x => x.CreatedDate)
                 .ToListAsync();
 
@@ -32,7 +28,7 @@ namespace RikiPath.Infrastructure.Repositories
             => _context.MentorBookings
                 .Include(x => x.UserSubscription)
                 .Include(x => x.MentorAvailability)
-                .Where(x => x.Status == ConsultationStatus.AwaitingPayment
+                .Where(x => x.Status == MentorStatus.AwaitingPayment
                     && x.UserSubscription.PaymentStatus == PaymentStatus.Pending
                     && x.UserSubscription.PaymentExpiresAt <= now)
                 .ToListAsync(cancellationToken);
@@ -51,8 +47,15 @@ namespace RikiPath.Infrastructure.Repositories
                 .Include(x => x.MentorAvailability)
                 .Where(x => x.MentorAvailability != null && x.MentorAvailability.MentorId == mentorId
                     && !x.IsDeleted && x.UserSubscription.PaymentStatus == PaymentStatus.Paid
-                    && x.Status != ConsultationStatus.Cancelled)
+                    && x.Status != MentorStatus.Cancelled)
                 .OrderBy(x => x.ScheduledAt)
                 .ToListAsync(cancellationToken);
+
+        public Task<MentorBooking?> GetActiveMeetingByRoomIdAsync(Guid roomId, CancellationToken cancellationToken = default)
+            => _context.MentorBookings.AsNoTracking()
+                .Include(x => x.UserSubscription).ThenInclude(x => x.UserAccount)
+                .Include(x => x.MentorAvailability).ThenInclude(x => x.Mentor)
+                .Where(x => x.RoomId == roomId && !x.IsDeleted && x.Status == MentorStatus.Assigned)
+                .FirstOrDefaultAsync(cancellationToken);
     }
 }

@@ -1,0 +1,5 @@
+<Project>
+  <PropertyGroup>
+    <BaseOutputPath>$(MSBuildThisFileDirectory)_codex-build\bin\</BaseOutputPath>
+  </PropertyGroup>
+</Project>

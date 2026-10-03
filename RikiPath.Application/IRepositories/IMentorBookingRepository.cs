@@ -11,5 +11,6 @@ namespace RikiPath.Application.IRepositories
         Task<List<MentorBooking>> GetExpiredPaymentHoldsAsync(DateTime now, CancellationToken cancellationToken = default);
         Task<List<MentorBooking>> GetByLearnerAsync(int learnerId, CancellationToken cancellationToken = default);
         Task<List<MentorBooking>> GetPaidBookingsForMentorAsync(int mentorId, CancellationToken cancellationToken = default);
+        Task<MentorBooking?> GetActiveMeetingByRoomIdAsync(Guid roomId, CancellationToken cancellationToken = default);
     }
 }

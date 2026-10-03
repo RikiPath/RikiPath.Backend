@@ -1,4 +1,5 @@
 using RikiPath.Domain.Entities;
+using RikiPath.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
@@ -27,6 +28,20 @@ namespace RikiPath.Infrastructure.Configuration
 
             builder.HasIndex(x => new { x.UserSubscriptionId, x.Status });
             builder.HasIndex(x => x.MentorAvailabilityId).IsUnique();
+
+            builder.HasData(new MentorBooking
+            {
+                Id = 990001,
+                UserSubscriptionId = 990001,
+                MentorAvailabilityId = 990001,
+                Status = MentorStatus.Assigned,
+                Question = "Meeting demo để kiểm thử phòng 1-1 trên frontend.",
+                ScheduledAt = new DateTime(2026, 10, 2, 9, 0, 0, DateTimeKind.Unspecified),
+                MeetingLink = "http://localhost:5173/mentor-meeting/5d75c4cc-5404-4f9a-91e8-b8596f31d2a2",
+                RoomId = Guid.Parse("5d75c4cc-5404-4f9a-91e8-b8596f31d2a2"),
+                IsDeleted = false,
+                CreatedDate = new DateTime(2026, 10, 1, 0, 0, 0, DateTimeKind.Unspecified)
+            });
         }
     }
 }

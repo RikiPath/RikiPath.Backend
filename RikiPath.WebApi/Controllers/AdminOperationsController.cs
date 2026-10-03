@@ -53,9 +53,15 @@ public class AdminOperationsController(IUnitOfWork uow) : ControllerBase
         using var hmac = new HMACSHA512();
         var user = new UserAccount
         {
-            Email = email, PasswordSalt = hmac.Key, PasswordHash = hmac.ComputeHash(Encoding.UTF8.GetBytes(r.Password)),
-            FirstName = r.FirstName, LastName = r.LastName, PhoneNumber = r.PhoneNumber, Role = r.Role,
-            IsEmailVerified = r.IsEmailVerified, CreatedDate = DateTime.UtcNow
+            Email = email,
+            PasswordSalt = hmac.Key,
+            PasswordHash = hmac.ComputeHash(Encoding.UTF8.GetBytes(r.Password)),
+            FirstName = r.FirstName,
+            LastName = r.LastName,
+            PhoneNumber = r.PhoneNumber,
+            Role = r.Role,
+            IsEmailVerified = r.IsEmailVerified,
+            CreatedDate = DateTime.UtcNow
         };
         await uow.UserAccounts.AddAsync(user, ct);
         await uow.SaveChangesAsync(ct);
@@ -203,7 +209,7 @@ public class AdminOperationsController(IUnitOfWork uow) : ControllerBase
     /// <param name="status">Trạng thái booking cần lọc; bỏ trống để lấy tất cả trạng thái.</param>
     /// <param name="ct">Token hủy request.</param>
     [HttpGet("mentor-bookings")]
-    public async Task<IActionResult> GetMentorBookings([FromQuery] ConsultationStatus? status, CancellationToken ct)
+    public async Task<IActionResult> GetMentorBookings([FromQuery] MentorStatus? status, CancellationToken ct)
     {
         var items = await uow.MentorBookings.Query().Include(x => x.UserSubscription).Include(x => x.MentorAvailability).ToListAsync(ct);
         var result = items.Where(x => !x.IsDeleted && (status is null || x.Status == status))
@@ -285,13 +291,13 @@ public class AdminOperationsController(IUnitOfWork uow) : ControllerBase
             }
             slot.IsBooked = true; uow.MentorAvailabilities.Update(slot); booking.MentorAvailabilityId = slotId;
         }
-        if (r.Status == ConsultationStatus.Cancelled && booking.MentorAvailabilityId is int cancelledSlotId)
+        if (r.Status == MentorStatus.Cancelled && booking.MentorAvailabilityId is int cancelledSlotId)
         {
             var cancelledSlot = await uow.MentorAvailabilities.GetByIdAsync(cancelledSlotId, ct);
             if (cancelledSlot is not null) { cancelledSlot.IsBooked = false; uow.MentorAvailabilities.Update(cancelledSlot); }
             booking.MentorAvailabilityId = null;
         }
-        if (r.Status == ConsultationStatus.Cancelled && previousStatus != ConsultationStatus.Cancelled)
+        if (r.Status == MentorStatus.Cancelled && previousStatus != MentorStatus.Cancelled)
         {
             var subscription = await uow.UserSubscriptions.GetByIdAsync(booking.UserSubscriptionId, ct);
             if (subscription is not null && subscription.PaymentStatus == PaymentStatus.Paid)
@@ -324,7 +330,7 @@ public class AdminOperationsController(IUnitOfWork uow) : ControllerBase
             ActiveSubscriptions = subs.Count(x => !x.IsDeleted && x.PaymentStatus == PaymentStatus.Paid && x.StartDate <= DateTime.UtcNow && x.EndDate >= DateTime.UtcNow),
             PaidSubscriptionAmount = subs.Where(x => !x.IsDeleted && x.PaymentStatus == PaymentStatus.Paid).Sum(x => x.AmountPaid),
             MentorBookings = bookings.Count(x => !x.IsDeleted),
-            MentorBookingsByStatus = Enum.GetValues<ConsultationStatus>().ToDictionary(x => x.ToString(), x => bookings.Count(b => !b.IsDeleted && b.Status == x)),
+            MentorBookingsByStatus = Enum.GetValues<MentorStatus>().ToDictionary(x => x.ToString(), x => bookings.Count(b => !b.IsDeleted && b.Status == x)),
             Content = new { Lessons = Count(lessons), Kanjis = Count(kanjis), Vocabularies = Count(vocab), GrammarPatterns = Count(grammar), MockTests = Count(tests), PracticeExercises = Count(exercises) },
             PendingReview = new { Lessons = lessons.Count(x => !x.IsDeleted && x.Status == ContentStatus.PendingReview), Kanjis = kanjis.Count(x => !x.IsDeleted && x.Status == ContentStatus.PendingReview), Vocabularies = vocab.Count(x => !x.IsDeleted && x.Status == ContentStatus.PendingReview), GrammarPatterns = grammar.Count(x => !x.IsDeleted && x.Status == ContentStatus.PendingReview), MockTests = tests.Count(x => !x.IsDeleted && x.Status == ContentStatus.PendingReview), PracticeExercises = exercises.Count(x => !x.IsDeleted && x.Status == ContentStatus.PendingReview) }
         });
@@ -387,7 +393,7 @@ public sealed class SaveFeatureRequest { public string Name { get; set; } = stri
 public sealed class UpdateMentorBookingRequest
 {
     public int? MentorAvailabilityId { get; set; }
-    public ConsultationStatus Status { get; set; }
+    public MentorStatus Status { get; set; }
     public DateTime? ScheduledAt { get; set; }
     public string? MeetingLink { get; set; }
 }
