@@ -54,8 +54,8 @@ namespace RikiPath.Application.Responses.Consultations
     public class MentorBookingResponse
     {
         public int Id { get; set; }
-        public ConsultationType Type { get; set; }
-        public ConsultationStatus Status { get; set; }
+        public MentorType Type { get; set; }
+        public MentorStatus Status { get; set; }
         public int? MentorId { get; set; }
         public DateTime? ScheduledAt { get; set; }
         public string? MeetingLink { get; set; }
@@ -70,8 +70,8 @@ namespace RikiPath.Application.Responses.Consultations
         public int RequestId { get; set; }
         public int LearnerId { get; set; }
         public string LearnerName { get; set; } = string.Empty;
-        public ConsultationType Type { get; set; }
-        public ConsultationStatus Status { get; set; }
+        public MentorType Type { get; set; }
+        public MentorStatus Status { get; set; }
         public DateTime? ScheduledAt { get; set; }
         public string? Question { get; set; }
         public List<MockTestSummary> RecentMockTestResults { get; set; } = new();

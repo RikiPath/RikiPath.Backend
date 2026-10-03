@@ -30,7 +30,8 @@ namespace RikiPath.Infrastructure.Configuration
                 CreateSeedUser(900002, "mentor1@rikipath.local", "Mentor", "One", Role.Mentor, "Mentor1@123"),
                 CreateSeedUser(900003, "mentor2@rikipath.local", "Mentor", "Two", Role.Mentor, "Mentor2@123"),
                 CreateSeedUser(900004, "author1@rikipath.local", "Content", "Author One", Role.ContentAuthor, "Author1@123"),
-                CreateSeedUser(900005, "author2@rikipath.local", "Content", "Author Two", Role.ContentAuthor, "Author2@123"));
+                CreateSeedUser(900005, "author2@rikipath.local", "Content", "Author Two", Role.ContentAuthor, "Author2@123"),
+                CreateSeedUser(900007, "learner.meeting@rikipath.local", "Meeting", "Test Learner", Role.Learner, "Learner1@123"));
 
             // Learner's target certification level — optional, does not cascade-delete the user
             builder.HasOne(x => x.TargetCertificateLevel)

@@ -43,8 +43,8 @@ public sealed class PaymentService(
                 subscription.PaymentStatus = PaymentStatus.Failed;
                 foreach (var booking in subscription.MentorBookings ?? [])
                 {
-                    if (booking.Status != ConsultationStatus.AwaitingPayment) continue;
-                    booking.Status = ConsultationStatus.Cancelled;
+                    if (booking.Status != MentorStatus.AwaitingPayment) continue;
+                    booking.Status = MentorStatus.Cancelled;
                     if (booking.MentorAvailability is not null)
                     {
                         booking.MentorAvailability.IsBooked = false;
@@ -64,8 +64,8 @@ public sealed class PaymentService(
 
                 foreach (var booking in subscription.MentorBookings ?? [])
                 {
-                    if (booking.Status != ConsultationStatus.AwaitingPayment) continue;
-                    booking.Status = ConsultationStatus.Assigned;
+                    if (booking.Status != MentorStatus.AwaitingPayment) continue;
+                    booking.Status = MentorStatus.Assigned;
                     booking.RoomId = Guid.NewGuid();
                     booking.MeetingLink = BuildMeetingLink(booking.RoomId.Value);
                 }

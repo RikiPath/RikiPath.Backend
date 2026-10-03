@@ -96,7 +96,7 @@ public sealed class MentorMeetingService(
             {
                 UserSubscription = subscription,
                 MentorAvailability = slot,
-                Status = ConsultationStatus.AwaitingPayment,
+                Status = MentorStatus.AwaitingPayment,
                 ScheduledAt = slot.StartTime
             };
 
@@ -137,7 +137,7 @@ public sealed class MentorMeetingService(
                 logger.LogError(ex, "PayOS checkout creation failed for subscription {SubscriptionId}.", subscription.Id);
                 subscription.PaymentStatus = PaymentStatus.Failed;
                 subscription.PaymentExpiresAt = null;
-                booking.Status = ConsultationStatus.Cancelled;
+                booking.Status = MentorStatus.Cancelled;
                 booking.MentorAvailability = null;
                 booking.MentorAvailabilityId = null;
                 slot.IsBooked = false;
@@ -378,7 +378,7 @@ public sealed class MentorMeetingService(
         if (expired.Count == 0) return;
         foreach (var booking in expired)
         {
-            booking.Status = ConsultationStatus.Cancelled;
+            booking.Status = MentorStatus.Cancelled;
             if (booking.MentorAvailability is not null)
             {
                 var slot = booking.MentorAvailability;
@@ -402,7 +402,7 @@ public sealed class MentorMeetingService(
         {
             UserSubscription = subscription,
             MentorAvailability = slot,
-            Status = ConsultationStatus.Assigned,
+            Status = MentorStatus.Assigned,
             ScheduledAt = slot.StartTime,
             RoomId = roomId,
             MeetingLink = $"{appSettings.FrontendBaseUrl.TrimEnd('/')}/mentor-meeting/{roomId:D}"

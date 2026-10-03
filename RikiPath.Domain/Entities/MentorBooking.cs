@@ -19,7 +19,7 @@ namespace RikiPath.Domain.Entities
         public int? MentorAvailabilityId { get; set; }
         public MentorAvailability? MentorAvailability { get; set; }
 
-        public ConsultationStatus Status { get; set; } = ConsultationStatus.PendingAssignment;
+        public MentorStatus Status { get; set; } = MentorStatus.PendingAssignment;
         public string? Question { get; set; }
         public DateTime? ScheduledAt { get; set; }
         public string? MeetingLink { get; set; }

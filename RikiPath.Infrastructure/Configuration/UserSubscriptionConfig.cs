@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using RikiPath.Domain.Entities;
+using RikiPath.Domain.Enums;
 
 namespace RikiPath.Infrastructure.Configuration
 {
@@ -27,6 +28,27 @@ namespace RikiPath.Infrastructure.Configuration
                 .OnDelete(DeleteBehavior.Restrict);
 
             builder.HasIndex(x => new { x.UserId, x.PaymentStatus, x.EndDate });
+
+            // Paid demo subscription lets the seeded Learner test included Mentor sessions without PayOS checkout.
+            builder.HasData(new UserSubscription
+            {
+                Id = 990001,
+                UserId = 900007,
+                SubscriptionPlanId = 7,
+                AmountPaid = 459000m,
+                PaymentStatus = PaymentStatus.Paid,
+                PaymentTransactionId = "DEMO-MENTOR-12-SESSIONS",
+                StartDate = new DateTime(2026, 10, 1, 0, 0, 0, DateTimeKind.Unspecified),
+                EndDate = new DateTime(2026, 12, 30, 23, 59, 59, DateTimeKind.Unspecified),
+                AiGradingQuota = 0,
+                AiGradingUsedCount = 0,
+                MeetingSessionsIncluded = 12,
+                MeetingSessionsUsed = 1,
+                PaymentExpiresAt = null,
+                PurchasedAt = new DateTime(2026, 10, 1, 0, 0, 0, DateTimeKind.Unspecified),
+                CreatedDate = new DateTime(2026, 10, 1, 0, 0, 0, DateTimeKind.Unspecified),
+                IsDeleted = false
+            });
         }
     }
 }
