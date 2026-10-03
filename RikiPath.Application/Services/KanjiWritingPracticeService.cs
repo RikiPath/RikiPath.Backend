@@ -90,6 +90,41 @@ namespace RikiPath.Application.Services
             }
         }
 
+        public async Task<ApiResponse<List<KanjiWritingQueueItem>>> GetAllForPracticeAsync(
+            int count, CancellationToken cancellationToken)
+        {
+            try
+            {
+                var userId = claimService.GetUserClaim().Id;
+                var user = await unitOfWork.UserAccounts.GetByIdAsync(userId, cancellationToken);
+                if (user?.TargetCertificateLevelId is not int targetLevelId)
+                    return ApiResponse<List<KanjiWritingQueueItem>>.Success([]);
+
+                var kanjis = (await unitOfWork.Kanjis.FindAsync(
+                    k => k.CertificateLevelId == targetLevelId && k.Status == ContentStatus.Published,
+                    cancellationToken))
+                    .OrderBy(k => k.Id)
+                    .Take(Math.Clamp(count, 1, 200))
+                    .ToList();
+
+                var cards = await unitOfWork.ReviewCards.FindAsync(
+                    r => r.UserId == userId && r.Mode == ReviewMode.Writing && r.KanjiId != null,
+                    cancellationToken);
+                var cardByKanji = cards.ToDictionary(card => card.KanjiId!.Value);
+
+                return ApiResponse<List<KanjiWritingQueueItem>>.Success(kanjis
+                    .Select(kanji => MapToQueueItem(
+                        kanji,
+                        isNew: !cardByKanji.ContainsKey(kanji.Id),
+                        cardByKanji.TryGetValue(kanji.Id, out var card) ? card : null))
+                    .ToList());
+            }
+            catch (Exception ex)
+            {
+                return ApiResponse<List<KanjiWritingQueueItem>>.Fail($"Không thể tải danh sách Kanji luyện viết: {ex.Message}");
+            }
+        }
+
         public async Task<ApiResponse<SubmitKanjiWritingResultResponse>> SubmitResultAsync(
             SubmitKanjiWritingResultRequest request, CancellationToken cancellationToken)
         {
@@ -118,6 +153,11 @@ namespace RikiPath.Application.Services
                 var quality = MapMistakesToQuality(request.TotalMistakes);
                 ApplySm2(reviewItem, quality);
                 reviewItem.LastReviewedAt = DateTime.UtcNow;
+                reviewItem.WritingScore = Math.Clamp(request.Score, 0, 100);
+                reviewItem.WritingCorrectStrokeCount = Math.Max(0, request.CorrectStrokeCount);
+                reviewItem.WritingTotalStrokeCount = Math.Max(0, request.TotalStrokeCount);
+                reviewItem.WritingPracticeMode = request.PracticeMode is "free" ? "free" : "guided";
+                reviewItem.WritingScoreUpdatedAt = DateTime.UtcNow;
 
                 if (isNewItem)
                     await unitOfWork.ReviewCards.AddAsync(reviewItem, cancellationToken);
@@ -145,6 +185,7 @@ namespace RikiPath.Application.Services
                     Repetitions = reviewItem.Repetitions,
                     IntervalDays = reviewItem.IntervalDays,
                     NextReviewDate = reviewItem.NextReviewDate,
+                    Score = reviewItem.WritingScore.Value,
                 });
             }
             catch (Exception ex)
@@ -153,14 +194,43 @@ namespace RikiPath.Application.Services
             }
         }
 
-        private static KanjiWritingQueueItem MapToQueueItem(Kanji kanji, bool isNew) => new()
+        public async Task<ApiResponse<List<KanjiWritingScoreResponse>>> GetScoresAsync(
+                CancellationToken cancellationToken)
+            {
+                try
+                {
+                    var userId = claimService.GetUserClaim().Id;
+                    var cards = await unitOfWork.ReviewCards.FindAsync(
+                        r => r.UserId == userId && r.Mode == ReviewMode.Writing && r.KanjiId != null && r.WritingScore != null,
+                        cancellationToken);
+
+                    return ApiResponse<List<KanjiWritingScoreResponse>>.Success(cards.Select(card => new KanjiWritingScoreResponse
+                    {
+                        KanjiId = card.KanjiId!.Value,
+                        Score = card.WritingScore!.Value,
+                        CorrectStrokeCount = card.WritingCorrectStrokeCount ?? 0,
+                        TotalStrokeCount = card.WritingTotalStrokeCount ?? 0,
+                        PracticeMode = card.WritingPracticeMode ?? "guided",
+                        CompletedAt = card.WritingScoreUpdatedAt ?? card.LastReviewedAt ?? DateTime.UtcNow,
+                    }).ToList());
+                }
+                catch (Exception ex)
+                {
+                    return ApiResponse<List<KanjiWritingScoreResponse>>.Fail($"Không thể tải điểm luyện viết: {ex.Message}");
+                }
+            }
+
+            private static KanjiWritingQueueItem MapToQueueItem(Kanji kanji, bool isNew, ReviewCard? card = null) => new()
         {
             KanjiId = kanji.Id,
             Character = kanji.Character,
             Meaning = kanji.Meaning,
             OnYomi = kanji.OnYomi,
             KunYomi = kanji.KunYomi,
+            StrokeCount = kanji.StrokeCount,
             IsNew = isNew,
+            WritingScore = card?.WritingScore,
+            WritingPracticeMode = card?.WritingPracticeMode,
         };
 
         // 0 lỗi -> nhớ hoàn hảo (5); mỗi lỗi thêm trừ dần; >=4 lỗi coi như chưa nhớ cách viết (1).
