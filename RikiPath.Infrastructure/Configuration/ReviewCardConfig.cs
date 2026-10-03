@@ -30,6 +30,8 @@ namespace RikiPath.Infrastructure.Configuration
 
             // UserAccount side (Cascade) configured in UserConfig.
             builder.HasIndex(x => new { x.UserId, x.NextReviewDate });
+            builder.Property(x => x.WritingPracticeMode).HasMaxLength(20);
+            builder.HasIndex(x => new { x.UserId, x.KanjiId, x.Mode }).IsUnique();
         }
     }
 }

@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using RikiPath.Infrastructure;
@@ -11,9 +12,11 @@ using RikiPath.Infrastructure;
 namespace RikiPath.Infrastructure.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20261001124755_AddKanjiWritingScore")]
+    partial class AddKanjiWritingScore
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -216,16 +219,6 @@ namespace RikiPath.Infrastructure.Migrations
                         {
                             FeaturesId = 6,
                             SubscriptionPlansId = 6
-                        },
-                        new
-                        {
-                            FeaturesId = 7,
-                            SubscriptionPlansId = 7
-                        },
-                        new
-                        {
-                            FeaturesId = 8,
-                            SubscriptionPlansId = 7
                         });
                 });
 
@@ -1088,168 +1081,6 @@ namespace RikiPath.Infrastructure.Migrations
                     b.HasIndex("CertificateLevelId", "Status");
 
                     b.ToTable("Kanjis");
-
-                    b.HasData(
-                        new
-                        {
-                            Id = 910001,
-                            CertificateLevelId = 1,
-                            Character = "日",
-                            ContentAuthorId = 900004,
-                            CreatedDate = new DateTime(2026, 10, 3, 0, 0, 0, 0, DateTimeKind.Utc),
-                            IsApproved = true,
-                            IsDeleted = false,
-                            KunYomi = "ひ、か",
-                            Meaning = "Mặt trời; ngày",
-                            OnYomi = "ニチ、ジツ",
-                            SinoVietnamese = "Nhật",
-                            Status = "Published",
-                            StrokeCount = 4
-                        },
-                        new
-                        {
-                            Id = 910002,
-                            CertificateLevelId = 1,
-                            Character = "月",
-                            ContentAuthorId = 900004,
-                            CreatedDate = new DateTime(2026, 10, 3, 0, 0, 0, 0, DateTimeKind.Utc),
-                            IsApproved = true,
-                            IsDeleted = false,
-                            KunYomi = "つき",
-                            Meaning = "Mặt trăng; tháng",
-                            OnYomi = "ゲツ、ガツ",
-                            SinoVietnamese = "Nguyệt",
-                            Status = "Published",
-                            StrokeCount = 4
-                        },
-                        new
-                        {
-                            Id = 910003,
-                            CertificateLevelId = 1,
-                            Character = "火",
-                            ContentAuthorId = 900004,
-                            CreatedDate = new DateTime(2026, 10, 3, 0, 0, 0, 0, DateTimeKind.Utc),
-                            IsApproved = true,
-                            IsDeleted = false,
-                            KunYomi = "ひ、ほ",
-                            Meaning = "Lửa",
-                            OnYomi = "カ",
-                            SinoVietnamese = "Hỏa",
-                            Status = "Published",
-                            StrokeCount = 4
-                        },
-                        new
-                        {
-                            Id = 910004,
-                            CertificateLevelId = 1,
-                            Character = "水",
-                            ContentAuthorId = 900004,
-                            CreatedDate = new DateTime(2026, 10, 3, 0, 0, 0, 0, DateTimeKind.Utc),
-                            IsApproved = true,
-                            IsDeleted = false,
-                            KunYomi = "みず",
-                            Meaning = "Nước",
-                            OnYomi = "スイ",
-                            SinoVietnamese = "Thủy",
-                            Status = "Published",
-                            StrokeCount = 4
-                        },
-                        new
-                        {
-                            Id = 910005,
-                            CertificateLevelId = 1,
-                            Character = "木",
-                            ContentAuthorId = 900004,
-                            CreatedDate = new DateTime(2026, 10, 3, 0, 0, 0, 0, DateTimeKind.Utc),
-                            IsApproved = true,
-                            IsDeleted = false,
-                            KunYomi = "き、こ",
-                            Meaning = "Cây; gỗ",
-                            OnYomi = "モク、ボク",
-                            SinoVietnamese = "Mộc",
-                            Status = "Published",
-                            StrokeCount = 4
-                        },
-                        new
-                        {
-                            Id = 910006,
-                            CertificateLevelId = 1,
-                            Character = "金",
-                            ContentAuthorId = 900004,
-                            CreatedDate = new DateTime(2026, 10, 3, 0, 0, 0, 0, DateTimeKind.Utc),
-                            IsApproved = true,
-                            IsDeleted = false,
-                            KunYomi = "かね、かな",
-                            Meaning = "Vàng; tiền",
-                            OnYomi = "キン、コン",
-                            SinoVietnamese = "Kim",
-                            Status = "Published",
-                            StrokeCount = 8
-                        },
-                        new
-                        {
-                            Id = 910007,
-                            CertificateLevelId = 1,
-                            Character = "土",
-                            ContentAuthorId = 900004,
-                            CreatedDate = new DateTime(2026, 10, 3, 0, 0, 0, 0, DateTimeKind.Utc),
-                            IsApproved = true,
-                            IsDeleted = false,
-                            KunYomi = "つち",
-                            Meaning = "Đất",
-                            OnYomi = "ド、ト",
-                            SinoVietnamese = "Thổ",
-                            Status = "Published",
-                            StrokeCount = 3
-                        },
-                        new
-                        {
-                            Id = 910008,
-                            CertificateLevelId = 1,
-                            Character = "山",
-                            ContentAuthorId = 900004,
-                            CreatedDate = new DateTime(2026, 10, 3, 0, 0, 0, 0, DateTimeKind.Utc),
-                            IsApproved = true,
-                            IsDeleted = false,
-                            KunYomi = "やま",
-                            Meaning = "Núi",
-                            OnYomi = "サン",
-                            SinoVietnamese = "Sơn",
-                            Status = "Published",
-                            StrokeCount = 3
-                        },
-                        new
-                        {
-                            Id = 910009,
-                            CertificateLevelId = 1,
-                            Character = "川",
-                            ContentAuthorId = 900004,
-                            CreatedDate = new DateTime(2026, 10, 3, 0, 0, 0, 0, DateTimeKind.Utc),
-                            IsApproved = true,
-                            IsDeleted = false,
-                            KunYomi = "かわ",
-                            Meaning = "Sông",
-                            OnYomi = "セン",
-                            SinoVietnamese = "Xuyên",
-                            Status = "Published",
-                            StrokeCount = 3
-                        },
-                        new
-                        {
-                            Id = 910010,
-                            CertificateLevelId = 1,
-                            Character = "人",
-                            ContentAuthorId = 900004,
-                            CreatedDate = new DateTime(2026, 10, 3, 0, 0, 0, 0, DateTimeKind.Utc),
-                            IsApproved = true,
-                            IsDeleted = false,
-                            KunYomi = "ひと",
-                            Meaning = "Người",
-                            OnYomi = "ジン、ニン",
-                            SinoVietnamese = "Nhân",
-                            Status = "Published",
-                            StrokeCount = 2
-                        });
                 });
 
             modelBuilder.Entity("RikiPath.Domain.Entities.LanguageSkill", b =>
@@ -1718,56 +1549,6 @@ namespace RikiPath.Infrastructure.Migrations
                     b.HasIndex("MentorId", "StartTime", "EndTime");
 
                     b.ToTable("MentorAvailabilities");
-
-                    b.HasData(
-                        new
-                        {
-                            Id = 990001,
-                            AdminName = "Seed Demo",
-                            CreatedDate = new DateTime(2026, 10, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
-                            EndTime = new DateTime(2026, 10, 2, 10, 0, 0, 0, DateTimeKind.Unspecified),
-                            IsApproved = true,
-                            IsBooked = true,
-                            IsDeleted = false,
-                            MentorId = 900002,
-                            StartTime = new DateTime(2026, 10, 2, 9, 0, 0, 0, DateTimeKind.Unspecified)
-                        },
-                        new
-                        {
-                            Id = 990002,
-                            AdminName = "Seed Demo",
-                            CreatedDate = new DateTime(2026, 10, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
-                            EndTime = new DateTime(2026, 10, 3, 14, 0, 0, 0, DateTimeKind.Unspecified),
-                            IsApproved = true,
-                            IsBooked = false,
-                            IsDeleted = false,
-                            MentorId = 900002,
-                            StartTime = new DateTime(2026, 10, 3, 13, 0, 0, 0, DateTimeKind.Unspecified)
-                        },
-                        new
-                        {
-                            Id = 990003,
-                            AdminName = "Seed Demo",
-                            CreatedDate = new DateTime(2026, 10, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
-                            EndTime = new DateTime(2026, 10, 4, 10, 0, 0, 0, DateTimeKind.Unspecified),
-                            IsApproved = true,
-                            IsBooked = false,
-                            IsDeleted = false,
-                            MentorId = 900003,
-                            StartTime = new DateTime(2026, 10, 4, 9, 0, 0, 0, DateTimeKind.Unspecified)
-                        },
-                        new
-                        {
-                            Id = 990004,
-                            AdminName = "Seed Demo",
-                            CreatedDate = new DateTime(2026, 10, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
-                            EndTime = new DateTime(2026, 10, 5, 14, 0, 0, 0, DateTimeKind.Unspecified),
-                            IsApproved = true,
-                            IsBooked = false,
-                            IsDeleted = false,
-                            MentorId = 900003,
-                            StartTime = new DateTime(2026, 10, 5, 13, 0, 0, 0, DateTimeKind.Unspecified)
-                        });
                 });
 
             modelBuilder.Entity("RikiPath.Domain.Entities.MentorBooking", b =>
@@ -1832,21 +1613,6 @@ namespace RikiPath.Infrastructure.Migrations
                     b.HasIndex("UserSubscriptionId", "Status");
 
                     b.ToTable("MentorBookings");
-
-                    b.HasData(
-                        new
-                        {
-                            Id = 990001,
-                            CreatedDate = new DateTime(2026, 10, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
-                            IsDeleted = false,
-                            MeetingLink = "http://localhost:5173/mentor-meeting/5d75c4cc-5404-4f9a-91e8-b8596f31d2a2",
-                            MentorAvailabilityId = 990001,
-                            Question = "Meeting demo để kiểm thử phòng 1-1 trên frontend.",
-                            RoomId = new Guid("5d75c4cc-5404-4f9a-91e8-b8596f31d2a2"),
-                            ScheduledAt = new DateTime(2026, 10, 2, 9, 0, 0, 0, DateTimeKind.Unspecified),
-                            Status = "Assigned",
-                            UserSubscriptionId = 990001
-                        });
                 });
 
             modelBuilder.Entity("RikiPath.Domain.Entities.MockQuestion", b =>
@@ -2918,22 +2684,6 @@ namespace RikiPath.Infrastructure.Migrations
                             Name = "Tự học tiếng Nhật - 3 tháng",
                             Price = 459000m,
                             SortOrder = 1
-                        },
-                        new
-                        {
-                            Id = 7,
-                            AiGradingQuota = 0,
-                            CreatedDate = new DateTime(2026, 10, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Description = "Gói demo gồm 12 buổi ôn luyện 1-1 với Mentor, thời hạn 90 ngày. Dữ liệu thanh toán demo được seed để kiểm thử đặt lịch trên frontend.",
-                            DurationDays = 90,
-                            IsActive = true,
-                            IsDeleted = false,
-                            IsPopular = false,
-                            IsTrial = false,
-                            MeetingSessionCount = 12,
-                            Name = "Meeting 1-1 với Mentor - 12 buổi",
-                            Price = 459000m,
-                            SortOrder = 7
                         });
                 });
 
@@ -3131,25 +2881,6 @@ namespace RikiPath.Infrastructure.Migrations
                             PasswordSalt = new byte[] { 66, 178, 77, 56, 234, 206, 29, 78, 136, 190, 160, 142, 226, 249, 14, 17, 26, 101, 167, 36, 193, 55, 150, 94, 239, 81, 69, 54, 81, 171, 80, 22, 208, 38, 242, 2, 55, 171, 64, 38, 48, 224, 36, 216, 133, 132, 147, 100, 174, 32, 65, 134, 128, 35, 50, 138, 204, 59, 167, 96, 11, 128, 101, 102 },
                             Role = "ContentAuthor",
                             SystemNotificationsEnabled = true
-                        },
-                        new
-                        {
-                            Id = 900007,
-                            CreatedDate = new DateTime(2026, 9, 28, 0, 0, 0, 0, DateTimeKind.Utc),
-                            CurrentStreak = 0,
-                            DailyStudyMinutes = 30,
-                            Email = "learner.meeting@rikipath.local",
-                            EmailNotificationsEnabled = true,
-                            FirstName = "Meeting",
-                            IsDeleted = false,
-                            IsEmailVerified = true,
-                            IsPhoneVerified = false,
-                            LastName = "Test Learner",
-                            LongestStreak = 0,
-                            PasswordHash = new byte[] { 9, 206, 219, 58, 155, 234, 107, 145, 121, 174, 134, 51, 96, 253, 64, 216, 157, 114, 92, 36, 123, 206, 67, 217, 207, 166, 54, 71, 254, 251, 156, 200, 185, 110, 198, 135, 221, 146, 243, 40, 237, 229, 16, 133, 163, 161, 156, 79, 138, 103, 85, 25, 114, 81, 99, 182, 25, 73, 212, 198, 212, 192, 54, 129 },
-                            PasswordSalt = new byte[] { 231, 202, 97, 95, 11, 9, 242, 47, 62, 77, 67, 36, 170, 78, 120, 81, 56, 69, 47, 36, 209, 212, 107, 244, 15, 34, 189, 110, 57, 66, 205, 213, 224, 19, 245, 192, 104, 146, 130, 44, 54, 107, 2, 15, 109, 136, 118, 220, 228, 44, 110, 219, 31, 100, 161, 164, 63, 231, 196, 79, 120, 106, 181, 71 },
-                            Role = "Learner",
-                            SystemNotificationsEnabled = true
                         });
                 });
 
@@ -3229,26 +2960,6 @@ namespace RikiPath.Infrastructure.Migrations
                     b.HasIndex("UserId", "PaymentStatus", "EndDate");
 
                     b.ToTable("UserSubscriptions");
-
-                    b.HasData(
-                        new
-                        {
-                            Id = 990001,
-                            AiGradingQuota = 0,
-                            AiGradingUsedCount = 0,
-                            AmountPaid = 459000m,
-                            CreatedDate = new DateTime(2026, 10, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
-                            EndDate = new DateTime(2026, 12, 30, 23, 59, 59, 0, DateTimeKind.Unspecified),
-                            IsDeleted = false,
-                            MeetingSessionsIncluded = 12,
-                            MeetingSessionsUsed = 1,
-                            PaymentStatus = "Paid",
-                            PaymentTransactionId = "DEMO-MENTOR-12-SESSIONS",
-                            PurchasedAt = new DateTime(2026, 10, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
-                            StartDate = new DateTime(2026, 10, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
-                            SubscriptionPlanId = 7,
-                            UserId = 900007
-                        });
                 });
 
             modelBuilder.Entity("RikiPath.Domain.Entities.Vocabulary", b =>

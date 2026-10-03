@@ -7,6 +7,9 @@ namespace RikiPath.Application.Responses.KanjiWriting
         public string Meaning { get; set; } = string.Empty;
         public string? OnYomi { get; set; }
         public string? KunYomi { get; set; }
+        public int StrokeCount { get; set; }
+        public int? WritingScore { get; set; }
+        public string? WritingPracticeMode { get; set; }
 
         /// <summary>true nếu đây là chữ mới (chưa từng luyện viết lần nào) - FE nên bật
         /// animateCharacter() cho FE xem trước cách viết đúng, thay vì vào quiz ngay.</summary>
