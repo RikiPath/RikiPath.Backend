@@ -2,7 +2,7 @@
 {
     public sealed class MeetingAccessInfoResponse
     {
-        public MeetingParticipantResponse Learner { get; init; } = null!;
         public MeetingParticipantResponse Mentor { get; init; } = null!;
+        public IReadOnlyList<MeetingParticipantResponse> Learners { get; init; } = [];
     }
 }

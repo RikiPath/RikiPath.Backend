@@ -55,7 +55,7 @@ namespace RikiPath.Infrastructure.Repositories
             => _context.MentorBookings.AsNoTracking()
                 .Include(x => x.UserSubscription).ThenInclude(x => x.UserAccount)
                 .Include(x => x.MentorAvailability).ThenInclude(x => x.Mentor)
-                .Where(x => x.RoomId == roomId && !x.IsDeleted && x.Status == MentorStatus.Assigned)
+                .Where(x => x.MentorAvailability != null && x.MentorAvailability.RoomId == roomId && !x.IsDeleted && x.Status == MentorStatus.Assigned)
                 .FirstOrDefaultAsync(cancellationToken);
     }
 }

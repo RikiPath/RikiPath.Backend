@@ -225,7 +225,7 @@ public class AdminOperationsController(IUnitOfWork uow) : ControllerBase
     public async Task<IActionResult> GetMentorAvailabilities([FromQuery] int? mentorId, CancellationToken ct)
     {
         var rows = (await uow.MentorAvailabilities.GetAllAsync(ct)).Where(x => !x.IsDeleted && (mentorId is null || x.MentorId == mentorId)).OrderBy(x => x.StartTime);
-        return Ok(rows.Select(x => new { x.Id, x.MentorId, x.StartTime, x.EndTime, x.IsBooked }));
+        return Ok(rows.Select(x => new { x.Id, x.MentorId, x.StartTime, x.EndTime }));
     }
 
     /// <summary>Tạo khung giờ rảnh cho một tài khoản có role Mentor.</summary>
@@ -237,7 +237,7 @@ public class AdminOperationsController(IUnitOfWork uow) : ControllerBase
         if (mentor is null || mentor.IsDeleted || mentor.Role != Role.Mentor) return BadRequest(new { error = "Mentor không tồn tại hoặc đang bị khóa." });
         var row = new MentorAvailability { MentorId = r.MentorId, StartTime = r.StartTime, EndTime = r.EndTime };
         await uow.MentorAvailabilities.AddAsync(row, ct); await uow.SaveChangesAsync(ct);
-        return CreatedAtAction(nameof(GetMentorAvailabilities), new { mentorId = row.MentorId }, new { row.Id, row.MentorId, row.StartTime, row.EndTime, row.IsBooked });
+        return CreatedAtAction(nameof(GetMentorAvailabilities), new { mentorId = row.MentorId }, new { row.Id, row.MentorId, row.StartTime, row.EndTime });
     }
 
     /// <summary>Đổi thời gian của khung giờ chưa được đặt.</summary>
@@ -249,11 +249,10 @@ public class AdminOperationsController(IUnitOfWork uow) : ControllerBase
     {
         var row = await uow.MentorAvailabilities.GetByIdAsync(id, ct);
         if (row is null || row.IsDeleted) return NotFound();
-        if (row.IsBooked) return Conflict(new { error = "Không thể đổi khung giờ đã được đặt." });
         if (r.EndTime <= r.StartTime) return BadRequest(new { error = "EndTime phải sau StartTime." });
         row.StartTime = r.StartTime; row.EndTime = r.EndTime; row.ModifiedDate = DateTime.UtcNow;
         uow.MentorAvailabilities.Update(row); await uow.SaveChangesAsync(ct);
-        return Ok(new { row.Id, row.MentorId, row.StartTime, row.EndTime, row.IsBooked });
+        return Ok(new { row.Id, row.MentorId, row.StartTime, row.EndTime });
     }
 
     /// <summary>Xóa mềm khung giờ chưa được đặt.</summary>
@@ -264,7 +263,6 @@ public class AdminOperationsController(IUnitOfWork uow) : ControllerBase
     {
         var row = await uow.MentorAvailabilities.GetByIdAsync(id, ct);
         if (row is null || row.IsDeleted) return NotFound();
-        if (row.IsBooked) return Conflict(new { error = "Không thể xóa khung giờ đã được đặt." });
         row.IsDeleted = true; row.ModifiedDate = DateTime.UtcNow; uow.MentorAvailabilities.Update(row); await uow.SaveChangesAsync(ct); return NoContent();
     }
 
@@ -279,24 +277,6 @@ public class AdminOperationsController(IUnitOfWork uow) : ControllerBase
         var booking = await uow.MentorBookings.GetByIdAsync(id, ct);
         if (booking is null || booking.IsDeleted) return NotFound();
         var previousStatus = booking.Status;
-        if (r.MentorAvailabilityId is int slotId)
-        {
-            var slot = await uow.MentorAvailabilities.GetByIdAsync(slotId, ct);
-            if (slot is null || slot.IsDeleted || (slot.IsBooked && slotId != booking.MentorAvailabilityId))
-                return BadRequest(new { error = "Khung giờ không tồn tại hoặc đã được đặt." });
-            if (booking.MentorAvailabilityId is int previousId && previousId != slotId)
-            {
-                var previous = await uow.MentorAvailabilities.GetByIdAsync(previousId, ct);
-                if (previous is not null) { previous.IsBooked = false; uow.MentorAvailabilities.Update(previous); }
-            }
-            slot.IsBooked = true; uow.MentorAvailabilities.Update(slot); booking.MentorAvailabilityId = slotId;
-        }
-        if (r.Status == MentorStatus.Cancelled && booking.MentorAvailabilityId is int cancelledSlotId)
-        {
-            var cancelledSlot = await uow.MentorAvailabilities.GetByIdAsync(cancelledSlotId, ct);
-            if (cancelledSlot is not null) { cancelledSlot.IsBooked = false; uow.MentorAvailabilities.Update(cancelledSlot); }
-            booking.MentorAvailabilityId = null;
-        }
         if (r.Status == MentorStatus.Cancelled && previousStatus != MentorStatus.Cancelled)
         {
             var subscription = await uow.UserSubscriptions.GetByIdAsync(booking.UserSubscriptionId, ct);
