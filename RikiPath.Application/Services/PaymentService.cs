@@ -47,7 +47,6 @@ public sealed class PaymentService(
                     booking.Status = MentorStatus.Cancelled;
                     if (booking.MentorAvailability is not null)
                     {
-                        booking.MentorAvailability.IsBooked = false;
                         booking.MentorAvailability = null;
                         booking.MentorAvailabilityId = null;
                     }
@@ -66,8 +65,10 @@ public sealed class PaymentService(
                 {
                     if (booking.Status != MentorStatus.AwaitingPayment) continue;
                     booking.Status = MentorStatus.Assigned;
-                    booking.RoomId = Guid.NewGuid();
-                    booking.MeetingLink = BuildMeetingLink(booking.RoomId.Value);
+                    if (booking.MentorAvailability is not null)
+                    {
+                        booking.MeetingLink = BuildMeetingLink(booking.MentorAvailability.RoomId);
+                    }
                 }
             }
 

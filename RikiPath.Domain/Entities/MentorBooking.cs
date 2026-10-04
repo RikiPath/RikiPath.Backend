@@ -1,14 +1,7 @@
-using System;
-
 using RikiPath.Domain.Enums;
 
 namespace RikiPath.Domain.Entities
 {
-    /// <summary>
-    /// The meeting booking or written-answer ticket created from a purchase. For
-    /// Meeting-type requests, <see cref="MentorAvailabilityId"/> links to the exact
-    /// slot that was booked (1-to-1, both sides optional until a slot is actually chosen).
-    /// </summary>
     public class MentorBooking : Base
     {
         public int Id { get; set; }
@@ -22,9 +15,9 @@ namespace RikiPath.Domain.Entities
         public MentorStatus Status { get; set; } = MentorStatus.PendingAssignment;
         public string? Question { get; set; }
         public DateTime? ScheduledAt { get; set; }
+
+        /// <summary>Filled when the learner books: URL that contains the slot's RoomId.</summary>
         public string? MeetingLink { get; set; }
-        /// <summary>Opaque unique room key used to form the meeting URL and authorize room access.</summary>
-        public Guid? RoomId { get; set; }
         public DateTime? CompletedAt { get; set; }
 
         public Note? Note { get; set; }

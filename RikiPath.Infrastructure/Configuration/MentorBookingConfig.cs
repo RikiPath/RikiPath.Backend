@@ -12,36 +12,71 @@ namespace RikiPath.Infrastructure.Configuration
             builder.HasKey(x => x.Id);
             builder.Property(x => x.Status).HasConversion<string>().HasMaxLength(20);
             builder.Property(x => x.MeetingLink).HasMaxLength(500);
-            builder.HasIndex(x => x.RoomId).IsUnique().HasFilter("\"RoomId\" IS NOT NULL");
 
             builder.HasOne(x => x.UserSubscription)
                 .WithMany(x => x.MentorBookings)
                 .HasForeignKey(x => x.UserSubscriptionId)
                 .OnDelete(DeleteBehavior.Restrict);
 
-            // 1-to-1, both sides optional: a request may not have booked a slot yet
-            // (e.g. WrittenAnswer type never books one), and a slot may not be booked yet.
             builder.HasOne(x => x.MentorAvailability)
-                .WithOne(x => x.MentorBooking)
-                .HasForeignKey<MentorBooking>(x => x.MentorAvailabilityId)
-                .OnDelete(DeleteBehavior.SetNull);
+                .WithMany(x => x.MentorBookings)
+                .HasForeignKey(x => x.MentorAvailabilityId)
+                .OnDelete(DeleteBehavior.Restrict);
 
             builder.HasIndex(x => new { x.UserSubscriptionId, x.Status });
-            builder.HasIndex(x => x.MentorAvailabilityId).IsUnique();
 
-            builder.HasData(new MentorBooking
-            {
-                Id = 990001,
-                UserSubscriptionId = 990001,
-                MentorAvailabilityId = 990001,
-                Status = MentorStatus.Assigned,
-                Question = "Meeting demo để kiểm thử phòng 1-1 trên frontend.",
-                ScheduledAt = new DateTime(2026, 10, 2, 9, 0, 0, DateTimeKind.Unspecified),
-                MeetingLink = "http://localhost:5173/mentor-meeting/5d75c4cc-5404-4f9a-91e8-b8596f31d2a2",
-                RoomId = Guid.Parse("5d75c4cc-5404-4f9a-91e8-b8596f31d2a2"),
-                IsDeleted = false,
-                CreatedDate = new DateTime(2026, 10, 1, 0, 0, 0, DateTimeKind.Unspecified)
-            });
+            builder.HasIndex(x => new { x.MentorAvailabilityId, x.UserSubscriptionId }).IsUnique();
+
+            builder.HasData(
+               new MentorBooking
+               {
+                   Id = 990001,
+                   UserSubscriptionId = 990001,
+                   MentorAvailabilityId = 990001,
+                   Status = MentorStatus.Assigned,
+                   Question = "Meeting demo để kiểm thử phòng họp trên frontend.",
+                   ScheduledAt = new DateTime(2026, 10, 2, 9, 0, 0, DateTimeKind.Unspecified),
+                   MeetingLink = "http://localhost:5173/mentor-meeting/a1000000-0000-0000-0000-000000990001",
+                   IsDeleted = false,
+                   CreatedDate = new DateTime(2026, 10, 1, 0, 0, 0, DateTimeKind.Unspecified)
+               },
+               new MentorBooking
+               {
+                   Id = 990002,
+                   UserSubscriptionId = 990002,
+                   MentorAvailabilityId = 990001,
+                   Status = MentorStatus.Assigned,
+                   Question = "Em muốn nhờ Mentor giải đáp phần ngữ pháp N3 bài 5.",
+                   ScheduledAt = new DateTime(2026, 10, 2, 9, 0, 0, DateTimeKind.Unspecified),
+                   MeetingLink = "http://localhost:5173/mentor-meeting/a1000000-0000-0000-0000-000000990001",
+                   IsDeleted = false,
+                   CreatedDate = new DateTime(2026, 10, 1, 0, 0, 0, DateTimeKind.Unspecified)
+               },
+               new MentorBooking
+               {
+                   Id = 990003,
+                   UserSubscriptionId = 990003,
+                   MentorAvailabilityId = 990001,
+                   Status = MentorStatus.Assigned,
+                   Question = "Hỏi về cách phân biệt giữa ~てくる và ~ていく.",
+                   ScheduledAt = new DateTime(2026, 10, 2, 9, 0, 0, DateTimeKind.Unspecified),
+                   MeetingLink = "http://localhost:5173/mentor-meeting/a1000000-0000-0000-0000-000000990001",
+                   IsDeleted = false,
+                   CreatedDate = new DateTime(2026, 10, 1, 0, 0, 0, DateTimeKind.Unspecified)
+               },
+               new MentorBooking
+               {
+                   Id = 990004,
+                   UserSubscriptionId = 990004,
+                   MentorAvailabilityId = 990001,
+                   Status = MentorStatus.Assigned,
+                   Question = "Tư vấn phương pháp luyện nghe JLPT N3 hiệu quả.",
+                   ScheduledAt = new DateTime(2026, 10, 2, 9, 0, 0, DateTimeKind.Unspecified),
+                   MeetingLink = "http://localhost:5173/mentor-meeting/a1000000-0000-0000-0000-000000990001",
+                   IsDeleted = false,
+                   CreatedDate = new DateTime(2026, 10, 1, 0, 0, 0, DateTimeKind.Unspecified)
+               }
+           );
         }
     }
 }

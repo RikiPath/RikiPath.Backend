@@ -100,7 +100,6 @@ public sealed class MentorMeetingService(
                 ScheduledAt = slot.StartTime
             };
 
-            slot.IsBooked = true;
             unitOfWork.MentorAvailabilities.Update(slot);
             await unitOfWork.UserSubscriptions.AddAsync(subscription, cancellationToken);
             await unitOfWork.MentorBookings.AddAsync(booking, cancellationToken);
@@ -140,7 +139,6 @@ public sealed class MentorMeetingService(
                 booking.Status = MentorStatus.Cancelled;
                 booking.MentorAvailability = null;
                 booking.MentorAvailabilityId = null;
-                slot.IsBooked = false;
                 unitOfWork.UserSubscriptions.Update(subscription);
                 unitOfWork.MentorBookings.Update(booking);
                 unitOfWork.MentorAvailabilities.Update(slot);
@@ -203,7 +201,6 @@ public sealed class MentorMeetingService(
             if (slot is null)
                 return ApiResponse<MentorBookingResponse>.Fail("Slot không còn trống hoặc không hợp lệ.", HttpStatusCode.Conflict);
 
-            slot.IsBooked = true;
             subscription.MeetingSessionsUsed++;
             var booking = CreateConfirmedBooking(subscription, slot);
             unitOfWork.MentorAvailabilities.Update(slot);
@@ -339,8 +336,6 @@ public sealed class MentorMeetingService(
             var slot = await unitOfWork.MentorAvailabilities.GetByIdAsync(id, cancellationToken);
             if (slot is null || slot.IsDeleted || slot.MentorId != claims.Id)
                 return ApiResponse<bool>.Fail("Không tìm thấy khung giờ.", HttpStatusCode.NotFound);
-            if (slot.IsBooked)
-                return ApiResponse<bool>.Fail("Không thể xóa slot đang được giữ hoặc đã đặt.", HttpStatusCode.Conflict);
             slot.IsDeleted = true;
             slot.ModifiedDate = DateTime.UtcNow;
             unitOfWork.MentorAvailabilities.Update(slot);
@@ -382,7 +377,6 @@ public sealed class MentorMeetingService(
             if (booking.MentorAvailability is not null)
             {
                 var slot = booking.MentorAvailability;
-                slot.IsBooked = false;
                 unitOfWork.MentorAvailabilities.Update(slot);
                 booking.MentorAvailability = null;
                 booking.MentorAvailabilityId = null;
@@ -404,7 +398,6 @@ public sealed class MentorMeetingService(
             MentorAvailability = slot,
             Status = MentorStatus.Assigned,
             ScheduledAt = slot.StartTime,
-            RoomId = roomId,
             MeetingLink = $"{appSettings.FrontendBaseUrl.TrimEnd('/')}/mentor-meeting/{roomId:D}"
         };
     }
@@ -434,7 +427,6 @@ public sealed class MentorMeetingService(
         MentorName = $"{slot.Mentor?.FirstName} {slot.Mentor?.LastName}".Trim(),
         StartTime = slot.StartTime,
         EndTime = slot.EndTime,
-        IsBooked = slot.IsBooked
     };
 
     private static MentorBookingResponse MapBooking(MentorBooking booking, int currentUserId)
@@ -455,7 +447,6 @@ public sealed class MentorMeetingService(
             PaymentStatus = booking.UserSubscription?.PaymentStatus,
             ScheduledAt = booking.ScheduledAt,
             MeetingLink = booking.MeetingLink,
-            RoomId = booking.RoomId
         };
     }
 }

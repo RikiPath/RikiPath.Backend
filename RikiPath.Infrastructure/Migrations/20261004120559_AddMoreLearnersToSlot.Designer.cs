@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using RikiPath.Infrastructure;
@@ -11,9 +12,11 @@ using RikiPath.Infrastructure;
 namespace RikiPath.Infrastructure.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20261004120559_AddMoreLearnersToSlot")]
+    partial class AddMoreLearnersToSlot
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -1088,168 +1091,6 @@ namespace RikiPath.Infrastructure.Migrations
                     b.HasIndex("CertificateLevelId", "Status");
 
                     b.ToTable("Kanjis");
-
-                    b.HasData(
-                        new
-                        {
-                            Id = 910001,
-                            CertificateLevelId = 1,
-                            Character = "日",
-                            ContentAuthorId = 900004,
-                            CreatedDate = new DateTime(2026, 10, 3, 0, 0, 0, 0, DateTimeKind.Utc),
-                            IsApproved = true,
-                            IsDeleted = false,
-                            KunYomi = "ひ、か",
-                            Meaning = "Mặt trời; ngày",
-                            OnYomi = "ニチ、ジツ",
-                            SinoVietnamese = "Nhật",
-                            Status = "Published",
-                            StrokeCount = 4
-                        },
-                        new
-                        {
-                            Id = 910002,
-                            CertificateLevelId = 1,
-                            Character = "月",
-                            ContentAuthorId = 900004,
-                            CreatedDate = new DateTime(2026, 10, 3, 0, 0, 0, 0, DateTimeKind.Utc),
-                            IsApproved = true,
-                            IsDeleted = false,
-                            KunYomi = "つき",
-                            Meaning = "Mặt trăng; tháng",
-                            OnYomi = "ゲツ、ガツ",
-                            SinoVietnamese = "Nguyệt",
-                            Status = "Published",
-                            StrokeCount = 4
-                        },
-                        new
-                        {
-                            Id = 910003,
-                            CertificateLevelId = 1,
-                            Character = "火",
-                            ContentAuthorId = 900004,
-                            CreatedDate = new DateTime(2026, 10, 3, 0, 0, 0, 0, DateTimeKind.Utc),
-                            IsApproved = true,
-                            IsDeleted = false,
-                            KunYomi = "ひ、ほ",
-                            Meaning = "Lửa",
-                            OnYomi = "カ",
-                            SinoVietnamese = "Hỏa",
-                            Status = "Published",
-                            StrokeCount = 4
-                        },
-                        new
-                        {
-                            Id = 910004,
-                            CertificateLevelId = 1,
-                            Character = "水",
-                            ContentAuthorId = 900004,
-                            CreatedDate = new DateTime(2026, 10, 3, 0, 0, 0, 0, DateTimeKind.Utc),
-                            IsApproved = true,
-                            IsDeleted = false,
-                            KunYomi = "みず",
-                            Meaning = "Nước",
-                            OnYomi = "スイ",
-                            SinoVietnamese = "Thủy",
-                            Status = "Published",
-                            StrokeCount = 4
-                        },
-                        new
-                        {
-                            Id = 910005,
-                            CertificateLevelId = 1,
-                            Character = "木",
-                            ContentAuthorId = 900004,
-                            CreatedDate = new DateTime(2026, 10, 3, 0, 0, 0, 0, DateTimeKind.Utc),
-                            IsApproved = true,
-                            IsDeleted = false,
-                            KunYomi = "き、こ",
-                            Meaning = "Cây; gỗ",
-                            OnYomi = "モク、ボク",
-                            SinoVietnamese = "Mộc",
-                            Status = "Published",
-                            StrokeCount = 4
-                        },
-                        new
-                        {
-                            Id = 910006,
-                            CertificateLevelId = 1,
-                            Character = "金",
-                            ContentAuthorId = 900004,
-                            CreatedDate = new DateTime(2026, 10, 3, 0, 0, 0, 0, DateTimeKind.Utc),
-                            IsApproved = true,
-                            IsDeleted = false,
-                            KunYomi = "かね、かな",
-                            Meaning = "Vàng; tiền",
-                            OnYomi = "キン、コン",
-                            SinoVietnamese = "Kim",
-                            Status = "Published",
-                            StrokeCount = 8
-                        },
-                        new
-                        {
-                            Id = 910007,
-                            CertificateLevelId = 1,
-                            Character = "土",
-                            ContentAuthorId = 900004,
-                            CreatedDate = new DateTime(2026, 10, 3, 0, 0, 0, 0, DateTimeKind.Utc),
-                            IsApproved = true,
-                            IsDeleted = false,
-                            KunYomi = "つち",
-                            Meaning = "Đất",
-                            OnYomi = "ド、ト",
-                            SinoVietnamese = "Thổ",
-                            Status = "Published",
-                            StrokeCount = 3
-                        },
-                        new
-                        {
-                            Id = 910008,
-                            CertificateLevelId = 1,
-                            Character = "山",
-                            ContentAuthorId = 900004,
-                            CreatedDate = new DateTime(2026, 10, 3, 0, 0, 0, 0, DateTimeKind.Utc),
-                            IsApproved = true,
-                            IsDeleted = false,
-                            KunYomi = "やま",
-                            Meaning = "Núi",
-                            OnYomi = "サン",
-                            SinoVietnamese = "Sơn",
-                            Status = "Published",
-                            StrokeCount = 3
-                        },
-                        new
-                        {
-                            Id = 910009,
-                            CertificateLevelId = 1,
-                            Character = "川",
-                            ContentAuthorId = 900004,
-                            CreatedDate = new DateTime(2026, 10, 3, 0, 0, 0, 0, DateTimeKind.Utc),
-                            IsApproved = true,
-                            IsDeleted = false,
-                            KunYomi = "かわ",
-                            Meaning = "Sông",
-                            OnYomi = "セン",
-                            SinoVietnamese = "Xuyên",
-                            Status = "Published",
-                            StrokeCount = 3
-                        },
-                        new
-                        {
-                            Id = 910010,
-                            CertificateLevelId = 1,
-                            Character = "人",
-                            ContentAuthorId = 900004,
-                            CreatedDate = new DateTime(2026, 10, 3, 0, 0, 0, 0, DateTimeKind.Utc),
-                            IsApproved = true,
-                            IsDeleted = false,
-                            KunYomi = "ひと",
-                            Meaning = "Người",
-                            OnYomi = "ジン、ニン",
-                            SinoVietnamese = "Nhân",
-                            Status = "Published",
-                            StrokeCount = 2
-                        });
                 });
 
             modelBuilder.Entity("RikiPath.Domain.Entities.LanguageSkill", b =>
@@ -2739,22 +2580,6 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Property<int>("UserId")
                         .HasColumnType("integer");
 
-                    b.Property<int?>("WritingCorrectStrokeCount")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("WritingPracticeMode")
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)");
-
-                    b.Property<int?>("WritingScore")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTime?>("WritingScoreUpdatedAt")
-                        .HasColumnType("timestamp without time zone");
-
-                    b.Property<int?>("WritingTotalStrokeCount")
-                        .HasColumnType("integer");
-
                     b.HasKey("Id");
 
                     b.HasIndex("GrammarPatternId");
@@ -2764,9 +2589,6 @@ namespace RikiPath.Infrastructure.Migrations
                     b.HasIndex("LearnerNoteEntryId");
 
                     b.HasIndex("UserId", "NextReviewDate");
-
-                    b.HasIndex("UserId", "KanjiId", "Mode")
-                        .IsUnique();
 
                     b.ToTable("ReviewCards");
                 });
