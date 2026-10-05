@@ -28,6 +28,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Content Include="tessdata\jpn.traineddata" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <ProjectReference Include="..\RikiPath.Application\RikiPath.Application.csproj" />
     <ProjectReference Include="..\RikiPath.Domain\RikiPath.Domain.csproj" />
     <ProjectReference Include="..\RikiPath.Infrastructure\RikiPath.Infrastructure.csproj" />

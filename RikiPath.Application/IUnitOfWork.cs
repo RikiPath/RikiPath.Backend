@@ -33,6 +33,8 @@ namespace RikiPath.Application
         // 5. Personal Vocabulary Notebook
         ILearnerNoteRepository LearnerNotes { get; }
         ILearnerNoteEntryRepository LearnerNoteEntries { get; }
+        ILearnerEssayRepository LearnerEssays { get; }
+        IJapaneseDictionaryRepository JapaneseDictionaryEntries { get; }
 
         // 6. JLPT Practice Tests & Submissions
         IMockTestRepository MockTests { get; }

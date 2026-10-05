@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using RikiPath.Infrastructure;
@@ -11,9 +12,11 @@ using RikiPath.Infrastructure;
 namespace RikiPath.Infrastructure.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20261005145440_AddJapaneseDictionaryEntries")]
+    partial class AddJapaneseDictionaryEntries
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -879,10 +882,15 @@ namespace RikiPath.Infrastructure.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
 
+                    b.Property<int?>("UserAccountId")
+                        .HasColumnType("integer");
+
                     b.Property<int?>("UserId")
                         .HasColumnType("integer");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("UserAccountId");
 
                     b.HasIndex("UserId");
 
@@ -3784,8 +3792,12 @@ namespace RikiPath.Infrastructure.Migrations
 
             modelBuilder.Entity("RikiPath.Domain.Entities.JapaneseDictionaryEntry", b =>
                 {
-                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "UserAccount")
+                    b.HasOne("RikiPath.Domain.Entities.UserAccount", null)
                         .WithMany("PersonalDictionaryEntries")
+                        .HasForeignKey("UserAccountId");
+
+                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "UserAccount")
+                        .WithMany()
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade);
 

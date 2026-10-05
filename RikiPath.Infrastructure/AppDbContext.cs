@@ -34,6 +34,8 @@ namespace RikiPath.Infrastructure
         // Personal vocabulary notebook
         public DbSet<LearnerNote> LearnerNotes { get; set; }
         public DbSet<LearnerNoteEntry> LearnerNoteEntries { get; set; }
+        public DbSet<LearnerEssay> LearnerEssays { get; set; }
+        public DbSet<JapaneseDictionaryEntry> JapaneseDictionaryEntries { get; set; }
 
         // Mock JLPT-family practice tests
         public DbSet<MockTest> MockTests { get; set; }
@@ -98,6 +100,8 @@ namespace RikiPath.Infrastructure
 
             modelBuilder.ApplyConfiguration(new LearnerNoteConfig());
             modelBuilder.ApplyConfiguration(new LearnerNoteEntryConfig());
+            modelBuilder.ApplyConfiguration(new LearnerEssayConfig());
+            modelBuilder.ApplyConfiguration(new JapaneseDictionaryEntryConfig());
 
             modelBuilder.ApplyConfiguration(new MockTestConfig());
             modelBuilder.ApplyConfiguration(new MockTestSectionConfig());

@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using RikiPath.Infrastructure;
@@ -11,9 +12,11 @@ using RikiPath.Infrastructure;
 namespace RikiPath.Infrastructure.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20261005072859_AddLearnerEssays")]
+    partial class AddLearnerEssays
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -822,73 +825,6 @@ namespace RikiPath.Infrastructure.Migrations
                     b.HasIndex("LessonId");
 
                     b.ToTable("HomeworkSubmissions");
-                });
-
-            modelBuilder.Entity("RikiPath.Domain.Entities.JapaneseDictionaryEntry", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<Guid?>("CreatedBy")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime?>("CreatedDate")
-                        .HasColumnType("timestamp without time zone");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("boolean");
-
-                    b.Property<bool>("IsKatakana")
-                        .HasColumnType("boolean");
-
-                    b.Property<string>("Meaning")
-                        .IsRequired()
-                        .HasMaxLength(1000)
-                        .HasColumnType("character varying(1000)");
-
-                    b.Property<Guid?>("ModifiedBy")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime?>("ModifiedDate")
-                        .HasColumnType("timestamp without time zone");
-
-                    b.Property<string>("PartOfSpeech")
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<string>("ReadingKana")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
-
-                    b.Property<string>("ReadingRomaji")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
-
-                    b.Property<string>("Source")
-                        .IsRequired()
-                        .HasMaxLength(30)
-                        .HasColumnType("character varying(30)");
-
-                    b.Property<string>("Surface")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
-
-                    b.Property<int?>("UserId")
-                        .HasColumnType("integer");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("UserId");
-
-                    b.HasIndex("ReadingKana", "UserId");
-
-                    b.ToTable("JapaneseDictionaryEntries");
                 });
 
             modelBuilder.Entity("RikiPath.Domain.Entities.KanaCharacter", b =>
@@ -3782,16 +3718,6 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Navigation("Lesson");
                 });
 
-            modelBuilder.Entity("RikiPath.Domain.Entities.JapaneseDictionaryEntry", b =>
-                {
-                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "UserAccount")
-                        .WithMany("PersonalDictionaryEntries")
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade);
-
-                    b.Navigation("UserAccount");
-                });
-
             modelBuilder.Entity("RikiPath.Domain.Entities.KanaCharacter", b =>
                 {
                     b.HasOne("RikiPath.Domain.Entities.UserAccount", "ContentAuthor")
@@ -4599,8 +4525,6 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Navigation("Notes");
 
                     b.Navigation("Notifications");
-
-                    b.Navigation("PersonalDictionaryEntries");
 
                     b.Navigation("PracticeSubmissions");
 

@@ -50,6 +50,8 @@ namespace RikiPath.Domain.Entities
         public List<RecommendedLearningPath>? RecommendedLearningPaths { get; set; }
         public List<PracticeSubmission>? PracticeSubmissions { get; set; }
         public List<ReviewCard>? ReviewCards { get; set; }
+        public List<LearnerEssay>? LearnerEssays { get; set; }
+        public List<JapaneseDictionaryEntry>? PersonalDictionaryEntries { get; set; }
         public List<UserSubscription>? UserSubscriptions { get; set; }
         public List<AiCreditTopUp>? AiCreditTopUps { get; set; }
 
