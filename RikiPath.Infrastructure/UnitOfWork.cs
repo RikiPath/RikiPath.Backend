@@ -39,6 +39,7 @@ namespace RikiPath.Infrastructure
         // 5. Personal Vocabulary Notebook
         public ILearnerNoteRepository LearnerNotes { get; }
         public ILearnerNoteEntryRepository LearnerNoteEntries { get; }
+        public ILearnerEssayRepository LearnerEssays { get; }
 
         // 6. JLPT Practice Tests & Submissions
         public IMockTestRepository MockTests { get; }
@@ -103,6 +104,7 @@ namespace RikiPath.Infrastructure
 
             LearnerNotes = new LearnerNoteRepository(_context);
             LearnerNoteEntries = new LearnerNoteEntryRepository(_context);
+            LearnerEssays = new LearnerEssayRepository(_context);
 
             MockTests = new MockTestRepository(_context);
             MockTestSections = new MockTestSectionRepository(_context);
