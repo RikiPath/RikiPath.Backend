@@ -7,5 +7,9 @@ namespace RikiPath.Application.Requests.KanjiWriting
         /// <summary>Số nét vẽ sai trong lượt luyện - lấy thẳng từ HanziWriter.quiz()'s
         /// onComplete callback (summaryData.totalMistakes) ở phía FE, không cần FE tự tính điểm.</summary>
         public int TotalMistakes { get; set; }
+        public int Score { get; set; }
+        public int CorrectStrokeCount { get; set; }
+        public int TotalStrokeCount { get; set; }
+        public string PracticeMode { get; set; } = "guided";
     }
 }

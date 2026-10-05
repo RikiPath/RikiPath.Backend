@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using RikiPath.Infrastructure;
@@ -11,9 +12,11 @@ using RikiPath.Infrastructure;
 namespace RikiPath.Infrastructure.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20261003082936_SeedSampleKanji")]
+    partial class SeedSampleKanji
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -1677,9 +1680,6 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Property<string>("AdminName")
                         .HasColumnType("text");
 
-                    b.Property<int>("BookedCount")
-                        .HasColumnType("integer");
-
                     b.Property<Guid?>("CreatedBy")
                         .HasColumnType("uuid");
 
@@ -1692,13 +1692,11 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Property<bool>("IsApproved")
                         .HasColumnType("boolean");
 
-                    b.Property<bool>("IsDeleted")
+                    b.Property<bool>("IsBooked")
                         .HasColumnType("boolean");
 
-                    b.Property<int>("MaxLearners")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasDefaultValue(4);
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
 
                     b.Property<int>("MentorId")
                         .HasColumnType("integer");
@@ -1715,84 +1713,62 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Property<string>("RejectionReason")
                         .HasColumnType("text");
 
-                    b.Property<Guid>("RoomId")
-                        .HasColumnType("uuid");
-
-                    b.Property<byte[]>("RowVersion")
-                        .IsConcurrencyToken()
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("bytea");
-
                     b.Property<DateTime>("StartTime")
                         .HasColumnType("timestamp without time zone");
 
                     b.HasKey("Id");
 
-                    b.HasIndex("RoomId")
-                        .IsUnique();
-
                     b.HasIndex("MentorId", "StartTime", "EndTime");
 
-                    b.ToTable("MentorAvailabilities", t =>
-                        {
-                            t.HasCheckConstraint("CK_MentorAvailability_BookedCount", "[BookedCount] >= 0 AND [BookedCount] <= [MaxLearners]");
-                        });
+                    b.ToTable("MentorAvailabilities");
 
                     b.HasData(
                         new
                         {
                             Id = 990001,
                             AdminName = "Seed Demo",
-                            BookedCount = 1,
                             CreatedDate = new DateTime(2026, 10, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
                             EndTime = new DateTime(2026, 10, 2, 10, 0, 0, 0, DateTimeKind.Unspecified),
                             IsApproved = true,
+                            IsBooked = true,
                             IsDeleted = false,
-                            MaxLearners = 4,
                             MentorId = 900002,
-                            RoomId = new Guid("a1000000-0000-0000-0000-000000990001"),
                             StartTime = new DateTime(2026, 10, 2, 9, 0, 0, 0, DateTimeKind.Unspecified)
                         },
                         new
                         {
                             Id = 990002,
                             AdminName = "Seed Demo",
-                            BookedCount = 0,
                             CreatedDate = new DateTime(2026, 10, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
                             EndTime = new DateTime(2026, 10, 3, 14, 0, 0, 0, DateTimeKind.Unspecified),
                             IsApproved = true,
+                            IsBooked = false,
                             IsDeleted = false,
-                            MaxLearners = 4,
                             MentorId = 900002,
-                            RoomId = new Guid("a1000000-0000-0000-0000-000000990002"),
                             StartTime = new DateTime(2026, 10, 3, 13, 0, 0, 0, DateTimeKind.Unspecified)
                         },
                         new
                         {
                             Id = 990003,
                             AdminName = "Seed Demo",
-                            BookedCount = 0,
                             CreatedDate = new DateTime(2026, 10, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
                             EndTime = new DateTime(2026, 10, 4, 10, 0, 0, 0, DateTimeKind.Unspecified),
                             IsApproved = true,
+                            IsBooked = false,
                             IsDeleted = false,
-                            MaxLearners = 4,
                             MentorId = 900003,
-                            RoomId = new Guid("a1000000-0000-0000-0000-000000990003"),
                             StartTime = new DateTime(2026, 10, 4, 9, 0, 0, 0, DateTimeKind.Unspecified)
                         },
                         new
                         {
                             Id = 990004,
                             AdminName = "Seed Demo",
-                            BookedCount = 0,
                             CreatedDate = new DateTime(2026, 10, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
                             EndTime = new DateTime(2026, 10, 5, 14, 0, 0, 0, DateTimeKind.Unspecified),
                             IsApproved = true,
+                            IsBooked = false,
                             IsDeleted = false,
-                            MaxLearners = 4,
                             MentorId = 900003,
-                            RoomId = new Guid("a1000000-0000-0000-0000-000000990004"),
                             StartTime = new DateTime(2026, 10, 5, 13, 0, 0, 0, DateTimeKind.Unspecified)
                         });
                 });
@@ -1833,6 +1809,9 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Property<string>("Question")
                         .HasColumnType("text");
 
+                    b.Property<Guid?>("RoomId")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTime?>("ScheduledAt")
                         .HasColumnType("timestamp without time zone");
 
@@ -1846,8 +1825,12 @@ namespace RikiPath.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("MentorAvailabilityId", "UserSubscriptionId")
+                    b.HasIndex("MentorAvailabilityId")
                         .IsUnique();
+
+                    b.HasIndex("RoomId")
+                        .IsUnique()
+                        .HasFilter("\"RoomId\" IS NOT NULL");
 
                     b.HasIndex("UserSubscriptionId", "Status");
 
@@ -1859,48 +1842,13 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 990001,
                             CreatedDate = new DateTime(2026, 10, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
                             IsDeleted = false,
-                            MeetingLink = "http://localhost:5173/mentor-meeting/a1000000-0000-0000-0000-000000990001",
+                            MeetingLink = "http://localhost:5173/mentor-meeting/5d75c4cc-5404-4f9a-91e8-b8596f31d2a2",
                             MentorAvailabilityId = 990001,
-                            Question = "Meeting demo để kiểm thử phòng họp trên frontend.",
+                            Question = "Meeting demo để kiểm thử phòng 1-1 trên frontend.",
+                            RoomId = new Guid("5d75c4cc-5404-4f9a-91e8-b8596f31d2a2"),
                             ScheduledAt = new DateTime(2026, 10, 2, 9, 0, 0, 0, DateTimeKind.Unspecified),
                             Status = "Assigned",
                             UserSubscriptionId = 990001
-                        },
-                        new
-                        {
-                            Id = 990002,
-                            CreatedDate = new DateTime(2026, 10, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
-                            IsDeleted = false,
-                            MeetingLink = "http://localhost:5173/mentor-meeting/a1000000-0000-0000-0000-000000990001",
-                            MentorAvailabilityId = 990001,
-                            Question = "Em muốn nhờ Mentor giải đáp phần ngữ pháp N3 bài 5.",
-                            ScheduledAt = new DateTime(2026, 10, 2, 9, 0, 0, 0, DateTimeKind.Unspecified),
-                            Status = "Assigned",
-                            UserSubscriptionId = 990002
-                        },
-                        new
-                        {
-                            Id = 990003,
-                            CreatedDate = new DateTime(2026, 10, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
-                            IsDeleted = false,
-                            MeetingLink = "http://localhost:5173/mentor-meeting/a1000000-0000-0000-0000-000000990001",
-                            MentorAvailabilityId = 990001,
-                            Question = "Hỏi về cách phân biệt giữa ~てくる và ~ていく.",
-                            ScheduledAt = new DateTime(2026, 10, 2, 9, 0, 0, 0, DateTimeKind.Unspecified),
-                            Status = "Assigned",
-                            UserSubscriptionId = 990003
-                        },
-                        new
-                        {
-                            Id = 990004,
-                            CreatedDate = new DateTime(2026, 10, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
-                            IsDeleted = false,
-                            MeetingLink = "http://localhost:5173/mentor-meeting/a1000000-0000-0000-0000-000000990001",
-                            MentorAvailabilityId = 990001,
-                            Question = "Tư vấn phương pháp luyện nghe JLPT N3 hiệu quả.",
-                            ScheduledAt = new DateTime(2026, 10, 2, 9, 0, 0, 0, DateTimeKind.Unspecified),
-                            Status = "Assigned",
-                            UserSubscriptionId = 990004
                         });
                 });
 
@@ -3205,63 +3153,6 @@ namespace RikiPath.Infrastructure.Migrations
                             PasswordSalt = new byte[] { 231, 202, 97, 95, 11, 9, 242, 47, 62, 77, 67, 36, 170, 78, 120, 81, 56, 69, 47, 36, 209, 212, 107, 244, 15, 34, 189, 110, 57, 66, 205, 213, 224, 19, 245, 192, 104, 146, 130, 44, 54, 107, 2, 15, 109, 136, 118, 220, 228, 44, 110, 219, 31, 100, 161, 164, 63, 231, 196, 79, 120, 106, 181, 71 },
                             Role = "Learner",
                             SystemNotificationsEnabled = true
-                        },
-                        new
-                        {
-                            Id = 900008,
-                            CreatedDate = new DateTime(2026, 9, 28, 0, 0, 0, 0, DateTimeKind.Utc),
-                            CurrentStreak = 0,
-                            DailyStudyMinutes = 30,
-                            Email = "learner2.meeting@rikipath.local",
-                            EmailNotificationsEnabled = true,
-                            FirstName = "Linh",
-                            IsDeleted = false,
-                            IsEmailVerified = true,
-                            IsPhoneVerified = false,
-                            LastName = "Nguyen",
-                            LongestStreak = 0,
-                            PasswordHash = new byte[] { 217, 79, 50, 159, 85, 88, 67, 15, 23, 182, 103, 80, 220, 85, 86, 173, 204, 186, 57, 67, 183, 165, 253, 243, 150, 250, 150, 190, 122, 252, 55, 169, 85, 236, 69, 106, 19, 219, 244, 42, 239, 30, 189, 176, 52, 47, 30, 28, 125, 31, 162, 255, 61, 3, 238, 201, 168, 88, 161, 42, 216, 86, 172, 219 },
-                            PasswordSalt = new byte[] { 85, 97, 108, 158, 219, 70, 81, 106, 73, 23, 205, 163, 105, 159, 117, 19, 175, 147, 178, 99, 112, 116, 163, 243, 109, 178, 129, 229, 245, 175, 91, 174, 66, 198, 122, 88, 80, 68, 160, 64, 85, 118, 105, 41, 135, 89, 49, 160, 120, 13, 116, 148, 255, 27, 157, 207, 106, 203, 127, 74, 19, 61, 148, 120 },
-                            Role = "Learner",
-                            SystemNotificationsEnabled = true
-                        },
-                        new
-                        {
-                            Id = 900009,
-                            CreatedDate = new DateTime(2026, 9, 28, 0, 0, 0, 0, DateTimeKind.Utc),
-                            CurrentStreak = 0,
-                            DailyStudyMinutes = 30,
-                            Email = "learner3.meeting@rikipath.local",
-                            EmailNotificationsEnabled = true,
-                            FirstName = "Minh",
-                            IsDeleted = false,
-                            IsEmailVerified = true,
-                            IsPhoneVerified = false,
-                            LastName = "Tran",
-                            LongestStreak = 0,
-                            PasswordHash = new byte[] { 84, 97, 164, 196, 63, 151, 182, 39, 139, 242, 152, 22, 179, 33, 174, 113, 0, 236, 253, 114, 234, 242, 209, 76, 196, 162, 143, 195, 180, 3, 178, 193, 205, 230, 18, 114, 49, 151, 198, 217, 254, 21, 94, 176, 146, 214, 235, 122, 28, 241, 164, 161, 4, 161, 209, 38, 102, 179, 31, 107, 157, 25, 35, 63 },
-                            PasswordSalt = new byte[] { 26, 188, 78, 205, 57, 115, 100, 129, 148, 135, 165, 205, 148, 203, 245, 36, 244, 177, 9, 104, 120, 140, 21, 164, 36, 75, 122, 51, 115, 69, 174, 180, 120, 155, 62, 37, 97, 227, 212, 134, 200, 7, 66, 255, 219, 10, 140, 149, 67, 86, 164, 170, 142, 165, 181, 103, 47, 100, 238, 24, 178, 29, 171, 226 },
-                            Role = "Learner",
-                            SystemNotificationsEnabled = true
-                        },
-                        new
-                        {
-                            Id = 900010,
-                            CreatedDate = new DateTime(2026, 9, 28, 0, 0, 0, 0, DateTimeKind.Utc),
-                            CurrentStreak = 0,
-                            DailyStudyMinutes = 30,
-                            Email = "learner4.meeting@rikipath.local",
-                            EmailNotificationsEnabled = true,
-                            FirstName = "Hoang",
-                            IsDeleted = false,
-                            IsEmailVerified = true,
-                            IsPhoneVerified = false,
-                            LastName = "Pham",
-                            LongestStreak = 0,
-                            PasswordHash = new byte[] { 42, 30, 236, 129, 234, 192, 63, 84, 148, 163, 154, 246, 107, 147, 189, 95, 33, 141, 196, 67, 181, 51, 157, 136, 93, 228, 237, 165, 164, 49, 4, 146, 87, 84, 9, 47, 28, 59, 33, 130, 37, 63, 43, 229, 8, 178, 123, 74, 61, 159, 235, 68, 217, 51, 225, 29, 201, 104, 44, 152, 53, 255, 199, 28 },
-                            PasswordSalt = new byte[] { 83, 214, 138, 3, 142, 91, 229, 97, 238, 61, 48, 237, 80, 82, 112, 249, 166, 81, 53, 95, 170, 120, 13, 87, 113, 159, 60, 37, 75, 229, 226, 107, 229, 89, 60, 57, 109, 196, 235, 81, 145, 154, 110, 120, 141, 13, 142, 77, 41, 132, 58, 80, 154, 57, 226, 168, 176, 251, 113, 167, 242, 139, 7, 177 },
-                            Role = "Learner",
-                            SystemNotificationsEnabled = true
                         });
                 });
 
@@ -3356,64 +3247,10 @@ namespace RikiPath.Infrastructure.Migrations
                             MeetingSessionsUsed = 1,
                             PaymentStatus = "Paid",
                             PaymentTransactionId = "DEMO-MENTOR-12-SESSIONS",
-                            PurchasedAt = new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
+                            PurchasedAt = new DateTime(2026, 10, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
                             StartDate = new DateTime(2026, 10, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
                             SubscriptionPlanId = 7,
                             UserId = 900007
-                        },
-                        new
-                        {
-                            Id = 990002,
-                            AiGradingQuota = 0,
-                            AiGradingUsedCount = 0,
-                            AmountPaid = 459000m,
-                            CreatedDate = new DateTime(2026, 10, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
-                            EndDate = new DateTime(2026, 12, 30, 23, 59, 59, 0, DateTimeKind.Unspecified),
-                            IsDeleted = false,
-                            MeetingSessionsIncluded = 12,
-                            MeetingSessionsUsed = 1,
-                            PaymentStatus = "Paid",
-                            PaymentTransactionId = "DEMO-MENTOR-12-SESSIONS-2",
-                            PurchasedAt = new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
-                            StartDate = new DateTime(2026, 10, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
-                            SubscriptionPlanId = 7,
-                            UserId = 900008
-                        },
-                        new
-                        {
-                            Id = 990003,
-                            AiGradingQuota = 0,
-                            AiGradingUsedCount = 0,
-                            AmountPaid = 459000m,
-                            CreatedDate = new DateTime(2026, 10, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
-                            EndDate = new DateTime(2026, 12, 30, 23, 59, 59, 0, DateTimeKind.Unspecified),
-                            IsDeleted = false,
-                            MeetingSessionsIncluded = 12,
-                            MeetingSessionsUsed = 1,
-                            PaymentStatus = "Paid",
-                            PaymentTransactionId = "DEMO-MENTOR-12-SESSIONS-3",
-                            PurchasedAt = new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
-                            StartDate = new DateTime(2026, 10, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
-                            SubscriptionPlanId = 7,
-                            UserId = 900009
-                        },
-                        new
-                        {
-                            Id = 990004,
-                            AiGradingQuota = 0,
-                            AiGradingUsedCount = 0,
-                            AmountPaid = 459000m,
-                            CreatedDate = new DateTime(2026, 10, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
-                            EndDate = new DateTime(2026, 12, 30, 23, 59, 59, 0, DateTimeKind.Unspecified),
-                            IsDeleted = false,
-                            MeetingSessionsIncluded = 12,
-                            MeetingSessionsUsed = 1,
-                            PaymentStatus = "Paid",
-                            PaymentTransactionId = "DEMO-MENTOR-12-SESSIONS-4",
-                            PurchasedAt = new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
-                            StartDate = new DateTime(2026, 10, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
-                            SubscriptionPlanId = 7,
-                            UserId = 900010
                         });
                 });
 
@@ -3893,9 +3730,9 @@ namespace RikiPath.Infrastructure.Migrations
             modelBuilder.Entity("RikiPath.Domain.Entities.MentorBooking", b =>
                 {
                     b.HasOne("RikiPath.Domain.Entities.MentorAvailability", "MentorAvailability")
-                        .WithMany("MentorBookings")
-                        .HasForeignKey("MentorAvailabilityId")
-                        .OnDelete(DeleteBehavior.Restrict);
+                        .WithOne("MentorBooking")
+                        .HasForeignKey("RikiPath.Domain.Entities.MentorBooking", "MentorAvailabilityId")
+                        .OnDelete(DeleteBehavior.SetNull);
 
                     b.HasOne("RikiPath.Domain.Entities.UserSubscription", "UserSubscription")
                         .WithMany("MentorBookings")
@@ -4351,7 +4188,7 @@ namespace RikiPath.Infrastructure.Migrations
 
             modelBuilder.Entity("RikiPath.Domain.Entities.MentorAvailability", b =>
                 {
-                    b.Navigation("MentorBookings");
+                    b.Navigation("MentorBooking");
                 });
 
             modelBuilder.Entity("RikiPath.Domain.Entities.MentorBooking", b =>

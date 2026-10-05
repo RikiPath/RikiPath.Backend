@@ -27,6 +27,13 @@ namespace RikiPath.WebApi.Controllers
             return Ok(result);
         }
 
+        [HttpGet("all")]
+        public async Task<IActionResult> GetAll([FromQuery] int count = 100, CancellationToken cancellationToken = default)
+        {
+            var result = await kanjiWritingPracticeService.GetAllForPracticeAsync(count, cancellationToken);
+            return Ok(result);
+        }
+
         /// <summary>
         /// Ghi nhận kết quả 1 lượt luyện viết 1 chữ Kanji, tính lại lịch ôn theo SM-2.
         /// </summary>
@@ -39,6 +46,13 @@ namespace RikiPath.WebApi.Controllers
             [FromBody] SubmitKanjiWritingResultRequest request, CancellationToken cancellationToken)
         {
             var result = await kanjiWritingPracticeService.SubmitResultAsync(request, cancellationToken);
+            return Ok(result);
+        }
+
+        [HttpGet("scores")]
+        public async Task<IActionResult> GetScores(CancellationToken cancellationToken)
+        {
+            var result = await kanjiWritingPracticeService.GetScoresAsync(cancellationToken);
             return Ok(result);
         }
     }

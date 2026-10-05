@@ -8,5 +8,6 @@ namespace RikiPath.Application.Responses.KanjiWriting
         public int Repetitions { get; set; }
         public int IntervalDays { get; set; }
         public DateTime NextReviewDate { get; set; }
+        public int Score { get; set; }
     }
 }

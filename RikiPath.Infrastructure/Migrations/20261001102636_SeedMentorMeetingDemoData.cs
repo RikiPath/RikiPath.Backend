@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -27,21 +27,7 @@ namespace RikiPath.Infrastructure.Migrations
             migrationBuilder.InsertData(
                 table: "SubscriptionPlans",
                 columns: new[] { "Id", "AiGradingQuota", "CreatedBy", "CreatedDate", "Description", "DurationDays", "IsActive", "IsDeleted", "IsPopular", "IsTrial", "MeetingSessionCount", "ModifiedBy", "ModifiedDate", "Name", "Price", "SortOrder" },
-                values: new object[] { 7, 0, null, new DateTime(2026, 10, 1, 0, 0, 0, 0, DateTimeKind.Utc), "Gói demo gồm 12 buổi ôn luyện 1-1 với Mentor, thời hạn 90 ngày. Dữ liệu thanh toán demo được seed để kiểm thử đặt lịch trên frontend.", 90, true, false, false, false, 12, null, null, "Meeting 1-1 với Mentor - 12 buổi", 459000m, 7 });
-
-            migrationBuilder.InsertData(
-                table: "Users",
-                columns: new[] { "Id", "AvatarUrl", "CreatedBy", "CreatedDate", "CurrentStreak", "DailyStudyMinutes", "Email", "EmailNotificationsEnabled", "FirebaseUid", "FirstName", "IsDeleted", "IsEmailVerified", "IsPhoneVerified", "LastName", "LastStudyDate", "LongestStreak", "ModifiedBy", "ModifiedDate", "PasswordHash", "PasswordSalt", "PhoneNumber", "Role", "StudyTimePreference", "SystemNotificationsEnabled", "TargetCertificationLevelId" },
-                values: new object[] { 900006, null, null, new DateTime(2026, 9, 28, 0, 0, 0, 0, DateTimeKind.Utc), 0, 30, "learner.meeting@rikipath.local", true, null, "Meeting", false, true, false, "Test Learner", null, 0, null, null, new byte[] { 9, 206, 219, 58, 155, 234, 107, 145, 121, 174, 134, 51, 96, 253, 64, 216, 157, 114, 92, 36, 123, 206, 67, 217, 207, 166, 54, 71, 254, 251, 156, 200, 185, 110, 198, 135, 221, 146, 243, 40, 237, 229, 16, 133, 163, 161, 156, 79, 138, 103, 85, 25, 114, 81, 99, 182, 25, 73, 212, 198, 212, 192, 54, 129 }, new byte[] { 231, 202, 97, 95, 11, 9, 242, 47, 62, 77, 67, 36, 170, 78, 120, 81, 56, 69, 47, 36, 209, 212, 107, 244, 15, 34, 189, 110, 57, 66, 205, 213, 224, 19, 245, 192, 104, 146, 130, 44, 54, 107, 2, 15, 109, 136, 118, 220, 228, 44, 110, 219, 31, 100, 161, 164, 63, 231, 196, 79, 120, 106, 181, 71 }, null, "Learner", null, true, null });
-
-            migrationBuilder.InsertData(
-                table: "FeatureSubscriptionPlan",
-                columns: new[] { "FeaturesId", "SubscriptionPlansId" },
-                values: new object[,]
-                {
-                    { 7, 7 },
-                    { 8, 7 }
-                });
+                values: new object[] { 7, 0, null, new DateTime(2026, 10, 1, 0, 0, 0, 0, DateTimeKind.Utc), "GÃ³i demo gá»“m 12 buá»•i Ã´n luyá»‡n 1-1 vá»›i Mentor, thá»i háº¡n 90 ngÃ y. Dá»¯ liá»‡u thanh toÃ¡n demo Ä‘Æ°á»£c seed Ä‘á»ƒ kiá»ƒm thá»­ Ä‘áº·t lá»‹ch trÃªn frontend.", 90, true, false, false, false, 12, null, null, "Meeting 1-1 vá»›i Mentor - 12 buá»•i", 459000m, 7 });
 
             migrationBuilder.InsertData(
                 table: "UserSubscriptions",
@@ -91,11 +77,7 @@ namespace RikiPath.Infrastructure.Migrations
                 table: "SubscriptionPlans",
                 keyColumn: "Id",
                 keyValue: 7);
-
-            migrationBuilder.DeleteData(
-                table: "Users",
-                keyColumn: "Id",
-                keyValue: 900006);
         }
     }
 }
+

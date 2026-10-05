@@ -29,6 +29,11 @@ namespace RikiPath.Domain.Entities
         public int Repetitions { get; set; } = 0;
         public DateTime NextReviewDate { get; set; }
         public DateTime? LastReviewedAt { get; set; }
+        public int? WritingScore { get; set; }
+        public int? WritingCorrectStrokeCount { get; set; }
+        public int? WritingTotalStrokeCount { get; set; }
+        public string? WritingPracticeMode { get; set; }
+        public DateTime? WritingScoreUpdatedAt { get; set; }
 
         public List<ReviewHistory>? ReviewHistories { get; set; }
     }
