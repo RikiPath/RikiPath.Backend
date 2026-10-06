@@ -358,7 +358,7 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("DefaultCorsPolicy", policy =>
     {
-        policy.WithOrigins("http://localhost:5173") // Đổi AllowAnyOrigin() thành domain cụ thể của Frontend
+        policy.WithOrigins("http://localhost:5173", "https://riki-path-web.vercel.app") // Đổi AllowAnyOrigin() thành domain cụ thể của Frontend
               .AllowAnyHeader()
               .AllowAnyMethod()
               .AllowCredentials(); // Bắt buộc phải có để SignalR hoạt động
