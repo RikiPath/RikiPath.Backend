@@ -1,4 +1,4 @@
-name: Deploy .NET 8 Web API to Oracle Cloud
+name: Deploy .NET 8 Web API
 
 on:
   push:
@@ -20,22 +20,22 @@ jobs:
     - name: Publish Web API
       run: dotnet publish RikiPath.WebApi/RikiPath.WebApi.csproj -c Release -o ./publish
 
-    - name: Transfer files to Oracle Cloud
+    - name: Transfer files to VPS
       uses: appleboy/scp-action@v0.1.7
       with:
-        host: ${{ secrets.OCI_HOST }}
-        username: ${{ secrets.OCI_USERNAME }}
-        key: ${{ secrets.OCI_KEY }}
+        host: ${{ secrets.VPS_HOST }}
+        username: ${{ secrets.VPS_USERNAME }}
+        password: ${{ secrets.VPS_PASSWORD }}
         source: "publish/*"
-        target: "/home/opc/rikipath-api"
+        target: "/var/www/rikipath-api"
         strip_components: 1
         rm: false
 
     - name: Restart Systemd Service
       uses: appleboy/ssh-action@v1.0.3
       with:
-        host: ${{ secrets.OCI_HOST }}
-        username: ${{ secrets.OCI_USERNAME }}
-        key: ${{ secrets.OCI_KEY }}
+        host: ${{ secrets.VPS_HOST }}
+        username: ${{ secrets.VPS_USERNAME }}
+        password: ${{ secrets.VPS_PASSWORD }}
         script: |
-          sudo systemctl restart rikipath-api.service
+          systemctl restart rikipath-api.service
