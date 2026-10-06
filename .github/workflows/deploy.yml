@@ -17,6 +17,10 @@ jobs:
       with:
         dotnet-version: '8.0.x'
 
+    - name: Create appsettings.Production.json
+      run: |
+        echo '${{ secrets.APPSETTINGS_PRODUCTION }}' > RikiPath.WebApi/appsettings.Production.json
+
     - name: Publish Web API
       run: dotnet publish RikiPath.WebApi/RikiPath.WebApi.csproj -c Release -o ./publish
 
