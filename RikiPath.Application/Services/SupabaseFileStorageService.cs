@@ -25,13 +25,21 @@ namespace RikiPath.Application.Services
             if (string.IsNullOrWhiteSpace(url))
                 throw new InvalidOperationException("Supabase:Url chưa được cấu hình trong appsettings.");
 
-            if (string.IsNullOrWhiteSpace(supabase.ServiceRoleKey))
+            var storageKey = supabase.ServiceRoleKey?.Trim().Trim('<', '>');
+            if (string.IsNullOrWhiteSpace(storageKey))
                 throw new InvalidOperationException("Supabase:ServiceRoleKey chưa được cấu hình trong appsettings.");
 
             httpClient.BaseAddress ??= new Uri(url);
             httpClient.DefaultRequestHeaders.Remove("apikey");
-            httpClient.DefaultRequestHeaders.Add("apikey", supabase.ServiceRoleKey);
-            httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", supabase.ServiceRoleKey);
+            httpClient.DefaultRequestHeaders.Add("apikey", storageKey);
+            httpClient.DefaultRequestHeaders.Remove("Authorization");
+
+            // Legacy service_role keys are JWTs and must be sent as Bearer.
+            // New Supabase secret keys (sb_secret_...) are accepted through apikey,
+            // but are not JWTs and must not be sent as Bearer.
+            if (storageKey.StartsWith("eyJ", StringComparison.Ordinal))
+                httpClient.DefaultRequestHeaders.Authorization =
+                    new AuthenticationHeaderValue("Bearer", storageKey);
 
             return url;
         }
