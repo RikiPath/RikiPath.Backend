@@ -13,6 +13,7 @@ namespace RikiPath.Domain
         public SupabaseSettings Supabase { get; set; }
         public AiSettings Ai { get; set; }
         public AzureSpeechSettings AzureSpeech { get; set; }
+        public GeminiSettings Gemini { get; set; } = new GeminiSettings();
         public string FrontendBaseUrl { get; set; } = "http://localhost:5173";
     }
     public class ConnectionStrings
@@ -88,6 +89,18 @@ namespace RikiPath.Domain
         // Tổng số token (input + output cộng dồn, lấy từ usage.total_tokens của provider)
         // tối đa / user / ngày, tính riêng theo từng feature.
         public int MaxTokensPerUserPerDay { get; set; } = 50000;
+    }
+
+    public class GeminiSettings
+    {
+        public List<string> ApiKey { get; set; } = new();
+        public string BaseUrl { get; set; } = string.Empty;
+
+        // Hàm tiện ích lấy danh sách key không bị rỗng
+        public List<string> GetValidKeys()
+        {
+            return ApiKey?.Where(k => !string.IsNullOrWhiteSpace(k)).ToList() ?? new List<string>();
+        }
     }
 
     public class AzureSpeechSettings

@@ -5,7 +5,6 @@ using RikiPath.Application.IServices;
 namespace RikiPath.WebApi.Controllers;
 
 [ApiController]
-[Authorize]
 [Route("api/learner-essays")]
 public class LearnerEssayController(ILearnerEssayService essayService) : ControllerBase
 {

@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text;
 using Microsoft.AspNetCore.Http;
+using RikiPath.Application.IClients;
 using RikiPath.Application.IServices;
 using RikiPath.Application.Responses;
 using RikiPath.Application.Responses.Essay;
@@ -12,11 +13,23 @@ public class LearnerEssayService(
     IUnitOfWork unitOfWork,
     IClaimService claimService,
     IFileStorageService fileStorage,
-    IOcrService ocrService) : ILearnerEssayService
+    IGeminiOcrClient geminiOcrClient) : ILearnerEssayService
 {
     private static readonly string[] AllowedContentTypes =
         ["image/jpeg", "image/png", "image/webp"];
     private const long MaxImageSizeBytes = 10 * 1024 * 1024;
+
+    // Prompt chuyên sâu cho OCR chữ viết tay tiếng Nhật (作文/Sakubun)
+    private const string JapaneseOcrPrompt = @"
+You are a specialized OCR system for handwritten Japanese text extraction.
+
+STRICT INSTRUCTIONS:
+1. Extract ONLY HANDWRITTEN Japanese characters written by the learner.
+2. Completely IGNORE and EXCLUDE all PRINTED text (e.g., printed questions, task instructions, section headers, page numbers, grid lines, or pre-printed form elements).
+3. If both printed and handwritten Japanese text exist on the page, DO NOT include any word from the printed text.
+4. Preserve the natural line breaks and order of the handwritten text.
+5. Output ONLY the extracted handwritten text. Do NOT add any introduction, explanation, markdown formatting, or extra commentary.
+";
 
     public async Task<ApiResponse<EssayScanResponse>> ScanAsync(
         IFormFile image,
@@ -28,34 +41,26 @@ public class LearnerEssayService(
 
         try
         {
-            await using var ocrStream = image.OpenReadStream();
-            var text = await ocrService.RecognizeJapaneseAsync(
-                ocrStream, image.FileName, cancellationToken);
+            // 1. Chuyển đổi file ảnh sang Base64
+            var (base64Image, mimeType) = await ConvertFormFileToBase64Async(image, cancellationToken);
+
+            // 2. Gọi Gemini AI OCR Client
+            var text = await geminiOcrClient.ScanHandwritingAsync(
+                JapaneseOcrPrompt, base64Image, mimeType, cancellationToken);
+
             if (string.IsNullOrWhiteSpace(text))
                 return ApiResponse<EssayScanResponse>.Fail(
                     "Không nhận diện được chữ tiếng Nhật trong ảnh. Hãy dùng ảnh rõ hơn và chụp đủ sáng.");
 
-            await using var uploadStream = image.OpenReadStream();
-            var uploaded = await fileStorage.UploadAsync(
-                uploadStream, image.FileName, image.ContentType, "essays", cancellationToken);
-
-            var now = DateTime.UtcNow;
-            var essay = new LearnerEssay
+            // 3. Trả về kết quả OCR preview (không lưu DB / không upload Cloud)
+            var response = new EssayScanResponse
             {
-                UserId = claimService.GetUserClaim().Id,
-                Title = BuildTitle(text),
-                ImageUrl = uploaded.Url,
-                ImageStoragePath = uploaded.StoredFileName,
-                OriginalOcrText = text,
-                ContentText = text,
-                OcrLanguage = "jpn",
-                CreatedDate = now,
-                ModifiedDate = now,
+
+                Text = text,
+                ScannedAt = DateTime.UtcNow,
             };
 
-            await unitOfWork.LearnerEssays.AddAsync(essay, cancellationToken);
-            await unitOfWork.SaveChangesAsync(cancellationToken);
-            return ApiResponse<EssayScanResponse>.Created(MapScan(essay));
+            return ApiResponse<EssayScanResponse>.Success(response);
         }
         catch (Exception ex)
         {
@@ -140,13 +145,18 @@ public class LearnerEssayService(
 
         try
         {
-            await using var ocrStream = image.OpenReadStream();
-            var text = await ocrService.RecognizeJapaneseAsync(
-                ocrStream, image.FileName, cancellationToken);
+            // 1. Chuyển đổi file ảnh sang Base64
+            var (base64Image, mimeType) = await ConvertFormFileToBase64Async(image, cancellationToken);
+
+            // 2. Scan lại bằng Gemini AI OCR Client
+            var text = await geminiOcrClient.ScanHandwritingAsync(
+                JapaneseOcrPrompt, base64Image, mimeType, cancellationToken);
+
             if (string.IsNullOrWhiteSpace(text))
                 return ApiResponse<EssayScanResponse>.Fail(
                     "Không nhận diện được chữ tiếng Nhật trong ảnh. Hãy dùng ảnh rõ hơn và chụp đủ sáng.");
 
+            // 3. Upload ảnh mới
             await using var uploadStream = image.OpenReadStream();
             var uploaded = await fileStorage.UploadAsync(
                 uploadStream, image.FileName, image.ContentType, "essays", cancellationToken);
@@ -167,7 +177,7 @@ public class LearnerEssayService(
             }
             catch
             {
-                // The database now points to the new image; orphan cleanup can be retried separately.
+                // File cũ xóa thất bại có thể dọn dẹp sau
             }
 
             return ApiResponse<EssayScanResponse>.Success(MapScan(essay));
@@ -186,6 +196,18 @@ public class LearnerEssayService(
         var userId = claimService.GetUserClaim().Id;
         var essay = await unitOfWork.LearnerEssays.GetByIdAsync(id, cancellationToken);
         return essay is { IsDeleted: false } && essay.UserId == userId ? essay : null;
+    }
+
+    private static async Task<(string Base64, string MimeType)> ConvertFormFileToBase64Async(
+        IFormFile file,
+        CancellationToken cancellationToken)
+    {
+        using var memoryStream = new MemoryStream();
+        await file.CopyToAsync(memoryStream, cancellationToken);
+        var bytes = memoryStream.ToArray();
+        var base64 = Convert.ToBase64String(bytes);
+        var mimeType = string.IsNullOrWhiteSpace(file.ContentType) ? "image/jpeg" : file.ContentType;
+        return (base64, mimeType);
     }
 
     private static string? ValidateImage(IFormFile? image)
@@ -208,19 +230,12 @@ public class LearnerEssayService(
 
     private static EssayScanResponse MapScan(LearnerEssay essay) => new()
     {
-        Id = essay.Id,
-        Title = essay.Title,
-        ImageUrl = essay.ImageUrl,
-        OriginalOcrText = essay.OriginalOcrText,
-        ContentText = essay.ContentText,
+        Text = essay.OriginalOcrText,
         ScannedAt = essay.CreatedDate,
     };
 
     private static EssayDetailResponse MapDetail(LearnerEssay essay) => new()
     {
-        Id = essay.Id,
-        Title = essay.Title,
-        ImageUrl = essay.ImageUrl,
         OriginalOcrText = essay.OriginalOcrText,
         ContentText = essay.ContentText,
         ScannedAt = essay.CreatedDate,
