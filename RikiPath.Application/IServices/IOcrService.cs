@@ -1,9 +1,9 @@
-namespace RikiPath.Application.IServices;
+//namespace RikiPath.Application.IServices;
 
-public interface IOcrService
-{
-    Task<string> RecognizeJapaneseAsync(
-        Stream imageStream,
-        string fileName,
-        CancellationToken cancellationToken = default);
-}
+//public interface IOcrService
+//{
+//    Task<string> RecognizeJapaneseAsync(
+//        Stream imageStream,
+//        string fileName,
+//        CancellationToken cancellationToken = default);
+//}
