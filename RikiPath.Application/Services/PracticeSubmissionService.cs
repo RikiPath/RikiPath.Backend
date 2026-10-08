@@ -15,7 +15,7 @@ namespace RikiPath.Application.Services
     public class PracticeSubmissionService(
         IUnitOfWork unitOfWork,
         IAiGradingClient aiGradingClient,
-        ISpeechToTextClient speechToTextClient,
+        IAzureSpeechClient speechToTextClient,
         IClaimService claimService)
         : IPracticeSubmissionService
     {
