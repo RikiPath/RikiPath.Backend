@@ -1,3 +1,6 @@
+// Đặt tại: RikiPath.Infrastructure/Clients/AzureSpeechToTextClient.cs  (thay file cũ)
+// Chỉ được có MỘT class implement IAzureSpeechClient - nếu còn file AzureSpeechClient.cs (bản trước) thì XOÁ đi,
+// vì Program.cs ưu tiên class tên "AzureSpeechClient" và sẽ âm thầm bỏ qua class này.
 using RikiPath.Application.IClients;
 using RikiPath.Application.Responses.SpeechToText;
 using RikiPath.Domain;
@@ -6,36 +9,18 @@ using System.Text.Json;
 
 namespace RikiPath.Infrastructure.Clients
 {
-    // ⚠️ GIẢ ĐỊNH QUAN TRỌNG - ĐỌC TRƯỚC KHI DÙNG:
-    //
-    // 1) Dùng REST API "short audio" (endpoint /speech/recognition/conversation/.../v1) - đây là
-    //    API ĐỒNG BỘ, Azure giới hạn khoảng dưới 60 giây/file. Phù hợp cho bài luyện nói ngắn
-    //    (từng câu/đoạn ngắn JLPT speaking). Nếu sau này cần ghi âm DÀI HƠN (vd bài nói 2-3 phút),
-    //    phải chuyển sang Batch Transcription API (bất đồng bộ, cần Azure Blob Storage riêng,
-    //    polling job status...) - phức tạp hơn nhiều, báo tôi nếu cần bản đó.
-    //
-    // 2) Content-Type mặc định set cứng "audio/wav; codecs=audio/pcm; samplerate=16000" - đây là
-    //    format AN TOÀN NHẤT được Azure hỗ trợ chắc chắn (WAV PCM 16kHz mono 16-bit). Azure cũng hỗ
-    //    trợ "audio/ogg; codecs=opus" và "audio/webm; codecs=opus", nhưng KHÔNG hỗ trợ mp3/m4a trực
-    //    tiếp. Nếu app di động/web của bạn ghi âm ra định dạng khác WAV, BẮT BUỘC phải:
-    //      (a) convert sang WAV PCM 16kHz mono trước khi upload lên Supabase, HOẶC
-    //      (b) đổi hằng số AudioContentType bên dưới cho đúng định dạng thật bạn dùng.
-    //    Nếu không, Azure sẽ trả lỗi hoặc RecognitionStatus khác "Success".
-    //
-    // 3) Free Tier (F0) giới hạn 5 giờ audio/tháng + rate limit ~20 request/phút - cân nhắc thêm
-    //    retry/backoff ở tầng gọi nếu gặp lỗi 429 khi lên production.
-    public class AzureSpeechToTextClient : ISpeechToTextClient
+    public class AzureSpeechToTextClient(IHttpClientFactory httpClientFactory, AppSettings appSettings) : IAzureSpeechClient
     {
+        private const string SubscriptionKeyHeader = "Ocp-Apim-Subscription-Key";
+        private const string DefaultLanguage = "ja-JP";
+
         private const string AudioContentType = "audio/wav; codecs=audio/pcm; samplerate=16000";
 
-        private readonly HttpClient _httpClient;
-        private readonly string _language;
+        private const long MaxAudioBytes = 10 * 1024 * 1024;
 
-        public AzureSpeechToTextClient(HttpClient httpClient, AppSettings appSettings)
+        private (string Region, string Key, string Language) GetSettings()
         {
-            _httpClient = httpClient;
-
-            var settings = appSettings.AzureSpeech
+            var settings = appSettings.AzureSpeechSettings
                 ?? throw new InvalidOperationException("AzureSpeech chưa được cấu hình trong appsettings.");
 
             if (string.IsNullOrWhiteSpace(settings.Region))
@@ -44,31 +29,69 @@ namespace RikiPath.Infrastructure.Clients
             if (string.IsNullOrWhiteSpace(settings.SubscriptionKey))
                 throw new InvalidOperationException("AzureSpeech:SubscriptionKey chưa được cấu hình.");
 
-            _language = string.IsNullOrWhiteSpace(settings.Language) ? "ja-JP" : settings.Language;
-
-            _httpClient.BaseAddress ??= new Uri($"https://{settings.Region}.stt.speech.microsoft.com");
-            _httpClient.DefaultRequestHeaders.Remove("Ocp-Apim-Subscription-Key");
-            _httpClient.DefaultRequestHeaders.Add("Ocp-Apim-Subscription-Key", settings.SubscriptionKey);
-            _httpClient.DefaultRequestHeaders.Accept.Clear();
-            _httpClient.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+            var language = string.IsNullOrWhiteSpace(settings.Language) ? DefaultLanguage : settings.Language.Trim();
+            return (settings.Region.Trim(), settings.SubscriptionKey.Trim(), language);
         }
 
+        // ---------------------------------------------------------------------------------------
+        // 1) Lấy token tạm thời cho FE
+        // ---------------------------------------------------------------------------------------
+        public async Task<string> IssueTokenAsync(CancellationToken cancellationToken = default)
+        {
+            var (region, key, _) = GetSettings();
+
+            using var request = new HttpRequestMessage(
+                HttpMethod.Post, $"https://{region}.api.cognitive.microsoft.com/sts/v1.0/issueToken")
+            {
+                // Body rỗng nhưng vẫn gửi Content-Length: 0 (Azure có thể trả 411 nếu thiếu)
+                Content = new StringContent(string.Empty)
+            };
+            request.Headers.Add(SubscriptionKeyHeader, key);
+
+            var client = httpClientFactory.CreateClient();
+            using var response = await client.SendAsync(request, cancellationToken);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new HttpRequestException(
+                    $"Azure Speech issueToken trả về {(int)response.StatusCode}.", null, response.StatusCode);
+            }
+
+            return await response.Content.ReadAsStringAsync(cancellationToken);
+        }
+
+        // ---------------------------------------------------------------------------------------
+        // 2) Speech-to-Text từ URL audio
+        // ---------------------------------------------------------------------------------------
         public async Task<SpeechToTextResult> TranscribeFromUrlAsync(string audioUrl, CancellationToken cancellationToken)
         {
             if (string.IsNullOrWhiteSpace(audioUrl))
                 throw new ArgumentException("audioUrl không được để trống.", nameof(audioUrl));
 
-            // Tải file audio về. Lưu ý: _httpClient đã set BaseAddress trỏ tới Azure, nhưng vì
-            // audioUrl là URL tuyệt đối (vd https://xxx.supabase.co/...) nên HttpClient sẽ gọi
-            // thẳng tới đó, KHÔNG bị ghép với BaseAddress.
-            var audioBytes = await _httpClient.GetByteArrayAsync(audioUrl, cancellationToken);
+            if (!Uri.TryCreate(audioUrl, UriKind.Absolute, out var audioUri)
+                || (audioUri.Scheme != Uri.UriSchemeHttps && audioUri.Scheme != Uri.UriSchemeHttp))
+            {
+                throw new ArgumentException("audioUrl phải là URL http/https tuyệt đối.", nameof(audioUrl));
+            }
 
-            using var content = new ByteArrayContent(audioBytes);
-            content.Headers.ContentType = MediaTypeHeaderValue.Parse(AudioContentType);
+            var (region, key, language) = GetSettings();
 
-            var requestUrl = $"/speech/recognition/conversation/cognitiveservices/v1?language={_language}&format=detailed";
+            var audioBytes = await DownloadAudioAsync(audioUri, cancellationToken);
 
-            using var response = await _httpClient.PostAsync(requestUrl, content, cancellationToken);
+            var requestUrl =
+                $"https://{region}.stt.speech.microsoft.com/speech/recognition/conversation/cognitiveservices/v1" +
+                $"?language={Uri.EscapeDataString(language)}&format=detailed";
+
+            using var request = new HttpRequestMessage(HttpMethod.Post, requestUrl)
+            {
+                Content = new ByteArrayContent(audioBytes)
+            };
+            request.Content.Headers.TryAddWithoutValidation("Content-Type", AudioContentType);
+            request.Headers.Add(SubscriptionKeyHeader, key);
+            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
+            var azureClient = httpClientFactory.CreateClient();
+            using var response = await azureClient.SendAsync(request, cancellationToken);
             var rawJson = await response.Content.ReadAsStringAsync(cancellationToken);
 
             if (!response.IsSuccessStatusCode)
@@ -99,6 +122,30 @@ namespace RikiPath.Infrastructure.Clients
             }
 
             return new SpeechToTextResult(displayText, confidence, rawJson);
+        }
+
+        /// <summary>
+        /// Tải audio bằng một HttpClient RIÊNG, không mang Subscription Key,
+        /// để key Azure không bị gửi sang server lưu trữ (Supabase...).
+        /// </summary>
+        private async Task<byte[]> DownloadAudioAsync(Uri audioUri, CancellationToken cancellationToken)
+        {
+            var downloadClient = httpClientFactory.CreateClient();
+            using var response = await downloadClient.GetAsync(
+                audioUri, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+
+            if (!response.IsSuccessStatusCode)
+                throw new InvalidOperationException($"Không tải được file audio ({(int)response.StatusCode}).");
+
+            if (response.Content.Headers.ContentLength is > MaxAudioBytes)
+                throw new InvalidOperationException("File audio quá lớn (tối đa 10MB, khoảng 60 giây).");
+
+            var bytes = await response.Content.ReadAsByteArrayAsync(cancellationToken);
+
+            if (bytes.Length > MaxAudioBytes)
+                throw new InvalidOperationException("File audio quá lớn (tối đa 10MB, khoảng 60 giây).");
+
+            return bytes;
         }
     }
 }

@@ -12,9 +12,9 @@ namespace RikiPath.Domain
         public PayOsSettings PayOs { get; set; }
         public SupabaseSettings Supabase { get; set; }
         public AiSettings Ai { get; set; }
-        public AzureSpeechSettings AzureSpeech { get; set; }
-        public GeminiSettings Gemini { get; set; } = new GeminiSettings();
-        public string FrontendBaseUrl { get; set; } = "http://localhost:5173";
+        public AzureSpeechSettings AzureSpeechSettings { get; set; }
+        public GeminiSettings Gemini { get; set; }
+        public string FrontendBaseUrl { get; set; }
     }
     public class ConnectionStrings
     {
