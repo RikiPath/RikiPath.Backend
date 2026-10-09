@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using RikiPath.Infrastructure;
@@ -11,9 +12,11 @@ using RikiPath.Infrastructure;
 namespace RikiPath.Infrastructure.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20261008083434_RemoveCertificateFromPracticeExercise")]
+    partial class RemoveCertificateFromPracticeExercise
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -453,150 +456,6 @@ namespace RikiPath.Infrastructure.Migrations
                     b.HasIndex("LanguageSkillId");
 
                     b.ToTable("CertificationLevelSkills");
-                });
-
-            modelBuilder.Entity("RikiPath.Domain.Entities.ContentLevelMapping", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<int>("CertificateLevelId")
-                        .HasColumnType("integer")
-                        .HasColumnName("CertificationLevelId");
-
-                    b.Property<Guid?>("CreatedBy")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime?>("CreatedDate")
-                        .HasColumnType("timestamp without time zone");
-
-                    b.Property<int?>("GrammarPatternId")
-                        .HasColumnType("integer");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("boolean");
-
-                    b.Property<int?>("KanjiId")
-                        .HasColumnType("integer");
-
-                    b.Property<Guid?>("ModifiedBy")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime?>("ModifiedDate")
-                        .HasColumnType("timestamp without time zone");
-
-                    b.Property<int?>("VocabularyId")
-                        .HasColumnType("integer");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("GrammarPatternId");
-
-                    b.HasIndex("KanjiId");
-
-                    b.HasIndex("VocabularyId");
-
-                    b.HasIndex("CertificateLevelId", "GrammarPatternId")
-                        .IsUnique()
-                        .HasFilter("\"GrammarPatternId\" IS NOT NULL AND \"IsDeleted\" = false");
-
-                    b.HasIndex("CertificateLevelId", "KanjiId")
-                        .IsUnique()
-                        .HasFilter("\"KanjiId\" IS NOT NULL AND \"IsDeleted\" = false");
-
-                    b.HasIndex("CertificateLevelId", "VocabularyId")
-                        .IsUnique()
-                        .HasFilter("\"VocabularyId\" IS NOT NULL AND \"IsDeleted\" = false");
-
-                    b.ToTable("ContentLevelMappings", t =>
-                        {
-                            t.HasCheckConstraint("CK_ContentLevelMappings_ExactlyOneContent", "(CASE WHEN \"KanjiId\" IS NOT NULL THEN 1 ELSE 0 END) + (CASE WHEN \"VocabularyId\" IS NOT NULL THEN 1 ELSE 0 END) + (CASE WHEN \"GrammarPatternId\" IS NOT NULL THEN 1 ELSE 0 END) = 1");
-                        });
-
-                    b.HasData(
-                        new
-                        {
-                            Id = 920001,
-                            CertificateLevelId = 1,
-                            CreatedDate = new DateTime(2026, 10, 3, 0, 0, 0, 0, DateTimeKind.Utc),
-                            IsDeleted = false,
-                            KanjiId = 910001
-                        },
-                        new
-                        {
-                            Id = 920002,
-                            CertificateLevelId = 1,
-                            CreatedDate = new DateTime(2026, 10, 3, 0, 0, 0, 0, DateTimeKind.Utc),
-                            IsDeleted = false,
-                            KanjiId = 910002
-                        },
-                        new
-                        {
-                            Id = 920003,
-                            CertificateLevelId = 1,
-                            CreatedDate = new DateTime(2026, 10, 3, 0, 0, 0, 0, DateTimeKind.Utc),
-                            IsDeleted = false,
-                            KanjiId = 910003
-                        },
-                        new
-                        {
-                            Id = 920004,
-                            CertificateLevelId = 1,
-                            CreatedDate = new DateTime(2026, 10, 3, 0, 0, 0, 0, DateTimeKind.Utc),
-                            IsDeleted = false,
-                            KanjiId = 910004
-                        },
-                        new
-                        {
-                            Id = 920005,
-                            CertificateLevelId = 1,
-                            CreatedDate = new DateTime(2026, 10, 3, 0, 0, 0, 0, DateTimeKind.Utc),
-                            IsDeleted = false,
-                            KanjiId = 910005
-                        },
-                        new
-                        {
-                            Id = 920006,
-                            CertificateLevelId = 1,
-                            CreatedDate = new DateTime(2026, 10, 3, 0, 0, 0, 0, DateTimeKind.Utc),
-                            IsDeleted = false,
-                            KanjiId = 910006
-                        },
-                        new
-                        {
-                            Id = 920007,
-                            CertificateLevelId = 1,
-                            CreatedDate = new DateTime(2026, 10, 3, 0, 0, 0, 0, DateTimeKind.Utc),
-                            IsDeleted = false,
-                            KanjiId = 910007
-                        },
-                        new
-                        {
-                            Id = 920008,
-                            CertificateLevelId = 1,
-                            CreatedDate = new DateTime(2026, 10, 3, 0, 0, 0, 0, DateTimeKind.Utc),
-                            IsDeleted = false,
-                            KanjiId = 910008
-                        },
-                        new
-                        {
-                            Id = 920009,
-                            CertificateLevelId = 1,
-                            CreatedDate = new DateTime(2026, 10, 3, 0, 0, 0, 0, DateTimeKind.Utc),
-                            IsDeleted = false,
-                            KanjiId = 910009
-                        },
-                        new
-                        {
-                            Id = 920010,
-                            CertificateLevelId = 1,
-                            CreatedDate = new DateTime(2026, 10, 3, 0, 0, 0, 0, DateTimeKind.Utc),
-                            IsDeleted = false,
-                            KanjiId = 910010
-                        });
                 });
 
             modelBuilder.Entity("RikiPath.Domain.Entities.EmailVerification", b =>
@@ -3754,38 +3613,6 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Navigation("LanguageSkill");
                 });
 
-            modelBuilder.Entity("RikiPath.Domain.Entities.ContentLevelMapping", b =>
-                {
-                    b.HasOne("RikiPath.Domain.Entities.CertificateLevel", "CertificateLevel")
-                        .WithMany("ContentLevelMappings")
-                        .HasForeignKey("CertificateLevelId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("RikiPath.Domain.Entities.GrammarPattern", "GrammarPattern")
-                        .WithMany("ContentLevelMappings")
-                        .HasForeignKey("GrammarPatternId")
-                        .OnDelete(DeleteBehavior.Cascade);
-
-                    b.HasOne("RikiPath.Domain.Entities.Kanji", "Kanji")
-                        .WithMany("ContentLevelMappings")
-                        .HasForeignKey("KanjiId")
-                        .OnDelete(DeleteBehavior.Cascade);
-
-                    b.HasOne("RikiPath.Domain.Entities.Vocabulary", "Vocabulary")
-                        .WithMany("ContentLevelMappings")
-                        .HasForeignKey("VocabularyId")
-                        .OnDelete(DeleteBehavior.Cascade);
-
-                    b.Navigation("CertificateLevel");
-
-                    b.Navigation("GrammarPattern");
-
-                    b.Navigation("Kanji");
-
-                    b.Navigation("Vocabulary");
-                });
-
             modelBuilder.Entity("RikiPath.Domain.Entities.EmailVerification", b =>
                 {
                     b.HasOne("RikiPath.Domain.Entities.UserAccount", "User")
@@ -4496,8 +4323,6 @@ namespace RikiPath.Infrastructure.Migrations
 
             modelBuilder.Entity("RikiPath.Domain.Entities.CertificateLevel", b =>
                 {
-                    b.Navigation("ContentLevelMappings");
-
                     b.Navigation("GrammarPatterns");
 
                     b.Navigation("Kanjis");
@@ -4522,8 +4347,6 @@ namespace RikiPath.Infrastructure.Migrations
 
             modelBuilder.Entity("RikiPath.Domain.Entities.GrammarPattern", b =>
                 {
-                    b.Navigation("ContentLevelMappings");
-
                     b.Navigation("LessonGrammars");
 
                     b.Navigation("ReviewCards");
@@ -4551,8 +4374,6 @@ namespace RikiPath.Infrastructure.Migrations
 
             modelBuilder.Entity("RikiPath.Domain.Entities.Kanji", b =>
                 {
-                    b.Navigation("ContentLevelMappings");
-
                     b.Navigation("LearnerNoteEntries");
 
                     b.Navigation("LessonKanjis");
@@ -4708,8 +4529,6 @@ namespace RikiPath.Infrastructure.Migrations
 
             modelBuilder.Entity("RikiPath.Domain.Entities.Vocabulary", b =>
                 {
-                    b.Navigation("ContentLevelMappings");
-
                     b.Navigation("LearnerNoteEntries");
 
                     b.Navigation("LessonVocabularies");

@@ -22,11 +22,11 @@ public class ContentAuthorService(IUnitOfWork unitOfWork, IClaimService claimSer
         {
             AuthorContentDetailsResponse? result = type switch
             {
-                ContentEntityType.Lesson => Map(await unitOfWork.Lessons.GetByIdAsync(id, cancellationToken), type, ownerId, e => new() { Title=e.Title, Description=e.Description, VideoUrl=e.VideoUrl, DurationSeconds=e.DurationSeconds, SortOrder=e.SortOrder, CertificateLevelId=e.CertificateLevelId, LanguageSkillId=e.LanguageSkillId, Status=e.Status, ReviewNote=e.ReviewNote, ReviewedDate=e.ReviewedDate, ReviewedByName=e.ReviewedByName }),
-                ContentEntityType.Kanji => Map(await unitOfWork.Kanjis.GetByIdAsync(id, cancellationToken), type, ownerId, e => new() { Title=e.Character, Character=e.Character, Meaning=e.Meaning, SinoVietnamese=e.SinoVietnamese, OnYomi=e.OnYomi, KunYomi=e.KunYomi, StrokeCount=e.StrokeCount, StrokeOrderImageUrl=e.StrokeOrderImageUrl, AudioUrl=e.AudioUrl, CertificateLevelId=e.CertificateLevelId, Status=e.Status, ReviewNote=e.ReviewNote, ReviewedDate=e.ReviewedDate, ReviewedByName=e.ReviewedByName }),
-                ContentEntityType.KanaCharacter => Map(await unitOfWork.KanaCharacters.GetByIdAsync(id, cancellationToken), type, ownerId, e => new() { Title=e.Character, Character=e.Character, KanaType=e.Type, Romaji=e.Romaji, StrokeCount=e.StrokeCount, StrokeOrderImageUrl=e.StrokeOrderImageUrl, AudioUrl=e.AudioUrl, Status=e.Status, ReviewNote=e.ReviewNote, ReviewedDate=e.ReviewedDate, ReviewedByName=e.ReviewedByName }),
-                ContentEntityType.Vocabulary => Map(await unitOfWork.Vocabularies.GetByIdAsync(id, cancellationToken), type, ownerId, e => new() { Title=e.Word, Word=e.Word, Reading=e.Reading, Meaning=e.Meaning, ExampleSentence=e.ExampleSentence, ExampleSentenceMeaning=e.ExampleSentenceMeaning, AudioUrl=e.AudioUrl, CertificateLevelId=e.CertificateLevelId, Status=e.Status, ReviewNote=e.ReviewNote, ReviewedDate=e.ReviewedDate, ReviewedByName=e.ReviewedByName }),
-                ContentEntityType.GrammarPattern => Map(await unitOfWork.GrammarPatterns.GetByIdAsync(id, cancellationToken), type, ownerId, e => new() { Title=e.Title, Structure=e.Structure, UsageNotes=e.UsageNotes, ExampleSentence=e.ExampleSentence, ExampleSentenceMeaning=e.ExampleSentenceMeaning, CertificateLevelId=e.CertificateLevelId, Status=e.Status, ReviewNote=e.ReviewNote, ReviewedDate=e.ReviewedDate, ReviewedByName=e.ReviewedByName }),
+                ContentEntityType.Lesson => Map(await unitOfWork.Lessons.GetByIdAsync(id, cancellationToken), type, ownerId, e => new() { Title = e.Title, Description = e.Description, VideoUrl = e.VideoUrl, DurationSeconds = e.DurationSeconds, SortOrder = e.SortOrder, CertificateLevelId = e.CertificateLevelId, LanguageSkillId = e.LanguageSkillId, Status = e.Status, ReviewNote = e.ReviewNote, ReviewedDate = e.ReviewedDate, ReviewedByName = e.ReviewedByName }),
+                ContentEntityType.Kanji => Map(await unitOfWork.Kanjis.GetByIdAsync(id, cancellationToken), type, ownerId, e => new() { Title = e.Character, Character = e.Character, Meaning = e.Meaning, SinoVietnamese = e.SinoVietnamese, OnYomi = e.OnYomi, KunYomi = e.KunYomi, StrokeCount = e.StrokeCount, StrokeOrderImageUrl = e.StrokeOrderImageUrl, AudioUrl = e.AudioUrl, CertificateLevelId = e.CertificateLevelId, Status = e.Status, ReviewNote = e.ReviewNote, ReviewedDate = e.ReviewedDate, ReviewedByName = e.ReviewedByName }),
+                ContentEntityType.KanaCharacter => Map(await unitOfWork.KanaCharacters.GetByIdAsync(id, cancellationToken), type, ownerId, e => new() { Title = e.Character, Character = e.Character, KanaType = e.Type, Romaji = e.Romaji, StrokeCount = e.StrokeCount, StrokeOrderImageUrl = e.StrokeOrderImageUrl, AudioUrl = e.AudioUrl, Status = e.Status, ReviewNote = e.ReviewNote, ReviewedDate = e.ReviewedDate, ReviewedByName = e.ReviewedByName }),
+                ContentEntityType.Vocabulary => Map(await unitOfWork.Vocabularies.GetByIdAsync(id, cancellationToken), type, ownerId, e => new() { Title = e.Word, Word = e.Word, Reading = e.Reading, Meaning = e.Meaning, ExampleSentence = e.ExampleSentence, ExampleSentenceMeaning = e.ExampleSentenceMeaning, AudioUrl = e.AudioUrl, CertificateLevelId = e.CertificateLevelId, Status = e.Status, ReviewNote = e.ReviewNote, ReviewedDate = e.ReviewedDate, ReviewedByName = e.ReviewedByName }),
+                ContentEntityType.GrammarPattern => Map(await unitOfWork.GrammarPatterns.GetByIdAsync(id, cancellationToken), type, ownerId, e => new() { Title = e.Title, Structure = e.Structure, UsageNotes = e.UsageNotes, ExampleSentence = e.ExampleSentence, ExampleSentenceMeaning = e.ExampleSentenceMeaning, CertificateLevelId = e.CertificateLevelId, Status = e.Status, ReviewNote = e.ReviewNote, ReviewedDate = e.ReviewedDate, ReviewedByName = e.ReviewedByName }),
                 ContentEntityType.MockTest => MapMockTest(await unitOfWork.MockTests.GetWithSectionsAndQuestionsAsync(id), type, ownerId),
                 ContentEntityType.PracticeExercise => MapPracticeExercise(await unitOfWork.PracticeExercises.GetWithQuestionsAndOptionsAsync(id, cancellationToken), type, ownerId),
                 _ => null
@@ -49,7 +49,7 @@ public class ContentAuthorService(IUnitOfWork unitOfWork, IClaimService claimSer
                 ContentEntityType.Vocabulary => await SaveVocabularyAsync(authorId, id, request, cancellationToken),
                 ContentEntityType.GrammarPattern => await SaveGrammarAsync(authorId, id, request, cancellationToken),
                 ContentEntityType.MockTest => await SaveMockTestAsync(authorId, id, request, cancellationToken),
-                ContentEntityType.PracticeExercise => await SavePracticeExerciseAsync(authorId, id, request, cancellationToken),
+                //ContentEntityType.PracticeExercise => await SavePracticeExerciseAsync(authorId, id, request, cancellationToken),
                 _ => null
             };
             if (result is null) return ApiResponse<ContentReviewStatusResponse>.Fail("Loại nội dung này không hỗ trợ tạo hoặc cập nhật.");
@@ -156,15 +156,15 @@ public class ContentAuthorService(IUnitOfWork unitOfWork, IClaimService claimSer
         return Map(e.Id, ContentEntityType.MockTest, e.Title, authorId, e.Status, e.ReviewNote, e.ReviewedDate, e.ReviewedByName);
     }
 
-    private async Task<ContentReviewStatusResponse> SavePracticeExerciseAsync(int authorId, int? id, AuthorContentRequest r, CancellationToken ct)
-    {
-        var e = id is null ? new PracticeExercise { ContentAuthorId = authorId } : await EditableAsync(await unitOfWork.PracticeExercises.GetByIdAsync(id.Value, ct), authorId);
-        e.Title = Required(r.Title, nameof(r.Title)); e.Description = r.Description; e.LessonId = Required(r.LessonId, nameof(r.LessonId));
-        e.LanguageSkillId = Required(r.LanguageSkillId, nameof(r.LanguageSkillId)); e.CertificateLevelId = r.CertificateLevelId; e.SortOrder = r.SortOrder ?? 0; Prepare(e);
-        if (id is null) await unitOfWork.PracticeExercises.AddAsync(e, ct); else unitOfWork.PracticeExercises.Update(e);
-        await unitOfWork.SaveChangesAsync(ct);
-        return Map(e.Id, ContentEntityType.PracticeExercise, e.Title, authorId, e.Status, e.ReviewNote, e.ReviewedDate, e.ReviewedByName);
-    }
+    //private async Task<ContentReviewStatusResponse> SavePracticeExerciseAsync(int authorId, int? id, AuthorContentRequest r, CancellationToken ct)
+    //{
+    //    var e = id is null ? new PracticeExercise { ContentAuthorId = authorId } : await EditableAsync(await unitOfWork.PracticeExercises.GetByIdAsync(id.Value, ct), authorId);
+    //    e.Title = Required(r.Title, nameof(r.Title)); e.Description = r.Description; e.LessonId = Required(r.LessonId, nameof(r.LessonId));
+    //    e.LanguageSkillId = Required(r.LanguageSkillId, nameof(r.LanguageSkillId)); e.CertificateLevelId = r.CertificateLevelId; e.SortOrder = r.SortOrder ?? 0; Prepare(e);
+    //    if (id is null) await unitOfWork.PracticeExercises.AddAsync(e, ct); else unitOfWork.PracticeExercises.Update(e);
+    //    await unitOfWork.SaveChangesAsync(ct);
+    //    return Map(e.Id, ContentEntityType.PracticeExercise, e.Title, authorId, e.Status, e.ReviewNote, e.ReviewedDate, e.ReviewedByName);
+    //}
 
     private static async Task<T> EditableAsync<T>(T? entity, int authorId) where T : Base
     {
@@ -205,20 +205,44 @@ public class ContentAuthorService(IUnitOfWork unitOfWork, IClaimService claimSer
     private static int GetAuthorId(Base e) => e switch { Lesson x => x.ContentAuthorId, Kanji x => x.ContentAuthorId, KanaCharacter x => x.ContentAuthorId, Vocabulary x => x.ContentAuthorId, GrammarPattern x => x.ContentAuthorId, MockTest x => x.ContentAuthorId, PracticeExercise x => x.ContentAuthorId, _ => 0 };
     private static AuthorContentDetailsResponse? MapMockTest(MockTest? e, ContentEntityType type, int? ownerId) => e is null || e.IsDeleted || (ownerId is not null && e.ContentAuthorId != ownerId) ? null : new()
     {
-        Id=e.Id, EntityType=type, Title=e.Title, Description=e.Description, TimeLimitMinutes=e.TimeLimitMinutes, CertificateLevelId=e.CertificateLevelId,
-        ContentAuthorId=e.ContentAuthorId, Status=e.Status, ReviewNote=e.ReviewNote, ReviewedDate=e.ReviewedDate, ReviewedByName=e.ReviewedByName,
-        MockSections=e.Sections?.Where(s => !s.IsDeleted).OrderBy(s => s.SortOrder).Select(s => new AuthorMockSectionDetails
-        { Id=s.Id, Title=s.Title, SortOrder=s.SortOrder, LanguageSkillId=s.LanguageSkillId, Questions=s.Questions?.Where(q => !q.IsDeleted).OrderBy(q => q.SortOrder).Select(q => new AuthorQuestionDetails
-        { Id=q.Id, QuestionText=q.QuestionText, Explanation=q.Explanation, AudioUrl=q.AudioUrl, ImageUrl=q.ImageUrl, SortOrder=q.SortOrder, Options=q.Options?.Where(o => !o.IsDeleted).OrderBy(o => o.SortOrder).Select(ToOption).ToList() ?? [] }).ToList() ?? [] }).ToList()
+        Id = e.Id,
+        EntityType = type,
+        Title = e.Title,
+        Description = e.Description,
+        TimeLimitMinutes = e.TimeLimitMinutes,
+        CertificateLevelId = e.CertificateLevelId,
+        ContentAuthorId = e.ContentAuthorId,
+        Status = e.Status,
+        ReviewNote = e.ReviewNote,
+        ReviewedDate = e.ReviewedDate,
+        ReviewedByName = e.ReviewedByName,
+        MockSections = e.Sections?.Where(s => !s.IsDeleted).OrderBy(s => s.SortOrder).Select(s => new AuthorMockSectionDetails
+        {
+            Id = s.Id,
+            Title = s.Title,
+            SortOrder = s.SortOrder,
+            LanguageSkillId = s.LanguageSkillId,
+            Questions = s.Questions?.Where(q => !q.IsDeleted).OrderBy(q => q.SortOrder).Select(q => new AuthorQuestionDetails
+            { Id = q.Id, QuestionText = q.QuestionText, Explanation = q.Explanation, AudioUrl = q.AudioUrl, ImageUrl = q.ImageUrl, SortOrder = q.SortOrder, Options = q.Options?.Where(o => !o.IsDeleted).OrderBy(o => o.SortOrder).Select(ToOption).ToList() ?? [] }).ToList() ?? []
+        }).ToList()
     };
     private static AuthorContentDetailsResponse? MapPracticeExercise(PracticeExercise? e, ContentEntityType type, int? ownerId) => e is null || e.IsDeleted || (ownerId is not null && e.ContentAuthorId != ownerId) ? null : new()
     {
-        Id=e.Id, EntityType=type, Title=e.Title, Description=e.Description, LessonId=e.LessonId, LanguageSkillId=e.LanguageSkillId,
-        CertificateLevelId=e.CertificateLevelId, SortOrder=e.SortOrder, ContentAuthorId=e.ContentAuthorId, Status=e.Status, ReviewNote=e.ReviewNote,
-        ReviewedDate=e.ReviewedDate, ReviewedByName=e.ReviewedByName,
-        PracticeQuestions=e.Questions?.Where(q => !q.IsDeleted).OrderBy(q => q.SortOrder).Select(q => new AuthorPracticeQuestionDetails
-        { Id=q.Id, QuestionText=q.QuestionText, Explanation=q.Explanation, SortOrder=q.SortOrder, Options=q.Options?.Where(o => !o.IsDeleted).OrderBy(o => o.SortOrder).Select(ToOption).ToList() ?? [] }).ToList()
+        Id = e.Id,
+        EntityType = type,
+        Title = e.Title,
+        Description = e.Description,
+        LessonId = e.LessonId,
+        LanguageSkillId = e.LanguageSkillId,
+        SortOrder = e.SortOrder,
+        ContentAuthorId = e.ContentAuthorId,
+        Status = e.Status,
+        ReviewNote = e.ReviewNote,
+        ReviewedDate = e.ReviewedDate,
+        ReviewedByName = e.ReviewedByName,
+        PracticeQuestions = e.Questions?.Where(q => !q.IsDeleted).OrderBy(q => q.SortOrder).Select(q => new AuthorPracticeQuestionDetails
+        { Id = q.Id, QuestionText = q.QuestionText, Explanation = q.Explanation, SortOrder = q.SortOrder, Options = q.Options?.Where(o => !o.IsDeleted).OrderBy(o => o.SortOrder).Select(ToOption).ToList() ?? [] }).ToList()
     };
-    private static AuthorOptionDetails ToOption(MockQuestionOption o) => new() { Id=o.Id, OptionText=o.OptionText, IsCorrect=o.IsCorrect, SortOrder=o.SortOrder };
-    private static AuthorOptionDetails ToOption(PracticeQuestionOption o) => new() { Id=o.Id, OptionText=o.OptionText, IsCorrect=o.IsCorrect, SortOrder=o.SortOrder };
+    private static AuthorOptionDetails ToOption(MockQuestionOption o) => new() { Id = o.Id, OptionText = o.OptionText, IsCorrect = o.IsCorrect, SortOrder = o.SortOrder };
+    private static AuthorOptionDetails ToOption(PracticeQuestionOption o) => new() { Id = o.Id, OptionText = o.OptionText, IsCorrect = o.IsCorrect, SortOrder = o.SortOrder };
 }

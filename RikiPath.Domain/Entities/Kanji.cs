@@ -29,5 +29,6 @@ namespace RikiPath.Domain.Entities
         public List<LessonKanji>? LessonKanjis { get; set; }
         public List<LearnerNoteEntry>? LearnerNoteEntries { get; set; }
         public List<ReviewCard>? ReviewCards { get; set; }
+        public List<ContentLevelMapping>? ContentLevelMappings { get; set; }
     }
 }

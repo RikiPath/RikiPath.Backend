@@ -27,6 +27,7 @@ namespace RikiPath.Infrastructure
         public DbSet<KanaWritingPracticeHistory> KanaWritingPracticeHistories { get; set; }
         public DbSet<Vocabulary> Vocabularies { get; set; }
         public DbSet<GrammarPattern> GrammarPatterns { get; set; }
+        public DbSet<ContentLevelMapping> ContentLevelMappings { get; set; }
         public DbSet<LessonKanji> LessonKanjis { get; set; }
         public DbSet<LessonVocabulary> LessonVocabularies { get; set; }
         public DbSet<LessonGrammar> LessonGrammars { get; set; }
@@ -93,6 +94,7 @@ namespace RikiPath.Infrastructure
             modelBuilder.ApplyConfiguration(new KanaWritingPracticeHistoryConfig());
             modelBuilder.ApplyConfiguration(new VocabularyConfig());
             modelBuilder.ApplyConfiguration(new GrammarPatternConfig());
+            modelBuilder.ApplyConfiguration(new ContentLevelMappingConfig());
             modelBuilder.ApplyConfiguration(new LessonKanjiConfig());
             modelBuilder.ApplyConfiguration(new LessonVocabularyConfig());
             modelBuilder.ApplyConfiguration(new LessonGrammarConfig());
