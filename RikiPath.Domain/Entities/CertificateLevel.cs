@@ -19,5 +19,6 @@ namespace RikiPath.Domain.Entities
         public List<GrammarPattern>? GrammarPatterns { get; set; }
         public List<MockTest>? MockTests { get; set; }
         public List<PracticeSubmission>? PracticeSubmissions { get; set; }
+        public List<ContentLevelMapping>? ContentLevelMappings { get; set; }
     }
 }

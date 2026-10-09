@@ -15,7 +15,6 @@ public class PracticeExerciseConfig : IEntityTypeConfiguration<PracticeExercise>
         builder.HasOne(x => x.Lesson).WithMany().HasForeignKey(x => x.LessonId).OnDelete(DeleteBehavior.Cascade);
         builder.Property(x => x.ReviewNote).HasMaxLength(2000);
         builder.HasOne(x => x.LanguageSkill).WithMany().HasForeignKey(x => x.LanguageSkillId).OnDelete(DeleteBehavior.Restrict);
-        builder.HasOne(x => x.CertificateLevel).WithMany().HasForeignKey(x => x.CertificateLevelId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne(x => x.ContentAuthor).WithMany().HasForeignKey(x => x.ContentAuthorId).OnDelete(DeleteBehavior.Restrict);
         builder.HasIndex(x => new { x.LessonId, x.LanguageSkillId, x.Status });
     }

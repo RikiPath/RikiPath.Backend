@@ -1,7 +1,4 @@
 using RikiPath.Domain.Enums;
-using RikiPath.Domain.Entities;
-using System;
-using System.Collections.Generic;
 
 namespace RikiPath.Domain.Entities
 {
@@ -28,5 +25,6 @@ namespace RikiPath.Domain.Entities
 
         public List<LessonGrammar>? LessonGrammars { get; set; }
         public List<ReviewCard>? ReviewCards { get; set; }
+        public List<ContentLevelMapping>? ContentLevelMappings { get; set; }
     }
 }
