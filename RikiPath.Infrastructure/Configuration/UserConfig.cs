@@ -120,8 +120,8 @@ namespace RikiPath.Infrastructure.Configuration
             // ---- As a Mentor ----
 
             builder.HasMany(x => x.Notes)
-                .WithOne(x => x.Mentor)
-                .HasForeignKey(x => x.MentorId)
+                .WithOne(x => x.UserAccount)
+                .HasForeignKey(x => x.UserId)
                 .OnDelete(DeleteBehavior.Restrict);
 
             builder.HasMany(x => x.MentorAvailabilities)
