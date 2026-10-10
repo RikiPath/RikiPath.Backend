@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.SignalR;
 using RikiPath.Application.IServices;
 using RikiPath.Application.Requests.MentorMeetings;
 using RikiPath.Application.Responses.MentorMeetings;
+using RikiPath.Application.Services;
 using System.Collections.Concurrent;
 using System.Security.Claims;
 
@@ -13,7 +14,7 @@ namespace RikiPath.WebApi.Hubs;
 /// Peer được định danh bằng ConnectionId; signaling (offer/answer/ice) gửi ĐÍCH DANH tới 1 peer.
 /// </summary>
 [Authorize]
-public sealed class MentorMeetingHub(IMentorMeetingAccessService meetingAccessService) : Hub
+public sealed class MentorMeetingHub(IMentorMeetingAccessService meetingAccessService, IMeetingNoteService meetingNoteService) : Hub
 {
     // Mesh: 6 người => mỗi máy giữ 5 kết nối và upload 5 luồng video. Lớp đông hơn cần SFU (LiveKit, mediasoup...).
     private const int MaxLearners = 5;
@@ -52,13 +53,16 @@ public sealed class MentorMeetingHub(IMentorMeetingAccessService meetingAccessSe
             await RemoveConnectionAsync(connId);
 
         var me = new Joined(roomId, userId, isMentor, name);
+        bool isNewConnection;
         lock (RoomLock)
         {
             var learnerCount = JoinedRooms.Count(x => x.Value.RoomId == roomId && !x.Value.IsMentor && x.Key != Context.ConnectionId);
             if (!isMentor && learnerCount >= MaxLearners)
                 throw new HubException($"Phòng đã đủ {MaxLearners} học viên.");
+            isNewConnection = !JoinedRooms.ContainsKey(Context.ConnectionId);
             JoinedRooms[Context.ConnectionId] = me;
         }
+        if (isNewConnection) meetingAccessService.TrackChatParticipantJoined(roomId);
 
         var group = Group(roomId);
         await Groups.AddToGroupAsync(Context.ConnectionId, group);
@@ -111,20 +115,22 @@ public sealed class MentorMeetingHub(IMentorMeetingAccessService meetingAccessSe
     // ===================== CHAT / HAND / MEDIA STATE (broadcast) =====================
 
     // Dựng lại tin nhắn từ thông tin server biết, không chuyển tiếp nguyên object do client gửi
-    public async Task SendChatMessage(Guid roomId, SendMeetingChatRequest request)
+    public async Task<MeetingChatMessageResponse?> SendChatMessage(Guid roomId, SendMeetingChatRequest request)
     {
         var me = GetJoined(roomId);
-        var text = request.Text?.Trim();
-        if (string.IsNullOrEmpty(text)) return;
+        var message = meetingAccessService.AddChatMessage(roomId, me.UserId, me.Name, me.IsMentor ? "Mentor" : "Learner", request.Text);
 
-        await Clients.OthersInGroup(Group(roomId)).SendAsync("ReceiveChatMessage", new
-        {
-            id = string.IsNullOrWhiteSpace(request.Id) ? Guid.NewGuid().ToString("N") : request.Id,
-            sender = me.Name,
-            role = me.IsMentor ? "Mentor" : "Learner",
-            text = text.Length > 2000 ? text[..2000] : text,
-            timestamp = request.Timestamp,
-        });
+        if (message is null) return null;
+
+
+        await Clients.OthersInGroup(Group(roomId)).SendAsync("ReceiveChatMessage", message);
+        return message;
+    }
+
+    public IReadOnlyList<MeetingChatMessageResponse> GetChatHistory(Guid roomId)
+    {
+        GetJoined(roomId);
+        return meetingAccessService.GetChatHistory(roomId);
     }
 
     public async Task RaiseHand(Guid roomId, bool isRaised)
