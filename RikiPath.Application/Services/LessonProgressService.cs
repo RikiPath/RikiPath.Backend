@@ -98,7 +98,6 @@ namespace RikiPath.Application.Services
             LessonId = lesson.Id,
             Title = lesson.Title,
             Content = lesson.Description,
-            VideoUrl = lesson.VideoUrl,
             AttachmentUrl = null,
             OrderIndex = lesson.SortOrder,
             ProgressPercent = progress?.ProgressPercent ?? 0,

@@ -43,31 +43,6 @@ namespace RikiPath.Infrastructure.Configuration
                 .HasForeignKey(x => x.TargetCertificateLevelId)
                 .OnDelete(DeleteBehavior.SetNull);
 
-            // ---- As a Content Author ----
-            // Không còn cấu hình Reviewed* nữa: Lesson/Kanji/Vocabulary/GrammarPattern/
-            // MockTest giờ lưu thẳng "ReviewedByName" (string), không phải FK về UserAccount,
-            // vì hệ thống chỉ có 1 Admin duy nhất — không cần navigation/relationship cho việc này.
-
-            builder.HasMany(x => x.AuthoredLessons)
-                .WithOne(x => x.ContentAuthor)
-                .HasForeignKey(x => x.ContentAuthorId)
-                .OnDelete(DeleteBehavior.Restrict);
-
-            builder.HasMany(x => x.AuthoredKanjis)
-                .WithOne(x => x.ContentAuthor)
-                .HasForeignKey(x => x.ContentAuthorId)
-                .OnDelete(DeleteBehavior.Restrict);
-
-            builder.HasMany(x => x.AuthoredVocabularies)
-                .WithOne(x => x.ContentAuthor)
-                .HasForeignKey(x => x.ContentAuthorId)
-                .OnDelete(DeleteBehavior.Restrict);
-
-            builder.HasMany(x => x.AuthoredGrammarPatterns)
-                .WithOne(x => x.ContentAuthor)
-                .HasForeignKey(x => x.ContentAuthorId)
-                .OnDelete(DeleteBehavior.Restrict);
-
             builder.HasMany(x => x.AuthoredMockTests)
                 .WithOne(x => x.ContentAuthor)
                 .HasForeignKey(x => x.ContentAuthorId)

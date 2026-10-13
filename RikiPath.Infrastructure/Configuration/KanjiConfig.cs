@@ -14,16 +14,10 @@ namespace RikiPath.Infrastructure.Configuration
             builder.Property(x => x.Character).IsRequired().HasMaxLength(10);
             builder.Property(x => x.Meaning).IsRequired().HasMaxLength(300);
             builder.Property(x => x.Status).HasConversion<string>().HasMaxLength(20);
-            builder.Property(x => x.ReviewedByName).HasMaxLength(200);
 
             builder.HasOne(x => x.CertificateLevel)
                 .WithMany(x => x.Kanjis)
                 .HasForeignKey(x => x.CertificateLevelId)
-                .OnDelete(DeleteBehavior.Restrict);
-
-            builder.HasOne(x => x.ContentAuthor)
-                .WithMany(x => x.AuthoredKanjis)
-                .HasForeignKey(x => x.ContentAuthorId)
                 .OnDelete(DeleteBehavior.Restrict);
 
             builder.HasIndex(x => new { x.CertificateLevelId, x.Status });
@@ -39,9 +33,7 @@ namespace RikiPath.Infrastructure.Configuration
                     KunYomi = "ひ、か",
                     StrokeCount = 4,
                     Status = ContentStatus.Published,
-                    IsApproved = true,
                     CertificateLevelId = 1,
-                    ContentAuthorId = 900004,
                     CreatedDate = new DateTime(2026, 10, 3, 0, 0, 0, DateTimeKind.Utc),
                     IsDeleted = false
                 },
@@ -55,9 +47,7 @@ namespace RikiPath.Infrastructure.Configuration
                     KunYomi = "つき",
                     StrokeCount = 4,
                     Status = ContentStatus.Published,
-                    IsApproved = true,
                     CertificateLevelId = 1,
-                    ContentAuthorId = 900004,
                     CreatedDate = new DateTime(2026, 10, 3, 0, 0, 0, DateTimeKind.Utc),
                     IsDeleted = false
                 },
@@ -71,9 +61,7 @@ namespace RikiPath.Infrastructure.Configuration
                     KunYomi = "ひ、ほ",
                     StrokeCount = 4,
                     Status = ContentStatus.Published,
-                    IsApproved = true,
                     CertificateLevelId = 1,
-                    ContentAuthorId = 900004,
                     CreatedDate = new DateTime(2026, 10, 3, 0, 0, 0, DateTimeKind.Utc),
                     IsDeleted = false
                 },
@@ -87,9 +75,7 @@ namespace RikiPath.Infrastructure.Configuration
                     KunYomi = "みず",
                     StrokeCount = 4,
                     Status = ContentStatus.Published,
-                    IsApproved = true,
                     CertificateLevelId = 1,
-                    ContentAuthorId = 900004,
                     CreatedDate = new DateTime(2026, 10, 3, 0, 0, 0, DateTimeKind.Utc),
                     IsDeleted = false
                 },
@@ -103,9 +89,7 @@ namespace RikiPath.Infrastructure.Configuration
                     KunYomi = "き、こ",
                     StrokeCount = 4,
                     Status = ContentStatus.Published,
-                    IsApproved = true,
                     CertificateLevelId = 1,
-                    ContentAuthorId = 900004,
                     CreatedDate = new DateTime(2026, 10, 3, 0, 0, 0, DateTimeKind.Utc),
                     IsDeleted = false
                 },
@@ -119,9 +103,7 @@ namespace RikiPath.Infrastructure.Configuration
                     KunYomi = "かね、かな",
                     StrokeCount = 8,
                     Status = ContentStatus.Published,
-                    IsApproved = true,
                     CertificateLevelId = 1,
-                    ContentAuthorId = 900004,
                     CreatedDate = new DateTime(2026, 10, 3, 0, 0, 0, DateTimeKind.Utc),
                     IsDeleted = false
                 },
@@ -135,9 +117,7 @@ namespace RikiPath.Infrastructure.Configuration
                     KunYomi = "つち",
                     StrokeCount = 3,
                     Status = ContentStatus.Published,
-                    IsApproved = true,
                     CertificateLevelId = 1,
-                    ContentAuthorId = 900004,
                     CreatedDate = new DateTime(2026, 10, 3, 0, 0, 0, DateTimeKind.Utc),
                     IsDeleted = false
                 },
@@ -151,9 +131,7 @@ namespace RikiPath.Infrastructure.Configuration
                     KunYomi = "やま",
                     StrokeCount = 3,
                     Status = ContentStatus.Published,
-                    IsApproved = true,
                     CertificateLevelId = 1,
-                    ContentAuthorId = 900004,
                     CreatedDate = new DateTime(2026, 10, 3, 0, 0, 0, DateTimeKind.Utc),
                     IsDeleted = false
                 },
@@ -167,9 +145,7 @@ namespace RikiPath.Infrastructure.Configuration
                     KunYomi = "かわ",
                     StrokeCount = 3,
                     Status = ContentStatus.Published,
-                    IsApproved = true,
                     CertificateLevelId = 1,
-                    ContentAuthorId = 900004,
                     CreatedDate = new DateTime(2026, 10, 3, 0, 0, 0, DateTimeKind.Utc),
                     IsDeleted = false
                 },
@@ -183,9 +159,7 @@ namespace RikiPath.Infrastructure.Configuration
                     KunYomi = "ひと",
                     StrokeCount = 2,
                     Status = ContentStatus.Published,
-                    IsApproved = true,
                     CertificateLevelId = 1,
-                    ContentAuthorId = 900004,
                     CreatedDate = new DateTime(2026, 10, 3, 0, 0, 0, DateTimeKind.Utc),
                     IsDeleted = false
                 });

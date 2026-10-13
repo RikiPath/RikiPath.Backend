@@ -7,7 +7,7 @@ namespace RikiPath.WebApi.Controllers
 {
     [Route("api/[controller]")]
     [ApiController]
-    [Authorize(Roles = "Learner")]
+    [Authorize]
     public class NotificationController(INotificationService notificationService) : ControllerBase
     {
         /// <summary>

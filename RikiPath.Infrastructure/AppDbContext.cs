@@ -76,7 +76,7 @@ namespace RikiPath.Infrastructure
         // Notifications
         public DbSet<EmailVerification> EmailVerifications { get; set; }
         public DbSet<Notification> Notifications { get; set; }
-
+        public DbSet<ContentApprovalRequest> ContentApprovalRequests { get; set; }
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             modelBuilder.ApplyConfiguration(new UserConfig());
@@ -89,6 +89,7 @@ namespace RikiPath.Infrastructure
             modelBuilder.ApplyConfiguration(new LessonProgressConfig());
 
             modelBuilder.ApplyConfiguration(new KanjiConfig());
+            modelBuilder.ApplyConfiguration(new ContentApprovalRequestConfig());
             modelBuilder.ApplyConfiguration(new KanaCharacterConfig());
             modelBuilder.ApplyConfiguration(new KanaWritingPracticeCardConfig());
             modelBuilder.ApplyConfiguration(new KanaWritingPracticeHistoryConfig());
