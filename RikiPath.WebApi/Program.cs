@@ -1,9 +1,12 @@
+using DocumentFormat.OpenXml.Office2016.Drawing.ChartDrawing;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using RikiPath.Application;
+using RikiPath.Application.Handlers;
+using RikiPath.Application.Hubs;
 using RikiPath.Application.IClients;
 using RikiPath.Application.IRepositories;
 using RikiPath.Application.IServices;
@@ -261,6 +264,12 @@ internal class Program
         builder.Services.AddSignalR(o => o.EnableDetailedErrors = builder.Environment.IsDevelopment());
         builder.Services.AddSingleton<ICallConnectionTracker, CallConnectionTracker>();
 
+        builder.Services.AddScoped<ISheetImportHandler, KanjiImportHandler>();
+        builder.Services.AddScoped<ISheetImportHandler, VocabularyImportHandler>();
+        builder.Services.AddScoped<ISheetImportHandler, GrammarImportHandler>();
+        builder.Services.AddScoped<ISheetImportHandler, LessonImportHandler>();
+        builder.Services.AddScoped<ISheetImportHandler, MockTestImportHandler>();
+        builder.Services.AddScoped<ISheetImportHandler, PracticeExerciseImportHandler>();
         // 7. JWT Authentication & Authorization
         var secret = appSettings?.SecretToken?.Value ?? builder.Configuration["SecretToken:Value"];
         if (string.IsNullOrWhiteSpace(secret))
@@ -387,7 +396,9 @@ internal class Program
         app.UseAuthentication();
         app.UseAuthorization();
         app.MapControllers();
+
         app.MapHub<MentorMeetingHub>("/hubs/mentor-meeting");
+        app.MapHub<NotificationHub>("/hubs/notification");
 
         app.Run();
     }

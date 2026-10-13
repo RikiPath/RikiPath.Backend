@@ -74,7 +74,7 @@ namespace RikiPath.Infrastructure
         public IMentorBookingRepository MentorBookings { get; }
         public INoteRepository Notes { get; }
         public IMentorAvailabilityRepository MentorAvailabilities { get; }
-
+        public IContentApprovalRequestRepository ContentApprovalRequests { get; }
         public UnitOfWork(AppDbContext context)
         {
             _context = context ?? throw new ArgumentNullException(nameof(context));
@@ -135,6 +135,7 @@ namespace RikiPath.Infrastructure
             MentorBookings = new MentorBookingRepository(_context);
             Notes = new NoteRepository(_context);
             MentorAvailabilities = new MentorAvailabilityRepository(_context);
+            ContentApprovalRequests = new ContentApprovalRequestRepository(_context);
         }
 
         public async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)

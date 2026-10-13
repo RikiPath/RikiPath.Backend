@@ -72,24 +72,20 @@ namespace RikiPath.Application.Services
                                     var durationSeconds = GetOptionalInt(row, "DurationSeconds") ?? 0;
                                     var sortOrder = GetOptionalInt(row, "SortOrder") ?? row.RowNumber;
                                     var lesson = await unitOfWork.Lessons.FirstOrDefaultAsync(
-                                        x => !x.IsDeleted && x.ContentAuthorId == authorId
+                                        x => !x.IsDeleted
                                             && (x.Status == ContentStatus.Draft || x.Status == ContentStatus.Rejected)
                                             && x.CertificateLevelId == certificateLevelId
                                             && x.LanguageSkillId == languageSkillId && x.Title == title
-                                            && x.Description == description && x.VideoUrl == videoUrl
-                                            && x.DurationSeconds == durationSeconds && x.SortOrder == sortOrder,
+                                            && x.Description == description && x.SortOrder == sortOrder,
                                         cancellationToken);
 
                                     lesson ??= new Lesson
                                     {
                                         Title = title,
                                         Description = description,
-                                        VideoUrl = videoUrl,
-                                        DurationSeconds = durationSeconds,
                                         SortOrder = sortOrder,
                                         CertificateLevelId = certificateLevelId,
                                         LanguageSkillId = languageSkillId,
-                                        ContentAuthorId = authorId,
                                         Status = ContentStatus.Draft
                                     };
                                     if (lesson.Id == 0)
@@ -110,8 +106,8 @@ namespace RikiPath.Application.Services
                                     var strokeOrderImageUrl = GetOptional(row, "StrokeOrderImageUrl");
                                     var audioUrl = GetOptional(row, "AudioUrl");
 
-                                    var kanji = lesson is null ? null : await unitOfWork.Kanjis.FirstOrDefaultAsync(
-                                        x => !x.IsDeleted && x.ContentAuthorId == authorId
+                                    var existingKanji = lesson is null ? null : await unitOfWork.Kanjis.FirstOrDefaultAsync(
+                                        x => !x.IsDeleted
                                             && x.CertificateLevelId == certificateLevelId
                                             && x.Character == character && x.Meaning == meaning
                                             && x.SinoVietnamese == sinoVietnamese && x.OnYomi == onYomi
@@ -119,7 +115,7 @@ namespace RikiPath.Application.Services
                                             && x.StrokeOrderImageUrl == strokeOrderImageUrl && x.AudioUrl == audioUrl,
                                         cancellationToken);
 
-                                    kanji ??= new Kanji
+                                    var kanji = existingKanji ?? new Kanji
                                     {
                                         Character = character,
                                         Meaning = meaning,
@@ -130,7 +126,6 @@ namespace RikiPath.Application.Services
                                         StrokeOrderImageUrl = strokeOrderImageUrl,
                                         AudioUrl = audioUrl,
                                         CertificateLevelId = certificateLevelId,
-                                        ContentAuthorId = authorId,
                                         Status = ContentStatus.Draft
                                     };
                                     if (kanji.Id == 0)
@@ -182,15 +177,15 @@ namespace RikiPath.Application.Services
                                     var exampleSentenceMeaning = GetOptional(row, "ExampleSentenceMeaning");
                                     var audioUrl = GetOptional(row, "AudioUrl");
 
-                                    var vocabulary = lesson is null ? null : await unitOfWork.Vocabularies.FirstOrDefaultAsync(
-                                        x => !x.IsDeleted && x.ContentAuthorId == authorId
+                                    var existingVocabulary = lesson is null ? null : await unitOfWork.Vocabularies.FirstOrDefaultAsync(
+                                        x => !x.IsDeleted
                                             && x.CertificateLevelId == certificateLevelId
                                             && x.Word == word && x.Reading == reading && x.Meaning == meaning
                                             && x.ExampleSentence == exampleSentence
                                             && x.ExampleSentenceMeaning == exampleSentenceMeaning && x.AudioUrl == audioUrl,
                                         cancellationToken);
 
-                                    vocabulary ??= new Vocabulary
+                                    var vocabulary = existingVocabulary ?? new Vocabulary
                                     {
                                         Word = word,
                                         Reading = reading,
@@ -199,7 +194,6 @@ namespace RikiPath.Application.Services
                                         ExampleSentenceMeaning = exampleSentenceMeaning,
                                         AudioUrl = audioUrl,
                                         CertificateLevelId = certificateLevelId,
-                                        ContentAuthorId = authorId,
                                         Status = ContentStatus.Draft
                                     };
                                     if (vocabulary.Id == 0)
@@ -227,15 +221,15 @@ namespace RikiPath.Application.Services
                                     var exampleSentence = GetOptional(row, "ExampleSentence");
                                     var exampleSentenceMeaning = GetOptional(row, "ExampleSentenceMeaning");
 
-                                    var grammarPattern = lesson is null ? null : await unitOfWork.GrammarPatterns.FirstOrDefaultAsync(
-                                        x => !x.IsDeleted && x.ContentAuthorId == authorId
+                                    var existingGrammarPattern = lesson is null ? null : await unitOfWork.GrammarPatterns.FirstOrDefaultAsync(
+                                        x => !x.IsDeleted
                                             && x.CertificateLevelId == certificateLevelId
                                             && x.Title == title && x.Structure == structure
                                             && x.UsageNotes == usageNotes && x.ExampleSentence == exampleSentence
                                             && x.ExampleSentenceMeaning == exampleSentenceMeaning,
                                         cancellationToken);
 
-                                    grammarPattern ??= new GrammarPattern
+                                    var grammarPattern = existingGrammarPattern ?? new GrammarPattern
                                     {
                                         Title = title,
                                         Structure = structure,
@@ -243,16 +237,15 @@ namespace RikiPath.Application.Services
                                         ExampleSentence = exampleSentence,
                                         ExampleSentenceMeaning = exampleSentenceMeaning,
                                         CertificateLevelId = certificateLevelId,
-                                        ContentAuthorId = authorId,
                                         Status = ContentStatus.Draft
                                     };
                                     if (grammarPattern.Id == 0)
                                         await unitOfWork.GrammarPatterns.AddAsync(grammarPattern, cancellationToken);
                                     if (lesson is not null)
                                     {
-                                        if (queuedGrammarLinks.Add((lesson, grammarPattern))
+                                        if (queuedGrammarLinks.Add(((Lesson)lesson!, (GrammarPattern)grammarPattern!))
                                             && !await unitOfWork.LessonGrammars.AnyAsync(
-                                                x => x.LessonId == lesson.Id && x.GrammarPatternId == grammarPattern.Id, cancellationToken))
+                                                x => x.LessonId == lesson!.Id && x.GrammarPatternId == grammarPattern!.Id, cancellationToken))
                                         {
                                             await unitOfWork.LessonGrammars.AddAsync(
                                                 new LessonGrammar { Lesson = lesson, GrammarPattern = grammarPattern }, cancellationToken);
@@ -293,7 +286,6 @@ namespace RikiPath.Application.Services
                                         Lesson = lesson,
                                         LanguageSkillId = languageSkillId,
                                         SortOrder = GetOptionalInt(row, "SortOrder") ?? row.RowNumber,
-                                        ContentAuthorId = authorId,
                                         Status = ContentStatus.Draft
                                     }, cancellationToken);
                                     break;
@@ -373,17 +365,13 @@ namespace RikiPath.Application.Services
             try
             {
                 var entity = await unitOfWork.Lessons.GetByIdAsync(entityId, cancellationToken);
-                if (entity is null || entity.IsDeleted || entity.ContentAuthorId != authorId)
+                if (entity is null || entity.IsDeleted)
                     return ApiResponse<ContentReviewStatusResponse>.Fail("Không tìm thấy nội dung.");
 
                 if (entity.Status is not (ContentStatus.Draft or ContentStatus.Rejected))
                     return ApiResponse<ContentReviewStatusResponse>.Fail("Chỉ có thể gửi duyệt nội dung Draft hoặc Rejected.");
 
                 entity.Status = ContentStatus.PendingReview;
-                entity.IsApproved = false;
-                entity.ReviewedByName = null;
-                entity.ReviewNote = null;
-                entity.ReviewedDate = null;
 
                 unitOfWork.Lessons.Update(entity);
                 await unitOfWork.SaveChangesAsync(cancellationToken);
@@ -402,17 +390,13 @@ namespace RikiPath.Application.Services
             try
             {
                 var entity = await unitOfWork.Kanjis.GetByIdAsync(entityId, cancellationToken);
-                if (entity is null || entity.IsDeleted || entity.ContentAuthorId != authorId)
+                if (entity is null || entity.IsDeleted)
                     return ApiResponse<ContentReviewStatusResponse>.Fail("Không tìm thấy nội dung.");
 
                 if (entity.Status is not (ContentStatus.Draft or ContentStatus.Rejected))
                     return ApiResponse<ContentReviewStatusResponse>.Fail("Chỉ có thể gửi duyệt nội dung Draft hoặc Rejected.");
 
                 entity.Status = ContentStatus.PendingReview;
-                entity.IsApproved = false;
-                entity.ReviewedByName = null;
-                entity.ReviewNote = null;
-                entity.ReviewedDate = null;
 
                 unitOfWork.Kanjis.Update(entity);
                 await unitOfWork.SaveChangesAsync(cancellationToken);
@@ -445,17 +429,13 @@ namespace RikiPath.Application.Services
             try
             {
                 var entity = await unitOfWork.Vocabularies.GetByIdAsync(entityId, cancellationToken);
-                if (entity is null || entity.IsDeleted || entity.ContentAuthorId != authorId)
+                if (entity is null || entity.IsDeleted)
                     return ApiResponse<ContentReviewStatusResponse>.Fail("Không tìm thấy nội dung.");
 
                 if (entity.Status is not (ContentStatus.Draft or ContentStatus.Rejected))
                     return ApiResponse<ContentReviewStatusResponse>.Fail("Chỉ có thể gửi duyệt nội dung Draft hoặc Rejected.");
 
                 entity.Status = ContentStatus.PendingReview;
-                entity.IsApproved = false;
-                entity.ReviewedByName = null;
-                entity.ReviewNote = null;
-                entity.ReviewedDate = null;
 
                 unitOfWork.Vocabularies.Update(entity);
                 await unitOfWork.SaveChangesAsync(cancellationToken);
@@ -474,17 +454,13 @@ namespace RikiPath.Application.Services
             try
             {
                 var entity = await unitOfWork.GrammarPatterns.GetByIdAsync(entityId, cancellationToken);
-                if (entity is null || entity.IsDeleted || entity.ContentAuthorId != authorId)
+                if (entity is null || entity.IsDeleted)
                     return ApiResponse<ContentReviewStatusResponse>.Fail("Không tìm thấy nội dung.");
 
                 if (entity.Status is not (ContentStatus.Draft or ContentStatus.Rejected))
                     return ApiResponse<ContentReviewStatusResponse>.Fail("Chỉ có thể gửi duyệt nội dung Draft hoặc Rejected.");
 
                 entity.Status = ContentStatus.PendingReview;
-                entity.IsApproved = false;
-                entity.ReviewedByName = null;
-                entity.ReviewNote = null;
-                entity.ReviewedDate = null;
 
                 unitOfWork.GrammarPatterns.Update(entity);
                 await unitOfWork.SaveChangesAsync(cancellationToken);
@@ -534,16 +510,13 @@ namespace RikiPath.Application.Services
             try
             {
                 var entity = await unitOfWork.PracticeExercises.GetByIdAsync(entityId, cancellationToken);
-                if (entity is null || entity.IsDeleted || entity.ContentAuthorId != authorId)
+                if (entity is null || entity.IsDeleted)
                     return ApiResponse<ContentReviewStatusResponse>.Fail("Không tìm thấy nội dung.");
                 if (entity.Status is not (ContentStatus.Draft or ContentStatus.Rejected))
                     return ApiResponse<ContentReviewStatusResponse>.Fail("Chỉ có thể gửi duyệt nội dung Draft hoặc Rejected.");
 
                 entity.Status = ContentStatus.PendingReview;
-                entity.IsApproved = false;
-                entity.ReviewedByName = null;
-                entity.ReviewNote = null;
-                entity.ReviewedDate = null;
+
                 unitOfWork.PracticeExercises.Update(entity);
                 await unitOfWork.SaveChangesAsync(cancellationToken);
                 return ApiResponse<ContentReviewStatusResponse>.Success(MapPracticeExerciseToResponse(entity));
@@ -560,19 +533,19 @@ namespace RikiPath.Application.Services
 
                 List<ContentReviewStatusResponse> result = entityType switch
                 {
-                    ContentEntityType.Lesson => (await unitOfWork.Lessons.FindAsync(e => !e.IsDeleted && e.ContentAuthorId == authorId, cancellationToken))
+                    ContentEntityType.Lesson => (await unitOfWork.Lessons.FindAsync(e => !e.IsDeleted, cancellationToken))
                         .Select(MapLessonToResponse).ToList(),
-                    ContentEntityType.Kanji => (await unitOfWork.Kanjis.FindAsync(e => !e.IsDeleted && e.ContentAuthorId == authorId, cancellationToken))
+                    ContentEntityType.Kanji => (await unitOfWork.Kanjis.FindAsync(e => !e.IsDeleted, cancellationToken))
                         .Select(MapKanjiToResponse).ToList(),
                     ContentEntityType.KanaCharacter => (await unitOfWork.KanaCharacters.FindAsync(e => !e.IsDeleted && e.ContentAuthorId == authorId, cancellationToken))
                         .Select(MapKanaToResponse).ToList(),
-                    ContentEntityType.Vocabulary => (await unitOfWork.Vocabularies.FindAsync(e => !e.IsDeleted && e.ContentAuthorId == authorId, cancellationToken))
+                    ContentEntityType.Vocabulary => (await unitOfWork.Vocabularies.FindAsync(e => !e.IsDeleted, cancellationToken))
                         .Select(MapVocabularyToResponse).ToList(),
-                    ContentEntityType.GrammarPattern => (await unitOfWork.GrammarPatterns.FindAsync(e => !e.IsDeleted && e.ContentAuthorId == authorId, cancellationToken))
+                    ContentEntityType.GrammarPattern => (await unitOfWork.GrammarPatterns.FindAsync(e => !e.IsDeleted, cancellationToken))
                         .Select(MapGrammarToResponse).ToList(),
                     ContentEntityType.MockTest => (await unitOfWork.MockTests.FindAsync(e => !e.IsDeleted && e.ContentAuthorId == authorId, cancellationToken))
                         .Select(MapMockTestToResponse).ToList(),
-                    ContentEntityType.PracticeExercise => (await unitOfWork.PracticeExercises.FindAsync(e => !e.IsDeleted && e.ContentAuthorId == authorId, cancellationToken))
+                    ContentEntityType.PracticeExercise => (await unitOfWork.PracticeExercises.FindAsync(e => !e.IsDeleted, cancellationToken))
                         .Select(MapPracticeExerciseToResponse).ToList(),
                     _ => throw new InvalidOperationException("Loại nội dung không hợp lệ.")
                 };
@@ -658,10 +631,6 @@ namespace RikiPath.Application.Services
                     return ApiResponse<ContentReviewStatusResponse>.Fail("Không tìm thấy nội dung đang chờ duyệt.");
 
                 entity.Status = request.Approve ? ContentStatus.Published : ContentStatus.Rejected;
-                entity.IsApproved = request.Approve;
-                entity.ReviewedByName = await GetReviewerNameAsync(adminId, cancellationToken);
-                entity.ReviewNote = request.ReviewNote;
-                entity.ReviewedDate = DateTime.UtcNow;
 
                 unitOfWork.Lessons.Update(entity);
                 await unitOfWork.SaveChangesAsync(cancellationToken);
@@ -684,10 +653,6 @@ namespace RikiPath.Application.Services
                     return ApiResponse<ContentReviewStatusResponse>.Fail("Không tìm thấy nội dung đang chờ duyệt.");
 
                 entity.Status = request.Approve ? ContentStatus.Published : ContentStatus.Rejected;
-                entity.IsApproved = request.Approve;
-                entity.ReviewedByName = await GetReviewerNameAsync(adminId, cancellationToken);
-                entity.ReviewNote = request.ReviewNote;
-                entity.ReviewedDate = DateTime.UtcNow;
 
                 unitOfWork.Kanjis.Update(entity);
                 await unitOfWork.SaveChangesAsync(cancellationToken);
@@ -725,10 +690,6 @@ namespace RikiPath.Application.Services
                     return ApiResponse<ContentReviewStatusResponse>.Fail("Không tìm thấy nội dung đang chờ duyệt.");
 
                 entity.Status = request.Approve ? ContentStatus.Published : ContentStatus.Rejected;
-                entity.IsApproved = request.Approve;
-                entity.ReviewedByName = await GetReviewerNameAsync(adminId, cancellationToken);
-                entity.ReviewNote = request.ReviewNote;
-                entity.ReviewedDate = DateTime.UtcNow;
 
                 unitOfWork.Vocabularies.Update(entity);
                 await unitOfWork.SaveChangesAsync(cancellationToken);
@@ -751,10 +712,6 @@ namespace RikiPath.Application.Services
                     return ApiResponse<ContentReviewStatusResponse>.Fail("Không tìm thấy nội dung đang chờ duyệt.");
 
                 entity.Status = request.Approve ? ContentStatus.Published : ContentStatus.Rejected;
-                entity.IsApproved = request.Approve;
-                entity.ReviewedByName = await GetReviewerNameAsync(adminId, cancellationToken);
-                entity.ReviewNote = request.ReviewNote;
-                entity.ReviewedDate = DateTime.UtcNow;
 
                 unitOfWork.GrammarPatterns.Update(entity);
                 await unitOfWork.SaveChangesAsync(cancellationToken);
@@ -803,10 +760,6 @@ namespace RikiPath.Application.Services
                     return ApiResponse<ContentReviewStatusResponse>.Fail("Không tìm thấy nội dung đang chờ duyệt.");
 
                 entity.Status = request.Approve ? ContentStatus.Published : ContentStatus.Rejected;
-                entity.IsApproved = request.Approve;
-                entity.ReviewedByName = await GetReviewerNameAsync(adminId, cancellationToken);
-                entity.ReviewNote = request.Approve ? null : request.ReviewNote;
-                entity.ReviewedDate = DateTime.UtcNow;
                 unitOfWork.PracticeExercises.Update(entity);
                 await unitOfWork.SaveChangesAsync(cancellationToken);
                 return ApiResponse<ContentReviewStatusResponse>.Success(MapPracticeExerciseToResponse(entity));
@@ -822,10 +775,6 @@ namespace RikiPath.Application.Services
             EntityType = ContentEntityType.Lesson,
             Title = e.Title,
             Status = e.Status,
-            ContentAuthorId = e.ContentAuthorId,
-            ReviewNote = e.ReviewNote,
-            ReviewedDate = e.ReviewedDate,
-            ReviewedByName = e.ReviewedByName
         };
 
         private static ContentReviewStatusResponse MapKanjiToResponse(Kanji e) => new()
@@ -834,10 +783,6 @@ namespace RikiPath.Application.Services
             EntityType = ContentEntityType.Kanji,
             Title = e.Character,
             Status = e.Status,
-            ContentAuthorId = e.ContentAuthorId,
-            ReviewNote = e.ReviewNote,
-            ReviewedDate = e.ReviewedDate,
-            ReviewedByName = e.ReviewedByName
         };
 
         private static ContentReviewStatusResponse MapKanaToResponse(KanaCharacter e) => new()
@@ -858,10 +803,6 @@ namespace RikiPath.Application.Services
             EntityType = ContentEntityType.Vocabulary,
             Title = e.Word,
             Status = e.Status,
-            ContentAuthorId = e.ContentAuthorId,
-            ReviewNote = e.ReviewNote,
-            ReviewedDate = e.ReviewedDate,
-            ReviewedByName = e.ReviewedByName
         };
 
         private static ContentReviewStatusResponse MapGrammarToResponse(GrammarPattern e) => new()
@@ -870,10 +811,6 @@ namespace RikiPath.Application.Services
             EntityType = ContentEntityType.GrammarPattern,
             Title = e.Title,
             Status = e.Status,
-            ContentAuthorId = e.ContentAuthorId,
-            ReviewNote = e.ReviewNote,
-            ReviewedDate = e.ReviewedDate,
-            ReviewedByName = e.ReviewedByName
         };
 
         private static ContentReviewStatusResponse MapMockTestToResponse(MockTest e) => new()
@@ -894,10 +831,6 @@ namespace RikiPath.Application.Services
             EntityType = ContentEntityType.PracticeExercise,
             Title = e.Title,
             Status = e.Status,
-            ContentAuthorId = e.ContentAuthorId,
-            ReviewNote = e.ReviewNote,
-            ReviewedDate = e.ReviewedDate,
-            ReviewedByName = e.ReviewedByName
         };
 
         private static string GetRequired(ParsedContentRow row, string key)

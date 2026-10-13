@@ -69,6 +69,7 @@ namespace RikiPath.Application
         INoteRepository Notes { get; }
         IMentorAvailabilityRepository MentorAvailabilities { get; }
 
+        IContentApprovalRequestRepository ContentApprovalRequests { get; }
         // Db Helpers
         Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
         Task<T> ExecuteScalarAsync<T>(string sql);
