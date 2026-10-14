@@ -18,14 +18,14 @@ namespace RikiPath.Application.Services
                 var userId = claimService.GetUserClaim().Id;
                 var now = DateTime.UtcNow;
                 var cards = await unitOfWork.KanaWritingPracticeCards.FindAsync(
-                    x => x.UserId == userId && x.NextReviewDate <= now && !x.KanaCharacter.IsDeleted && x.KanaCharacter.Status == ContentStatus.Published
+                    x => x.UserId == userId && x.NextReviewDate <= now && !x.KanaCharacter.IsDeleted
                         && (!type.HasValue || x.KanaCharacter.Type == type.Value),
                     cancellationToken);
                 var result = new List<KanaWritingQueueItem>();
                 foreach (var card in cards.OrderBy(x => x.NextReviewDate).Take(count))
                 {
                     var kana = await unitOfWork.KanaCharacters.GetByIdAsync(card.KanaCharacterId, cancellationToken);
-                    if (kana is not null && kana.Status == ContentStatus.Published)
+                    if (kana is not null)
                         result.Add(Map(kana, false));
                 }
 
@@ -36,14 +36,16 @@ namespace RikiPath.Application.Services
                     var allCards = await unitOfWork.KanaWritingPracticeCards.FindAsync(x => x.UserId == userId, cancellationToken);
                     existingIds.UnionWith(allCards.Select(x => x.KanaCharacterId));
                     var candidates = (await unitOfWork.KanaCharacters.FindAsync(
-                        x => x.Status == ContentStatus.Published && !x.IsDeleted && (!type.HasValue || x.Type == type.Value), cancellationToken))
+                        x => !x.IsDeleted && (!type.HasValue || x.Type == type.Value), cancellationToken))
                         .Where(x => !existingIds.Contains(x.Id)).OrderBy(x => x.Type).ThenBy(x => x.Character).Take(remaining).ToList();
 
                     foreach (var kana in candidates)
                     {
                         await unitOfWork.KanaWritingPracticeCards.AddAsync(new KanaWritingPracticeCard
                         {
-                            UserId = userId, KanaCharacterId = kana.Id, NextReviewDate = now
+                            UserId = userId,
+                            KanaCharacterId = kana.Id,
+                            NextReviewDate = now
                         }, cancellationToken);
                         result.Add(Map(kana, true));
                     }
@@ -62,7 +64,7 @@ namespace RikiPath.Application.Services
             {
                 var userId = claimService.GetUserClaim().Id;
                 var kana = await unitOfWork.KanaCharacters.GetByIdAsync(request.KanaCharacterId, cancellationToken);
-                if (kana is null || kana.Status != ContentStatus.Published)
+                if (kana is null)
                     return ApiResponse<SubmitKanaWritingResultResponse>.NotFound("Không tìm thấy ký tự Kana đã được duyệt.");
 
                 var card = await unitOfWork.KanaWritingPracticeCards.FirstOrDefaultAsync(
@@ -88,8 +90,12 @@ namespace RikiPath.Application.Services
                 await unitOfWork.SaveChangesAsync(cancellationToken);
                 return ApiResponse<SubmitKanaWritingResultResponse>.Success(new()
                 {
-                    PracticeCardId = card.Id, KanaCharacterId = kana.Id, TotalMistakes = request.TotalMistakes,
-                    QualityScore = quality, Repetitions = card.Repetitions, IntervalDays = card.IntervalDays,
+                    PracticeCardId = card.Id,
+                    KanaCharacterId = kana.Id,
+                    TotalMistakes = request.TotalMistakes,
+                    QualityScore = quality,
+                    Repetitions = card.Repetitions,
+                    IntervalDays = card.IntervalDays,
                     NextReviewDate = card.NextReviewDate
                 });
             }
@@ -98,8 +104,14 @@ namespace RikiPath.Application.Services
 
         private static KanaWritingQueueItem Map(KanaCharacter x, bool isNew) => new()
         {
-            KanaCharacterId = x.Id, Character = x.Character, Type = x.Type, Romaji = x.Romaji,
-            StrokeCount = x.StrokeCount, StrokeOrderImageUrl = x.StrokeOrderImageUrl, AudioUrl = x.AudioUrl, IsNew = isNew
+            KanaCharacterId = x.Id,
+            Character = x.Character,
+            Type = x.Type,
+            Romaji = x.Romaji,
+            StrokeCount = x.StrokeCount,
+            StrokeOrderImageUrl = x.StrokeOrderImageUrl,
+            AudioUrl = x.AudioUrl,
+            IsNew = isNew
         };
 
         private static void ApplySm2(KanaWritingPracticeCard card, int quality)

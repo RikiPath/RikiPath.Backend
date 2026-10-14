@@ -1,8 +1,9 @@
-﻿using RikiPath.Application.Responses.Content;
-using RikiPath.Domain.Enums;
-using System.Text.Json;
+﻿using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using RikiPath.Application.Helpers;
+using RikiPath.Application.Responses.Content;
+using RikiPath.Domain.Entities;
+using RikiPath.Domain.Enums;
 
 namespace RikiPath.Application.Handlers
 {
@@ -14,35 +15,28 @@ namespace RikiPath.Application.Handlers
         public async Task<SheetImportResponse> BuildDiffAsync(
             IReadOnlyList<ExcelRow> rows, CancellationToken cancellationToken)
         {
-            // Nạp toàn bộ dữ liệu cần so khớp 1 lần duy nhất, tránh N+1 query theo từng dòng Excel.
-            // Chỉ lấy Kanji chưa xóa. Chữ nào trùng nhiều bản ghi trong DB thì đánh dấu "ambiguous" thay vì ném lỗi.
+            // Thay CertificateLevel bằng ContentLevelMappings
             var existingKanjis = await unitOfWork.Kanjis.Query()
-                .Include(k => k.CertificateLevel)
-                .Include(k => k.LessonKanjis).ThenInclude(lk => lk.Lesson).ThenInclude(l => l.CertificateLevel)
+                .Include(k => k.ContentLevelMappings!)
+                    .ThenInclude(m => m.CertificateLevel)
+                .Include(k => k.LessonKanjis!)
+                    .ThenInclude(lk => lk.Lesson)
+                        .ThenInclude(l => l.CertificateLevel)
                 .Where(k => !k.IsDeleted)
                 .ToListAsync(cancellationToken);
+
             var (existingByCharacter, ambiguousCharacters) = ImportHandlerSupport.IndexByKey(existingKanjis, k => k.Character);
-
             var (levelsByCode, ambiguousLevelCodes) = await ImportHandlerSupport.LoadLevelsAsync(unitOfWork, cancellationToken);
-
-            // Kanji đã import nhưng đang chờ Admin duyệt (chưa có trong bảng chính).
             var openRowKeys = await ImportHandlerSupport.LoadOpenRowKeysAsync(unitOfWork, EntityType, cancellationToken);
 
             var result = new SheetImportResponse { EntityType = EntityType, SheetName = SheetName, TotalRows = rows.Count };
-            var seenInFile = new HashSet<string>();
+            var seenInFile = new HashSet<string>(StringComparer.Ordinal);
 
             foreach (var row in rows)
             {
                 var diff = BuildRowDiff(row, existingByCharacter, ambiguousCharacters, levelsByCode, ambiguousLevelCodes, openRowKeys, seenInFile);
                 result.Rows.Add(diff);
-
-                switch (diff.Action)
-                {
-                    case ImportRowAction.New: result.NewCount++; break;
-                    case ImportRowAction.Modified: result.ModifiedCount++; break;
-                    case ImportRowAction.Unchanged: result.UnchangedCount++; break;
-                    case ImportRowAction.Error: result.ErrorCount++; break;
-                }
+                ImportHandlerSupport.Tally(result, diff);
             }
 
             return result;
@@ -50,7 +44,7 @@ namespace RikiPath.Application.Handlers
 
         private static ImportRowDiffResponse BuildRowDiff(
             ExcelRow row,
-            Dictionary<string, Domain.Entities.Kanji> existingByCharacter,
+            Dictionary<string, Kanji> existingByCharacter,
             HashSet<string> ambiguousCharacters,
             Dictionary<string, int> levelsByCode,
             HashSet<string> ambiguousLevelCodes,
@@ -88,10 +82,10 @@ namespace RikiPath.Application.Handlers
                 diff.Errors.Add("Thiếu cột Character.");
             if (string.IsNullOrWhiteSpace(meaning))
                 diff.Errors.Add("Thiếu cột Meaning.");
-            if (string.IsNullOrWhiteSpace(strokeCountRaw) || !int.TryParse(strokeCountRaw, out var strokeCount) || strokeCount <= 0)
+
+            var isValidStrokeCount = int.TryParse(strokeCountRaw, out var strokeCount) && strokeCount > 0;
+            if (!isValidStrokeCount)
                 diff.Errors.Add("Stroke Count phải là số nguyên dương.");
-            else
-                strokeCount = int.Parse(strokeCountRaw!);
 
             ImportHandlerSupport.CheckLevel(levelCode, levelsByCode, ambiguousLevelCodes, diff.Errors);
 
@@ -111,7 +105,7 @@ namespace RikiPath.Application.Handlers
                 return diff;
             }
 
-            // ---- Build payload (đã qua validate, mọi giá trị required chắc chắn có) ----
+            // ---- Build payload ----
             var payload = new KanjiImportPayloadResponse
             {
                 Character = character!,
@@ -119,7 +113,7 @@ namespace RikiPath.Application.Handlers
                 SinoVietnamese = sinoVietnamese,
                 OnYomi = onYomi,
                 KunYomi = kunYomi,
-                StrokeCount = int.Parse(strokeCountRaw!),
+                StrokeCount = strokeCount,
                 CertificateLevelCode = levelCode!,
                 CertificateLevelId = levelsByCode[levelCode!],
                 LessonTitle = lessonTitle,
@@ -141,9 +135,15 @@ namespace RikiPath.Application.Handlers
             ImportHandlerSupport.CompareField(changed, "onYomi", existing.OnYomi, payload.OnYomi);
             ImportHandlerSupport.CompareField(changed, "kunYomi", existing.KunYomi, payload.KunYomi);
             ImportHandlerSupport.CompareField(changed, "strokeCount", existing.StrokeCount.ToString(), payload.StrokeCount.ToString());
-            ImportHandlerSupport.CompareField(changed, "certificateLevelCode", existing.CertificateLevel?.Code, payload.CertificateLevelCode);
 
-            // Excel ghi 1 bài học; nếu Kanji đang thuộc bài khác thì báo rõ "bài hiện tại → bài trong file" để Content Author tự kiểm tra.
+            // Lấy mã trình độ hiện tại từ danh sách ContentLevelMappings
+            var existingLevelCode = existing.ContentLevelMappings?
+                .Where(m => !m.IsDeleted && m.CertificateLevel != null)
+                .Select(m => m.CertificateLevel.Code)
+                .FirstOrDefault();
+
+            ImportHandlerSupport.CompareField(changed, "certificateLevelCode", existingLevelCode, payload.CertificateLevelCode);
+
             ImportHandlerSupport.CompareLesson(changed, lessonTitle, payload.CertificateLevelId, payload.CertificateLevelCode,
                 existing.LessonKanjis?.Select(lk => lk.Lesson));
 
@@ -160,4 +160,3 @@ namespace RikiPath.Application.Handlers
         }
     }
 }
-

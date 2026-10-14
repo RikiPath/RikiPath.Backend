@@ -9,8 +9,6 @@ namespace RikiPath.Domain.Entities
         public string? Description { get; set; }
         public int SortOrder { get; set; }
 
-        public ContentStatus Status { get; set; } = ContentStatus.Draft;
-
         public int CertificateLevelId { get; set; }
         public CertificateLevel CertificateLevel { get; set; }
         public int LanguageSkillId { get; set; }

@@ -63,9 +63,6 @@ namespace RikiPath.Infrastructure.Repositories
                 .Select(x => x.Kanji!)
                 .Where(k => !k.IsDeleted);
 
-            if (publishedOnly)
-                query = query.Where(k => k.Status == ContentStatus.Published);
-
             return await query.OrderBy(k => k.Id).ToListAsync(ct);
         }
 
@@ -76,9 +73,6 @@ namespace RikiPath.Infrastructure.Repositories
                 .Select(x => x.Vocabulary!)
                 .Where(v => !v.IsDeleted);
 
-            if (publishedOnly)
-                query = query.Where(v => v.Status == ContentStatus.Published);
-
             return await query.OrderBy(v => v.Id).ToListAsync(ct);
         }
 
@@ -88,9 +82,6 @@ namespace RikiPath.Infrastructure.Repositories
                 .Where(x => !x.IsDeleted && x.CertificateLevelId == certificateLevelId && x.GrammarPatternId != null)
                 .Select(x => x.GrammarPattern!)
                 .Where(g => !g.IsDeleted);
-
-            if (publishedOnly)
-                query = query.Where(g => g.Status == ContentStatus.Published);
 
             return await query.OrderBy(g => g.Id).ToListAsync(ct);
         }

@@ -1,5 +1,6 @@
 using ClosedXML.Excel;
 using RikiPath.Application.DTOs.Content;
+using RikiPath.Application.Helpers;
 using RikiPath.Application.IClients;
 using System.Text;
 
@@ -106,6 +107,42 @@ namespace RikiPath.Infrastructure.Clients
             {
                 result.Success = false;
                 result.Errors.Add($"Lỗi đọc file Excel: {ex.Message}");
+            }
+
+            return Task.FromResult(result);
+        }
+
+        public Task<ExcelSheetsParseResult> ParseSheetsAsync(Stream fileStream, CancellationToken cancellationToken)
+        {
+            var result = new ExcelSheetsParseResult();
+
+            try
+            {
+                using var workbook = new XLWorkbook(fileStream);
+
+                foreach (var ws in workbook.Worksheets)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    var rows = ExcelSheetReader.ReadRows(ws);
+                    result.Sheets.Add(new SheetParseResult
+                    {
+                        SheetName = ws.Name,
+                        // Chuyển đổi từ ExcelRow sang ParsedContentRow
+                        Rows = rows.Select(r => new ParsedContentRow
+                        {
+                            RowNumber = r.RowNumber,
+                            Fields = r.Fields
+                        }).ToList()
+                    });
+                }
+
+                result.Success = true;
+            }
+            catch (Exception ex)
+            {
+                result.Success = false;
+                result.Errors.Add($"Không đọc được file Excel: {ex.Message}");
             }
 
             return Task.FromResult(result);

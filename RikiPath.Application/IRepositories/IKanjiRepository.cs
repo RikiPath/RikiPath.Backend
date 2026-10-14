@@ -9,13 +9,11 @@ namespace RikiPath.Application.IRepositories
     {
         Task<(List<Kanji> Items, int TotalCount)> SearchAsync(
             int? jlptLevelId,
-            ContentStatus? status,
             string? keyword,
             int? minStroke,
             int? maxStroke,
             int pageIndex,
             int pageSize);
-        Task<int> CountSearchAsync(int? jlptLevelId, ContentStatus? status, string? keyword);
-        Task<List<Kanji>> GetPendingReviewAsync();
+        Task<int> CountSearchAsync(int? jlptLevelId, string? keyword);
     }
 }

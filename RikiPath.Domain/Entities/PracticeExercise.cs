@@ -13,7 +13,6 @@ public class PracticeExercise : Base
     public int LanguageSkillId { get; set; }
     public LanguageSkill LanguageSkill { get; set; } = null!;
     public int SortOrder { get; set; }
-    public ContentStatus Status { get; set; } = ContentStatus.Draft;
     public List<PracticeQuestion>? Questions { get; set; }
     public List<PracticeExerciseAttempt>? Attempts { get; set; }
 }

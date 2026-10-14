@@ -13,19 +13,9 @@ namespace RikiPath.Domain.Entities
         public string? Description { get; set; }
         public int TimeLimitMinutes { get; set; }
 
-        public ContentStatus Status { get; set; } = ContentStatus.Draft;
-        public bool IsApproved { get; set; }
-        public string? ReviewNote { get; set; }
-        public DateTime? ReviewedDate { get; set; }
-        public string? ReviewedByName { get; set; }
-
-
         public int CertificateLevelId { get; set; }
         public CertificateLevel CertificateLevel { get; set; }
-        public int ContentAuthorId { get; set; }
-        public UserAccount ContentAuthor { get; set; }
 
         public List<MockTestSection>? Sections { get; set; }
-        public List<MockTestAttempt>? Attempts { get; set; }
     }
 }

@@ -2,6 +2,7 @@
 using Microsoft.EntityFrameworkCore;
 using RikiPath.Application.Helpers;
 using RikiPath.Application.Responses.Content;
+using RikiPath.Domain.Entities;
 using RikiPath.Domain.Enums;
 
 namespace RikiPath.Application.Handlers
@@ -14,11 +15,16 @@ namespace RikiPath.Application.Handlers
 
         public async Task<SheetImportResponse> BuildDiffAsync(IReadOnlyList<ExcelRow> rows, CancellationToken cancellationToken)
         {
+            // Sửa Include: chuyển từ CertificateLevel sang ContentLevelMappings
             var existingPatterns = await unitOfWork.GrammarPatterns.Query()
-                .Include(g => g.CertificateLevel)
-                .Include(g => g.LessonGrammars).ThenInclude(lg => lg.Lesson).ThenInclude(l => l.CertificateLevel)
+                .Include(g => g.ContentLevelMappings!)
+                    .ThenInclude(m => m.CertificateLevel)
+                .Include(g => g.LessonGrammars!)
+                    .ThenInclude(lg => lg.Lesson)
+                        .ThenInclude(l => l.CertificateLevel)
                 .Where(g => !g.IsDeleted)
                 .ToListAsync(cancellationToken);
+
             var (existingByTitle, ambiguousTitles) = ImportHandlerSupport.IndexByKey(existingPatterns, g => g.Title);
 
             var (levelsByCode, ambiguousLevelCodes) = await ImportHandlerSupport.LoadLevelsAsync(unitOfWork, cancellationToken);
@@ -39,7 +45,7 @@ namespace RikiPath.Application.Handlers
 
         private static ImportRowDiffResponse BuildRowDiff(
             ExcelRow row,
-            Dictionary<string, Domain.Entities.GrammarPattern> existingByTitle,
+            Dictionary<string, GrammarPattern> existingByTitle,
             HashSet<string> ambiguousTitles,
             Dictionary<string, int> levelsByCode,
             HashSet<string> ambiguousLevelCodes,
@@ -120,7 +126,14 @@ namespace RikiPath.Application.Handlers
             ImportHandlerSupport.CompareField(changed, "usageNotes", existing.UsageNotes, payload.UsageNotes);
             ImportHandlerSupport.CompareField(changed, "exampleSentence", existing.ExampleSentence, payload.ExampleSentence);
             ImportHandlerSupport.CompareField(changed, "exampleSentenceMeaning", existing.ExampleSentenceMeaning, payload.ExampleSentenceMeaning);
-            ImportHandlerSupport.CompareField(changed, "certificateLevelCode", existing.CertificateLevel?.Code, payload.CertificateLevelCode);
+
+            // Lấy mã trình độ hiện tại từ danh sách ContentLevelMappings
+            var existingLevelCode = existing.ContentLevelMappings?
+                .Where(m => !m.IsDeleted && m.CertificateLevel != null)
+                .Select(m => m.CertificateLevel.Code)
+                .FirstOrDefault();
+
+            ImportHandlerSupport.CompareField(changed, "certificateLevelCode", existingLevelCode, payload.CertificateLevelCode);
 
             ImportHandlerSupport.CompareLesson(changed, lessonTitle, payload.CertificateLevelId, payload.CertificateLevelCode,
                 existing.LessonGrammars?.Select(lg => lg.Lesson));

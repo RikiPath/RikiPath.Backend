@@ -54,7 +54,8 @@ namespace RikiPath.Application.Services
                             .ToHashSet();
 
                         var candidates = (await unitOfWork.Kanjis.FindAsync(
-                            k => k.CertificateLevelId == targetLevelId.Value && k.Status == ContentStatus.Published,
+                            k => k.ContentLevelMappings != null &&
+                                 k.ContentLevelMappings.Any(m => m.CertificateLevelId == targetLevelId.Value && !m.IsDeleted),
                             cancellationToken))
                             .Where(k => !existingKanjiIds.Contains(k.Id))
                             .Take(remaining)
@@ -101,11 +102,12 @@ namespace RikiPath.Application.Services
                     return ApiResponse<List<KanjiWritingQueueItem>>.Success([]);
 
                 var kanjis = (await unitOfWork.Kanjis.FindAsync(
-                    k => k.CertificateLevelId == targetLevelId && k.Status == ContentStatus.Published,
-                    cancellationToken))
-                    .OrderBy(k => k.Id)
-                    .Take(Math.Clamp(count, 1, 200))
-                    .ToList();
+                     k => k.ContentLevelMappings != null &&
+                          k.ContentLevelMappings.Any(m => m.CertificateLevelId == targetLevelId && !m.IsDeleted),
+                     cancellationToken))
+                     .OrderBy(k => k.Id)
+                     .Take(Math.Clamp(count, 1, 200))
+                     .ToList();
 
                 var cards = await unitOfWork.ReviewCards.FindAsync(
                     r => r.UserId == userId && r.Mode == ReviewMode.Writing && r.KanjiId != null,
@@ -196,31 +198,31 @@ namespace RikiPath.Application.Services
 
         public async Task<ApiResponse<List<KanjiWritingScoreResponse>>> GetScoresAsync(
                 CancellationToken cancellationToken)
+        {
+            try
             {
-                try
-                {
-                    var userId = claimService.GetUserClaim().Id;
-                    var cards = await unitOfWork.ReviewCards.FindAsync(
-                        r => r.UserId == userId && r.Mode == ReviewMode.Writing && r.KanjiId != null && r.WritingScore != null,
-                        cancellationToken);
+                var userId = claimService.GetUserClaim().Id;
+                var cards = await unitOfWork.ReviewCards.FindAsync(
+                    r => r.UserId == userId && r.Mode == ReviewMode.Writing && r.KanjiId != null && r.WritingScore != null,
+                    cancellationToken);
 
-                    return ApiResponse<List<KanjiWritingScoreResponse>>.Success(cards.Select(card => new KanjiWritingScoreResponse
-                    {
-                        KanjiId = card.KanjiId!.Value,
-                        Score = card.WritingScore!.Value,
-                        CorrectStrokeCount = card.WritingCorrectStrokeCount ?? 0,
-                        TotalStrokeCount = card.WritingTotalStrokeCount ?? 0,
-                        PracticeMode = card.WritingPracticeMode ?? "guided",
-                        CompletedAt = card.WritingScoreUpdatedAt ?? card.LastReviewedAt ?? DateTime.UtcNow,
-                    }).ToList());
-                }
-                catch (Exception ex)
+                return ApiResponse<List<KanjiWritingScoreResponse>>.Success(cards.Select(card => new KanjiWritingScoreResponse
                 {
-                    return ApiResponse<List<KanjiWritingScoreResponse>>.Fail($"Không thể tải điểm luyện viết: {ex.Message}");
-                }
+                    KanjiId = card.KanjiId!.Value,
+                    Score = card.WritingScore!.Value,
+                    CorrectStrokeCount = card.WritingCorrectStrokeCount ?? 0,
+                    TotalStrokeCount = card.WritingTotalStrokeCount ?? 0,
+                    PracticeMode = card.WritingPracticeMode ?? "guided",
+                    CompletedAt = card.WritingScoreUpdatedAt ?? card.LastReviewedAt ?? DateTime.UtcNow,
+                }).ToList());
             }
+            catch (Exception ex)
+            {
+                return ApiResponse<List<KanjiWritingScoreResponse>>.Fail($"Không thể tải điểm luyện viết: {ex.Message}");
+            }
+        }
 
-            private static KanjiWritingQueueItem MapToQueueItem(Kanji kanji, bool isNew, ReviewCard? card = null) => new()
+        private static KanjiWritingQueueItem MapToQueueItem(Kanji kanji, bool isNew, ReviewCard? card = null) => new()
         {
             KanjiId = kanji.Id,
             Character = kanji.Character,

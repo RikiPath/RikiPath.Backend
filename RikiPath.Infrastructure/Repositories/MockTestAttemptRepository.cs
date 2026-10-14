@@ -15,14 +15,12 @@ namespace RikiPath.Infrastructure.Repositories
 
         public async Task<List<MockTestAttempt>> GetByUserAsync(int userId)
             => await _context.MockTestAttempts
-                .Include(x => x.MockTest)
                 .Where(x => x.UserId == userId)
                 .OrderByDescending(x => x.StartedAt)
                 .ToListAsync();
 
         public async Task<MockTestAttempt?> GetWithBreakdownAsync(int attemptId)
             => await _context.MockTestAttempts
-                .Include(x => x.MockTest)
                 .Include(x => x.Answers).ThenInclude(a => a.MockQuestion)
                 .Include(x => x.SectionResults).ThenInclude(r => r.MockTestSection)
                 .FirstOrDefaultAsync(x => x.Id == attemptId);

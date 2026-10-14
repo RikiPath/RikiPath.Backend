@@ -9,8 +9,9 @@ namespace RikiPath.Infrastructure.Configuration
         public void Configure(EntityTypeBuilder<MockTestSection> builder)
         {
             builder.HasKey(x => x.Id);
-            builder.Property(x => x.MockTestId).HasColumnName("PracticeTestId");
+            builder.Property(x => x.MockTestId).HasColumnName("MockTestId");
             builder.Property(x => x.LanguageSkillId).HasColumnName("SkillId");
+            builder.Property(x => x.CertificateSectionId).HasColumnName("CertificationSectionId");
             builder.Property(x => x.Title).IsRequired().HasMaxLength(200);
 
             builder.HasOne(x => x.MockTest)
@@ -22,6 +23,13 @@ namespace RikiPath.Infrastructure.Configuration
                 .WithMany(x => x.MockTestSections)
                 .HasForeignKey(x => x.LanguageSkillId)
                 .OnDelete(DeleteBehavior.Restrict);
+
+            builder.HasOne(x => x.CertificateSection)
+                .WithMany(x => x.MockTestSections)
+                .HasForeignKey(x => x.CertificateSectionId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            builder.HasIndex(x => new { x.MockTestId, x.CertificateSectionId });
         }
     }
 }

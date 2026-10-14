@@ -12,8 +12,6 @@ namespace RikiPath.Infrastructure.Configuration
             builder.Property(x => x.Character).IsRequired().HasMaxLength(10);
             builder.Property(x => x.Type).HasConversion<string>().HasMaxLength(20);
             builder.Property(x => x.Romaji).IsRequired().HasMaxLength(20);
-            builder.Property(x => x.Status).HasConversion<string>().HasMaxLength(20);
-            builder.Property(x => x.ReviewedByName).HasMaxLength(200);
             builder.HasIndex(x => new { x.Character, x.Type }).IsUnique();
             builder.HasOne(x => x.ContentAuthor).WithMany()
                 .HasForeignKey(x => x.ContentAuthorId).OnDelete(DeleteBehavior.Restrict);

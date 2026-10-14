@@ -1,6 +1,6 @@
-using RikiPath.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using RikiPath.Domain.Entities;
 
 namespace RikiPath.Infrastructure.Configuration
 {
@@ -9,18 +9,12 @@ namespace RikiPath.Infrastructure.Configuration
         public void Configure(EntityTypeBuilder<Vocabulary> builder)
         {
             builder.HasKey(x => x.Id);
-            builder.Property(x => x.CertificateLevelId).HasColumnName("CertificationLevelId");
             builder.Property(x => x.Word).IsRequired().HasMaxLength(200);
             builder.Property(x => x.Reading).IsRequired().HasMaxLength(200);
             builder.Property(x => x.Meaning).IsRequired().HasMaxLength(300);
-            builder.Property(x => x.Status).HasConversion<string>().HasMaxLength(20);
 
-            builder.HasOne(x => x.CertificateLevel)
-                .WithMany(x => x.Vocabularies)
-                .HasForeignKey(x => x.CertificateLevelId)
-                .OnDelete(DeleteBehavior.Restrict);
-
-            builder.HasIndex(x => new { x.CertificateLevelId, x.Status });
+            // Index trên Word và Reading để tìm kiếm từ vựng nhanh hơn
+            builder.HasIndex(x => new { x.Word, x.Reading });
         }
     }
 }

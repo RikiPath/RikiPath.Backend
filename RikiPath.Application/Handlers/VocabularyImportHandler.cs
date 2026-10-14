@@ -2,6 +2,7 @@
 using Microsoft.EntityFrameworkCore;
 using RikiPath.Application.Helpers;
 using RikiPath.Application.Responses.Content;
+using RikiPath.Domain.Entities;
 using RikiPath.Domain.Enums;
 
 namespace RikiPath.Application.Handlers
@@ -15,11 +16,16 @@ namespace RikiPath.Application.Handlers
         public async Task<SheetImportResponse> BuildDiffAsync(IReadOnlyList<ExcelRow> rows, CancellationToken cancellationToken)
         {
             // Nạp dữ liệu cần so khớp 1 lần duy nhất, tránh N+1 query theo từng dòng Excel.
+            // Thay CertificateLevel bằng ContentLevelMappings
             var existingVocabularies = await unitOfWork.Vocabularies.Query()
-                .Include(v => v.CertificateLevel)
-                .Include(v => v.LessonVocabularies).ThenInclude(lv => lv.Lesson).ThenInclude(l => l.CertificateLevel)
+                .Include(v => v.ContentLevelMappings!)
+                    .ThenInclude(m => m.CertificateLevel)
+                .Include(v => v.LessonVocabularies!)
+                    .ThenInclude(lv => lv.Lesson)
+                        .ThenInclude(l => l.CertificateLevel)
                 .Where(v => !v.IsDeleted)
                 .ToListAsync(cancellationToken);
+
             var (existingByKey, ambiguousKeys) = ImportHandlerSupport.IndexByKey(
                 existingVocabularies, v => NaturalKey(v.Word, v.Reading));
 
@@ -44,7 +50,7 @@ namespace RikiPath.Application.Handlers
 
         private static ImportRowDiffResponse BuildRowDiff(
             ExcelRow row,
-            Dictionary<string, Domain.Entities.Vocabulary> existingByKey,
+            Dictionary<string, Vocabulary> existingByKey,
             HashSet<string> ambiguousKeys,
             Dictionary<string, int> levelsByCode,
             HashSet<string> ambiguousLevelCodes,
@@ -131,10 +137,18 @@ namespace RikiPath.Application.Handlers
             ImportHandlerSupport.CompareField(changed, "meaning", existing.Meaning, payload.Meaning);
             ImportHandlerSupport.CompareField(changed, "exampleSentence", existing.ExampleSentence, payload.ExampleSentence);
             ImportHandlerSupport.CompareField(changed, "exampleSentenceMeaning", existing.ExampleSentenceMeaning, payload.ExampleSentenceMeaning);
+
             // AudioUrl là cột tùy chọn: file không có cột này thì coi như không đổi.
             if (payload.AudioUrl is not null)
                 ImportHandlerSupport.CompareField(changed, "audioUrl", existing.AudioUrl, payload.AudioUrl);
-            ImportHandlerSupport.CompareField(changed, "certificateLevelCode", existing.CertificateLevel?.Code, payload.CertificateLevelCode);
+
+            // Lấy mã trình độ hiện tại từ danh sách ContentLevelMappings
+            var existingLevelCode = existing.ContentLevelMappings?
+                .Where(m => !m.IsDeleted && m.CertificateLevel != null)
+                .Select(m => m.CertificateLevel.Code)
+                .FirstOrDefault();
+
+            ImportHandlerSupport.CompareField(changed, "certificateLevelCode", existingLevelCode, payload.CertificateLevelCode);
 
             ImportHandlerSupport.CompareLesson(changed, lessonTitle, payload.CertificateLevelId, payload.CertificateLevelCode,
                 existing.LessonVocabularies?.Select(lv => lv.Lesson));

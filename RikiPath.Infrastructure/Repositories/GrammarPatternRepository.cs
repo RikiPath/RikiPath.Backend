@@ -1,55 +1,49 @@
+using Microsoft.EntityFrameworkCore;
 using RikiPath.Application.IRepositories;
 using RikiPath.Domain.Entities;
-using Microsoft.EntityFrameworkCore;
-using RikiPath.Domain.Enums;
 
 namespace RikiPath.Infrastructure.Repositories
 {
     public class GrammarPatternRepository(AppDbContext context) : GenericRepository<GrammarPattern>(context), IGrammarPatternRepository
     {
-        private IQueryable<GrammarPattern> BuildSearchQuery(int? jlptLevelId, ContentStatus? status, string? keyword)
+        private IQueryable<GrammarPattern> BuildSearchQuery(int? jlptLevelId, string? keyword)
         {
             IQueryable<GrammarPattern> query = _context.GrammarPatterns.AsQueryable();
-            if (jlptLevelId.HasValue) query = query.Where(x => x.CertificateLevelId == jlptLevelId.Value);
-            if (status.HasValue) query = query.Where(x => x.Status == status.Value);
-            if (!string.IsNullOrEmpty(keyword))
-                query = query.Where(x => x.Title.ToLower().Contains(keyword.ToLower()) || x.Structure.ToLower().Contains(keyword.ToLower()));
-            return query;
-        }
 
-        public async Task<(List<GrammarPattern> Items, int TotalCount)> SearchAsync(
-    int? jlptLevelId,
-    ContentStatus? status,
-    string? keyword,
-    int pageIndex,
-    int pageSize)
-        {
-            var query = _context.GrammarPatterns
-                .Include(g => g.CertificateLevel)
-                .AsQueryable();
-
+            // Lọc theo Cấp độ chứng chỉ thông qua bảng trung gian ContentLevelMapping
             if (jlptLevelId.HasValue)
             {
-                query = query.Where(g => g.CertificateLevelId == jlptLevelId.Value);
+                query = query.Where(x => x.ContentLevelMappings != null &&
+                    x.ContentLevelMappings.Any(m => m.CertificateLevelId == jlptLevelId.Value && !m.IsDeleted));
             }
 
-            if (status.HasValue)
-            {
-                query = query.Where(g => g.Status == status.Value);
-            }
-
+            // Lọc theo từ khóa (Tiêu đề, Cấu trúc, Ghi chú sử dụng, Câu ví dụ)
             if (!string.IsNullOrWhiteSpace(keyword))
             {
                 var term = keyword.Trim();
                 query = query.Where(g =>
                     g.Title.Contains(term) ||
                     g.Structure.Contains(term) ||
-                    (g.UsageNotes != null && g.UsageNotes.Contains(term)));
+                    (g.UsageNotes != null && g.UsageNotes.Contains(term)) ||
+                    (g.ExampleSentence != null && g.ExampleSentence.Contains(term)));
             }
+
+            return query;
+        }
+
+        public async Task<(List<GrammarPattern> Items, int TotalCount)> SearchAsync(
+            int? jlptLevelId,
+            string? keyword,
+            int pageIndex,
+            int pageSize)
+        {
+            var query = BuildSearchQuery(jlptLevelId, keyword);
 
             var totalCount = await query.CountAsync();
 
             var items = await query
+                .Include(g => g.ContentLevelMappings!)
+                    .ThenInclude(m => m.CertificateLevel)
                 .OrderByDescending(g => g.Id)
                 .Skip((pageIndex - 1) * pageSize)
                 .Take(pageSize)
@@ -58,13 +52,7 @@ namespace RikiPath.Infrastructure.Repositories
             return (items, totalCount);
         }
 
-        public async Task<int> CountSearchAsync(int? jlptLevelId, ContentStatus? status, string? keyword)
-            => await BuildSearchQuery(jlptLevelId, status, keyword).CountAsync();
-
-        public async Task<List<GrammarPattern>> GetPendingReviewAsync()
-            => await _context.GrammarPatterns
-                .Where(x => x.Status == ContentStatus.PendingReview)
-                .OrderBy(x => x.ModifiedDate)
-                .ToListAsync();
+        public async Task<int> CountSearchAsync(int? jlptLevelId, string? keyword)
+            => await BuildSearchQuery(jlptLevelId, keyword).CountAsync();
     }
 }

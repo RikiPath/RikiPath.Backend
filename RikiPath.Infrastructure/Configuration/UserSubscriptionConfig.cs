@@ -29,12 +29,12 @@ namespace RikiPath.Infrastructure.Configuration
 
             builder.HasIndex(x => new { x.UserId, x.PaymentStatus, x.EndDate });
 
-            // Paid demo subscription lets the seeded Learner test included Mentor sessions without PayOS checkout.
+            // Ánh xạ 4 subscription tương ứng cho 4 Learner (900006 -> 900009)
             builder.HasData(
                 new UserSubscription
                 {
                     Id = 990001,
-                    UserId = 900007,
+                    UserId = 900006,
                     SubscriptionPlanId = 7,
                     AmountPaid = 459000m,
                     PaymentStatus = PaymentStatus.Paid,
@@ -49,7 +49,7 @@ namespace RikiPath.Infrastructure.Configuration
                 new UserSubscription
                 {
                     Id = 990002,
-                    UserId = 900008,
+                    UserId = 900007,
                     SubscriptionPlanId = 7,
                     AmountPaid = 459000m,
                     PaymentStatus = PaymentStatus.Paid,
@@ -64,7 +64,7 @@ namespace RikiPath.Infrastructure.Configuration
                 new UserSubscription
                 {
                     Id = 990003,
-                    UserId = 900009,
+                    UserId = 900008,
                     SubscriptionPlanId = 7,
                     AmountPaid = 459000m,
                     PaymentStatus = PaymentStatus.Paid,
@@ -79,7 +79,7 @@ namespace RikiPath.Infrastructure.Configuration
                 new UserSubscription
                 {
                     Id = 990004,
-                    UserId = 900010,
+                    UserId = 900009,
                     SubscriptionPlanId = 7,
                     AmountPaid = 459000m,
                     PaymentStatus = PaymentStatus.Paid,

@@ -24,7 +24,7 @@ namespace RikiPath.Infrastructure.Configuration
             builder.Property(x => x.RowVersion).IsRowVersion();
             builder.ToTable(t => t.HasCheckConstraint(
                 "CK_MentorAvailability_BookedCount",
-                "[BookedCount] >= 0 AND [BookedCount] <= [MaxLearners]"));
+                "\"BookedCount\" >= 0 AND \"BookedCount\" <= \"MaxLearners\""));
 
             builder.HasMany(x => x.MentorBookings)
                    .WithOne(b => b.MentorAvailability)

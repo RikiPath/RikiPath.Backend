@@ -381,6 +381,66 @@ namespace RikiPath.Infrastructure.Migrations
                         });
                 });
 
+            modelBuilder.Entity("RikiPath.Domain.Entities.CertificateSection", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("CertificateLevelId")
+                        .HasColumnType("integer")
+                        .HasColumnName("CertificationLevelId");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("CreatedDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<int?>("DurationMinutes")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("MaxScore")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid?>("ModifiedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("ModifiedDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<int>("PassingScore")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CertificateLevelId", "Code");
+
+                    b.ToTable("CertificateSections");
+                });
+
             modelBuilder.Entity("RikiPath.Domain.Entities.CertificateType", b =>
                 {
                     b.Property<int>("Id")
@@ -436,23 +496,6 @@ namespace RikiPath.Infrastructure.Migrations
                             Name = "JLPT",
                             SortOrder = 1
                         });
-                });
-
-            modelBuilder.Entity("RikiPath.Domain.Entities.CertificationLevelSkill", b =>
-                {
-                    b.Property<int>("CertificateLevelId")
-                        .HasColumnType("integer")
-                        .HasColumnName("CertificationLevelId");
-
-                    b.Property<int>("LanguageSkillId")
-                        .HasColumnType("integer")
-                        .HasColumnName("SkillId");
-
-                    b.HasKey("CertificateLevelId", "LanguageSkillId");
-
-                    b.HasIndex("LanguageSkillId");
-
-                    b.ToTable("CertificationLevelSkills");
                 });
 
             modelBuilder.Entity("RikiPath.Domain.Entities.ContentApprovalRequest", b =>
@@ -872,10 +915,6 @@ namespace RikiPath.Infrastructure.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
-                    b.Property<int>("CertificateLevelId")
-                        .HasColumnType("integer")
-                        .HasColumnName("CertificationLevelId");
-
                     b.Property<Guid?>("CreatedBy")
                         .HasColumnType("uuid");
 
@@ -883,10 +922,12 @@ namespace RikiPath.Infrastructure.Migrations
                         .HasColumnType("timestamp without time zone");
 
                     b.Property<string>("ExampleSentence")
-                        .HasColumnType("text");
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
 
                     b.Property<string>("ExampleSentenceMeaning")
-                        .HasColumnType("text");
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
 
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
@@ -896,11 +937,6 @@ namespace RikiPath.Infrastructure.Migrations
 
                     b.Property<DateTime?>("ModifiedDate")
                         .HasColumnType("timestamp without time zone");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)");
 
                     b.Property<string>("Structure")
                         .IsRequired()
@@ -913,16 +949,17 @@ namespace RikiPath.Infrastructure.Migrations
                         .HasColumnType("character varying(300)");
 
                     b.Property<string>("UsageNotes")
-                        .HasColumnType("text");
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
 
                     b.Property<int?>("UserAccountId")
                         .HasColumnType("integer");
 
                     b.HasKey("Id");
 
-                    b.HasIndex("UserAccountId");
+                    b.HasIndex("Title");
 
-                    b.HasIndex("CertificateLevelId", "Status");
+                    b.HasIndex("UserAccountId");
 
                     b.ToTable("GrammarPatterns");
                 });
@@ -1064,9 +1101,6 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Property<DateTime?>("CreatedDate")
                         .HasColumnType("timestamp without time zone");
 
-                    b.Property<bool>("IsApproved")
-                        .HasColumnType("boolean");
-
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
 
@@ -1076,22 +1110,7 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Property<DateTime?>("ModifiedDate")
                         .HasColumnType("timestamp without time zone");
 
-                    b.Property<string>("ReviewNote")
-                        .HasColumnType("text");
-
-                    b.Property<string>("ReviewedByName")
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
-
-                    b.Property<DateTime?>("ReviewedDate")
-                        .HasColumnType("timestamp without time zone");
-
                     b.Property<string>("Romaji")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)");
-
-                    b.Property<string>("Status")
                         .IsRequired()
                         .HasMaxLength(20)
                         .HasColumnType("character varying(20)");
@@ -1231,10 +1250,6 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Property<string>("AudioUrl")
                         .HasColumnType("text");
 
-                    b.Property<int>("CertificateLevelId")
-                        .HasColumnType("integer")
-                        .HasColumnName("CertificationLevelId");
-
                     b.Property<string>("Character")
                         .IsRequired()
                         .HasMaxLength(10)
@@ -1269,11 +1284,6 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Property<string>("SinoVietnamese")
                         .HasColumnType("text");
 
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)");
-
                     b.Property<int>("StrokeCount")
                         .HasColumnType("integer");
 
@@ -1285,9 +1295,9 @@ namespace RikiPath.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("UserAccountId");
+                    b.HasIndex("Character");
 
-                    b.HasIndex("CertificateLevelId", "Status");
+                    b.HasIndex("UserAccountId");
 
                     b.ToTable("Kanjis");
 
@@ -1295,7 +1305,6 @@ namespace RikiPath.Infrastructure.Migrations
                         new
                         {
                             Id = 910001,
-                            CertificateLevelId = 1,
                             Character = "日",
                             CreatedDate = new DateTime(2026, 10, 3, 0, 0, 0, 0, DateTimeKind.Utc),
                             IsDeleted = false,
@@ -1303,13 +1312,11 @@ namespace RikiPath.Infrastructure.Migrations
                             Meaning = "Mặt trời; ngày",
                             OnYomi = "ニチ、ジツ",
                             SinoVietnamese = "Nhật",
-                            Status = "Published",
                             StrokeCount = 4
                         },
                         new
                         {
                             Id = 910002,
-                            CertificateLevelId = 1,
                             Character = "月",
                             CreatedDate = new DateTime(2026, 10, 3, 0, 0, 0, 0, DateTimeKind.Utc),
                             IsDeleted = false,
@@ -1317,13 +1324,11 @@ namespace RikiPath.Infrastructure.Migrations
                             Meaning = "Mặt trăng; tháng",
                             OnYomi = "ゲツ、ガツ",
                             SinoVietnamese = "Nguyệt",
-                            Status = "Published",
                             StrokeCount = 4
                         },
                         new
                         {
                             Id = 910003,
-                            CertificateLevelId = 1,
                             Character = "火",
                             CreatedDate = new DateTime(2026, 10, 3, 0, 0, 0, 0, DateTimeKind.Utc),
                             IsDeleted = false,
@@ -1331,13 +1336,11 @@ namespace RikiPath.Infrastructure.Migrations
                             Meaning = "Lửa",
                             OnYomi = "カ",
                             SinoVietnamese = "Hỏa",
-                            Status = "Published",
                             StrokeCount = 4
                         },
                         new
                         {
                             Id = 910004,
-                            CertificateLevelId = 1,
                             Character = "水",
                             CreatedDate = new DateTime(2026, 10, 3, 0, 0, 0, 0, DateTimeKind.Utc),
                             IsDeleted = false,
@@ -1345,13 +1348,11 @@ namespace RikiPath.Infrastructure.Migrations
                             Meaning = "Nước",
                             OnYomi = "スイ",
                             SinoVietnamese = "Thủy",
-                            Status = "Published",
                             StrokeCount = 4
                         },
                         new
                         {
                             Id = 910005,
-                            CertificateLevelId = 1,
                             Character = "木",
                             CreatedDate = new DateTime(2026, 10, 3, 0, 0, 0, 0, DateTimeKind.Utc),
                             IsDeleted = false,
@@ -1359,13 +1360,11 @@ namespace RikiPath.Infrastructure.Migrations
                             Meaning = "Cây; gỗ",
                             OnYomi = "モク、ボク",
                             SinoVietnamese = "Mộc",
-                            Status = "Published",
                             StrokeCount = 4
                         },
                         new
                         {
                             Id = 910006,
-                            CertificateLevelId = 1,
                             Character = "金",
                             CreatedDate = new DateTime(2026, 10, 3, 0, 0, 0, 0, DateTimeKind.Utc),
                             IsDeleted = false,
@@ -1373,13 +1372,11 @@ namespace RikiPath.Infrastructure.Migrations
                             Meaning = "Vàng; tiền",
                             OnYomi = "キン、コン",
                             SinoVietnamese = "Kim",
-                            Status = "Published",
                             StrokeCount = 8
                         },
                         new
                         {
                             Id = 910007,
-                            CertificateLevelId = 1,
                             Character = "土",
                             CreatedDate = new DateTime(2026, 10, 3, 0, 0, 0, 0, DateTimeKind.Utc),
                             IsDeleted = false,
@@ -1387,13 +1384,11 @@ namespace RikiPath.Infrastructure.Migrations
                             Meaning = "Đất",
                             OnYomi = "ド、ト",
                             SinoVietnamese = "Thổ",
-                            Status = "Published",
                             StrokeCount = 3
                         },
                         new
                         {
                             Id = 910008,
-                            CertificateLevelId = 1,
                             Character = "山",
                             CreatedDate = new DateTime(2026, 10, 3, 0, 0, 0, 0, DateTimeKind.Utc),
                             IsDeleted = false,
@@ -1401,13 +1396,11 @@ namespace RikiPath.Infrastructure.Migrations
                             Meaning = "Núi",
                             OnYomi = "サン",
                             SinoVietnamese = "Sơn",
-                            Status = "Published",
                             StrokeCount = 3
                         },
                         new
                         {
                             Id = 910009,
-                            CertificateLevelId = 1,
                             Character = "川",
                             CreatedDate = new DateTime(2026, 10, 3, 0, 0, 0, 0, DateTimeKind.Utc),
                             IsDeleted = false,
@@ -1415,13 +1408,11 @@ namespace RikiPath.Infrastructure.Migrations
                             Meaning = "Sông",
                             OnYomi = "セン",
                             SinoVietnamese = "Xuyên",
-                            Status = "Published",
                             StrokeCount = 3
                         },
                         new
                         {
                             Id = 910010,
-                            CertificateLevelId = 1,
                             Character = "人",
                             CreatedDate = new DateTime(2026, 10, 3, 0, 0, 0, 0, DateTimeKind.Utc),
                             IsDeleted = false,
@@ -1429,7 +1420,6 @@ namespace RikiPath.Infrastructure.Migrations
                             Meaning = "Người",
                             OnYomi = "ジン、ニン",
                             SinoVietnamese = "Nhân",
-                            Status = "Published",
                             StrokeCount = 2
                         });
                 });
@@ -1766,11 +1756,6 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Property<int>("SortOrder")
                         .HasColumnType("integer");
 
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)");
-
                     b.Property<string>("Title")
                         .IsRequired()
                         .HasMaxLength(300)
@@ -1785,7 +1770,7 @@ namespace RikiPath.Infrastructure.Migrations
 
                     b.HasIndex("UserAccountId");
 
-                    b.HasIndex("CertificateLevelId", "LanguageSkillId", "Status");
+                    b.HasIndex("CertificateLevelId", "LanguageSkillId");
 
                     b.ToTable("Lessons");
                 });
@@ -1958,7 +1943,7 @@ namespace RikiPath.Infrastructure.Migrations
 
                     b.ToTable("MentorAvailabilities", t =>
                         {
-                            t.HasCheckConstraint("CK_MentorAvailability_BookedCount", "[BookedCount] >= 0 AND [BookedCount] <= [MaxLearners]");
+                            t.HasCheckConstraint("CK_MentorAvailability_BookedCount", "\"BookedCount\" >= 0 AND \"BookedCount\" <= \"MaxLearners\"");
                         });
 
                     b.HasData(
@@ -2234,9 +2219,6 @@ namespace RikiPath.Infrastructure.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("CertificationLevelId");
 
-                    b.Property<int>("ContentAuthorId")
-                        .HasColumnType("integer");
-
                     b.Property<Guid?>("CreatedBy")
                         .HasColumnType("uuid");
 
@@ -2245,9 +2227,6 @@ namespace RikiPath.Infrastructure.Migrations
 
                     b.Property<string>("Description")
                         .HasColumnType("text");
-
-                    b.Property<bool>("IsApproved")
-                        .HasColumnType("boolean");
 
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
@@ -2258,21 +2237,6 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Property<DateTime?>("ModifiedDate")
                         .HasColumnType("timestamp without time zone");
 
-                    b.Property<string>("ReviewNote")
-                        .HasColumnType("text");
-
-                    b.Property<string>("ReviewedByName")
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
-
-                    b.Property<DateTime?>("ReviewedDate")
-                        .HasColumnType("timestamp without time zone");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)");
-
                     b.Property<int>("TimeLimitMinutes")
                         .HasColumnType("integer");
 
@@ -2281,11 +2245,14 @@ namespace RikiPath.Infrastructure.Migrations
                         .HasMaxLength(300)
                         .HasColumnType("character varying(300)");
 
+                    b.Property<int?>("UserAccountId")
+                        .HasColumnType("integer");
+
                     b.HasKey("Id");
 
-                    b.HasIndex("ContentAuthorId");
+                    b.HasIndex("CertificateLevelId");
 
-                    b.HasIndex("CertificateLevelId", "Status");
+                    b.HasIndex("UserAccountId");
 
                     b.ToTable("MockTests");
                 });
@@ -2359,10 +2326,6 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
 
-                    b.Property<int>("MockTestId")
-                        .HasColumnType("integer")
-                        .HasColumnName("PracticeTestId");
-
                     b.Property<Guid?>("ModifiedBy")
                         .HasColumnType("uuid");
 
@@ -2378,14 +2341,19 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Property<double?>("TotalScore")
                         .HasColumnType("double precision");
 
+                    b.Property<int?>("UserAccountId")
+                        .HasColumnType("integer");
+
                     b.Property<int>("UserId")
                         .HasColumnType("integer");
 
                     b.HasKey("Id");
 
-                    b.HasIndex("MockTestId");
+                    b.HasIndex("StartedAt");
 
-                    b.HasIndex("UserId", "MockTestId");
+                    b.HasIndex("UserAccountId");
+
+                    b.HasIndex("UserId");
 
                     b.ToTable("MockTestAttempts");
                 });
@@ -2397,6 +2365,10 @@ namespace RikiPath.Infrastructure.Migrations
                         .HasColumnType("integer");
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("CertificateSectionId")
+                        .HasColumnType("integer")
+                        .HasColumnName("CertificationSectionId");
 
                     b.Property<Guid?>("CreatedBy")
                         .HasColumnType("uuid");
@@ -2413,7 +2385,7 @@ namespace RikiPath.Infrastructure.Migrations
 
                     b.Property<int>("MockTestId")
                         .HasColumnType("integer")
-                        .HasColumnName("PracticeTestId");
+                        .HasColumnName("MockTestId");
 
                     b.Property<Guid?>("ModifiedBy")
                         .HasColumnType("uuid");
@@ -2431,9 +2403,11 @@ namespace RikiPath.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("CertificateSectionId");
+
                     b.HasIndex("LanguageSkillId");
 
-                    b.HasIndex("MockTestId");
+                    b.HasIndex("MockTestId", "CertificateSectionId");
 
                     b.ToTable("MockTestSections");
                 });
@@ -2460,11 +2434,11 @@ namespace RikiPath.Infrastructure.Migrations
 
                     b.Property<int>("MockTestAttemptId")
                         .HasColumnType("integer")
-                        .HasColumnName("PracticeTestAttemptId");
+                        .HasColumnName("MockTestAttemptId");
 
                     b.Property<int>("MockTestSectionId")
                         .HasColumnType("integer")
-                        .HasColumnName("PracticeTestSectionId");
+                        .HasColumnName("MockTestSectionId");
 
                     b.Property<Guid?>("ModifiedBy")
                         .HasColumnType("uuid");
@@ -2625,11 +2599,6 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Property<int>("SortOrder")
                         .HasColumnType("integer");
 
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)");
-
                     b.Property<string>("Title")
                         .IsRequired()
                         .HasMaxLength(300)
@@ -2639,7 +2608,7 @@ namespace RikiPath.Infrastructure.Migrations
 
                     b.HasIndex("LanguageSkillId");
 
-                    b.HasIndex("LessonId", "LanguageSkillId", "Status");
+                    b.HasIndex("LessonId", "LanguageSkillId");
 
                     b.ToTable("PracticeExercises");
                 });
@@ -3389,7 +3358,7 @@ namespace RikiPath.Infrastructure.Migrations
                         },
                         new
                         {
-                            Id = 900007,
+                            Id = 900006,
                             CreatedDate = new DateTime(2026, 9, 28, 0, 0, 0, 0, DateTimeKind.Utc),
                             CurrentStreak = 0,
                             DailyStudyMinutes = 30,
@@ -3408,7 +3377,7 @@ namespace RikiPath.Infrastructure.Migrations
                         },
                         new
                         {
-                            Id = 900011,
+                            Id = 900007,
                             CreatedDate = new DateTime(2026, 9, 28, 0, 0, 0, 0, DateTimeKind.Utc),
                             CurrentStreak = 0,
                             DailyStudyMinutes = 30,
@@ -3427,7 +3396,7 @@ namespace RikiPath.Infrastructure.Migrations
                         },
                         new
                         {
-                            Id = 900009,
+                            Id = 900008,
                             CreatedDate = new DateTime(2026, 9, 28, 0, 0, 0, 0, DateTimeKind.Utc),
                             CurrentStreak = 0,
                             DailyStudyMinutes = 30,
@@ -3446,7 +3415,7 @@ namespace RikiPath.Infrastructure.Migrations
                         },
                         new
                         {
-                            Id = 900010,
+                            Id = 900009,
                             CreatedDate = new DateTime(2026, 9, 28, 0, 0, 0, 0, DateTimeKind.Utc),
                             CurrentStreak = 0,
                             DailyStudyMinutes = 30,
@@ -3559,7 +3528,7 @@ namespace RikiPath.Infrastructure.Migrations
                             PurchasedAt = new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
                             StartDate = new DateTime(2026, 10, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
                             SubscriptionPlanId = 7,
-                            UserId = 900007
+                            UserId = 900006
                         },
                         new
                         {
@@ -3577,7 +3546,7 @@ namespace RikiPath.Infrastructure.Migrations
                             PurchasedAt = new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
                             StartDate = new DateTime(2026, 10, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
                             SubscriptionPlanId = 7,
-                            UserId = 900008
+                            UserId = 900007
                         },
                         new
                         {
@@ -3595,7 +3564,7 @@ namespace RikiPath.Infrastructure.Migrations
                             PurchasedAt = new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
                             StartDate = new DateTime(2026, 10, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
                             SubscriptionPlanId = 7,
-                            UserId = 900009
+                            UserId = 900008
                         },
                         new
                         {
@@ -3613,7 +3582,7 @@ namespace RikiPath.Infrastructure.Migrations
                             PurchasedAt = new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
                             StartDate = new DateTime(2026, 10, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
                             SubscriptionPlanId = 7,
-                            UserId = 900010
+                            UserId = 900009
                         });
                 });
 
@@ -3627,10 +3596,6 @@ namespace RikiPath.Infrastructure.Migrations
 
                     b.Property<string>("AudioUrl")
                         .HasColumnType("text");
-
-                    b.Property<int>("CertificateLevelId")
-                        .HasColumnType("integer")
-                        .HasColumnName("CertificationLevelId");
 
                     b.Property<Guid?>("CreatedBy")
                         .HasColumnType("uuid");
@@ -3663,11 +3628,6 @@ namespace RikiPath.Infrastructure.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
 
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)");
-
                     b.Property<int?>("UserAccountId")
                         .HasColumnType("integer");
 
@@ -3680,7 +3640,7 @@ namespace RikiPath.Infrastructure.Migrations
 
                     b.HasIndex("UserAccountId");
 
-                    b.HasIndex("CertificateLevelId", "Status");
+                    b.HasIndex("Word", "Reading");
 
                     b.ToTable("Vocabularies");
                 });
@@ -3722,23 +3682,15 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Navigation("CertificateType");
                 });
 
-            modelBuilder.Entity("RikiPath.Domain.Entities.CertificationLevelSkill", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.CertificateSection", b =>
                 {
                     b.HasOne("RikiPath.Domain.Entities.CertificateLevel", "CertificateLevel")
-                        .WithMany("Sections")
+                        .WithMany()
                         .HasForeignKey("CertificateLevelId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("RikiPath.Domain.Entities.LanguageSkill", "LanguageSkill")
-                        .WithMany("CertificationLevelSkills")
-                        .HasForeignKey("LanguageSkillId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
                     b.Navigation("CertificateLevel");
-
-                    b.Navigation("LanguageSkill");
                 });
 
             modelBuilder.Entity("RikiPath.Domain.Entities.ContentApprovalRequest", b =>
@@ -3814,17 +3766,9 @@ namespace RikiPath.Infrastructure.Migrations
 
             modelBuilder.Entity("RikiPath.Domain.Entities.GrammarPattern", b =>
                 {
-                    b.HasOne("RikiPath.Domain.Entities.CertificateLevel", "CertificateLevel")
-                        .WithMany("GrammarPatterns")
-                        .HasForeignKey("CertificateLevelId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
                     b.HasOne("RikiPath.Domain.Entities.UserAccount", null)
                         .WithMany("AuthoredGrammarPatterns")
                         .HasForeignKey("UserAccountId");
-
-                    b.Navigation("CertificateLevel");
                 });
 
             modelBuilder.Entity("RikiPath.Domain.Entities.HomeworkAssignment", b =>
@@ -3923,17 +3867,9 @@ namespace RikiPath.Infrastructure.Migrations
 
             modelBuilder.Entity("RikiPath.Domain.Entities.Kanji", b =>
                 {
-                    b.HasOne("RikiPath.Domain.Entities.CertificateLevel", "CertificateLevel")
-                        .WithMany("Kanjis")
-                        .HasForeignKey("CertificateLevelId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
                     b.HasOne("RikiPath.Domain.Entities.UserAccount", null)
                         .WithMany("AuthoredKanjis")
                         .HasForeignKey("UserAccountId");
-
-                    b.Navigation("CertificateLevel");
                 });
 
             modelBuilder.Entity("RikiPath.Domain.Entities.LearnerEssay", b =>
@@ -4167,15 +4103,11 @@ namespace RikiPath.Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
-                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "ContentAuthor")
+                    b.HasOne("RikiPath.Domain.Entities.UserAccount", null)
                         .WithMany("AuthoredMockTests")
-                        .HasForeignKey("ContentAuthorId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
+                        .HasForeignKey("UserAccountId");
 
                     b.Navigation("CertificateLevel");
-
-                    b.Navigation("ContentAuthor");
                 });
 
             modelBuilder.Entity("RikiPath.Domain.Entities.MockTestAnswer", b =>
@@ -4206,25 +4138,27 @@ namespace RikiPath.Infrastructure.Migrations
 
             modelBuilder.Entity("RikiPath.Domain.Entities.MockTestAttempt", b =>
                 {
-                    b.HasOne("RikiPath.Domain.Entities.MockTest", "MockTest")
-                        .WithMany("Attempts")
-                        .HasForeignKey("MockTestId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
+                    b.HasOne("RikiPath.Domain.Entities.UserAccount", null)
+                        .WithMany("MockTestAttempts")
+                        .HasForeignKey("UserAccountId");
 
                     b.HasOne("RikiPath.Domain.Entities.UserAccount", "UserAccount")
-                        .WithMany("MockTestAttempts")
+                        .WithMany()
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
-
-                    b.Navigation("MockTest");
 
                     b.Navigation("UserAccount");
                 });
 
             modelBuilder.Entity("RikiPath.Domain.Entities.MockTestSection", b =>
                 {
+                    b.HasOne("RikiPath.Domain.Entities.CertificateSection", "CertificateSection")
+                        .WithMany("MockTestSections")
+                        .HasForeignKey("CertificateSectionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
                     b.HasOne("RikiPath.Domain.Entities.LanguageSkill", "LanguageSkill")
                         .WithMany("MockTestSections")
                         .HasForeignKey("LanguageSkillId")
@@ -4236,6 +4170,8 @@ namespace RikiPath.Infrastructure.Migrations
                         .HasForeignKey("MockTestId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.Navigation("CertificateSection");
 
                     b.Navigation("LanguageSkill");
 
@@ -4455,26 +4391,14 @@ namespace RikiPath.Infrastructure.Migrations
 
             modelBuilder.Entity("RikiPath.Domain.Entities.Vocabulary", b =>
                 {
-                    b.HasOne("RikiPath.Domain.Entities.CertificateLevel", "CertificateLevel")
-                        .WithMany("Vocabularies")
-                        .HasForeignKey("CertificateLevelId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
                     b.HasOne("RikiPath.Domain.Entities.UserAccount", null)
                         .WithMany("AuthoredVocabularies")
                         .HasForeignKey("UserAccountId");
-
-                    b.Navigation("CertificateLevel");
                 });
 
             modelBuilder.Entity("RikiPath.Domain.Entities.CertificateLevel", b =>
                 {
                     b.Navigation("ContentLevelMappings");
-
-                    b.Navigation("GrammarPatterns");
-
-                    b.Navigation("Kanjis");
 
                     b.Navigation("LearnersTargeting");
 
@@ -4483,10 +4407,11 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Navigation("MockTests");
 
                     b.Navigation("PracticeSubmissions");
+                });
 
-                    b.Navigation("Sections");
-
-                    b.Navigation("Vocabularies");
+            modelBuilder.Entity("RikiPath.Domain.Entities.CertificateSection", b =>
+                {
+                    b.Navigation("MockTestSections");
                 });
 
             modelBuilder.Entity("RikiPath.Domain.Entities.CertificateType", b =>
@@ -4536,8 +4461,6 @@ namespace RikiPath.Infrastructure.Migrations
 
             modelBuilder.Entity("RikiPath.Domain.Entities.LanguageSkill", b =>
                 {
-                    b.Navigation("CertificationLevelSkills");
-
                     b.Navigation("Lessons");
 
                     b.Navigation("MockTestSections");
@@ -4583,8 +4506,6 @@ namespace RikiPath.Infrastructure.Migrations
 
             modelBuilder.Entity("RikiPath.Domain.Entities.MockTest", b =>
                 {
-                    b.Navigation("Attempts");
-
                     b.Navigation("Sections");
                 });
 
