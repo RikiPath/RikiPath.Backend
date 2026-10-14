@@ -1,6 +1,6 @@
-using RikiPath.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using RikiPath.Domain.Entities;
 
 namespace RikiPath.Infrastructure.Configuration
 {
@@ -9,17 +9,28 @@ namespace RikiPath.Infrastructure.Configuration
         public void Configure(EntityTypeBuilder<GrammarPattern> builder)
         {
             builder.HasKey(x => x.Id);
-            builder.Property(x => x.CertificateLevelId).HasColumnName("CertificationLevelId");
-            builder.Property(x => x.Title).IsRequired().HasMaxLength(300);
-            builder.Property(x => x.Structure).IsRequired().HasMaxLength(300);
-            builder.Property(x => x.Status).HasConversion<string>().HasMaxLength(20);
 
-            builder.HasOne(x => x.CertificateLevel)
-                .WithMany(x => x.GrammarPatterns)
-                .HasForeignKey(x => x.CertificateLevelId)
-                .OnDelete(DeleteBehavior.Restrict);
+            // Các trường bắt buộc
+            builder.Property(x => x.Title)
+                .IsRequired()
+                .HasMaxLength(300);
 
-            builder.HasIndex(x => new { x.CertificateLevelId, x.Status });
+            builder.Property(x => x.Structure)
+                .IsRequired()
+                .HasMaxLength(300);
+
+            // Các trường không bắt buộc (Nullable)
+            builder.Property(x => x.UsageNotes)
+                .HasMaxLength(2000);
+
+            builder.Property(x => x.ExampleSentence)
+                .HasMaxLength(1000);
+
+            builder.Property(x => x.ExampleSentenceMeaning)
+                .HasMaxLength(1000);
+
+            // Index tối ưu tốc độ tìm kiếm theo tiêu đề mẫu ngữ pháp
+            builder.HasIndex(x => x.Title);
         }
     }
 }

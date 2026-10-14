@@ -18,8 +18,8 @@ namespace RikiPath.Infrastructure
         // 2. Master Data / CertificateTypes & LanguageSkills
         public ICertificateTypeRepository CertificateTypes { get; }
         public ICertificateLevelRepository CertificateLevels { get; }
+        public ICertificateSectionRepository CertificateSections { get; }
         public ILanguageSkillRepository LanguageSkills { get; }
-        public ICertificationLevelSkillRepository CertificationLevelSkills { get; }
 
         // 3. Lessons & Learning Progress
         public ILessonRepository Lessons { get; }
@@ -32,6 +32,7 @@ namespace RikiPath.Infrastructure
         public IKanaWritingPracticeHistoryRepository KanaWritingPracticeHistories { get; }
         public IVocabularyRepository Vocabularies { get; }
         public IGrammarPatternRepository GrammarPatterns { get; }
+        public IContentLevelMappingRepository ContentLevelMappings { get; }
         public ILessonKanjiRepository LessonKanjis { get; }
         public ILessonVocabularyRepository LessonVocabularies { get; }
         public ILessonGrammarRepository LessonGrammars { get; }
@@ -86,8 +87,8 @@ namespace RikiPath.Infrastructure
 
             CertificateTypes = new CertificateTypeRepository(_context);
             CertificateLevels = new CertificateLevelRepository(_context);
+            CertificateSections = new CertificateSectionRepository(_context);
             LanguageSkills = new LanguageSkillRepository(_context);
-            CertificationLevelSkills = new CertificationLevelSkillRepository(_context);
 
             Lessons = new LessonRepository(_context);
             LessonProgresses = new LessonProgressRepository(_context);
@@ -98,6 +99,7 @@ namespace RikiPath.Infrastructure
             KanaWritingPracticeHistories = new KanaWritingPracticeHistoryRepository(_context);
             Vocabularies = new VocabularyRepository(_context);
             GrammarPatterns = new GrammarPatternRepository(_context);
+            ContentLevelMappings = new ContentLevelMappingRepository(_context);
             LessonKanjis = new LessonKanjiRepository(_context);
             LessonVocabularies = new LessonVocabularyRepository(_context);
             LessonGrammars = new LessonGrammarRepository(_context);

@@ -12,11 +12,7 @@ namespace RikiPath.Domain.Entities
         public int SortOrder { get; set; }
 
         public List<UserAccount>? LearnersTargeting { get; set; }
-        public List<CertificationLevelSkill>? Sections { get; set; }
         public List<Lesson>? Lessons { get; set; }
-        public List<Kanji>? Kanjis { get; set; }
-        public List<Vocabulary>? Vocabularies { get; set; }
-        public List<GrammarPattern>? GrammarPatterns { get; set; }
         public List<MockTest>? MockTests { get; set; }
         public List<PracticeSubmission>? PracticeSubmissions { get; set; }
         public List<ContentLevelMapping>? ContentLevelMappings { get; set; }

@@ -10,9 +10,8 @@ public class PracticeExerciseConfig : IEntityTypeConfiguration<PracticeExercise>
     {
         builder.HasKey(x => x.Id);
         builder.Property(x => x.Title).IsRequired().HasMaxLength(300);
-        builder.Property(x => x.Status).HasConversion<string>().HasMaxLength(20);
         builder.HasOne(x => x.Lesson).WithMany().HasForeignKey(x => x.LessonId).OnDelete(DeleteBehavior.Cascade);
         builder.HasOne(x => x.LanguageSkill).WithMany().HasForeignKey(x => x.LanguageSkillId).OnDelete(DeleteBehavior.Restrict);
-        builder.HasIndex(x => new { x.LessonId, x.LanguageSkillId, x.Status });
+        builder.HasIndex(x => new { x.LessonId, x.LanguageSkillId });
     }
 }

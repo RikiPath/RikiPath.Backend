@@ -1,5 +1,4 @@
 using RikiPath.Domain.Entities;
-using RikiPath.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
@@ -10,17 +9,11 @@ namespace RikiPath.Infrastructure.Configuration
         public void Configure(EntityTypeBuilder<Kanji> builder)
         {
             builder.HasKey(x => x.Id);
-            builder.Property(x => x.CertificateLevelId).HasColumnName("CertificationLevelId");
             builder.Property(x => x.Character).IsRequired().HasMaxLength(10);
             builder.Property(x => x.Meaning).IsRequired().HasMaxLength(300);
-            builder.Property(x => x.Status).HasConversion<string>().HasMaxLength(20);
 
-            builder.HasOne(x => x.CertificateLevel)
-                .WithMany(x => x.Kanjis)
-                .HasForeignKey(x => x.CertificateLevelId)
-                .OnDelete(DeleteBehavior.Restrict);
-
-            builder.HasIndex(x => new { x.CertificateLevelId, x.Status });
+            // Index trên Character để tìm kiếm Kanji nhanh
+            builder.HasIndex(x => x.Character);
 
             builder.HasData(
                 new Kanji
@@ -32,8 +25,6 @@ namespace RikiPath.Infrastructure.Configuration
                     OnYomi = "ニチ、ジツ",
                     KunYomi = "ひ、か",
                     StrokeCount = 4,
-                    Status = ContentStatus.Published,
-                    CertificateLevelId = 1,
                     CreatedDate = new DateTime(2026, 10, 3, 0, 0, 0, DateTimeKind.Utc),
                     IsDeleted = false
                 },
@@ -46,8 +37,6 @@ namespace RikiPath.Infrastructure.Configuration
                     OnYomi = "ゲツ、ガツ",
                     KunYomi = "つき",
                     StrokeCount = 4,
-                    Status = ContentStatus.Published,
-                    CertificateLevelId = 1,
                     CreatedDate = new DateTime(2026, 10, 3, 0, 0, 0, DateTimeKind.Utc),
                     IsDeleted = false
                 },
@@ -60,8 +49,6 @@ namespace RikiPath.Infrastructure.Configuration
                     OnYomi = "カ",
                     KunYomi = "ひ、ほ",
                     StrokeCount = 4,
-                    Status = ContentStatus.Published,
-                    CertificateLevelId = 1,
                     CreatedDate = new DateTime(2026, 10, 3, 0, 0, 0, DateTimeKind.Utc),
                     IsDeleted = false
                 },
@@ -74,8 +61,6 @@ namespace RikiPath.Infrastructure.Configuration
                     OnYomi = "スイ",
                     KunYomi = "みず",
                     StrokeCount = 4,
-                    Status = ContentStatus.Published,
-                    CertificateLevelId = 1,
                     CreatedDate = new DateTime(2026, 10, 3, 0, 0, 0, DateTimeKind.Utc),
                     IsDeleted = false
                 },
@@ -88,8 +73,6 @@ namespace RikiPath.Infrastructure.Configuration
                     OnYomi = "モク、ボク",
                     KunYomi = "き、こ",
                     StrokeCount = 4,
-                    Status = ContentStatus.Published,
-                    CertificateLevelId = 1,
                     CreatedDate = new DateTime(2026, 10, 3, 0, 0, 0, DateTimeKind.Utc),
                     IsDeleted = false
                 },
@@ -102,8 +85,6 @@ namespace RikiPath.Infrastructure.Configuration
                     OnYomi = "キン、コン",
                     KunYomi = "かね、かな",
                     StrokeCount = 8,
-                    Status = ContentStatus.Published,
-                    CertificateLevelId = 1,
                     CreatedDate = new DateTime(2026, 10, 3, 0, 0, 0, DateTimeKind.Utc),
                     IsDeleted = false
                 },
@@ -116,8 +97,6 @@ namespace RikiPath.Infrastructure.Configuration
                     OnYomi = "ド、ト",
                     KunYomi = "つち",
                     StrokeCount = 3,
-                    Status = ContentStatus.Published,
-                    CertificateLevelId = 1,
                     CreatedDate = new DateTime(2026, 10, 3, 0, 0, 0, DateTimeKind.Utc),
                     IsDeleted = false
                 },
@@ -130,8 +109,6 @@ namespace RikiPath.Infrastructure.Configuration
                     OnYomi = "サン",
                     KunYomi = "やま",
                     StrokeCount = 3,
-                    Status = ContentStatus.Published,
-                    CertificateLevelId = 1,
                     CreatedDate = new DateTime(2026, 10, 3, 0, 0, 0, DateTimeKind.Utc),
                     IsDeleted = false
                 },
@@ -144,8 +121,6 @@ namespace RikiPath.Infrastructure.Configuration
                     OnYomi = "セン",
                     KunYomi = "かわ",
                     StrokeCount = 3,
-                    Status = ContentStatus.Published,
-                    CertificateLevelId = 1,
                     CreatedDate = new DateTime(2026, 10, 3, 0, 0, 0, DateTimeKind.Utc),
                     IsDeleted = false
                 },
@@ -158,8 +133,6 @@ namespace RikiPath.Infrastructure.Configuration
                     OnYomi = "ジン、ニン",
                     KunYomi = "ひと",
                     StrokeCount = 2,
-                    Status = ContentStatus.Published,
-                    CertificateLevelId = 1,
                     CreatedDate = new DateTime(2026, 10, 3, 0, 0, 0, DateTimeKind.Utc),
                     IsDeleted = false
                 });

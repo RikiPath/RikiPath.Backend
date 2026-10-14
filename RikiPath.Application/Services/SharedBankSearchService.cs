@@ -26,7 +26,7 @@ namespace RikiPath.Application.Services
                 Normalize(filter);
 
                 var (items, total) = await unitOfWork.Vocabularies.SearchAsync(
-                    filter.JlptLevelId, null, filter.Keyword, filter.Page, filter.PageSize);
+                    filter.JlptLevelId, filter.Keyword, filter.Page, filter.PageSize);
 
                 var result = new PagedResult<VocabularyCardResponse>
                 {
@@ -70,7 +70,7 @@ namespace RikiPath.Application.Services
                 Normalize(filter);
 
                 var (items, total) = await unitOfWork.Kanjis.SearchAsync(
-                    filter.JlptLevelId, null, filter.Keyword, filter.MinStrokeCount, filter.MaxStrokeCount,
+                    filter.JlptLevelId, filter.Keyword, filter.MinStrokeCount, filter.MaxStrokeCount,
                     filter.Page, filter.PageSize);
 
                 var result = new PagedResult<KanjiCardResponse>
@@ -115,7 +115,7 @@ namespace RikiPath.Application.Services
                 Normalize(filter);
 
                 var (items, total) = await unitOfWork.GrammarPatterns.SearchAsync(
-                    filter.JlptLevelId, null, filter.Keyword, filter.Page, filter.PageSize);
+                    filter.JlptLevelId, filter.Keyword, filter.Page, filter.PageSize);
 
                 var result = new PagedResult<GrammarCardResponse>
                 {
@@ -158,6 +158,17 @@ namespace RikiPath.Application.Services
             if (filter.PageSize > MaxPageSize) filter.PageSize = MaxPageSize;
         }
 
+        private static string GetLevelNames(IEnumerable<ContentLevelMapping>? mappings)
+        {
+            if (mappings == null || !mappings.Any()) return string.Empty;
+
+            var levelCodes = mappings
+                .Where(m => !m.IsDeleted && m.CertificateLevel != null)
+                .Select(m => m.CertificateLevel.Code);
+
+            return string.Join(", ", levelCodes);
+        }
+
         private static VocabularyCardResponse MapVocabulary(Vocabulary e) => new()
         {
             Id = e.Id,
@@ -166,7 +177,7 @@ namespace RikiPath.Application.Services
             Meaning = e.Meaning,
             ExampleSentence = e.ExampleSentence,
             AudioUrl = e.AudioUrl,
-            JlptLevelName = e.CertificateLevel?.Code ?? string.Empty,
+            JlptLevelName = GetLevelNames(e.ContentLevelMappings)
         };
 
         private static KanjiCardResponse MapKanji(Kanji k) => new()
@@ -180,7 +191,7 @@ namespace RikiPath.Application.Services
             StrokeCount = k.StrokeCount,
             StrokeOrderUrl = k.StrokeOrderImageUrl,
             AudioUrl = k.AudioUrl,
-            JlptLevelName = k.CertificateLevel?.Code ?? string.Empty,
+            JlptLevelName = GetLevelNames(k.ContentLevelMappings)
         };
 
         private static GrammarCardResponse MapGrammar(GrammarPattern g) => new()
@@ -190,7 +201,7 @@ namespace RikiPath.Application.Services
             Structure = g.Structure,
             Explanation = g.UsageNotes,
             ExampleSentence = g.ExampleSentence,
-            JlptLevelName = g.CertificateLevel?.Code ?? string.Empty,
+            JlptLevelName = GetLevelNames(g.ContentLevelMappings)
         };
 
         private static List<string> BuildDebugErrors(Exception ex)

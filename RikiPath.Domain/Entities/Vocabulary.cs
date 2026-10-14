@@ -15,11 +15,6 @@ namespace RikiPath.Domain.Entities
         public string? ExampleSentenceMeaning { get; set; }
         public string? AudioUrl { get; set; }
 
-        public ContentStatus Status { get; set; } = ContentStatus.Draft;
-
-        public int CertificateLevelId { get; set; }
-        public CertificateLevel CertificateLevel { get; set; }
-
         public List<LessonVocabulary>? LessonVocabularies { get; set; }
         public List<LearnerNoteEntry>? LearnerNoteEntries { get; set; }
         public List<ContentLevelMapping>? ContentLevelMappings { get; set; }

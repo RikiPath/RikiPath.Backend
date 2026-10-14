@@ -13,7 +13,8 @@ namespace RikiPath.Domain.Entities
         public MockTest MockTest { get; set; }
         public int LanguageSkillId { get; set; }
         public LanguageSkill LanguageSkill { get; set; }
-
+        public int CertificateSectionId { get; set; }
+        public CertificateSection CertificateSection { get; set; } = null!;
         public List<MockQuestion>? Questions { get; set; }
         public List<MockTestSectionResult>? SectionResults { get; set; }
     }

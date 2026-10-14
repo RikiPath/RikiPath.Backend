@@ -24,7 +24,7 @@ namespace RikiPath.Application.Services
 
                 // --- Thuật toán Quizlet: Tìm câu hỏi bị làm sai ở lần thi trước ---
                 var previousAttempts = await unitOfWork.MockTestAttempts.FindAsync(a =>
-                    a.UserId == userId && a.MockTestId == practiceTestId && a.IsCompleted);
+                    a.UserId == userId && a.IsCompleted);
 
                 var previousAttemptIds = previousAttempts.Select(a => a.Id).ToList();
                 var previouslyWrongQuestionIds = new List<int>();
@@ -44,7 +44,6 @@ namespace RikiPath.Application.Services
                 var attempt = new MockTestAttempt
                 {
                     UserId = userId,
-                    MockTestId = practiceTestId,
                     StartedAt = DateTime.UtcNow,
                     SubmittedAt = null,
                     TotalScore = 0,
@@ -127,7 +126,6 @@ namespace RikiPath.Application.Services
                 var result = new AttemptResultResponse
                 {
                     AttemptId = attempt.Id,
-                    MockTestId = attempt.MockTestId,
                     Status = attempt.IsCompleted ? StatusCompleted : StatusInProgress,
                     StartedAt = attempt.StartedAt,
                     SubmittedAt = attempt.SubmittedAt,
@@ -168,7 +166,6 @@ namespace RikiPath.Application.Services
                 var result = new AttemptResultResponse
                 {
                     AttemptId = attempt.Id,
-                    MockTestId = attempt.MockTestId,
                     Status = attempt.IsCompleted ? StatusCompleted : StatusInProgress,
                     StartedAt = attempt.StartedAt,
                     SubmittedAt = attempt.SubmittedAt,
@@ -261,7 +258,6 @@ namespace RikiPath.Application.Services
                 return ApiResponse<DetailedAttemptResultResponse>.Success(new DetailedAttemptResultResponse
                 {
                     AttemptId = attempt.Id,
-                    MockTestId = attempt.MockTestId,
                     TotalScore = attempt.TotalScore.Value,
                     Questions = questions,
                 });
@@ -282,7 +278,7 @@ namespace RikiPath.Application.Services
                 var userId = claimService.GetUserClaim().Id;
                 // 1. Lấy tất cả lượt làm bài đã hoàn thành
                 var attempts = await unitOfWork.MockTestAttempts.FindAsync(a =>
-                    a.UserId == userId && a.IsCompleted && (!practiceTestId.HasValue || a.MockTestId == practiceTestId.Value));
+                    a.UserId == userId && a.IsCompleted && (!practiceTestId.HasValue));
 
                 var attemptIds = attempts.Select(a => a.Id).ToList();
                 if (attemptIds.Count == 0)

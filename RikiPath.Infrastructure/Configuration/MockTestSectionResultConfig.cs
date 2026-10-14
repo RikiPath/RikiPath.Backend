@@ -9,8 +9,8 @@ namespace RikiPath.Infrastructure.Configuration
         public void Configure(EntityTypeBuilder<MockTestSectionResult> builder)
         {
             builder.HasKey(x => x.Id);
-            builder.Property(x => x.MockTestAttemptId).HasColumnName("PracticeTestAttemptId");
-            builder.Property(x => x.MockTestSectionId).HasColumnName("PracticeTestSectionId");
+            builder.Property(x => x.MockTestAttemptId).HasColumnName("MockTestAttemptId");
+            builder.Property(x => x.MockTestSectionId).HasColumnName("MockTestSectionId");
 
             builder.HasOne(x => x.MockTestAttempt)
                 .WithMany(x => x.SectionResults)

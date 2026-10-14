@@ -12,8 +12,8 @@ namespace RikiPath.Application
         // 2. Master Data / CertificateTypes & LanguageSkills
         ICertificateTypeRepository CertificateTypes { get; }
         ICertificateLevelRepository CertificateLevels { get; }
+        ICertificateSectionRepository CertificateSections { get; }
         ILanguageSkillRepository LanguageSkills { get; }
-        ICertificationLevelSkillRepository CertificationLevelSkills { get; }
 
         // 3. Lessons & Learning Progress
         ILessonRepository Lessons { get; }
@@ -26,6 +26,7 @@ namespace RikiPath.Application
         IKanaWritingPracticeHistoryRepository KanaWritingPracticeHistories { get; }
         IVocabularyRepository Vocabularies { get; }
         IGrammarPatternRepository GrammarPatterns { get; }
+        IContentLevelMappingRepository ContentLevelMappings { get; }
         ILessonKanjiRepository LessonKanjis { get; }
         ILessonVocabularyRepository LessonVocabularies { get; }
         ILessonGrammarRepository LessonGrammars { get; }

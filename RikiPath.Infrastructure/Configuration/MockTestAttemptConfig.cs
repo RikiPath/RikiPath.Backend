@@ -1,6 +1,6 @@
-using RikiPath.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using RikiPath.Domain.Entities;
 
 namespace RikiPath.Infrastructure.Configuration
 {
@@ -9,15 +9,18 @@ namespace RikiPath.Infrastructure.Configuration
         public void Configure(EntityTypeBuilder<MockTestAttempt> builder)
         {
             builder.HasKey(x => x.Id);
-            builder.Property(x => x.MockTestId).HasColumnName("PracticeTestId");
 
-            // UserAccount side (Cascade) configured in UserConfig.
-            builder.HasOne(x => x.MockTest)
-                .WithMany(x => x.Attempts)
-                .HasForeignKey(x => x.MockTestId)
-                .OnDelete(DeleteBehavior.Restrict);
+            builder.Property(x => x.StartedAt).IsRequired();
 
-            builder.HasIndex(x => new { x.UserId, x.MockTestId });
+            // Quan hệ với UserAccount (1 - N)
+            builder.HasOne(x => x.UserAccount)
+                .WithMany()
+                .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // Index tối ưu truy vấn lịch sử làm bài của người dùng
+            builder.HasIndex(x => x.UserId);
+            builder.HasIndex(x => x.StartedAt);
         }
     }
 }

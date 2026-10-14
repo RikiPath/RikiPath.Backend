@@ -14,11 +14,6 @@ namespace RikiPath.Domain.Entities
         public string? StrokeOrderImageUrl { get; set; }
         public string? AudioUrl { get; set; }
 
-        public ContentStatus Status { get; set; } = ContentStatus.Draft;
-
-        public int CertificateLevelId { get; set; }
-        public CertificateLevel CertificateLevel { get; set; }
-
         public List<LessonKanji>? LessonKanjis { get; set; }
         public List<LearnerNoteEntry>? LearnerNoteEntries { get; set; }
         public List<ReviewCard>? ReviewCards { get; set; }

@@ -7,8 +7,11 @@ namespace RikiPath.Application.IRepositories
 {
     public interface IGrammarPatternRepository : IGenericRepository<GrammarPattern>
     {
-        Task<(List<GrammarPattern> Items, int TotalCount)> SearchAsync(int? jlptLevelId, ContentStatus? status, string? keyword, int pageIndex, int pageSize);
-        Task<int> CountSearchAsync(int? jlptLevelId, ContentStatus? status, string? keyword);
-        Task<List<GrammarPattern>> GetPendingReviewAsync();
+        Task<(List<GrammarPattern> Items, int TotalCount)> SearchAsync(
+             int? jlptLevelId,
+             string? keyword,
+             int pageIndex,
+             int pageSize);
+        Task<int> CountSearchAsync(int? jlptLevelId, string? keyword);
     }
 }

@@ -1,6 +1,7 @@
+using Infrastructure.Configuration;
+using Microsoft.EntityFrameworkCore;
 using RikiPath.Domain.Entities;
 using RikiPath.Infrastructure.Configuration;
-using Microsoft.EntityFrameworkCore;
 
 namespace RikiPath.Infrastructure
 {
@@ -13,7 +14,7 @@ namespace RikiPath.Infrastructure
         // Catalog / master data
         public DbSet<CertificateType> CertificateTypes { get; set; }
         public DbSet<CertificateLevel> CertificateLevels { get; set; }
-        public DbSet<CertificationLevelSkill> CertificationLevelSkills { get; set; }
+        public DbSet<CertificateSection> CertificateSections { get; set; }
         public DbSet<LanguageSkill> LanguageSkills { get; set; }
 
         // Content
@@ -82,7 +83,6 @@ namespace RikiPath.Infrastructure
             modelBuilder.ApplyConfiguration(new UserConfig());
             modelBuilder.ApplyConfiguration(new CertificateTypeConfig());
             modelBuilder.ApplyConfiguration(new CertificateLevelConfig());
-            modelBuilder.ApplyConfiguration(new CertificationLevelSkillConfig());
             modelBuilder.ApplyConfiguration(new LanguageSkillConfig());
 
             modelBuilder.ApplyConfiguration(new LessonConfig());
@@ -136,6 +136,10 @@ namespace RikiPath.Infrastructure
             modelBuilder.ApplyConfiguration(new ReviewHistoryConfig());
 
             modelBuilder.ApplyConfiguration(new NotificationConfig());
+
+            // Additional configurations for completeness
+            modelBuilder.ApplyConfiguration(new CertificateSectionConfig());
+            modelBuilder.ApplyConfiguration(new EmailVerificationsConfig());
         }
     }
 }

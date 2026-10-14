@@ -10,8 +10,6 @@ namespace RikiPath.Domain.Entities
 
         public int UserId { get; set; }
         public UserAccount UserAccount { get; set; }
-        public int MockTestId { get; set; }
-        public MockTest MockTest { get; set; }
 
         public DateTime StartedAt { get; set; }
         public DateTime? SubmittedAt { get; set; }

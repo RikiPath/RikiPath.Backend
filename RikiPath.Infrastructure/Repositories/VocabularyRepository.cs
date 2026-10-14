@@ -1,54 +1,57 @@
+using Microsoft.EntityFrameworkCore;
 using RikiPath.Application.IRepositories;
 using RikiPath.Domain.Entities;
-using Microsoft.EntityFrameworkCore;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
-using RikiPath.Domain.Enums;
 
 namespace RikiPath.Infrastructure.Repositories
 {
     public class VocabularyRepository(AppDbContext context) : GenericRepository<Vocabulary>(context), IVocabularyRepository
     {
-        private IQueryable<Vocabulary> BuildSearchQuery(int? jlptLevelId, ContentStatus? status, string? keyword)
+        private IQueryable<Vocabulary> BuildSearchQuery(int? jlptLevelId, string? keyword)
         {
             IQueryable<Vocabulary> query = _context.Vocabularies.AsQueryable();
-            if (jlptLevelId.HasValue) query = query.Where(x => x.CertificateLevelId == jlptLevelId.Value);
-            if (status.HasValue) query = query.Where(x => x.Status == status.Value);
-            if (!string.IsNullOrEmpty(keyword))
-                query = query.Where(x => x.Word.Contains(keyword) || x.Reading.Contains(keyword) || x.Meaning.ToLower().Contains(keyword.ToLower()));
+
+            // Lọc theo Cấp độ chứng chỉ thông qua bảng trung gian ContentLevelMapping
+            if (jlptLevelId.HasValue)
+            {
+                query = query.Where(x => x.ContentLevelMappings != null &&
+                    x.ContentLevelMappings.Any(m => m.CertificateLevelId == jlptLevelId.Value && !m.IsDeleted));
+            }
+
+            // Lọc theo Từ khóa
+            if (!string.IsNullOrWhiteSpace(keyword))
+            {
+                var kw = keyword.Trim();
+                query = query.Where(x =>
+                    x.Word.Contains(kw) ||
+                    x.Reading.Contains(kw) ||
+                    x.Meaning.Contains(kw));
+            }
+
             return query;
         }
 
         public async Task<(List<Vocabulary> items, int total)> SearchAsync(
-             int? jlptLevelId,
-             ContentStatus? status,
-             string? keyword,
-             int pageIndex,
-             int pageSize)
+            int? jlptLevelId,
+            string? keyword,
+            int pageIndex,
+            int pageSize)
         {
-            var query = BuildSearchQuery(jlptLevelId, status, keyword);
+            var query = BuildSearchQuery(jlptLevelId, keyword);
 
             var total = await query.CountAsync();
 
             var items = await query
-                .Include(x => x.CertificateLevel)
+                .Include(x => x.ContentLevelMappings!)
+                    .ThenInclude(m => m.CertificateLevel)
                 .OrderBy(x => x.Word)
-                .Skip((pageIndex - 1) * pageSize)
+                .Skip((pageIndex - 1) * pageSize) // Đã sửa lỗi phân trang
                 .Take(pageSize)
                 .ToListAsync();
 
             return (items, total);
         }
 
-        public async Task<int> CountSearchAsync(int? jlptLevelId, ContentStatus? status, string? keyword)
-            => await BuildSearchQuery(jlptLevelId, status, keyword).CountAsync();
-
-        public async Task<List<Vocabulary>> GetPendingReviewAsync()
-            => await _context.Vocabularies
-                .Where(x => x.Status == ContentStatus.PendingReview)
-                .OrderBy(x => x.ModifiedDate)
-                .ToListAsync();
-
+        public async Task<int> CountSearchAsync(int? jlptLevelId, string? keyword)
+            => await BuildSearchQuery(jlptLevelId, keyword).CountAsync();
     }
 }

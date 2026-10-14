@@ -12,7 +12,6 @@ namespace RikiPath.Infrastructure.Configuration
             builder.Property(x => x.CertificateLevelId).HasColumnName("CertificationLevelId");
             builder.Property(x => x.LanguageSkillId).HasColumnName("SkillId");
             builder.Property(x => x.Title).IsRequired().HasMaxLength(300);
-            builder.Property(x => x.Status).HasConversion<string>().HasMaxLength(20);
 
             builder.HasOne(x => x.CertificateLevel)
                 .WithMany(x => x.Lessons)
@@ -24,7 +23,7 @@ namespace RikiPath.Infrastructure.Configuration
                 .HasForeignKey(x => x.LanguageSkillId)
                 .OnDelete(DeleteBehavior.Restrict);
 
-            builder.HasIndex(x => new { x.CertificateLevelId, x.LanguageSkillId, x.Status });
+            builder.HasIndex(x => new { x.CertificateLevelId, x.LanguageSkillId });
         }
     }
 }

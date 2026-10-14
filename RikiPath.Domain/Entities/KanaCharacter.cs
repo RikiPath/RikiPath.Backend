@@ -13,12 +13,6 @@ namespace RikiPath.Domain.Entities
         public string? StrokeOrderImageUrl { get; set; }
         public string? AudioUrl { get; set; }
 
-        public ContentStatus Status { get; set; } = ContentStatus.Draft;
-        public bool IsApproved { get; set; }
-        public string? ReviewNote { get; set; }
-        public DateTime? ReviewedDate { get; set; }
-        public string? ReviewedByName { get; set; }
-
         public int ContentAuthorId { get; set; }
         public UserAccount ContentAuthor { get; set; } = null!;
         public List<KanaWritingPracticeCard>? PracticeCards { get; set; }
