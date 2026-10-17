@@ -1092,9 +1092,6 @@ namespace RikiPath.Infrastructure.Migrations
                         .HasMaxLength(10)
                         .HasColumnType("character varying(10)");
 
-                    b.Property<int>("ContentAuthorId")
-                        .HasColumnType("integer");
-
                     b.Property<Guid?>("CreatedBy")
                         .HasColumnType("uuid");
 
@@ -1128,12 +1125,1024 @@ namespace RikiPath.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("ContentAuthorId");
-
                     b.HasIndex("Character", "Type")
                         .IsUnique();
 
                     b.ToTable("KanaCharacters");
+
+                    b.HasData(
+                        new
+                        {
+                            Id = 1,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/2/22/Ja-a.ogg",
+                            Character = "あ",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7153),
+                            IsDeleted = false,
+                            Romaji = "a",
+                            StrokeCount = 3,
+                            Type = "Hiragana"
+                        },
+                        new
+                        {
+                            Id = 2,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/2/28/Ja-i.ogg",
+                            Character = "い",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7176),
+                            IsDeleted = false,
+                            Romaji = "i",
+                            StrokeCount = 2,
+                            Type = "Hiragana"
+                        },
+                        new
+                        {
+                            Id = 3,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/a/a2/Ja-u.ogg",
+                            Character = "う",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7178),
+                            IsDeleted = false,
+                            Romaji = "u",
+                            StrokeCount = 2,
+                            Type = "Hiragana"
+                        },
+                        new
+                        {
+                            Id = 4,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/2/21/Ja-e.ogg",
+                            Character = "え",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7180),
+                            IsDeleted = false,
+                            Romaji = "e",
+                            StrokeCount = 2,
+                            Type = "Hiragana"
+                        },
+                        new
+                        {
+                            Id = 5,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/d/df/Ja-o.ogg",
+                            Character = "お",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7181),
+                            IsDeleted = false,
+                            Romaji = "o",
+                            StrokeCount = 3,
+                            Type = "Hiragana"
+                        },
+                        new
+                        {
+                            Id = 6,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/2/2e/Ja-ka.ogg",
+                            Character = "か",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7185),
+                            IsDeleted = false,
+                            Romaji = "ka",
+                            StrokeCount = 3,
+                            Type = "Hiragana"
+                        },
+                        new
+                        {
+                            Id = 7,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/8/87/Ja-ki.ogg",
+                            Character = "き",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7186),
+                            IsDeleted = false,
+                            Romaji = "ki",
+                            StrokeCount = 4,
+                            Type = "Hiragana"
+                        },
+                        new
+                        {
+                            Id = 8,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/a/a3/Ja-ku.ogg",
+                            Character = "く",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7187),
+                            IsDeleted = false,
+                            Romaji = "ku",
+                            StrokeCount = 1,
+                            Type = "Hiragana"
+                        },
+                        new
+                        {
+                            Id = 9,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/b/b3/Ja-ke.ogg",
+                            Character = "け",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7188),
+                            IsDeleted = false,
+                            Romaji = "ke",
+                            StrokeCount = 3,
+                            Type = "Hiragana"
+                        },
+                        new
+                        {
+                            Id = 10,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/1/18/Ja-ko.ogg",
+                            Character = "こ",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7190),
+                            IsDeleted = false,
+                            Romaji = "ko",
+                            StrokeCount = 2,
+                            Type = "Hiragana"
+                        },
+                        new
+                        {
+                            Id = 11,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/a/a9/Ja-sa.ogg",
+                            Character = "さ",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7192),
+                            IsDeleted = false,
+                            Romaji = "sa",
+                            StrokeCount = 3,
+                            Type = "Hiragana"
+                        },
+                        new
+                        {
+                            Id = 12,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/8/80/Ja-shi.ogg",
+                            Character = "し",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7193),
+                            IsDeleted = false,
+                            Romaji = "shi",
+                            StrokeCount = 1,
+                            Type = "Hiragana"
+                        },
+                        new
+                        {
+                            Id = 13,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/a/a7/Ja-su.ogg",
+                            Character = "す",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7194),
+                            IsDeleted = false,
+                            Romaji = "su",
+                            StrokeCount = 2,
+                            Type = "Hiragana"
+                        },
+                        new
+                        {
+                            Id = 14,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/a/a8/Ja-se.ogg",
+                            Character = "せ",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7195),
+                            IsDeleted = false,
+                            Romaji = "se",
+                            StrokeCount = 3,
+                            Type = "Hiragana"
+                        },
+                        new
+                        {
+                            Id = 15,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/0/00/Ja-so.ogg",
+                            Character = "そ",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7196),
+                            IsDeleted = false,
+                            Romaji = "so",
+                            StrokeCount = 1,
+                            Type = "Hiragana"
+                        },
+                        new
+                        {
+                            Id = 16,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/d/d2/Ja-ta.ogg",
+                            Character = "た",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7198),
+                            IsDeleted = false,
+                            Romaji = "ta",
+                            StrokeCount = 4,
+                            Type = "Hiragana"
+                        },
+                        new
+                        {
+                            Id = 17,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/3/38/Ja-chi.ogg",
+                            Character = "ち",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7199),
+                            IsDeleted = false,
+                            Romaji = "chi",
+                            StrokeCount = 2,
+                            Type = "Hiragana"
+                        },
+                        new
+                        {
+                            Id = 18,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/3/32/Ja-tsu.ogg",
+                            Character = "つ",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7202),
+                            IsDeleted = false,
+                            Romaji = "tsu",
+                            StrokeCount = 1,
+                            Type = "Hiragana"
+                        },
+                        new
+                        {
+                            Id = 19,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/1/10/Ja-te.ogg",
+                            Character = "て",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7203),
+                            IsDeleted = false,
+                            Romaji = "te",
+                            StrokeCount = 1,
+                            Type = "Hiragana"
+                        },
+                        new
+                        {
+                            Id = 20,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/a/a5/Ja-to.ogg",
+                            Character = "と",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7204),
+                            IsDeleted = false,
+                            Romaji = "to",
+                            StrokeCount = 2,
+                            Type = "Hiragana"
+                        },
+                        new
+                        {
+                            Id = 21,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/9/92/Ja-na.ogg",
+                            Character = "な",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7205),
+                            IsDeleted = false,
+                            Romaji = "na",
+                            StrokeCount = 4,
+                            Type = "Hiragana"
+                        },
+                        new
+                        {
+                            Id = 22,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/b/b7/Ja-ni.ogg",
+                            Character = "に",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7206),
+                            IsDeleted = false,
+                            Romaji = "ni",
+                            StrokeCount = 3,
+                            Type = "Hiragana"
+                        },
+                        new
+                        {
+                            Id = 23,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/b/b1/Ja-nu.ogg",
+                            Character = "ぬ",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7207),
+                            IsDeleted = false,
+                            Romaji = "nu",
+                            StrokeCount = 2,
+                            Type = "Hiragana"
+                        },
+                        new
+                        {
+                            Id = 24,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/8/86/Ja-ne.ogg",
+                            Character = "ね",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7285),
+                            IsDeleted = false,
+                            Romaji = "ne",
+                            StrokeCount = 2,
+                            Type = "Hiragana"
+                        },
+                        new
+                        {
+                            Id = 25,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/5/54/Ja-no.ogg",
+                            Character = "の",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7286),
+                            IsDeleted = false,
+                            Romaji = "no",
+                            StrokeCount = 1,
+                            Type = "Hiragana"
+                        },
+                        new
+                        {
+                            Id = 26,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/0/08/Ja-ha.ogg",
+                            Character = "は",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7287),
+                            IsDeleted = false,
+                            Romaji = "ha",
+                            StrokeCount = 3,
+                            Type = "Hiragana"
+                        },
+                        new
+                        {
+                            Id = 27,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/9/99/Ja-hi.ogg",
+                            Character = "ひ",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7288),
+                            IsDeleted = false,
+                            Romaji = "hi",
+                            StrokeCount = 1,
+                            Type = "Hiragana"
+                        },
+                        new
+                        {
+                            Id = 28,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/7/70/Ja-fu.ogg",
+                            Character = "ふ",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7290),
+                            IsDeleted = false,
+                            Romaji = "fu",
+                            StrokeCount = 4,
+                            Type = "Hiragana"
+                        },
+                        new
+                        {
+                            Id = 29,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/2/2a/Ja-he.ogg",
+                            Character = "へ",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7291),
+                            IsDeleted = false,
+                            Romaji = "he",
+                            StrokeCount = 1,
+                            Type = "Hiragana"
+                        },
+                        new
+                        {
+                            Id = 30,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/a/a4/Ja-ho.ogg",
+                            Character = "ほ",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7293),
+                            IsDeleted = false,
+                            Romaji = "ho",
+                            StrokeCount = 4,
+                            Type = "Hiragana"
+                        },
+                        new
+                        {
+                            Id = 31,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/0/0d/Ja-ma.ogg",
+                            Character = "ま",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7294),
+                            IsDeleted = false,
+                            Romaji = "ma",
+                            StrokeCount = 3,
+                            Type = "Hiragana"
+                        },
+                        new
+                        {
+                            Id = 32,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/1/16/Ja-mi.ogg",
+                            Character = "み",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7295),
+                            IsDeleted = false,
+                            Romaji = "mi",
+                            StrokeCount = 2,
+                            Type = "Hiragana"
+                        },
+                        new
+                        {
+                            Id = 33,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/e/eb/Ja-mu.ogg",
+                            Character = "む",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7296),
+                            IsDeleted = false,
+                            Romaji = "mu",
+                            StrokeCount = 3,
+                            Type = "Hiragana"
+                        },
+                        new
+                        {
+                            Id = 34,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/8/8b/Ja-me.ogg",
+                            Character = "め",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7298),
+                            IsDeleted = false,
+                            Romaji = "me",
+                            StrokeCount = 2,
+                            Type = "Hiragana"
+                        },
+                        new
+                        {
+                            Id = 35,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/c/c1/Ja-mo.ogg",
+                            Character = "も",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7299),
+                            IsDeleted = false,
+                            Romaji = "mo",
+                            StrokeCount = 3,
+                            Type = "Hiragana"
+                        },
+                        new
+                        {
+                            Id = 36,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/e/e8/Ja-ya.ogg",
+                            Character = "や",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7300),
+                            IsDeleted = false,
+                            Romaji = "ya",
+                            StrokeCount = 3,
+                            Type = "Hiragana"
+                        },
+                        new
+                        {
+                            Id = 37,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/7/7b/Ja-yu.ogg",
+                            Character = "ゆ",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7301),
+                            IsDeleted = false,
+                            Romaji = "yu",
+                            StrokeCount = 2,
+                            Type = "Hiragana"
+                        },
+                        new
+                        {
+                            Id = 38,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/c/c9/Ja-yo.ogg",
+                            Character = "よ",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7302),
+                            IsDeleted = false,
+                            Romaji = "yo",
+                            StrokeCount = 2,
+                            Type = "Hiragana"
+                        },
+                        new
+                        {
+                            Id = 39,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/0/04/Ja-ra.ogg",
+                            Character = "ら",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7303),
+                            IsDeleted = false,
+                            Romaji = "ra",
+                            StrokeCount = 2,
+                            Type = "Hiragana"
+                        },
+                        new
+                        {
+                            Id = 40,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/7/76/Ja-ri.ogg",
+                            Character = "り",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7304),
+                            IsDeleted = false,
+                            Romaji = "ri",
+                            StrokeCount = 2,
+                            Type = "Hiragana"
+                        },
+                        new
+                        {
+                            Id = 41,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/5/56/Ja-ru.ogg",
+                            Character = "る",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7306),
+                            IsDeleted = false,
+                            Romaji = "ru",
+                            StrokeCount = 1,
+                            Type = "Hiragana"
+                        },
+                        new
+                        {
+                            Id = 42,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/5/57/Ja-re.ogg",
+                            Character = "れ",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7307),
+                            IsDeleted = false,
+                            Romaji = "re",
+                            StrokeCount = 2,
+                            Type = "Hiragana"
+                        },
+                        new
+                        {
+                            Id = 43,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/e/ed/Ja-ro.ogg",
+                            Character = "ろ",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7308),
+                            IsDeleted = false,
+                            Romaji = "ro",
+                            StrokeCount = 1,
+                            Type = "Hiragana"
+                        },
+                        new
+                        {
+                            Id = 44,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/f/f2/Ja-wa.ogg",
+                            Character = "わ",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7309),
+                            IsDeleted = false,
+                            Romaji = "wa",
+                            StrokeCount = 2,
+                            Type = "Hiragana"
+                        },
+                        new
+                        {
+                            Id = 45,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/7/77/Ja-wo.ogg",
+                            Character = "を",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7310),
+                            IsDeleted = false,
+                            Romaji = "wo",
+                            StrokeCount = 3,
+                            Type = "Hiragana"
+                        },
+                        new
+                        {
+                            Id = 46,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/0/0c/Ja-n.ogg",
+                            Character = "ん",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7311),
+                            IsDeleted = false,
+                            Romaji = "n",
+                            StrokeCount = 1,
+                            Type = "Hiragana"
+                        },
+                        new
+                        {
+                            Id = 47,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/2/22/Ja-a.ogg",
+                            Character = "ア",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7395),
+                            IsDeleted = false,
+                            Romaji = "a",
+                            StrokeCount = 2,
+                            Type = "Katakana"
+                        },
+                        new
+                        {
+                            Id = 48,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/2/28/Ja-i.ogg",
+                            Character = "イ",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7398),
+                            IsDeleted = false,
+                            Romaji = "i",
+                            StrokeCount = 2,
+                            Type = "Katakana"
+                        },
+                        new
+                        {
+                            Id = 49,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/a/a2/Ja-u.ogg",
+                            Character = "ウ",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7399),
+                            IsDeleted = false,
+                            Romaji = "u",
+                            StrokeCount = 3,
+                            Type = "Katakana"
+                        },
+                        new
+                        {
+                            Id = 50,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/2/21/Ja-e.ogg",
+                            Character = "エ",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7400),
+                            IsDeleted = false,
+                            Romaji = "e",
+                            StrokeCount = 3,
+                            Type = "Katakana"
+                        },
+                        new
+                        {
+                            Id = 51,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/d/df/Ja-o.ogg",
+                            Character = "オ",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7401),
+                            IsDeleted = false,
+                            Romaji = "o",
+                            StrokeCount = 3,
+                            Type = "Katakana"
+                        },
+                        new
+                        {
+                            Id = 52,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/2/2e/Ja-ka.ogg",
+                            Character = "カ",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7402),
+                            IsDeleted = false,
+                            Romaji = "ka",
+                            StrokeCount = 2,
+                            Type = "Katakana"
+                        },
+                        new
+                        {
+                            Id = 53,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/8/87/Ja-ki.ogg",
+                            Character = "キ",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7403),
+                            IsDeleted = false,
+                            Romaji = "ki",
+                            StrokeCount = 3,
+                            Type = "Katakana"
+                        },
+                        new
+                        {
+                            Id = 54,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/a/a3/Ja-ku.ogg",
+                            Character = "ク",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7404),
+                            IsDeleted = false,
+                            Romaji = "ku",
+                            StrokeCount = 2,
+                            Type = "Katakana"
+                        },
+                        new
+                        {
+                            Id = 55,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/b/b3/Ja-ke.ogg",
+                            Character = "ケ",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7405),
+                            IsDeleted = false,
+                            Romaji = "ke",
+                            StrokeCount = 3,
+                            Type = "Katakana"
+                        },
+                        new
+                        {
+                            Id = 56,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/1/18/Ja-ko.ogg",
+                            Character = "コ",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7407),
+                            IsDeleted = false,
+                            Romaji = "ko",
+                            StrokeCount = 2,
+                            Type = "Katakana"
+                        },
+                        new
+                        {
+                            Id = 57,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/a/a9/Ja-sa.ogg",
+                            Character = "サ",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7408),
+                            IsDeleted = false,
+                            Romaji = "sa",
+                            StrokeCount = 3,
+                            Type = "Katakana"
+                        },
+                        new
+                        {
+                            Id = 58,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/8/80/Ja-shi.ogg",
+                            Character = "シ",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7409),
+                            IsDeleted = false,
+                            Romaji = "shi",
+                            StrokeCount = 3,
+                            Type = "Katakana"
+                        },
+                        new
+                        {
+                            Id = 59,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/a/a7/Ja-su.ogg",
+                            Character = "ス",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7410),
+                            IsDeleted = false,
+                            Romaji = "su",
+                            StrokeCount = 2,
+                            Type = "Katakana"
+                        },
+                        new
+                        {
+                            Id = 60,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/a/a8/Ja-se.ogg",
+                            Character = "セ",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7411),
+                            IsDeleted = false,
+                            Romaji = "se",
+                            StrokeCount = 2,
+                            Type = "Katakana"
+                        },
+                        new
+                        {
+                            Id = 61,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/0/00/Ja-so.ogg",
+                            Character = "ソ",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7412),
+                            IsDeleted = false,
+                            Romaji = "so",
+                            StrokeCount = 2,
+                            Type = "Katakana"
+                        },
+                        new
+                        {
+                            Id = 62,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/d/d2/Ja-ta.ogg",
+                            Character = "タ",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7413),
+                            IsDeleted = false,
+                            Romaji = "ta",
+                            StrokeCount = 3,
+                            Type = "Katakana"
+                        },
+                        new
+                        {
+                            Id = 63,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/3/38/Ja-chi.ogg",
+                            Character = "チ",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7414),
+                            IsDeleted = false,
+                            Romaji = "chi",
+                            StrokeCount = 3,
+                            Type = "Katakana"
+                        },
+                        new
+                        {
+                            Id = 64,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/3/32/Ja-tsu.ogg",
+                            Character = "ツ",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7415),
+                            IsDeleted = false,
+                            Romaji = "tsu",
+                            StrokeCount = 3,
+                            Type = "Katakana"
+                        },
+                        new
+                        {
+                            Id = 65,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/1/10/Ja-te.ogg",
+                            Character = "テ",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7416),
+                            IsDeleted = false,
+                            Romaji = "te",
+                            StrokeCount = 3,
+                            Type = "Katakana"
+                        },
+                        new
+                        {
+                            Id = 66,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/a/a5/Ja-to.ogg",
+                            Character = "ト",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7419),
+                            IsDeleted = false,
+                            Romaji = "to",
+                            StrokeCount = 2,
+                            Type = "Katakana"
+                        },
+                        new
+                        {
+                            Id = 67,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/9/92/Ja-na.ogg",
+                            Character = "ナ",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7420),
+                            IsDeleted = false,
+                            Romaji = "na",
+                            StrokeCount = 2,
+                            Type = "Katakana"
+                        },
+                        new
+                        {
+                            Id = 68,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/b/b7/Ja-ni.ogg",
+                            Character = "ニ",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7421),
+                            IsDeleted = false,
+                            Romaji = "ni",
+                            StrokeCount = 2,
+                            Type = "Katakana"
+                        },
+                        new
+                        {
+                            Id = 69,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/b/b1/Ja-nu.ogg",
+                            Character = "ヌ",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7463),
+                            IsDeleted = false,
+                            Romaji = "nu",
+                            StrokeCount = 2,
+                            Type = "Katakana"
+                        },
+                        new
+                        {
+                            Id = 70,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/8/86/Ja-ne.ogg",
+                            Character = "ネ",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7464),
+                            IsDeleted = false,
+                            Romaji = "ne",
+                            StrokeCount = 4,
+                            Type = "Katakana"
+                        },
+                        new
+                        {
+                            Id = 71,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/5/54/Ja-no.ogg",
+                            Character = "ノ",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7465),
+                            IsDeleted = false,
+                            Romaji = "no",
+                            StrokeCount = 1,
+                            Type = "Katakana"
+                        },
+                        new
+                        {
+                            Id = 72,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/0/08/Ja-ha.ogg",
+                            Character = "ハ",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7466),
+                            IsDeleted = false,
+                            Romaji = "ha",
+                            StrokeCount = 2,
+                            Type = "Katakana"
+                        },
+                        new
+                        {
+                            Id = 73,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/9/99/Ja-hi.ogg",
+                            Character = "ヒ",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7468),
+                            IsDeleted = false,
+                            Romaji = "hi",
+                            StrokeCount = 2,
+                            Type = "Katakana"
+                        },
+                        new
+                        {
+                            Id = 74,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/7/70/Ja-fu.ogg",
+                            Character = "フ",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7469),
+                            IsDeleted = false,
+                            Romaji = "fu",
+                            StrokeCount = 1,
+                            Type = "Katakana"
+                        },
+                        new
+                        {
+                            Id = 75,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/2/2a/Ja-he.ogg",
+                            Character = "ヘ",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7470),
+                            IsDeleted = false,
+                            Romaji = "he",
+                            StrokeCount = 1,
+                            Type = "Katakana"
+                        },
+                        new
+                        {
+                            Id = 76,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/a/a4/Ja-ho.ogg",
+                            Character = "ホ",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7471),
+                            IsDeleted = false,
+                            Romaji = "ho",
+                            StrokeCount = 4,
+                            Type = "Katakana"
+                        },
+                        new
+                        {
+                            Id = 77,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/0/0d/Ja-ma.ogg",
+                            Character = "マ",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7472),
+                            IsDeleted = false,
+                            Romaji = "ma",
+                            StrokeCount = 2,
+                            Type = "Katakana"
+                        },
+                        new
+                        {
+                            Id = 78,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/1/16/Ja-mi.ogg",
+                            Character = "ミ",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7473),
+                            IsDeleted = false,
+                            Romaji = "mi",
+                            StrokeCount = 3,
+                            Type = "Katakana"
+                        },
+                        new
+                        {
+                            Id = 79,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/e/eb/Ja-mu.ogg",
+                            Character = "ム",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7474),
+                            IsDeleted = false,
+                            Romaji = "mu",
+                            StrokeCount = 2,
+                            Type = "Katakana"
+                        },
+                        new
+                        {
+                            Id = 80,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/8/8b/Ja-me.ogg",
+                            Character = "メ",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7475),
+                            IsDeleted = false,
+                            Romaji = "me",
+                            StrokeCount = 2,
+                            Type = "Katakana"
+                        },
+                        new
+                        {
+                            Id = 81,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/c/c1/Ja-mo.ogg",
+                            Character = "モ",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7477),
+                            IsDeleted = false,
+                            Romaji = "mo",
+                            StrokeCount = 3,
+                            Type = "Katakana"
+                        },
+                        new
+                        {
+                            Id = 82,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/e/e8/Ja-ya.ogg",
+                            Character = "ヤ",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7478),
+                            IsDeleted = false,
+                            Romaji = "ya",
+                            StrokeCount = 2,
+                            Type = "Katakana"
+                        },
+                        new
+                        {
+                            Id = 83,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/7/7b/Ja-yu.ogg",
+                            Character = "ユ",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7479),
+                            IsDeleted = false,
+                            Romaji = "yu",
+                            StrokeCount = 2,
+                            Type = "Katakana"
+                        },
+                        new
+                        {
+                            Id = 84,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/c/c9/Ja-yo.ogg",
+                            Character = "ヨ",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7481),
+                            IsDeleted = false,
+                            Romaji = "yo",
+                            StrokeCount = 3,
+                            Type = "Katakana"
+                        },
+                        new
+                        {
+                            Id = 85,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/0/04/Ja-ra.ogg",
+                            Character = "ラ",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7482),
+                            IsDeleted = false,
+                            Romaji = "ra",
+                            StrokeCount = 2,
+                            Type = "Katakana"
+                        },
+                        new
+                        {
+                            Id = 86,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/7/76/Ja-ri.ogg",
+                            Character = "リ",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7483),
+                            IsDeleted = false,
+                            Romaji = "ri",
+                            StrokeCount = 2,
+                            Type = "Katakana"
+                        },
+                        new
+                        {
+                            Id = 87,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/5/56/Ja-ru.ogg",
+                            Character = "ル",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7484),
+                            IsDeleted = false,
+                            Romaji = "ru",
+                            StrokeCount = 2,
+                            Type = "Katakana"
+                        },
+                        new
+                        {
+                            Id = 88,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/5/57/Ja-re.ogg",
+                            Character = "レ",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7485),
+                            IsDeleted = false,
+                            Romaji = "re",
+                            StrokeCount = 1,
+                            Type = "Katakana"
+                        },
+                        new
+                        {
+                            Id = 89,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/e/ed/Ja-ro.ogg",
+                            Character = "ロ",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7486),
+                            IsDeleted = false,
+                            Romaji = "ro",
+                            StrokeCount = 3,
+                            Type = "Katakana"
+                        },
+                        new
+                        {
+                            Id = 90,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/f/f2/Ja-wa.ogg",
+                            Character = "ワ",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7487),
+                            IsDeleted = false,
+                            Romaji = "wa",
+                            StrokeCount = 2,
+                            Type = "Katakana"
+                        },
+                        new
+                        {
+                            Id = 91,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/7/77/Ja-wo.ogg",
+                            Character = "ヲ",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7488),
+                            IsDeleted = false,
+                            Romaji = "wo",
+                            StrokeCount = 3,
+                            Type = "Katakana"
+                        },
+                        new
+                        {
+                            Id = 92,
+                            AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/0/0c/Ja-n.ogg",
+                            Character = "ン",
+                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7489),
+                            IsDeleted = false,
+                            Romaji = "n",
+                            StrokeCount = 2,
+                            Type = "Katakana"
+                        });
                 });
 
             modelBuilder.Entity("RikiPath.Domain.Entities.KanaWritingPracticeCard", b =>
@@ -3822,17 +4831,6 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Navigation("Learner");
 
                     b.Navigation("Lesson");
-                });
-
-            modelBuilder.Entity("RikiPath.Domain.Entities.KanaCharacter", b =>
-                {
-                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "ContentAuthor")
-                        .WithMany()
-                        .HasForeignKey("ContentAuthorId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("ContentAuthor");
                 });
 
             modelBuilder.Entity("RikiPath.Domain.Entities.KanaWritingPracticeCard", b =>

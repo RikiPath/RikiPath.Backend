@@ -6,6 +6,6 @@ namespace RikiPath.Application.Responses.LearningPaths
         public DateTime GeneratedAt { get; set; }
         public string Summary { get; set; } = string.Empty;
         public List<string> FocusTopics { get; set; } = new();
-        public List<SuggestedLessonResponse> SuggestedLessons { get; set; } = new();
+        public List<DailyScheduleResponse> DailySchedules { get; set; } = new();
     }
 }
