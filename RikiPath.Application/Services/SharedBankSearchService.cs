@@ -25,8 +25,9 @@ namespace RikiPath.Application.Services
             {
                 Normalize(filter);
 
-                var (items, total) = await unitOfWork.Vocabularies.SearchAsync(
-                    filter.JlptLevelId, filter.Keyword, filter.Page, filter.PageSize);
+                // SharedBank Vocabulary luôn dùng truy vấn công khai; client không tự quyết định trạng thái hiển thị.
+                var (items, total) = await unitOfWork.Vocabularies.SearchPublicAsync(
+                    filter.JlptLevelId, filter.Keyword, filter.Page, filter.PageSize, cancellationToken);
 
                 var result = new PagedResult<VocabularyCardResponse>
                 {
@@ -49,7 +50,8 @@ namespace RikiPath.Application.Services
         {
             try
             {
-                var entry = await unitOfWork.Vocabularies.GetByIdAsync(id);
+                // Dùng cùng quy tắc với danh sách để không thể đoán ID và truy cập Vocabulary ẩn.
+                var entry = await unitOfWork.Vocabularies.GetPublicByIdAsync(id, cancellationToken);
                 if (entry is null)
                     return ApiResponse<VocabularyCardResponse>.NotFound($"Không tìm thấy từ vựng Id = {id}.");
 
@@ -69,9 +71,10 @@ namespace RikiPath.Application.Services
             {
                 Normalize(filter);
 
-                var (items, total) = await unitOfWork.Kanjis.SearchAsync(
+                // SharedBank Kanji dùng truy vấn công khai riêng để không ảnh hưởng luồng luyện viết.
+                var (items, total) = await unitOfWork.Kanjis.SearchPublicAsync(
                     filter.JlptLevelId, filter.Keyword, filter.MinStrokeCount, filter.MaxStrokeCount,
-                    filter.Page, filter.PageSize);
+                    filter.Page, filter.PageSize, cancellationToken);
 
                 var result = new PagedResult<KanjiCardResponse>
                 {
@@ -94,7 +97,8 @@ namespace RikiPath.Application.Services
         {
             try
             {
-                var entry = await unitOfWork.Kanjis.GetByIdAsync(id);
+                // Dùng cùng quy tắc với danh sách để không thể đoán ID và truy cập Kanji ẩn.
+                var entry = await unitOfWork.Kanjis.GetPublicByIdAsync(id, cancellationToken);
                 if (entry is null)
                     return ApiResponse<KanjiCardResponse>.NotFound($"Không tìm thấy Kanji Id = {id}.");
 
@@ -114,8 +118,9 @@ namespace RikiPath.Application.Services
             {
                 Normalize(filter);
 
-                var (items, total) = await unitOfWork.GrammarPatterns.SearchAsync(
-                    filter.JlptLevelId, filter.Keyword, filter.Page, filter.PageSize);
+                // SharedBank Grammar luôn dùng truy vấn công khai; client không tự quyết định trạng thái hiển thị.
+                var (items, total) = await unitOfWork.GrammarPatterns.SearchPublicAsync(
+                    filter.JlptLevelId, filter.Keyword, filter.Page, filter.PageSize, cancellationToken);
 
                 var result = new PagedResult<GrammarCardResponse>
                 {
@@ -138,7 +143,8 @@ namespace RikiPath.Application.Services
         {
             try
             {
-                var entry = await unitOfWork.GrammarPatterns.GetByIdAsync(id);
+                // Dùng cùng quy tắc với danh sách để không thể đoán ID và truy cập Grammar ẩn.
+                var entry = await unitOfWork.GrammarPatterns.GetPublicByIdAsync(id, cancellationToken);
                 if (entry is null)
                     return ApiResponse<GrammarCardResponse>.NotFound($"Không tìm thấy ngữ pháp Id = {id}.");
 

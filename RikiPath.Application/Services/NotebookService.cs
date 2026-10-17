@@ -154,7 +154,9 @@ namespace RikiPath.Application.Services
                 if (list.UserId != userId)
                     return ApiResponse<NotebookEntryResponse>.Fail("Danh sách này không thuộc về bạn.", HttpStatusCode.Forbidden);
 
-                var vocab = await unitOfWork.Vocabularies.GetByIdAsync(request.VocabularyId);
+                // Kiểm tra quyền hiển thị Learner trước khi bookmark Vocabulary.
+                // Không cho phép đoán ID để lưu nội dung ẩn hoặc đã xóa.
+                var vocab = await unitOfWork.Vocabularies.GetPublicByIdAsync(request.VocabularyId, cancellationToken);
                 if (vocab is null)
                     return ApiResponse<NotebookEntryResponse>.NotFound("Không tìm thấy từ vựng trong ngân hàng chung.");
 
@@ -193,7 +195,9 @@ namespace RikiPath.Application.Services
                 if (list.UserId != userId)
                     return ApiResponse<NotebookEntryResponse>.Fail("Danh sách này không thuộc về bạn.", HttpStatusCode.Forbidden);
 
-                var kanji = await unitOfWork.Kanjis.GetByIdAsync(request.KanjiId);
+                // Kiểm tra quyền hiển thị Learner trước khi bookmark Kanji.
+                // Không cho phép đoán ID để lưu nội dung ẩn hoặc đã xóa.
+                var kanji = await unitOfWork.Kanjis.GetPublicByIdAsync(request.KanjiId, cancellationToken);
                 if (kanji is null)
                     return ApiResponse<NotebookEntryResponse>.NotFound("Không tìm thấy Kanji trong ngân hàng chung.");
 
@@ -226,7 +230,9 @@ namespace RikiPath.Application.Services
             try
             {
                 var userId = claimService.GetUserClaim().Id;
-                var grammar = await unitOfWork.GrammarPatterns.GetByIdAsync(grammarPointId);
+                // Kiểm tra quyền hiển thị Learner trước khi bookmark Grammar.
+                // Không cho phép đoán ID để lưu nội dung ẩn hoặc đã xóa.
+                var grammar = await unitOfWork.GrammarPatterns.GetPublicByIdAsync(grammarPointId, cancellationToken);
                 if (grammar is null)
                     return ApiResponse<GrammarBookmarkResponse>.NotFound("Không tìm thấy điểm ngữ pháp.");
 
