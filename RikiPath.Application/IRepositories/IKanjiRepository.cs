@@ -14,6 +14,15 @@ namespace RikiPath.Application.IRepositories
             int? maxStroke,
             int pageIndex,
             int pageSize);
+        Task<(List<Kanji> Items, int TotalCount)> SearchPublicAsync(
+            int? jlptLevelId,
+            string? keyword,
+            int? minStroke,
+            int? maxStroke,
+            int pageIndex,
+            int pageSize,
+            CancellationToken cancellationToken = default);
+        Task<Kanji?> GetPublicByIdAsync(int id, CancellationToken cancellationToken = default);
         Task<int> CountSearchAsync(int? jlptLevelId, string? keyword);
     }
 }
