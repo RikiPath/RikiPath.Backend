@@ -6,7 +6,9 @@ namespace RikiPath.Application.IRepositories
 {
     public interface IMockTestSectionResultRepository : IGenericRepository<MockTestSectionResult>
     {
-        Task<List<MockTestSectionResult>> GetByAttemptIdAsync(int practiceTestAttemptId);
+        Task<List<MockTestSectionResult>> GetByAttemptIdAsync(
+            int practiceTestAttemptId,
+            CancellationToken cancellationToken = default);
         Task<List<MockTestSectionResult>> GetLanguageSkillBreakdownAsync(int userId);
     }
 }

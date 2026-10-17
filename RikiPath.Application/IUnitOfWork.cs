@@ -73,6 +73,9 @@ namespace RikiPath.Application
         IContentApprovalRequestRepository ContentApprovalRequests { get; }
         // Db Helpers
         Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
+        Task ExecuteInTransactionAsync(
+            Func<CancellationToken, Task> operation,
+            CancellationToken cancellationToken = default);
         Task<T> ExecuteScalarAsync<T>(string sql);
         Task ExecuteRawSqlAsync(string sql);
     }

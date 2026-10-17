@@ -16,12 +16,12 @@ namespace RikiPath.WebApi.Controllers
         /// </summary>
         /// <remarks>
         /// - Màn hình sử dụng: Màn hình Start Test / Quiz trong app Learner.
-        /// - Luồng xử lý: Tạo attempt mới trong CSDL, có thể sinh câu hỏi ngẫu nhiên hoặc lấy đề đã cấu hình; không gọi AI.
-        /// - Lưu ý cho FE: Yêu cầu Bearer Token (Role = Learner). FE nên hiển thị countdown/timeout nếu test có giới hạn thời gian.
+        /// - Luồng xử lý: Tạo attempt và snapshot bộ câu hỏi của đề; không gọi AI.
+        /// - Lưu ý cho FE: Yêu cầu Bearer Token (Role = Learner). QuestionId/OptionId trong response là ID Backend phải dùng khi submit.
         /// </remarks>
         /// <param name="practiceTestId">ID practice test (Required).</param>
         /// <param name="cancellationToken">Token hủy request (Optional).</param>
-        /// <response code="200">Thành công: Trả về attemptId và thông tin cần thiết để bắt đầu.</response>
+        /// <response code="201">Thành công: Trả về attemptId, thời gian và bộ câu hỏi/options có ID thật.</response>
         /// <response code="400">Dữ liệu không hợp lệ: test không còn khả dụng hoặc đã hết hạn đăng ký.</response>
         /// <response code="401">Chưa xác thực: Thiếu Bearer Token.</response>
         /// <response code="403">Không có quyền: Token không có role Learner hoặc user không được phép tham gia test.</response>
@@ -49,6 +49,7 @@ namespace RikiPath.WebApi.Controllers
         /// <response code="400">Dữ liệu không hợp lệ: answers thiếu hoặc format sai.</response>
         /// <response code="401">Chưa xác thực: Thiếu Bearer Token.</response>
         /// <response code="403">Không có quyền: attempt không thuộc user.</response>
+        /// <response code="409">Attempt cũ không có snapshot câu hỏi hợp lệ.</response>
         /// <response code="500">Lỗi server khi tính điểm hoặc gọi dịch vụ chấm.</response>
         [HttpPost("attempts/{attemptId:int}/submit")]
         public async Task<IActionResult> SubmitAttempt(int attemptId, [FromBody] SubmitAttemptRequest request, CancellationToken cancellationToken)
