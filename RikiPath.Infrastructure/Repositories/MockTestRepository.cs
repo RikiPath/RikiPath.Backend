@@ -29,10 +29,13 @@ namespace RikiPath.Infrastructure.Repositories
         public async Task<int> CountSearchAsync(int? jlptLevelId, ContentStatus? status, string? keyword)
             => await BuildSearchQuery(jlptLevelId, status, keyword).CountAsync();
 
-        public async Task<MockTest?> GetWithSectionsAndQuestionsAsync(int practiceTestId)
+        public async Task<MockTest?> GetWithSectionsAndQuestionsAsync(
+            int practiceTestId,
+            CancellationToken cancellationToken = default)
             => await _context.MockTests
                 .Include(x => x.Sections).ThenInclude(s => s.Questions).ThenInclude(q => q.Options)
-                .FirstOrDefaultAsync(x => x.Id == practiceTestId);
+                .AsSplitQuery()
+                .FirstOrDefaultAsync(x => x.Id == practiceTestId, cancellationToken);
 
         public async Task<List<MockTest>> GetByLevelAsync(int jlptLevelId)
         {

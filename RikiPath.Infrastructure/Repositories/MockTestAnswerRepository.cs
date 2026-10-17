@@ -13,11 +13,23 @@ namespace RikiPath.Infrastructure.Repositories
         {
         }
 
-        public async Task<List<MockTestAnswer>> GetByAttemptIdAsync(int practiceTestAttemptId)
+        public async Task<List<MockTestAnswer>> GetByAttemptIdAsync(
+            int practiceTestAttemptId,
+            CancellationToken cancellationToken = default)
             => await _context.MockTestAnswers
                 .Include(x => x.MockQuestion)
+                    .ThenInclude(q => q.Options)
+                .Include(x => x.MockQuestion)
+                    .ThenInclude(q => q.MockTestSection)
+                        .ThenInclude(s => s.MockTest)
+                .Include(x => x.MockQuestion)
+                    .ThenInclude(q => q.MockTestSection)
+                        .ThenInclude(s => s.LanguageSkill)
                 .Include(x => x.SelectedOption)
                 .Where(x => x.MockTestAttemptId == practiceTestAttemptId)
-                .ToListAsync();
+                .OrderBy(x => x.MockQuestion.MockTestSection.SortOrder)
+                .ThenBy(x => x.MockQuestion.SortOrder)
+                .AsSplitQuery()
+                .ToListAsync(cancellationToken);
     }
 }

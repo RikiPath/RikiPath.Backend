@@ -24,6 +24,15 @@ namespace RikiPath.Infrastructure.Repositories
                 .Include(x => x.Answers).ThenInclude(a => a.MockQuestion)
                 .Include(x => x.SectionResults).ThenInclude(r => r.MockTestSection)
                 .FirstOrDefaultAsync(x => x.Id == attemptId);
+
+        public async Task<MockTestAttempt?> GetForSubmissionAsync(
+            int attemptId,
+            CancellationToken cancellationToken = default)
+            => await _context.MockTestAttempts
+                // Khóa attempt trong transaction để hai request đồng thời không thể cùng chấm một bài.
+                .FromSqlInterpolated($"SELECT * FROM \"MockTestAttempts\" WHERE \"Id\" = {attemptId} FOR UPDATE")
+                .SingleOrDefaultAsync(cancellationToken);
+
         public async Task<List<DateTime>> GetActivityDatesAsync(int userId)
         {
             return await _context.MockTestAttempts

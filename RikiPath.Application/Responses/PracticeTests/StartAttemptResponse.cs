@@ -8,5 +8,26 @@ namespace RikiPath.Application.Responses.MockTests
         public int TimeLimitMinutes { get; set; }
         public int TotalPreviouslyWrongQuestions { get; set; }
         public List<int> PreviouslyWrongQuestionIds { get; set; } = [];
+        public List<StartAttemptQuestionResponse> Questions { get; set; } = [];
+    }
+
+    public class StartAttemptQuestionResponse
+    {
+        public int QuestionId { get; set; }
+        public int MockTestSectionId { get; set; }
+        public string SectionTitle { get; set; } = string.Empty;
+        public int SectionOrder { get; set; }
+        public int Order { get; set; }
+        public string Content { get; set; } = string.Empty;
+        public string? AudioUrl { get; set; }
+        public string? ImageUrl { get; set; }
+        public List<StartAttemptOptionResponse> Options { get; set; } = [];
+    }
+
+    public class StartAttemptOptionResponse
+    {
+        public int OptionId { get; set; }
+        public string Content { get; set; } = string.Empty;
+        public int Order { get; set; }
     }
 }
