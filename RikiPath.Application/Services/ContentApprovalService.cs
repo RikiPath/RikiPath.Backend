@@ -219,7 +219,7 @@ namespace RikiPath.Application.Services
                 try
                 {
                     var req = await unitOfWork.ContentApprovalRequests.GetByIdAsync(item.RequestId, cancellationToken);
-                    if (req is null || req.Status != ContentApprovalStatus.PendingReview)
+                    if (req is null || req.Status != ContentApprovalStatus.Draft)
                     {
                         result.Failures.Add(new BulkReviewItemResult
                         {

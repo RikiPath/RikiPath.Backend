@@ -12,9 +12,6 @@ namespace RikiPath.Domain.Entities
         public int StrokeCount { get; set; }
         public string? StrokeOrderImageUrl { get; set; }
         public string? AudioUrl { get; set; }
-
-        public int ContentAuthorId { get; set; }
-        public UserAccount ContentAuthor { get; set; } = null!;
         public List<KanaWritingPracticeCard>? PracticeCards { get; set; }
     }
 }
