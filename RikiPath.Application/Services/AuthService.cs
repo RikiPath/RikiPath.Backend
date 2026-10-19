@@ -20,7 +20,8 @@ namespace RikiPath.Application.Services
         AppSettings appSettings,
         IEmailService emailService,
         IFirebaseAuthService firebaseAuthService,
-        IMemoryCache memoryCache) : IAuthService
+        IMemoryCache memoryCache,
+        IClaimService claimService) : IAuthService
     {
         private const int VerificationCodeLifetimeMinutes = 30;
         private const int ResendCooldownSeconds = 60;
@@ -298,6 +299,10 @@ namespace RikiPath.Application.Services
         {
             try
             {
+                var ownershipError = ValidateAccountOwnership(userId);
+                if (ownershipError is not null)
+                    return ownershipError;
+
                 var user = await unitOfWork.UserAccounts.GetByIdAsync(userId, cancellationToken);
                 if (user is null)
                     return ApiResponse.NotFound("Không tìm thấy người dùng.");
@@ -338,6 +343,10 @@ namespace RikiPath.Application.Services
         {
             try
             {
+                var ownershipError = ValidateAccountOwnership(userId);
+                if (ownershipError is not null)
+                    return ownershipError;
+
                 var user = await unitOfWork.UserAccounts.GetByIdAsync(userId, cancellationToken);
                 if (user is null)
                     return ApiResponse.NotFound("Không tìm thấy người dùng.");
@@ -362,6 +371,24 @@ namespace RikiPath.Application.Services
         }
 
         // ---------- Private helpers ----------
+
+        private ApiResponse? ValidateAccountOwnership(int targetUserId)
+        {
+            try
+            {
+                // userId trên route chỉ xác định tài khoản đích; quyền sở hữu phải được đối chiếu với JWT trước khi đọc hoặc cập nhật dữ liệu.
+                var currentUser = claimService.GetUserClaim();
+
+                // Hệ thống chưa có policy quản trị sửa thông tin đăng nhập của người khác, nên mọi vai trò đều phải là chính chủ.
+                return currentUser.Id == targetUserId
+                    ? null
+                    : ApiResponse.Forbidden("Bạn không có quyền thay đổi tài khoản này.");
+            }
+            catch (Exception ex) when (ex is ArgumentException or FormatException)
+            {
+                return ApiResponse.Unauthorized("Không xác định được tài khoản hiện tại từ JWT.");
+            }
+        }
 
         private string CreateToken(UserAccount user)
         {

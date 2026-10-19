@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using RikiPath.Application.IServices;
@@ -129,12 +130,12 @@ namespace RikiPath.WebApi.Controllers
             return StatusCode((int)result.StatusCode, result);
         }
         /// <summary>
-        /// Cập nhật địa chỉ email cho user (Admin hoặc chính chủ).
+        /// Cập nhật địa chỉ email cho chính chủ tài khoản.
         /// </summary>
         /// <remarks>
         /// - Màn hình sử dụng: Trang quản lý tài khoản hoặc profile settings.
         /// - Luồng xử lý: Cập nhật email trong CSDL, gửi email xác thực mới; có thể yêu cầu xác thực lại.
-        /// - Lưu ý cho FE: Yêu cầu quyền phù hợp (Bearer Token). Nếu update cho user khác, cần role admin. Thao tác có thể mất thời gian do gửi mail.
+        /// - Lưu ý cho FE: Yêu cầu Bearer Token và userId phải trùng với tài khoản trong JWT. Thao tác có thể mất thời gian do gửi mail.
         /// </remarks>
         /// <param name="userId">ID user cần cập nhật (Required).</param>
         /// <param name="request">UpdateEmailRequest: NewEmail (Required).</param>
@@ -144,6 +145,7 @@ namespace RikiPath.WebApi.Controllers
         /// <response code="401">Chưa xác thực: Thiếu Bearer Token.</response>
         /// <response code="403">Không có quyền: User không được phép cập nhật email của tài khoản này.</response>
         /// <response code="500">Lỗi server khi cập nhật hoặc gửi mail.</response>
+        [Authorize]
         [HttpPut("update-email/{userId:int}")]
         public async Task<IActionResult> UpdateEmail(int userId, [FromBody] UpdateEmailRequest request, CancellationToken cancellationToken)
         {
@@ -152,12 +154,12 @@ namespace RikiPath.WebApi.Controllers
         }
 
         /// <summary>
-        /// Đổi mật khẩu cho user (chính chủ hoặc admin reset).
+        /// Đổi mật khẩu cho chính chủ tài khoản.
         /// </summary>
         /// <remarks>
         /// - Màn hình sử dụng: Trang đổi mật khẩu hoặc quản trị viên reset mật khẩu.
-        /// - Luồng xử lý: Kiểm tra mật khẩu hiện tại (nếu cần), cập nhật mật khẩu mới, invalid token phiên đăng nhập cũ nếu cần.
-        /// - Lưu ý cho FE: Yêu cầu Bearer Token. Nếu là reset bởi admin có thể không cần current password. Thời gian xử lý nhanh (<1s).
+        /// - Luồng xử lý: Kiểm tra mật khẩu hiện tại và cập nhật mật khẩu mới.
+        /// - Lưu ý cho FE: Yêu cầu Bearer Token và userId phải trùng với tài khoản trong JWT. Thời gian xử lý nhanh (<1s).
         /// </remarks>
         /// <param name="userId">ID user cần đổi mật khẩu (Required).</param>
         /// <param name="request">ChangePasswordRequest: CurrentPassword (Required if user tự đổi), NewPassword (Required).</param>
@@ -167,6 +169,7 @@ namespace RikiPath.WebApi.Controllers
         /// <response code="401">Chưa xác thực: Thiếu Bearer Token.</response>
         /// <response code="403">Không có quyền: Người gọi không được phép đổi mật khẩu cho user này.</response>
         /// <response code="500">Lỗi server khi cập nhật mật khẩu.</response>
+        [Authorize]
         [HttpPost("change-password/{userId:int}")]
         public async Task<IActionResult> ChangePassword(int userId, [FromBody] ChangePasswordRequest request, CancellationToken cancellationToken)
         {
