@@ -187,14 +187,17 @@ namespace RikiPath.WebApi.Controllers
         /// </summary>
         /// <remarks>
         /// - Màn hình sử dụng: Chức năng thêm note/manual entry trong Notebook.
-        /// - Luồng xử lý: Lưu note vào CSDL dưới user hiện tại.
-        /// - Lưu ý cho FE: Yêu cầu Bearer Token. Content là Required; có thể hỗ trợ attachments nhưng nên upload trước qua FileStorage API.
+        /// - Luồng xử lý: Kiểm tra ownership của LearnerNote, sau đó lưu entry và ReviewCard trong cùng một transaction.
+        /// - Lưu ý cho FE: LearnerNoteId, Word và Meaning là bắt buộc. Retry cùng nội dung trả lại entry hiện có.
         /// </remarks>
-        /// <param name="request">AddManualEntryRequest: Content (Required), Title (Optional), Attachments (Optional).</param>
+        /// <param name="request">AddManualEntryRequest: LearnerNoteId, Word, Meaning (Required); Reading, Note (Optional).</param>
         /// <param name="cancellationToken">Token hủy request (Optional).</param>
-        /// <response code="200">Thành công: Entry đã được thêm.</response>
+        /// <response code="200">Retry thành công: Trả lại entry giống hệt đã tồn tại.</response>
+        /// <response code="201">Thành công: Entry và ReviewCard đã được tạo.</response>
         /// <response code="400">Dữ liệu không hợp lệ.</response>
         /// <response code="401">Chưa xác thực: Thiếu Bearer Token.</response>
+        /// <response code="403">Không có quyền: Learner không sở hữu danh sách.</response>
+        /// <response code="404">Không tìm thấy danh sách.</response>
         /// <response code="500">Lỗi server khi lưu note.</response>
         [HttpPost("entries")]
         public async Task<IActionResult> AddManualEntry([FromBody] AddManualEntryRequest request, CancellationToken cancellationToken)
@@ -208,7 +211,7 @@ namespace RikiPath.WebApi.Controllers
         /// </summary>
         /// <remarks>
         /// - Màn hình sử dụng: Chức năng xóa note trong Notebook.
-        /// - Luồng xử lý: Xóa record nếu user sở hữu entry; có thể soft-delete.
+        /// - Luồng xử lý: Kiểm tra ownership qua LearnerNote, sau đó xóa ReviewCard và entry trong cùng một transaction.
         /// - Lưu ý cho FE: Yêu cầu Bearer Token. Hiển thị confirm trước khi gọi.
         /// </remarks>
         /// <param name="noteEntryId">ID mục cần xóa (Required).</param>
