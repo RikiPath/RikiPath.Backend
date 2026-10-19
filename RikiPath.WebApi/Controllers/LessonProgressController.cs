@@ -2,7 +2,8 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using RikiPath.Application.IServices;
 using RikiPath.Application.Requests.Lessons;
-using System.Security.Claims;
+using RikiPath.Application.Responses;
+using RikiPath.Application.Responses.Lessons;
 
 namespace RikiPath.WebApi.Controllers
 {
@@ -11,6 +12,38 @@ namespace RikiPath.WebApi.Controllers
     [Authorize(Roles = "Learner")]
     public class LessonProgressController(ILessonProgressService lessonProgressService) : ControllerBase
     {
+        /// <summary>
+        /// Lấy danh sách bài học khả dụng và tiến độ của Learner theo cấp độ JLPT.
+        /// </summary>
+        /// <remarks>
+        /// Dùng ID cấp độ thật từ catalog Backend. Kết quả được sắp xếp theo SortOrder rồi Id.
+        /// Catalog bài học rỗng vẫn trả 200 với danh sách rỗng; không thay bằng dữ liệu mẫu.
+        /// </remarks>
+        /// <param name="certificateLevelId">ID CertificateLevel JLPT (Required).</param>
+        /// <param name="cancellationToken">Token hủy request (Optional).</param>
+        /// <response code="200">Danh sách bài học và tiến độ hiện tại của Learner.</response>
+        /// <response code="400">ID cấp độ không hợp lệ.</response>
+        /// <response code="401">Thiếu Bearer Token.</response>
+        /// <response code="403">Token không có role Learner.</response>
+        /// <response code="404">Cấp độ JLPT không khả dụng.</response>
+        /// <response code="500">Không thể truy vấn nội dung học.</response>
+        [HttpGet("lessons")]
+        [ProducesResponseType(typeof(ApiResponse<LearningDiscoveryResponse>), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ApiResponse<LearningDiscoveryResponse>), StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(typeof(ApiResponse<LearningDiscoveryResponse>), StatusCodes.Status404NotFound)]
+        [ProducesResponseType(typeof(ApiResponse<LearningDiscoveryResponse>), StatusCodes.Status500InternalServerError)]
+        public async Task<IActionResult> GetLessons(
+            [FromQuery] int certificateLevelId,
+            CancellationToken cancellationToken)
+        {
+            var result = await lessonProgressService.GetLearningDiscoveryAsync(
+                certificateLevelId,
+                cancellationToken);
+            return StatusCode(result.StatusCode, result);
+        }
+
         /// <summary>
         /// Lấy chi tiết tiến độ và nội dung bài học cho user tại lessonId.
         /// </summary>
@@ -27,6 +60,11 @@ namespace RikiPath.WebApi.Controllers
         /// <response code="404">Không tìm thấy lesson này.</response>
         /// <response code="500">Lỗi server khi truy vấn dữ liệu.</response>
         [HttpGet("lessons/{lessonId:int}")]
+        [ProducesResponseType(typeof(ApiResponse<LessonDetailResponse>), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(typeof(ApiResponse<LessonDetailResponse>), StatusCodes.Status404NotFound)]
+        [ProducesResponseType(typeof(ApiResponse<LessonDetailResponse>), StatusCodes.Status500InternalServerError)]
         public async Task<IActionResult> GetLessonDetail(int lessonId, CancellationToken cancellationToken)
         {
 
@@ -52,11 +90,47 @@ namespace RikiPath.WebApi.Controllers
         /// <response code="404">Không tìm thấy lesson.</response>
         /// <response code="500">Lỗi server khi lưu tiến độ.</response>
         [HttpPatch("lessons/{lessonId:int}/playback-position")]
+        [ProducesResponseType(typeof(ApiResponse<LessonDetailResponse>), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ApiResponse<LessonDetailResponse>), StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(typeof(ApiResponse<LessonDetailResponse>), StatusCodes.Status404NotFound)]
+        [ProducesResponseType(typeof(ApiResponse<LessonDetailResponse>), StatusCodes.Status500InternalServerError)]
         public async Task<IActionResult> UpdatePlaybackPosition(int lessonId, [FromBody] UpdatePlaybackPositionRequest request, CancellationToken cancellationToken)
         {
 
             var result = await lessonProgressService.UpdatePlaybackPositionAsync(lessonId, request, cancellationToken);
             return StatusCode((int)result.StatusCode, result);
+        }
+
+        /// <summary>
+        /// Đánh dấu bài học đã hoàn thành cho Learner hiện tại.
+        /// </summary>
+        /// <remarks>
+        /// Identity lấy từ JWT, request không nhận userId. Gọi lại cùng lesson là idempotent
+        /// và không tạo thêm LessonProgress trùng.
+        /// </remarks>
+        /// <param name="lessonId">ID bài học khả dụng (Required).</param>
+        /// <param name="cancellationToken">Token hủy request (Optional).</param>
+        /// <response code="200">Đã hoàn thành hoặc bài học đã được hoàn thành trước đó.</response>
+        /// <response code="401">Thiếu Bearer Token.</response>
+        /// <response code="403">Token không có role Learner.</response>
+        /// <response code="404">Bài học không tồn tại hoặc không khả dụng.</response>
+        /// <response code="500">Không thể lưu trạng thái hoàn thành.</response>
+        [HttpPost("lessons/{lessonId:int}/complete")]
+        [ProducesResponseType(typeof(ApiResponse<LessonDetailResponse>), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(typeof(ApiResponse<LessonDetailResponse>), StatusCodes.Status404NotFound)]
+        [ProducesResponseType(typeof(ApiResponse<LessonDetailResponse>), StatusCodes.Status500InternalServerError)]
+        public async Task<IActionResult> CompleteLesson(
+            int lessonId,
+            CancellationToken cancellationToken)
+        {
+            var result = await lessonProgressService.CompleteLessonAsync(
+                lessonId,
+                cancellationToken);
+            return StatusCode(result.StatusCode, result);
         }
     }
 }

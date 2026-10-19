@@ -20,6 +20,51 @@ namespace RikiPath.Infrastructure.Repositories
                 .Include(x => x.LessonGrammars).ThenInclude(x => x.GrammarPattern)
                 .FirstOrDefaultAsync(x => x.Id == lessonId);
 
+        public async Task<IReadOnlyList<Lesson>> GetLearnerVisibleByLevelAsync(
+            int certificateLevelId,
+            int userId,
+            CancellationToken cancellationToken = default)
+        {
+            // Chỉ trả nội dung học đang khả dụng cho cấp độ JLPT của Learner.
+            return await _context.Lessons
+                .AsNoTracking()
+                .Where(lesson =>
+                    lesson.CertificateLevelId == certificateLevelId
+                    && !lesson.IsDeleted
+                    && !lesson.CertificateLevel.IsDeleted
+                    && !lesson.CertificateLevel.CertificateType.IsDeleted
+                    && lesson.CertificateLevel.CertificateType.IsActive
+                    && lesson.CertificateLevel.CertificateType.Name == "JLPT"
+                    && !lesson.LanguageSkill.IsDeleted)
+                .Include(lesson => lesson.LanguageSkill)
+                .Include(lesson => lesson.LessonProgresses!
+                    .Where(progress => progress.UserId == userId && !progress.IsDeleted))
+                // SortOrder là thứ tự nghiệp vụ hiện có; Id là tie-breaker ổn định.
+                .OrderBy(lesson => lesson.SortOrder)
+                .ThenBy(lesson => lesson.Id)
+                .ToListAsync(cancellationToken);
+        }
+
+        public async Task<Lesson?> GetLearnerVisibleByIdAsync(
+            int lessonId,
+            CancellationToken cancellationToken = default)
+        {
+            return await _context.Lessons
+                .AsNoTracking()
+                .Include(lesson => lesson.CertificateLevel)
+                    .ThenInclude(level => level.CertificateType)
+                .Include(lesson => lesson.LanguageSkill)
+                .FirstOrDefaultAsync(lesson =>
+                    lesson.Id == lessonId
+                    && !lesson.IsDeleted
+                    && !lesson.CertificateLevel.IsDeleted
+                    && !lesson.CertificateLevel.CertificateType.IsDeleted
+                    && lesson.CertificateLevel.CertificateType.IsActive
+                    && lesson.CertificateLevel.CertificateType.Name == "JLPT"
+                    && !lesson.LanguageSkill.IsDeleted,
+                    cancellationToken);
+        }
+
         public async Task<(int Total, int Completed)> GetCompletionStatsAsync(int userId)
         {
             var total = await _context.Lessons.CountAsync();

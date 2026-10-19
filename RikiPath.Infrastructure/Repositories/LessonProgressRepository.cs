@@ -13,23 +13,32 @@ namespace RikiPath.Infrastructure.Repositories
         {
         }
 
-        public async Task<LessonProgress?> GetByUserAndLessonAsync(int userId, int lessonId)
+        public async Task<LessonProgress?> GetByUserAndLessonAsync(
+            int userId,
+            int lessonId,
+            CancellationToken cancellationToken = default)
             => await _context.LessonProgresses
-                .FirstOrDefaultAsync(x => x.UserId == userId && x.LessonId == lessonId);
+                .FirstOrDefaultAsync(
+                    x => x.UserId == userId && x.LessonId == lessonId,
+                    cancellationToken);
 
-        public async Task<List<LessonProgress>> GetByUserAsync(int userId)
+        public async Task<List<LessonProgress>> GetByUserAsync(
+            int userId,
+            CancellationToken cancellationToken = default)
             => await _context.LessonProgresses
                 .Include(x => x.Lesson)
                 .Where(x => x.UserId == userId)
-                .ToListAsync();
+                .ToListAsync(cancellationToken);
 
-        public async Task<List<DateTime>> GetActivityDatesAsync(int userId)
+        public async Task<List<DateTime>> GetActivityDatesAsync(
+            int userId,
+            CancellationToken cancellationToken = default)
         {
             return await _context.LessonProgresses
                 .Where(p => p.UserId == userId && p.LastWatchedAt.HasValue)
                 .Select(p => p.LastWatchedAt!.Value.Date)
                 .Distinct()
-                .ToListAsync();
+                .ToListAsync(cancellationToken);
         }
     }
 }
