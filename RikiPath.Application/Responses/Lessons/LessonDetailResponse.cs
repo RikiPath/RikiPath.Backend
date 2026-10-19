@@ -4,6 +4,10 @@ namespace RikiPath.Application.Responses.Lessons
     {
         public int LessonId { get; set; }
         public int CourseId { get; set; }
+        public int CertificateLevelId { get; set; }
+        public string LevelCode { get; set; } = string.Empty;
+        public int LanguageSkillId { get; set; }
+        public string LanguageSkillName { get; set; } = string.Empty;
         public string Title { get; set; } = string.Empty;
         public string Content { get; set; } = string.Empty;
         public string? VideoUrl { get; set; }

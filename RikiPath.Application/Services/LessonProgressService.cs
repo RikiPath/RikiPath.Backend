@@ -7,50 +7,138 @@ using System.Net;
 
 namespace RikiPath.Application.Services
 {
-    // NOTE: cần thêm cột Lesson.AttachmentUrl (string?) và
-    // LessonProgress.ResumePositionSeconds (int, default 0) nếu chưa có.
     public class LessonProgressService(IUnitOfWork unitOfWork, IClaimService claimService) : ILessonProgressService
     {
         private const int AutoCompleteThresholdPercent = 95;
 
-        public async Task<ApiResponse<LessonDetailResponse>> GetLessonDetailAsync(int lessonId, CancellationToken cancellationToken)
+        public async Task<ApiResponse<LearningDiscoveryResponse>> GetLearningDiscoveryAsync(
+            int certificateLevelId,
+            CancellationToken cancellationToken)
         {
+            if (certificateLevelId <= 0)
+            {
+                return ApiResponse<LearningDiscoveryResponse>.Fail(
+                    "Cấp độ JLPT không hợp lệ.",
+                    HttpStatusCode.BadRequest);
+            }
+
             try
             {
                 var userId = claimService.GetUserClaim().Id;
-                var lesson = await unitOfWork.Lessons.GetByIdAsync(lessonId);
-                if (lesson is null)
-                    return ApiResponse<LessonDetailResponse>.NotFound($"Không tìm thấy bài học Id = {lessonId}.");
+                var level = await unitOfWork.CertificateLevels.FirstOrDefaultAsync(
+                    item => item.Id == certificateLevelId
+                        && !item.IsDeleted
+                        && !item.CertificateType.IsDeleted
+                        && item.CertificateType.IsActive
+                        && item.CertificateType.Name == "JLPT",
+                    cancellationToken);
 
-                // NOTE: cần ILessonProgressRepository.GetByUserAndLessonAsync(userId, lessonId).
-                var progress = await unitOfWork.LessonProgresses.GetByUserAndLessonAsync(userId, lessonId);
+                if (level is null)
+                {
+                    return ApiResponse<LearningDiscoveryResponse>.NotFound(
+                        $"Không tìm thấy cấp độ JLPT Id = {certificateLevelId}.");
+                }
 
-                return ApiResponse<LessonDetailResponse>.Success(MapToResponse(lesson, progress));
+                var lessons = await unitOfWork.Lessons.GetLearnerVisibleByLevelAsync(
+                    certificateLevelId,
+                    userId,
+                    cancellationToken);
+                var lessonResponses = lessons.Select(MapToSummary).ToList();
+                var completedLessons = lessonResponses.Count(item => item.IsCompleted);
+                var overallProgress = lessonResponses.Count == 0
+                    ? 0
+                    : (int)Math.Round(lessonResponses.Average(item => item.ProgressPercent));
+
+                return ApiResponse<LearningDiscoveryResponse>.Success(
+                    new LearningDiscoveryResponse
+                    {
+                        CertificateLevelId = level.Id,
+                        LevelCode = level.Code,
+                        TotalLessons = lessonResponses.Count,
+                        CompletedLessons = completedLessons,
+                        OverallProgressPercent = overallProgress,
+                        Lessons = lessonResponses,
+                    });
             }
-            catch (Exception ex)
+            catch (OperationCanceledException)
             {
-                return ApiResponse<LessonDetailResponse>.Fail(
-                    "Không thể tải chi tiết bài học.", HttpStatusCode.InternalServerError, errors: BuildDebugErrors(ex));
+                throw;
+            }
+            catch
+            {
+                return ApiResponse<LearningDiscoveryResponse>.Fail(
+                    "Không thể tải danh sách bài học.",
+                    HttpStatusCode.InternalServerError);
             }
         }
 
-        public async Task<ApiResponse<LessonDetailResponse>> UpdatePlaybackPositionAsync(int lessonId, UpdatePlaybackPositionRequest request, CancellationToken cancellationToken)
+        public async Task<ApiResponse<LessonDetailResponse>> GetLessonDetailAsync(
+            int lessonId,
+            CancellationToken cancellationToken)
         {
             try
             {
                 var userId = claimService.GetUserClaim().Id;
-                if (request.DurationSeconds <= 0)
-                    return ApiResponse<LessonDetailResponse>.Fail("Thời lượng video không hợp lệ.");
-
-                if (request.PositionSeconds < 0)
-                    return ApiResponse<LessonDetailResponse>.Fail("Vị trí phát không hợp lệ.");
-
-                var lesson = await unitOfWork.Lessons.GetByIdAsync(lessonId);
+                var lesson = await unitOfWork.Lessons.GetLearnerVisibleByIdAsync(
+                    lessonId,
+                    cancellationToken);
                 if (lesson is null)
-                    return ApiResponse<LessonDetailResponse>.NotFound($"Không tìm thấy bài học Id = {lessonId}.");
+                {
+                    return ApiResponse<LessonDetailResponse>.NotFound(
+                        $"Không tìm thấy bài học Id = {lessonId}.");
+                }
 
-                var progress = await unitOfWork.LessonProgresses.GetByUserAndLessonAsync(userId, lessonId);
+                var progress = await unitOfWork.LessonProgresses.GetByUserAndLessonAsync(
+                    userId,
+                    lessonId,
+                    cancellationToken);
 
+                return ApiResponse<LessonDetailResponse>.Success(MapToResponse(lesson, progress));
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch
+            {
+                return ApiResponse<LessonDetailResponse>.Fail(
+                    "Không thể tải chi tiết bài học.",
+                    HttpStatusCode.InternalServerError);
+            }
+        }
+
+        public async Task<ApiResponse<LessonDetailResponse>> UpdatePlaybackPositionAsync(
+            int lessonId,
+            UpdatePlaybackPositionRequest request,
+            CancellationToken cancellationToken)
+        {
+            if (request.DurationSeconds <= 0)
+            {
+                return ApiResponse<LessonDetailResponse>.Fail("Thời lượng video không hợp lệ.");
+            }
+
+            if (request.PositionSeconds < 0)
+            {
+                return ApiResponse<LessonDetailResponse>.Fail("Vị trí phát không hợp lệ.");
+            }
+
+            try
+            {
+                var userId = claimService.GetUserClaim().Id;
+                var lesson = await unitOfWork.Lessons.GetLearnerVisibleByIdAsync(
+                    lessonId,
+                    cancellationToken);
+                if (lesson is null)
+                {
+                    return ApiResponse<LessonDetailResponse>.NotFound(
+                        $"Không tìm thấy bài học Id = {lessonId}.");
+                }
+
+                var progress = await unitOfWork.LessonProgresses.GetByUserAndLessonAsync(
+                    userId,
+                    lessonId,
+                    cancellationToken);
+                var now = DateTime.UtcNow;
                 var clampedPosition = Math.Min(request.PositionSeconds, request.DurationSeconds);
                 var percent = (int)Math.Round(clampedPosition * 100.0 / request.DurationSeconds);
                 percent = Math.Clamp(percent, 0, 100);
@@ -61,43 +149,138 @@ namespace RikiPath.Application.Services
                     {
                         UserId = userId,
                         LessonId = lessonId,
-                        IsCompleted = false,
                         ProgressPercent = percent,
                         LastPositionSeconds = clampedPosition,
-                        ModifiedDate = null,
+                        LastWatchedAt = now,
                     };
-                    await unitOfWork.LessonProgresses.AddAsync(progress);
+                    await unitOfWork.LessonProgresses.AddAsync(progress, cancellationToken);
                 }
                 else
                 {
-                    // Không lùi % tiến độ nếu user tua lại video xem lại đoạn cũ.
+                    progress.IsDeleted = false;
                     progress.ProgressPercent = Math.Max(progress.ProgressPercent, percent);
                     progress.LastPositionSeconds = clampedPosition;
+                    progress.LastWatchedAt = now;
                     unitOfWork.LessonProgresses.Update(progress);
                 }
 
-                if (progress.ProgressPercent >= AutoCompleteThresholdPercent && progress.ModifiedDate is null)
+                if (!progress.IsCompleted && progress.ProgressPercent >= AutoCompleteThresholdPercent)
                 {
                     progress.IsCompleted = true;
-                    progress.ModifiedDate = DateTime.UtcNow;
+                    progress.ModifiedDate = now;
                 }
 
-                await unitOfWork.SaveChangesAsync();
-
+                await unitOfWork.SaveChangesAsync(cancellationToken);
                 return ApiResponse<LessonDetailResponse>.Success(MapToResponse(lesson, progress));
             }
-            catch (Exception ex)
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch
             {
                 return ApiResponse<LessonDetailResponse>.Fail(
-                    "Không thể lưu tiến độ xem video.", HttpStatusCode.InternalServerError, errors: BuildDebugErrors(ex));
+                    "Không thể lưu tiến độ xem video.",
+                    HttpStatusCode.InternalServerError);
             }
         }
 
-        private static LessonDetailResponse MapToResponse(Lesson lesson, LessonProgress? progress) => new()
+        public async Task<ApiResponse<LessonDetailResponse>> CompleteLessonAsync(
+            int lessonId,
+            CancellationToken cancellationToken)
+        {
+            try
+            {
+                var userId = claimService.GetUserClaim().Id;
+                var lesson = await unitOfWork.Lessons.GetLearnerVisibleByIdAsync(
+                    lessonId,
+                    cancellationToken);
+                if (lesson is null)
+                {
+                    return ApiResponse<LessonDetailResponse>.NotFound(
+                        $"Không tìm thấy bài học Id = {lessonId}.");
+                }
+
+                var progress = await unitOfWork.LessonProgresses.GetByUserAndLessonAsync(
+                    userId,
+                    lessonId,
+                    cancellationToken);
+                if (progress?.IsCompleted == true && !progress.IsDeleted)
+                {
+                    return ApiResponse<LessonDetailResponse>.Success(
+                        MapToResponse(lesson, progress));
+                }
+
+                var now = DateTime.UtcNow;
+                if (progress is null)
+                {
+                    progress = new LessonProgress
+                    {
+                        UserId = userId,
+                        LessonId = lessonId,
+                        ProgressPercent = 100,
+                        IsCompleted = true,
+                        LastWatchedAt = now,
+                        ModifiedDate = now,
+                    };
+                    await unitOfWork.LessonProgresses.AddAsync(progress, cancellationToken);
+                }
+                else
+                {
+                    // Retry hoàn thành cùng một lesson không được tạo thêm progress trùng.
+                    progress.IsDeleted = false;
+                    progress.ProgressPercent = 100;
+                    progress.IsCompleted = true;
+                    progress.LastWatchedAt = now;
+                    progress.ModifiedDate ??= now;
+                    unitOfWork.LessonProgresses.Update(progress);
+                }
+
+                // Chỉ một progress row được ghi; thống kê discovery luôn tính lại từ dữ liệu này.
+                await unitOfWork.SaveChangesAsync(cancellationToken);
+                return ApiResponse<LessonDetailResponse>.Success(MapToResponse(lesson, progress));
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch
+            {
+                return ApiResponse<LessonDetailResponse>.Fail(
+                    "Không thể hoàn thành bài học.",
+                    HttpStatusCode.InternalServerError);
+            }
+        }
+
+        private static LearningLessonSummaryResponse MapToSummary(Lesson lesson)
+        {
+            var progress = lesson.LessonProgresses?.SingleOrDefault();
+            return new LearningLessonSummaryResponse
+            {
+                LessonId = lesson.Id,
+                Title = lesson.Title,
+                Description = lesson.Description,
+                SortOrder = lesson.SortOrder,
+                LanguageSkillId = lesson.LanguageSkillId,
+                LanguageSkillName = lesson.LanguageSkill.Name,
+                ProgressPercent = progress?.ProgressPercent ?? 0,
+                ResumePositionSeconds = progress?.LastPositionSeconds ?? 0,
+                IsCompleted = progress?.IsCompleted ?? false,
+                CompletedAt = progress?.ModifiedDate,
+            };
+        }
+
+        private static LessonDetailResponse MapToResponse(
+            Lesson lesson,
+            LessonProgress? progress) => new()
         {
             LessonId = lesson.Id,
+            CertificateLevelId = lesson.CertificateLevelId,
+            LevelCode = lesson.CertificateLevel.Code,
+            LanguageSkillId = lesson.LanguageSkillId,
+            LanguageSkillName = lesson.LanguageSkill.Name,
             Title = lesson.Title,
-            Content = lesson.Description,
+            Content = lesson.Description ?? string.Empty,
             AttachmentUrl = null,
             OrderIndex = lesson.SortOrder,
             ProgressPercent = progress?.ProgressPercent ?? 0,
@@ -105,17 +288,5 @@ namespace RikiPath.Application.Services
             IsCompleted = progress?.IsCompleted ?? false,
             CompletedAt = progress?.ModifiedDate,
         };
-
-        private static List<string> BuildDebugErrors(Exception ex)
-        {
-            var errors = new List<string> { $"{ex.GetType().Name}: {ex.Message}" };
-            if (ex.InnerException is not null)
-                errors.Add($"Inner: {ex.InnerException.Message}");
-#if DEBUG
-            if (!string.IsNullOrEmpty(ex.StackTrace))
-                errors.Add(ex.StackTrace);
-#endif
-            return errors;
-        }
     }
 }

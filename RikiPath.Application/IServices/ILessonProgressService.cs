@@ -6,6 +6,10 @@ namespace RikiPath.Application.IServices
 {
     public interface ILessonProgressService
     {
+        Task<ApiResponse<LearningDiscoveryResponse>> GetLearningDiscoveryAsync(
+            int certificateLevelId,
+            CancellationToken cancellationToken);
+
         Task<ApiResponse<LessonDetailResponse>> GetLessonDetailAsync(int lessonId, CancellationToken cancellationToken);
 
         /// <summary>
@@ -13,5 +17,9 @@ namespace RikiPath.Application.IServices
         /// hoàn thành khi progress &gt;= 95% (ngưỡng tránh trường hợp video kết thúc lệch vài giây).
         /// </summary>
         Task<ApiResponse<LessonDetailResponse>> UpdatePlaybackPositionAsync(int lessonId, UpdatePlaybackPositionRequest request, CancellationToken cancellationToken);
+
+        Task<ApiResponse<LessonDetailResponse>> CompleteLessonAsync(
+            int lessonId,
+            CancellationToken cancellationToken);
     }
 }
