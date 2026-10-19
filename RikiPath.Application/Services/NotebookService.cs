@@ -239,7 +239,9 @@ namespace RikiPath.Application.Services
                 var reviewItem = new ReviewCard
                 {
                     UserId = userId,
-                    GrammarPattern = grammar,
+                    // Grammar từ public query là detached graph vì dùng AsNoTracking.
+                    // Chỉ lưu khóa ngoại để EF không insert lại Grammar, mapping và CertificateLevel đã tồn tại.
+                    GrammarPatternId = grammar.Id,
                     Repetitions = 0,
                     EaseFactor = DefaultEaseFactor,
                     IntervalDays = 0,
