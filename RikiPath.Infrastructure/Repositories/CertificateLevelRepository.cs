@@ -15,5 +15,21 @@ namespace RikiPath.Infrastructure.Repositories
                                .OrderBy(cl => cl.SortOrder)
                                .ToListAsync(ct);
         }
+
+        public async Task<IReadOnlyList<CertificateLevel>> GetLearnerVisibleJlptLevelsAsync(CancellationToken ct = default)
+        {
+            // Chỉ trả các cấp độ JLPT khả dụng cho luồng Learner.
+            return await _dbSet
+                .AsNoTracking()
+                .Where(level =>
+                    !level.IsDeleted
+                    && !level.CertificateType.IsDeleted
+                    && level.CertificateType.IsActive
+                    && level.CertificateType.Name == "JLPT")
+                // Sắp xếp catalog ổn định để Mobile không phụ thuộc vào thứ tự bản ghi trong CSDL.
+                .OrderBy(level => level.SortOrder)
+                .ThenBy(level => level.Id)
+                .ToListAsync(ct);
+        }
     }
 }
