@@ -35,6 +35,12 @@ public sealed class NotebookPublicVisibilityTests
         fixture.NoteEntries.Verify(
             x => x.AddAsync(It.IsAny<LearnerNoteEntry>(), It.IsAny<CancellationToken>()),
             Times.Once);
+        fixture.ReviewCards.Verify(
+            x => x.AddAsync(It.IsAny<ReviewCard>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+        fixture.UnitOfWork.Verify(
+            x => x.SaveChangesAsync(It.IsAny<CancellationToken>()),
+            Times.Once);
     }
 
     [Fact]
@@ -71,6 +77,36 @@ public sealed class NotebookPublicVisibilityTests
         fixture.NoteEntries.Verify(
             x => x.AddAsync(It.IsAny<LearnerNoteEntry>(), It.IsAny<CancellationToken>()),
             Times.Never);
+    }
+
+    [Fact]
+    public async Task Published_kanji_can_be_bookmarked_atomically()
+    {
+        var fixture = CreateFixture();
+        fixture.Kanjis
+            .Setup(x => x.GetPublicByIdAsync(106, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Kanji
+            {
+                Id = 106,
+                Character = "学",
+                Meaning = "study",
+            });
+
+        var result = await fixture.Service.BookmarkKanjiAsync(
+            new BookmarkKanjiRequest { LearnerNoteId = 10, KanjiId = 106 },
+            CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal((int)HttpStatusCode.Created, result.StatusCode);
+        fixture.NoteEntries.Verify(
+            x => x.AddAsync(It.IsAny<LearnerNoteEntry>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+        fixture.ReviewCards.Verify(
+            x => x.AddAsync(It.IsAny<ReviewCard>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+        fixture.UnitOfWork.Verify(
+            x => x.SaveChangesAsync(It.IsAny<CancellationToken>()),
+            Times.Once);
     }
 
     [Fact]
