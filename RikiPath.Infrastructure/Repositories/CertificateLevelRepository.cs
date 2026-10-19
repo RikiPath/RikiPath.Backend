@@ -31,5 +31,19 @@ namespace RikiPath.Infrastructure.Repositories
                 .ThenBy(level => level.Id)
                 .ToListAsync(ct);
         }
+
+        public async Task<CertificateLevel?> GetActiveJlptLevelByIdAsync(
+            int id,
+            CancellationToken ct = default)
+            => await _dbSet
+                .AsNoTracking()
+                .Include(level => level.CertificateType)
+                .FirstOrDefaultAsync(
+                    level => level.Id == id
+                        && !level.IsDeleted
+                        && !level.CertificateType.IsDeleted
+                        && level.CertificateType.IsActive
+                        && level.CertificateType.Name == "JLPT",
+                    ct);
     }
 }

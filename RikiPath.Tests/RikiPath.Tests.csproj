@@ -25,5 +25,6 @@
   <ItemGroup>
     <ProjectReference Include="..\RikiPath.Application\RikiPath.Application.csproj" />
     <ProjectReference Include="..\RikiPath.Infrastructure\RikiPath.Infrastructure.csproj" />
+    <ProjectReference Include="..\RikiPath.WebApi\RikiPath.WebApi.csproj" />
   </ItemGroup>
 </Project>
