@@ -66,7 +66,7 @@ namespace RikiPath.Application.Services
                 var emailResult = await emailService.SendValidationEmailAsync(user.Email, emailContent, cancellationToken);
                 if (!emailResult.IsSuccess)
                     return ApiResponse<RegisterResponse>.Fail(
-                        "Tạo tài khoản thành công nhưng gửi email xác thực thất bại: " + emailResult.ErrorMessage);
+                        "Tạo tài khoản thành công nhưng gửi email xác thực thất bại.");
 
                 return ApiResponse<RegisterResponse>.Created(new RegisterResponse { UserId = user.Id, FullName = $"{user.FirstName} {user.LastName}".Trim(), Email = user.Email });
             }
@@ -180,7 +180,8 @@ namespace RikiPath.Application.Services
 
                 if (!emailResult.IsSuccess)
                     return ApiResponse.Fail(
-                        "Không thể gửi email xác thực: " + emailResult.ErrorMessage,
+                        // Nội dung xác minh luôn do server tạo; không nhận subject/HTML từ client.
+                        "Không thể gửi email xác thực.",
                         System.Net.HttpStatusCode.BadRequest);
 
                 return ApiResponse.Success();
@@ -323,7 +324,7 @@ namespace RikiPath.Application.Services
                                     "<br/>Mã có hiệu lực trong 30 phút.";
                 var emailResult = await emailService.SendValidationEmailAsync(user.Email, emailContent, cancellationToken);
                 if (!emailResult.IsSuccess)
-                    return ApiResponse.Fail("Đã cập nhật email nhưng gửi mã xác thực thất bại: " + emailResult.ErrorMessage);
+                    return ApiResponse.Fail("Đã cập nhật email nhưng gửi mã xác thực thất bại.");
 
                 return ApiResponse.Success();
             }

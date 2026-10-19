@@ -33,9 +33,10 @@ namespace RikiPath.Application.Services
 
                 return EmailSendResult.Success();
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                return EmailSendResult.Fail($"{ex.GetType().Name}: {ex.Message}");
+                // Không trả chi tiết lỗi SMTP/provider ra API vì có thể lộ thông tin hạ tầng.
+                return EmailSendResult.Fail("Không thể gửi email qua nhà cung cấp.");
             }
         }
     }
