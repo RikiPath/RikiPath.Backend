@@ -145,6 +145,32 @@ namespace RikiPath.Infrastructure
             return await _context.SaveChangesAsync(cancellationToken);
         }
 
+        public async Task ExecuteInTransactionAsync(
+            Func<CancellationToken, Task> operation,
+            CancellationToken cancellationToken = default)
+        {
+            var strategy = _context.Database.CreateExecutionStrategy();
+            var isRetry = false;
+            await strategy.ExecuteAsync(async () =>
+            {
+                if (isRetry)
+                    _context.ChangeTracker.Clear();
+                isRetry = true;
+
+                await using var transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
+                try
+                {
+                    await operation(cancellationToken);
+                    await transaction.CommitAsync(cancellationToken);
+                }
+                catch
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    throw;
+                }
+            });
+        }
+
         public async Task<T> ExecuteScalarAsync<T>(string sql)
         {
             var connection = _context.Database.GetDbConnection();

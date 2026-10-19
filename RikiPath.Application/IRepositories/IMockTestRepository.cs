@@ -9,7 +9,9 @@ namespace RikiPath.Application.IRepositories
     {
         Task<List<MockTest>> SearchAsync(int? jlptLevelId, ContentStatus? status, string? keyword, int pageIndex, int pageSize);
         Task<int> CountSearchAsync(int? jlptLevelId, ContentStatus? status, string? keyword);
-        Task<MockTest?> GetWithSectionsAndQuestionsAsync(int practiceTestId);
+        Task<MockTest?> GetWithSectionsAndQuestionsAsync(
+            int practiceTestId,
+            CancellationToken cancellationToken = default);
         Task<List<MockTest>> GetByLevelAsync(int jlptLevelId);
     }
 }

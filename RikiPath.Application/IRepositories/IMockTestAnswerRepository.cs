@@ -6,6 +6,8 @@ namespace RikiPath.Application.IRepositories
 {
     public interface IMockTestAnswerRepository : IGenericRepository<MockTestAnswer>
     {
-        Task<List<MockTestAnswer>> GetByAttemptIdAsync(int practiceTestAttemptId);
+        Task<List<MockTestAnswer>> GetByAttemptIdAsync(
+            int practiceTestAttemptId,
+            CancellationToken cancellationToken = default);
     }
 }
