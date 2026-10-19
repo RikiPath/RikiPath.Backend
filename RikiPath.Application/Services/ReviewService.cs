@@ -46,10 +46,24 @@ namespace RikiPath.Application.Services
                     return ApiResponse<SubmitReviewResultResponse>.NotFound(
                         $"Không tìm thấy ReviewCard có Id = {request.ReviewCardId}.");
 
+                if (reviewItem.IsDeleted)
+                    return ApiResponse<SubmitReviewResultResponse>.NotFound(
+                        $"ReviewCard có Id = {request.ReviewCardId} đã bị lưu trữ.");
+
                 if (reviewItem.UserId != userId)
                     return ApiResponse<SubmitReviewResultResponse>.Fail(
                         "Bạn không có quyền nộp kết quả ôn tập cho mục này.",
                         HttpStatusCode.Forbidden);
+
+                if (reviewItem.Mode != ReviewMode.Recognition)
+                    return ApiResponse<SubmitReviewResultResponse>.Fail(
+                        "ReviewCard này không thuộc chế độ ôn nhận diện.",
+                        HttpStatusCode.BadRequest);
+
+                if (request.Quality < 1 || request.Quality > 5)
+                    return ApiResponse<SubmitReviewResultResponse>.Fail(
+                        "Quality phải trong khoảng 1-5.",
+                        HttpStatusCode.BadRequest);
 
                 ApplySm2Algorithm(reviewItem, request.Quality);
                 unitOfWork.ReviewCards.Update(reviewItem);
@@ -69,6 +83,7 @@ namespace RikiPath.Application.Services
                 {
                     ReviewCardId = reviewItem.Id,
                     QualitySubmitted = request.Quality,
+                    ShouldRepeatInSession = request.Quality <= 2,
                     NewEaseFactor = reviewItem.EaseFactor,
                     NewIntervalDays = reviewItem.IntervalDays,
                     Repetitions = reviewItem.Repetitions,

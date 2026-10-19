@@ -18,7 +18,8 @@ namespace RikiPath.WebApi.Controllers
         /// <remarks>
         /// - Màn hình sử dụng: Trang Daily Review / Flashcards của Learner.
         /// - Luồng xử lý: Tính toán SM-2 hoặc thuật toán lặp lại cách quãng (spaced repetition) để trả về các item cần ôn; có thể đọc từ cache/DB.
-        /// - Lưu ý cho FE: Yêu cầu Bearer Token (Role = Learner). Kết quả có thể trả theo batch; FE nên hiển thị loading và chuẩn bị UI cho answer/feedback.
+        /// - Lưu ý cho FE: Yêu cầu Bearer Token (Role = Learner). Response gồm mặt trước và đáp án; FE cần ẩn đáp án đến khi người học chọn xem.
+        /// - FE có thể giữ danh sách Items làm phiên hiện tại, chuyển sang item tiếp theo sau khi gửi kết quả.
         /// </remarks>
         /// <param name="cancellationToken">Token hủy request (Optional).</param>
         /// <response code="200">Thành công: Trả về danh sách item cần review hôm nay.</response>
@@ -36,10 +37,10 @@ namespace RikiPath.WebApi.Controllers
         /// </summary>
         /// <remarks>
         /// - Màn hình sử dụng: Khi người dùng trả lời 1 item trên Daily Review.
-        /// - Luồng xử lý: Cập nhật điểm/interval theo SM-2, lưu lịch sử, có thể cập nhật progress/course completion.
-        /// - Lưu ý cho FE: Yêu cầu Bearer Token. Request nên gửi điểm/quality (ví dụ 0-5). Trả về trạng thái cập nhật ngay.
+        /// - Luồng xử lý: Cập nhật điểm/interval theo SM-2 và lưu lịch sử.
+        /// - Lưu ý cho FE: Quality nhận 1-5. Nếu ShouldRepeatInSession=true, đưa thẻ sai vào cuối hàng retry của phiên hiện tại.
         /// </remarks>
-        /// <param name="request">SubmitReviewRequest: ItemId (Required), Quality (Required numeric 0-5), ResponseTime (Optional).</param>
+        /// <param name="request">SubmitReviewRequest: ReviewCardId (Required), Quality (Required numeric 1-5).</param>
         /// <param name="cancellationToken">Token hủy request (Optional).</param>
         /// <response code="200">Thành công: Trả về interval/gap mới và trạng thái item.</response>
         /// <response code="400">Dữ liệu không hợp lệ: quality ngoài khoảng cho phép.</response>
