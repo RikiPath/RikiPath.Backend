@@ -4,6 +4,7 @@ using System.Reflection;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Caching.Memory;
@@ -72,6 +73,70 @@ public sealed class AuthAccountOwnershipTests
         Assert.Equal((int)HttpStatusCode.Forbidden, result.StatusCode);
         fixture.Users.Verify(x => x.GetByIdAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
         fixture.UnitOfWork.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Mentor_cannot_update_another_accounts_email()
+    {
+        var fixture = CreateFixture(userId: 33, role: Role.Mentor);
+
+        var result = await fixture.Service.UpdateEmailAsync(
+            22,
+            new UpdateEmailRequest { NewEmail = "new@example.com" },
+            CancellationToken.None);
+
+        Assert.Equal((int)HttpStatusCode.Forbidden, result.StatusCode);
+        fixture.Users.Verify(x => x.GetByIdAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
+        fixture.UnitOfWork.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Admin_can_update_own_email()
+    {
+        var fixture = CreateFixture(userId: 900001, role: Role.Admin);
+        var user = ArrangeEmailUpdate(fixture, 900001, "admin@example.com", "admin-new@example.com");
+
+        var result = await fixture.Service.UpdateEmailAsync(
+            900001,
+            new UpdateEmailRequest { NewEmail = "admin-new@example.com" },
+            CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal("admin-new@example.com", user.Email);
+        fixture.UnitOfWork.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Admin_can_update_another_accounts_email()
+    {
+        var fixture = CreateFixture(userId: 900001, role: Role.Admin);
+        var targetUser = ArrangeEmailUpdate(fixture, 22, "target@example.com", "target-new@example.com");
+
+        var result = await fixture.Service.UpdateEmailAsync(
+            22,
+            new UpdateEmailRequest { NewEmail = "target-new@example.com" },
+            CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal("target-new@example.com", targetUser.Email);
+        fixture.UnitOfWork.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Request_body_fake_admin_role_cannot_bypass_jwt_role()
+    {
+        var fixture = CreateFixture(userId: 11, role: Role.Learner);
+        var request = JsonSerializer.Deserialize<UpdateEmailRequest>(
+            """{"NewEmail":"new@example.com","Role":"Admin"}""")!;
+
+        var result = await fixture.Service.UpdateEmailAsync(22, request, CancellationToken.None);
+
+        Assert.Equal((int)HttpStatusCode.Forbidden, result.StatusCode);
+        Assert.Equal("new@example.com", request.NewEmail);
+        Assert.DoesNotContain(
+            typeof(UpdateEmailRequest).GetProperties(),
+            property => string.Equals(property.Name, "Role", StringComparison.OrdinalIgnoreCase));
+        fixture.Users.Verify(x => x.GetByIdAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -154,6 +219,50 @@ public sealed class AuthAccountOwnershipTests
     }
 
     [Fact]
+    public async Task Mentor_cannot_change_another_accounts_password()
+    {
+        var fixture = CreateFixture(userId: 33, role: Role.Mentor);
+
+        var result = await fixture.Service.ChangePasswordAsync(
+            22,
+            new ChangePasswordRequest
+            {
+                CurrentPassword = "current-secret",
+                NewPassword = "new-secret",
+                ConfirmPassword = "new-secret",
+            },
+            CancellationToken.None);
+
+        Assert.Equal((int)HttpStatusCode.Forbidden, result.StatusCode);
+        fixture.Users.Verify(x => x.GetByIdAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
+        fixture.UnitOfWork.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Admin_can_change_own_password()
+    {
+        var fixture = CreateFixture(userId: 900001, role: Role.Admin);
+        var user = CreateUser(900001, "admin@example.com", "admin-secret");
+        fixture.Users
+            .Setup(x => x.GetByIdAsync(900001, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(user);
+
+        var result = await fixture.Service.ChangePasswordAsync(
+            900001,
+            new ChangePasswordRequest
+            {
+                CurrentPassword = "admin-secret",
+                NewPassword = "new-admin-secret",
+                ConfirmPassword = "new-admin-secret",
+            },
+            CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal((int)HttpStatusCode.OK, result.StatusCode);
+        fixture.UnitOfWork.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
     public async Task Wrong_current_password_remains_controlled()
     {
         var fixture = CreateFixture(userId: 11);
@@ -176,7 +285,7 @@ public sealed class AuthAccountOwnershipTests
     }
 
     [Fact]
-    public async Task Admin_has_no_implicit_cross_user_override()
+    public async Task Admin_cannot_change_another_accounts_password()
     {
         var fixture = CreateFixture(userId: 900001, role: Role.Admin);
 
@@ -286,6 +395,25 @@ public sealed class AuthAccountOwnershipTests
             PasswordHash = hmac.ComputeHash(Encoding.UTF8.GetBytes(password)),
             Role = Role.Learner,
         };
+    }
+
+    private static UserAccount ArrangeEmailUpdate(
+        AuthFixture fixture,
+        int targetUserId,
+        string currentEmail,
+        string newEmail)
+    {
+        var user = CreateUser(targetUserId, currentEmail, "current-secret");
+        fixture.Users
+            .Setup(x => x.GetByIdAsync(targetUserId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(user);
+        fixture.Users
+            .Setup(x => x.GetByEmailAsync(newEmail))
+            .ReturnsAsync((UserAccount?)null);
+        fixture.EmailVerifications
+            .Setup(x => x.AddAsync(It.IsAny<EmailVerification>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((EmailVerification entity, CancellationToken _) => entity);
+        return user;
     }
 
     private sealed record AuthFixture(

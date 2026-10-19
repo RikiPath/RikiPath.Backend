@@ -130,12 +130,12 @@ namespace RikiPath.WebApi.Controllers
             return StatusCode((int)result.StatusCode, result);
         }
         /// <summary>
-        /// Cập nhật địa chỉ email cho chính chủ tài khoản.
+        /// Cập nhật địa chỉ email cho chính chủ tài khoản hoặc bởi Admin.
         /// </summary>
         /// <remarks>
         /// - Màn hình sử dụng: Trang quản lý tài khoản hoặc profile settings.
         /// - Luồng xử lý: Cập nhật email trong CSDL, gửi email xác thực mới; có thể yêu cầu xác thực lại.
-        /// - Lưu ý cho FE: Yêu cầu Bearer Token và userId phải trùng với tài khoản trong JWT. Thao tác có thể mất thời gian do gửi mail.
+        /// - Lưu ý cho FE: User thường chỉ được cập nhật chính mình; Admin trong JWT được cập nhật email tài khoản khác.
         /// </remarks>
         /// <param name="userId">ID user cần cập nhật (Required).</param>
         /// <param name="request">UpdateEmailRequest: NewEmail (Required).</param>
@@ -143,7 +143,7 @@ namespace RikiPath.WebApi.Controllers
         /// <response code="200">Thành công: Email được cập nhật và email xác thực gửi đến địa chỉ mới.</response>
         /// <response code="400">Dữ liệu không hợp lệ: email format sai hoặc đã tồn tại.</response>
         /// <response code="401">Chưa xác thực: Thiếu Bearer Token.</response>
-        /// <response code="403">Không có quyền: User không được phép cập nhật email của tài khoản này.</response>
+        /// <response code="403">Không có quyền: User thường không được cập nhật email của tài khoản khác.</response>
         /// <response code="500">Lỗi server khi cập nhật hoặc gửi mail.</response>
         [Authorize]
         [HttpPut("update-email/{userId:int}")]
@@ -157,9 +157,9 @@ namespace RikiPath.WebApi.Controllers
         /// Đổi mật khẩu cho chính chủ tài khoản.
         /// </summary>
         /// <remarks>
-        /// - Màn hình sử dụng: Trang đổi mật khẩu hoặc quản trị viên reset mật khẩu.
+        /// - Màn hình sử dụng: Trang đổi mật khẩu của chính chủ tài khoản.
         /// - Luồng xử lý: Kiểm tra mật khẩu hiện tại và cập nhật mật khẩu mới.
-        /// - Lưu ý cho FE: Yêu cầu Bearer Token và userId phải trùng với tài khoản trong JWT. Thời gian xử lý nhanh (<1s).
+        /// - Lưu ý cho FE: userId phải trùng với tài khoản trong JWT; Admin không được đổi mật khẩu của người khác.
         /// </remarks>
         /// <param name="userId">ID user cần đổi mật khẩu (Required).</param>
         /// <param name="request">ChangePasswordRequest: CurrentPassword (Required if user tự đổi), NewPassword (Required).</param>

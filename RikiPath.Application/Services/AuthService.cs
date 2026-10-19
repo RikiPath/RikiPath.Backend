@@ -299,7 +299,9 @@ namespace RikiPath.Application.Services
         {
             try
             {
-                var ownershipError = ValidateAccountOwnership(userId);
+                // User thường chỉ được cập nhật email của chính mình.
+                // Admin được phép cập nhật email tài khoản khác theo nghiệp vụ quản trị.
+                var ownershipError = ValidateAccountOwnership(userId, allowAdminEmailOverride: true);
                 if (ownershipError is not null)
                     return ownershipError;
 
@@ -343,7 +345,9 @@ namespace RikiPath.Application.Services
         {
             try
             {
-                var ownershipError = ValidateAccountOwnership(userId);
+                // Mật khẩu chỉ được thay đổi bởi chính chủ tài khoản.
+                // Admin không được phép đổi mật khẩu của người dùng khác.
+                var ownershipError = ValidateAccountOwnership(userId, allowAdminEmailOverride: false);
                 if (ownershipError is not null)
                     return ownershipError;
 
@@ -372,15 +376,17 @@ namespace RikiPath.Application.Services
 
         // ---------- Private helpers ----------
 
-        private ApiResponse? ValidateAccountOwnership(int targetUserId)
+        private ApiResponse? ValidateAccountOwnership(int targetUserId, bool allowAdminEmailOverride)
         {
             try
             {
                 // userId trên route chỉ xác định tài khoản đích; quyền sở hữu phải được đối chiếu với JWT trước khi đọc hoặc cập nhật dữ liệu.
                 var currentUser = claimService.GetUserClaim();
 
-                // Hệ thống chưa có policy quản trị sửa thông tin đăng nhập của người khác, nên mọi vai trò đều phải là chính chủ.
-                return currentUser.Id == targetUserId
+                var isOwner = currentUser.Id == targetUserId;
+                var isAdminEmailOverride = allowAdminEmailOverride && currentUser.Role == Role.Admin;
+
+                return isOwner || isAdminEmailOverride
                     ? null
                     : ApiResponse.Forbidden("Bạn không có quyền thay đổi tài khoản này.");
             }
