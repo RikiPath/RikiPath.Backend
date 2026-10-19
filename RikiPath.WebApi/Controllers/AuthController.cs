@@ -130,12 +130,13 @@ namespace RikiPath.WebApi.Controllers
             return StatusCode((int)result.StatusCode, result);
         }
         /// <summary>
-        /// Cập nhật địa chỉ email cho chính chủ tài khoản hoặc bởi Admin.
+        /// Cập nhật địa chỉ email cho user (chính chủ hoặc Admin).
         /// </summary>
         /// <remarks>
-        /// - Màn hình sử dụng: Trang quản lý tài khoản hoặc profile settings.
-        /// - Luồng xử lý: Cập nhật email trong CSDL, gửi email xác thực mới; có thể yêu cầu xác thực lại.
-        /// - Lưu ý cho FE: User thường chỉ được cập nhật chính mình; Admin trong JWT được cập nhật email tài khoản khác.
+        /// - Màn hình sử dụng: Trang quản lý tài khoản hoặc Profile Settings.
+        /// - Luồng xử lý: Cập nhật email trong CSDL, gửi email xác thực mới, có thể yêu cầu xác thực lại.
+        /// - Lưu ý cho FE: Yêu cầu Bearer Token. User thường chỉ được cập nhật email của chính mình;
+        ///   Admin được phép cập nhật email của tài khoản khác.
         /// </remarks>
         /// <param name="userId">ID user cần cập nhật (Required).</param>
         /// <param name="request">UpdateEmailRequest: NewEmail (Required).</param>
@@ -143,7 +144,9 @@ namespace RikiPath.WebApi.Controllers
         /// <response code="200">Thành công: Email được cập nhật và email xác thực gửi đến địa chỉ mới.</response>
         /// <response code="400">Dữ liệu không hợp lệ: email format sai hoặc đã tồn tại.</response>
         /// <response code="401">Chưa xác thực: Thiếu Bearer Token.</response>
-        /// <response code="403">Không có quyền: User thường không được cập nhật email của tài khoản khác.</response>
+        /// <response code="403">
+        /// Không có quyền: User thường không được phép cập nhật email của tài khoản khác.
+        /// </response>
         /// <response code="500">Lỗi server khi cập nhật hoặc gửi mail.</response>
         [Authorize]
         [HttpPut("update-email/{userId:int}")]
@@ -157,9 +160,9 @@ namespace RikiPath.WebApi.Controllers
         /// Đổi mật khẩu cho chính chủ tài khoản.
         /// </summary>
         /// <remarks>
-        /// - Màn hình sử dụng: Trang đổi mật khẩu của chính chủ tài khoản.
-        /// - Luồng xử lý: Kiểm tra mật khẩu hiện tại và cập nhật mật khẩu mới.
-        /// - Lưu ý cho FE: userId phải trùng với tài khoản trong JWT; Admin không được đổi mật khẩu của người khác.
+        /// - Yêu cầu Bearer Token.
+        /// - User chỉ được phép đổi mật khẩu của chính mình.
+        /// - Admin không được phép đổi mật khẩu của tài khoản khác qua API này.
         /// </remarks>
         /// <param name="userId">ID user cần đổi mật khẩu (Required).</param>
         /// <param name="request">ChangePasswordRequest: CurrentPassword (Required if user tự đổi), NewPassword (Required).</param>
@@ -167,7 +170,9 @@ namespace RikiPath.WebApi.Controllers
         /// <response code="200">Thành công: Mật khẩu được đổi.</response>
         /// <response code="400">Dữ liệu không hợp lệ: mật khẩu yếu hoặc current password sai.</response>
         /// <response code="401">Chưa xác thực: Thiếu Bearer Token.</response>
-        /// <response code="403">Không có quyền: Người gọi không được phép đổi mật khẩu cho user này.</response>
+        /// <response code="403">
+        /// Không có quyền: Không được phép đổi mật khẩu của tài khoản khác.
+        /// </response>
         /// <response code="500">Lỗi server khi cập nhật mật khẩu.</response>
         [Authorize]
         [HttpPost("change-password/{userId:int}")]
