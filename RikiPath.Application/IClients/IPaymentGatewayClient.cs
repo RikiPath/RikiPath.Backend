@@ -5,6 +5,7 @@ namespace RikiPath.Application.IClients
     public record PaymentLinkResult(string CheckoutUrl, string PaymentLinkId, string QrCode);
 
     public record PaymentCallbackResult(bool IsValidSignature, bool IsSuccess, long OrderCode, decimal Amount, string Description);
+    public record PaymentLinkInformation(long OrderCode, decimal Amount, decimal AmountPaid, string Status, string PaymentLinkId);
 
     public interface IPaymentGatewayClient
     {
@@ -16,5 +17,6 @@ namespace RikiPath.Application.IClients
             string cancelUrl,
             CancellationToken cancellationToken);
         PaymentCallbackResult VerifyWebhook(PayOsWebhookRequest webhook);
+        Task<PaymentLinkInformation> GetPaymentInformationAsync(long orderCode, CancellationToken cancellationToken);
     }
 }

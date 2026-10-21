@@ -97,8 +97,7 @@ public sealed class MentorChatService(IUnitOfWork unitOfWork, IClaimService clai
         await unitOfWork.SaveChangesAsync(cancellationToken);
 
         // Load sender profile after save so SignalR and REST return identical server-authored metadata.
-        var saved = (await unitOfWork.MentorChatMessages.GetPageAsync(
-            bookingId, null, 1, cancellationToken)).Single();
+        var saved = await unitOfWork.MentorChatMessages.GetWithSenderAsync(message.Id, cancellationToken);
         return ApiResponse<MentorChatMessageResponse>.Success(MapMessage(saved), HttpStatusCode.Created);
     }
 

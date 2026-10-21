@@ -54,22 +54,7 @@ public sealed class PaymentService(
             }
             else
             {
-                subscription.PaymentStatus = PaymentStatus.Paid;
-                subscription.PaymentTransactionId = webhook.Data.Reference ?? subscription.PaymentTransactionId;
-                subscription.StartDate = now;
-                subscription.EndDate = subscription.SubscriptionPlan.DurationDays > 0
-                    ? now.AddDays(subscription.SubscriptionPlan.DurationDays)
-                    : null;
-
-                foreach (var booking in subscription.MentorBookings ?? [])
-                {
-                    if (booking.Status != MentorStatus.AwaitingPayment) continue;
-                    booking.Status = MentorStatus.Assigned;
-                    if (booking.MentorAvailability is not null)
-                    {
-                        booking.MeetingLink = BuildMeetingLink(booking.MentorAvailability.RoomId);
-                    }
-                }
+                MentorPurchaseFinalizer.MarkPaid(subscription, appSettings, webhook.Data.Reference);
             }
 
             subscription.PaymentExpiresAt = null;
@@ -82,9 +67,4 @@ public sealed class PaymentService(
         }
     }
 
-    private string BuildMeetingLink(Guid roomId)
-    {
-        var baseUrl = appSettings.FrontendBaseUrl;
-        return $"{baseUrl.TrimEnd('/')}/mentor-meeting/{roomId:D}";
-    }
 }

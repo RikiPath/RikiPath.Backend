@@ -12,6 +12,22 @@ namespace RikiPath.Infrastructure.Clients
     {
         private const string CreatePaymentLinkUrl = "https://api-merchant.payos.vn/v2/payment-requests";
 
+        public async Task<PaymentLinkInformation> GetPaymentInformationAsync(long orderCode, CancellationToken cancellationToken)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, $"{CreatePaymentLinkUrl}/{orderCode}");
+            request.Headers.Add("x-client-id", appSettings.PayOs.ClientId);
+            request.Headers.Add("x-api-key", appSettings.PayOs.ApiKey);
+            using var response = await httpClient.SendAsync(request, cancellationToken);
+            response.EnsureSuccessStatusCode();
+            using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
+            if (json.RootElement.GetProperty("code").GetString() != "00")
+                throw new InvalidOperationException("PayOS chưa trả được trạng thái giao dịch.");
+            var data = json.RootElement.GetProperty("data");
+            return new PaymentLinkInformation(data.GetProperty("orderCode").GetInt64(), data.GetProperty("amount").GetDecimal(),
+                data.GetProperty("amountPaid").GetDecimal(), data.GetProperty("status").GetString() ?? string.Empty,
+                data.GetProperty("id").GetString() ?? string.Empty);
+        }
+
         public async Task<PaymentLinkResult> CreatePaymentLinkAsync(
             long orderCode, int amount, string description, string returnUrl, string cancelUrl,
             CancellationToken cancellationToken)

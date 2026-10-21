@@ -7,6 +7,10 @@ namespace RikiPath.Infrastructure.Repositories;
 public sealed class MentorChatMessageRepository(AppDbContext context)
     : GenericRepository<MentorChatMessage>(context), IMentorChatMessageRepository
 {
+    public Task<MentorChatMessage> GetWithSenderAsync(int messageId, CancellationToken cancellationToken)
+        => _context.Set<MentorChatMessage>().AsNoTracking().Include(x => x.Sender)
+            .SingleAsync(x => x.Id == messageId, cancellationToken);
+
     public Task<List<MentorChatMessage>> GetPageAsync(
         int bookingId, int? beforeMessageId, int pageSize, CancellationToken cancellationToken)
     {

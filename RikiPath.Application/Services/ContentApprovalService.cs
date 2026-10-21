@@ -109,7 +109,7 @@ namespace RikiPath.Application.Services
             {
                 var query = unitOfWork.ContentApprovalRequests.Query()
                     .Include(r => r.SubmittedBy)
-                    .Where(r => r.Status == ContentApprovalStatus.Draft);
+                    .Where(r => !r.IsDeleted && r.Status == ContentApprovalStatus.Draft);
 
                 if (entityType.HasValue)
                     query = query.Where(r => r.EntityType == entityType.Value);

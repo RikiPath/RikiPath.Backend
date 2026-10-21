@@ -8,5 +8,11 @@
         public DateTime StartTime { get; set; }
         public DateTime EndTime { get; set; }
         public bool IsBooked { get; set; }
+        public bool IsApproved { get; set; }
+        public DateTime? RejectedAt { get; set; }
+        public string? RejectionReason { get; set; }
+        public int BookedCount { get; set; }
+        public int MaxLearners { get; set; }
+        public string? AdminName { get; set; }
     }
 }
