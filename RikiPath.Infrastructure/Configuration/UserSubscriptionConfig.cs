@@ -27,6 +27,11 @@ namespace RikiPath.Infrastructure.Configuration
                 .HasForeignKey(x => x.SubscriptionPlanId)
                 .OnDelete(DeleteBehavior.Restrict);
 
+            builder.HasOne(x => x.Mentor)
+                .WithMany()
+                .HasForeignKey(x => x.MentorId)
+                .OnDelete(DeleteBehavior.Restrict);
+
             builder.HasIndex(x => new { x.UserId, x.PaymentStatus, x.EndDate });
 
             // Ánh xạ 4 subscription tương ứng cho 4 Learner (900006 -> 900009)

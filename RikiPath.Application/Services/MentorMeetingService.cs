@@ -84,6 +84,7 @@ public sealed class MentorMeetingService(
                 UserId = claims.Id,
                 SubscriptionPlanId = plan.Id,
                 SubscriptionPlan = plan,
+                MentorId = slot.MentorId,
                 AmountPaid = plan.Price,
                 PaymentStatus = PaymentStatus.Pending,
                 MeetingSessionsIncluded = plan.MeetingSessionCount,
@@ -200,6 +201,20 @@ public sealed class MentorMeetingService(
                 request.MentorAvailabilityId, DateTime.UtcNow, cancellationToken);
             if (slot is null)
                 return ApiResponse<MentorBookingResponse>.Fail("Slot không còn trống hoặc không hợp lệ.", HttpStatusCode.Conflict);
+
+            // A purchased meeting package is tied to its original Mentor. To book a different
+            // Mentor, the learner must purchase a separate package.
+            var existingMentorIds = (subscription.MentorBookings ?? [])
+                .Where(x => !x.IsDeleted && x.MentorAvailability is not null)
+                .Select(x => x.MentorAvailability!.MentorId)
+                .Distinct()
+                .ToList();
+            var packageMentorId = subscription.MentorId ?? existingMentorIds.SingleOrDefault();
+            if (existingMentorIds.Count > 1 || (packageMentorId > 0 && packageMentorId != slot.MentorId))
+                return ApiResponse<MentorBookingResponse>.Fail(
+                    "Gói meeting này chỉ dùng được với Mentor đã chọn ban đầu. Muốn đặt Mentor khác, vui lòng mua gói riêng.",
+                    HttpStatusCode.Conflict);
+            subscription.MentorId = packageMentorId > 0 ? packageMentorId : slot.MentorId;
 
             subscription.MeetingSessionsUsed++;
             var booking = CreateConfirmedBooking(subscription, slot);
