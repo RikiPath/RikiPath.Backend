@@ -21,6 +21,14 @@ public sealed class MentorAvailabilityController(IMentorMeetingService service) 
     public async Task<IActionResult> GetMyMeetings(CancellationToken cancellationToken)
         => ToActionResult(await service.GetMyMeetingsAsync(cancellationToken));
 
+    [HttpGet("/api/mentor/meetings/{bookingId:int}")]
+    public async Task<IActionResult> GetBooking(int bookingId, CancellationToken cancellationToken)
+        => ToActionResult(await service.GetMentorBookingAsync(bookingId, cancellationToken));
+
+    [HttpPost("/api/mentor/meetings/{bookingId:int}/accept")]
+    public async Task<IActionResult> AcceptBooking(int bookingId, CancellationToken cancellationToken)
+        => ToActionResult(await service.AcceptMentorBookingAsync(bookingId, cancellationToken));
+
     /// <summary>Creates an open future availability slot for the authenticated Mentor.</summary>
     [HttpPost]
     public async Task<IActionResult> Create(

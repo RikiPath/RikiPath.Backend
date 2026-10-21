@@ -10,6 +10,12 @@ namespace RikiPath.WebApi.Controllers;
 [Route("api/mentor-meetings")]
 public sealed class MentorMeetingController(IMentorMeetingService service) : ControllerBase
 {
+    /// <summary>Lists active mentor profiles for learner booking, without account credentials or contact details.</summary>
+    [HttpGet("mentors")]
+    [AllowAnonymous]
+    public async Task<IActionResult> GetMentors(CancellationToken cancellationToken)
+        => ToActionResult(await service.GetMentorsAsync(cancellationToken));
+
     /// <summary>Lists active Mentor Meeting plans and their included Features.</summary>
     [HttpGet("plans")]
     [AllowAnonymous]
@@ -57,4 +63,9 @@ public sealed class MentorMeetingController(IMentorMeetingService service) : Con
 
     private IActionResult ToActionResult<T>(RikiPath.Application.Responses.ApiResponse<T> response)
         => StatusCode(response.StatusCode, response);
+
+    [HttpPost("purchases/{subscriptionId:int}/sync")]
+    [Authorize(Roles = "Learner")]
+    public async Task<IActionResult> SyncPurchase(int subscriptionId, CancellationToken cancellationToken)
+        => ToActionResult(await service.SyncPurchaseAsync(subscriptionId, cancellationToken));
 }

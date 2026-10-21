@@ -18,5 +18,8 @@ namespace RikiPath.Application.Responses.MentorMeetings
         public DateTime? ScheduledAt { get; set; }
         public string? MeetingLink { get; set; }
         public Guid? RoomId { get; set; }
+        public string? Question { get; set; }
+        public DateTime? EndsAt { get; set; }
+        public DateTime? CreatedAt { get; set; }
     }
 }
