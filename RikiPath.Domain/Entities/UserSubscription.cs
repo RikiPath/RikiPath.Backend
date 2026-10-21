@@ -10,6 +10,9 @@ namespace RikiPath.Domain.Entities
         public UserAccount UserAccount { get; set; }
         public int SubscriptionPlanId { get; set; }
         public SubscriptionPlan SubscriptionPlan { get; set; }
+        /// <summary>Mentor selected for this purchased booking package; all included slots use this mentor.</summary>
+        public int? MentorId { get; set; }
+        public UserAccount? Mentor { get; set; }
 
         public decimal AmountPaid { get; set; }
         public PaymentStatus PaymentStatus { get; set; } = PaymentStatus.Pending;

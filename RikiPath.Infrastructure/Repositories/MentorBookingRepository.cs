@@ -35,7 +35,8 @@ namespace RikiPath.Infrastructure.Repositories
 
         public Task<List<MentorBooking>> GetByLearnerAsync(int learnerId, CancellationToken cancellationToken = default)
             => _context.MentorBookings.AsNoTracking()
-                .Include(x => x.UserSubscription)
+                .Include(x => x.UserSubscription).ThenInclude(x => x.Mentor)
+                .Include(x => x.UserSubscription).ThenInclude(x => x.UserAccount)
                 .Include(x => x.MentorAvailability).ThenInclude(x => x!.Mentor)
                 .Where(x => x.UserSubscription.UserId == learnerId && !x.IsDeleted)
                 .OrderBy(x => x.ScheduledAt)
@@ -44,7 +45,8 @@ namespace RikiPath.Infrastructure.Repositories
         public Task<List<MentorBooking>> GetPaidBookingsForMentorAsync(int mentorId, CancellationToken cancellationToken = default)
             => _context.MentorBookings.AsNoTracking()
                 .Include(x => x.UserSubscription).ThenInclude(x => x.UserAccount)
-                .Include(x => x.MentorAvailability)
+                .Include(x => x.UserSubscription).ThenInclude(x => x.Mentor)
+                .Include(x => x.MentorAvailability).ThenInclude(x => x!.Mentor)
                 .Where(x => x.MentorAvailability != null && x.MentorAvailability.MentorId == mentorId
                     && !x.IsDeleted && x.UserSubscription.PaymentStatus == PaymentStatus.Paid
                     && x.Status != MentorStatus.Cancelled)
@@ -57,5 +59,23 @@ namespace RikiPath.Infrastructure.Repositories
                 .Include(x => x.MentorAvailability).ThenInclude(x => x.Mentor)
                 .Where(x => x.MentorAvailability != null && x.MentorAvailability.RoomId == roomId && !x.IsDeleted && x.Status == MentorStatus.Assigned)
                 .FirstOrDefaultAsync(cancellationToken);
+
+        public Task<MentorBooking?> GetForChatAsync(int bookingId, CancellationToken cancellationToken = default)
+            => _context.MentorBookings.AsNoTracking()
+                .Include(x => x.UserSubscription).ThenInclude(x => x.UserAccount)
+                .Include(x => x.UserSubscription).ThenInclude(x => x.Mentor)
+                .Include(x => x.MentorAvailability).ThenInclude(x => x!.Mentor)
+                .FirstOrDefaultAsync(x => x.Id == bookingId && !x.IsDeleted, cancellationToken);
+
+        public Task<List<MentorBooking>> GetChatThreadsForMentorAsync(int mentorId, CancellationToken cancellationToken = default)
+            => _context.MentorBookings.AsNoTracking()
+                .Include(x => x.UserSubscription).ThenInclude(x => x.UserAccount)
+                .Include(x => x.UserSubscription).ThenInclude(x => x.Mentor)
+                .Include(x => x.MentorAvailability).ThenInclude(x => x!.Mentor)
+                .Where(x => (x.MentorAvailability != null && x.MentorAvailability.MentorId == mentorId
+                    || x.UserSubscription.MentorId == mentorId)
+                    && !x.IsDeleted && x.UserSubscription.PaymentStatus == PaymentStatus.Paid)
+                .OrderBy(x => x.ScheduledAt)
+                .ToListAsync(cancellationToken);
     }
 }

@@ -12,5 +12,7 @@ namespace RikiPath.Application.IRepositories
         Task<List<MentorBooking>> GetByLearnerAsync(int learnerId, CancellationToken cancellationToken = default);
         Task<List<MentorBooking>> GetPaidBookingsForMentorAsync(int mentorId, CancellationToken cancellationToken = default);
         Task<MentorBooking?> GetActiveMeetingByRoomIdAsync(Guid roomId, CancellationToken cancellationToken = default);
+        Task<MentorBooking?> GetForChatAsync(int bookingId, CancellationToken cancellationToken = default);
+        Task<List<MentorBooking>> GetChatThreadsForMentorAsync(int mentorId, CancellationToken cancellationToken = default);
     }
 }

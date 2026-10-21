@@ -3014,6 +3014,27 @@ namespace RikiPath.Infrastructure.Migrations
                         });
                 });
 
+            modelBuilder.Entity("RikiPath.Domain.Entities.MentorChatMessage", b =>
+                {
+                    b.Property<int>("Id").ValueGeneratedOnAdd().HasColumnType("integer");
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+                    b.Property<DateTime?> ("CreatedDate").HasColumnType("timestamp without time zone");
+                    b.Property<Guid?> ("CreatedBy").HasColumnType("uuid");
+                    b.Property<bool>("IsDeleted").HasColumnType("boolean");
+                    b.Property<DateTime?> ("ModifiedDate").HasColumnType("timestamp without time zone");
+                    b.Property<Guid?> ("ModifiedBy").HasColumnType("uuid");
+                    b.Property<int>("MentorBookingId").HasColumnType("integer");
+                    b.Property<DateTime?>("ReadAt").HasColumnType("timestamp without time zone");
+                    b.Property<DateTime>("SentAt").HasColumnType("timestamp without time zone");
+                    b.Property<int>("SenderUserId").HasColumnType("integer");
+                    b.Property<string>("Text").IsRequired().HasMaxLength(2000).HasColumnType("character varying(2000)");
+                    b.HasKey("Id");
+                    b.HasIndex("MentorBookingId", "Id");
+                    b.HasIndex("MentorBookingId", "ReadAt", "SenderUserId");
+                    b.HasIndex("SenderUserId");
+                    b.ToTable("MentorChatMessages");
+                });
+
             modelBuilder.Entity("RikiPath.Domain.Entities.MentorBooking", b =>
                 {
                     b.Property<int>("Id")
@@ -4482,6 +4503,9 @@ namespace RikiPath.Infrastructure.Migrations
                         .HasColumnType("integer")
                         .HasDefaultValue(0);
 
+                    b.Property<int?>("MentorId")
+                        .HasColumnType("integer");
+
                     b.Property<Guid?>("ModifiedBy")
                         .HasColumnType("uuid");
 
@@ -4515,6 +4539,8 @@ namespace RikiPath.Infrastructure.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("SubscriptionPlanId");
+
+                    b.HasIndex("MentorId");
 
                     b.HasIndex("UserId", "PaymentStatus", "EndDate");
 
@@ -5053,6 +5079,22 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Navigation("Mentor");
                 });
 
+            modelBuilder.Entity("RikiPath.Domain.Entities.MentorChatMessage", b =>
+                {
+                    b.HasOne("RikiPath.Domain.Entities.MentorBooking", "MentorBooking")
+                        .WithMany()
+                        .HasForeignKey("MentorBookingId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "Sender")
+                        .WithMany()
+                        .HasForeignKey("SenderUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                    b.Navigation("MentorBooking");
+                    b.Navigation("Sender");
+                });
+
             modelBuilder.Entity("RikiPath.Domain.Entities.MentorBooking", b =>
                 {
                     b.HasOne("RikiPath.Domain.Entities.MentorAvailability", "MentorAvailability")
@@ -5370,6 +5412,11 @@ namespace RikiPath.Infrastructure.Migrations
 
             modelBuilder.Entity("RikiPath.Domain.Entities.UserSubscription", b =>
                 {
+                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "Mentor")
+                        .WithMany()
+                        .HasForeignKey("MentorId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("RikiPath.Domain.Entities.SubscriptionPlan", "SubscriptionPlan")
                         .WithMany("UserSubscriptions")
                         .HasForeignKey("SubscriptionPlanId")
@@ -5383,6 +5430,8 @@ namespace RikiPath.Infrastructure.Migrations
                         .IsRequired();
 
                     b.Navigation("SubscriptionPlan");
+
+                    b.Navigation("Mentor");
 
                     b.Navigation("UserAccount");
                 });
