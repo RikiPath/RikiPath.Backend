@@ -20,7 +20,8 @@ namespace RikiPath.Application.Services
         AppSettings appSettings,
         IEmailService emailService,
         IFirebaseAuthService firebaseAuthService,
-        IMemoryCache memoryCache) : IAuthService
+        IMemoryCache memoryCache,
+        IClaimService claimService) : IAuthService
     {
         private const int VerificationCodeLifetimeMinutes = 30;
         private const int ResendCooldownSeconds = 60;
@@ -299,6 +300,12 @@ namespace RikiPath.Application.Services
         {
             try
             {
+                // User thường chỉ được cập nhật email của chính mình.
+                // Admin được phép cập nhật email tài khoản khác theo nghiệp vụ quản trị.
+                var ownershipError = ValidateAccountOwnership(userId, allowAdminEmailOverride: true);
+                if (ownershipError is not null)
+                    return ownershipError;
+
                 var user = await unitOfWork.UserAccounts.GetByIdAsync(userId, cancellationToken);
                 if (user is null)
                     return ApiResponse.NotFound("Không tìm thấy người dùng.");
@@ -339,6 +346,12 @@ namespace RikiPath.Application.Services
         {
             try
             {
+                // Mật khẩu chỉ được thay đổi bởi chính chủ tài khoản.
+                // Admin không được phép đổi mật khẩu của người dùng khác.
+                var ownershipError = ValidateAccountOwnership(userId, allowAdminEmailOverride: false);
+                if (ownershipError is not null)
+                    return ownershipError;
+
                 var user = await unitOfWork.UserAccounts.GetByIdAsync(userId, cancellationToken);
                 if (user is null)
                     return ApiResponse.NotFound("Không tìm thấy người dùng.");
@@ -363,6 +376,26 @@ namespace RikiPath.Application.Services
         }
 
         // ---------- Private helpers ----------
+
+        private ApiResponse? ValidateAccountOwnership(int targetUserId, bool allowAdminEmailOverride)
+        {
+            try
+            {
+                // userId trên route chỉ xác định tài khoản đích; quyền sở hữu phải được đối chiếu với JWT trước khi đọc hoặc cập nhật dữ liệu.
+                var currentUser = claimService.GetUserClaim();
+
+                var isOwner = currentUser.Id == targetUserId;
+                var isAdminEmailOverride = allowAdminEmailOverride && currentUser.Role == Role.Admin;
+
+                return isOwner || isAdminEmailOverride
+                    ? null
+                    : ApiResponse.Forbidden("Bạn không có quyền thay đổi tài khoản này.");
+            }
+            catch (Exception ex) when (ex is ArgumentException or FormatException)
+            {
+                return ApiResponse.Unauthorized("Không xác định được tài khoản hiện tại từ JWT.");
+            }
+        }
 
         private string CreateToken(UserAccount user)
         {
