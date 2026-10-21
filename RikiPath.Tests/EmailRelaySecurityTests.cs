@@ -323,6 +323,7 @@ public sealed class EmailRelaySecurityTests
         var emailVerifications = new Mock<IEmailVerificationRepository>();
         var emailService = new Mock<IEmailService>();
         var firebaseAuth = new Mock<IFirebaseAuthService>();
+        var claims = new Mock<IClaimService>();
         var memoryCache = new MemoryCache(new MemoryCacheOptions());
 
         unitOfWork.SetupGet(x => x.UserAccounts).Returns(users.Object);
@@ -350,7 +351,8 @@ public sealed class EmailRelaySecurityTests
             settings,
             emailService.Object,
             firebaseAuth.Object,
-            memoryCache);
+            memoryCache,
+            claims.Object);
 
         return new EmailFixture(
             service,
