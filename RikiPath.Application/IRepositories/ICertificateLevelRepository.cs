@@ -6,5 +6,6 @@ namespace RikiPath.Application.IRepositories
     {
         Task<IReadOnlyList<CertificateLevel>> GetLevelsByCertificateTypeIdAsync(int certificationId, CancellationToken ct = default);
         Task<IReadOnlyList<CertificateLevel>> GetLearnerVisibleJlptLevelsAsync(CancellationToken ct = default);
+        Task<CertificateLevel?> GetActiveJlptLevelByIdAsync(int id, CancellationToken ct = default);
     }
 }
