@@ -8,5 +8,6 @@ namespace RikiPath.Application.IRepositories
     {
         Task<Lesson?> GetWithBankLinksAsync(int lessonId);
         Task<(int Total, int Completed)> GetCompletionStatsAsync(int userId);
+        Task<IReadOnlyList<Lesson>> GetByCertificateLevelAsync(int certificateLevelId, CancellationToken cancellationToken = default);
     }
 }

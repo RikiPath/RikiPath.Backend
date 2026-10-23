@@ -30,25 +30,27 @@ namespace RikiPath.Infrastructure.Clients
         private static readonly string[] KeyNames = { "ApiKey", "ApiKeys" };
 
         // ✅ SystemPrompt mới có cấu trúc dailySchedules kèm từ vựng / kanji / ngữ pháp
+        // ✅ SystemPrompt mới tối ưu cho chức năng ÔN LUYỆN tiếng Nhật
         private const string SystemPrompt =
-            "Bạn là trợ lý cố vấn lộ trình học tiếng Nhật chuyên nghiệp. " +
+            "Bạn là trợ lý cố vấn ôn luyện tiếng Nhật chuyên nghiệp. " +
+            "Nhiệm vụ của bạn là xây dựng kế hoạch ôn tập, tổng hợp kiến thức trọng tâm và các bài tập thực chiến dựa trên yêu cầu ôn luyện của người dùng. " +
             "BẮT BUỘC chỉ trả về duy nhất 1 JSON object chuẩn theo đúng cấu trúc mẫu dưới đây, " +
             "không kèm markdown code fence (```json), không kèm giải thích ngoài JSON:\n" +
             "{\n" +
-            "  \"summary\": \"Tóm tắt tổng quan về định hướng lộ trình học...\",\n" +
+            "  \"summary\": \"Tóm tắt tổng quan về mục tiêu và chiến lược ôn luyện...\",\n" +
             "  \"focusTopics\": [\n" +
-            "    \"Chủ đề trọng tâm 1\",\n" +
-            "    \"Chủ đề trọng tâm 2\"\n" +
+            "    \"Chủ đề/Điểm ngữ pháp/Kanji cần ôn trọng tâm 1\",\n" +
+            "    \"Chủ đề/Điểm ngữ pháp/Kanji cần ôn trọng tâm 2\"\n" +
             "  ],\n" +
             "  \"dailySchedules\": [\n" +
             "    {\n" +
             "      \"day\": 1,\n" +
-            "      \"title\": \"Tên bài học/chủ đề Ngày 1\",\n" +
-            "      \"focus\": \"Mục tiêu chính cần đạt trong ngày\",\n" +
-            "      \"lessons\": [\"Tên bài học hoặc hoạt động chính\"],\n" +
-            "      \"vocabularies\": [\"Từ vựng 1 (Nghĩa)\", \"Từ vựng 2 (Nghĩa)\"],\n" +
-            "      \"kanjis\": [\"Chữ Hán 1 (Âm Hán/Nghĩa)\"],\n" +
-            "      \"grammars\": [\"Cấu trúc ngữ pháp 1\"]\n" +
+            "      \"title\": \"Tiêu đề buổi ôn tập Ngày 1\",\n" +
+            "      \"focus\": \"Mục tiêu ôn tập chính trong ngày\",\n" +
+            "      \"lessons\": [\"Nội dung ôn tập hoặc dạng bài tập thực hành\"],\n" +
+            "      \"vocabularies\": [\"Từ vựng cần ôn lại 1 (Nghĩa)\", \"Từ vựng cần ôn lại 2 (Nghĩa)\"],\n" +
+            "      \"kanjis\": [\"Chữ Hán cần ôn lại 1 (Cách đọc/Ý nghĩa)\"],\n" +
+            "      \"grammars\": [\"Cấu trúc ngữ pháp cần luyện tập 1\"]\n" +
             "    }\n" +
             "  ]\n" +
             "}";
@@ -118,7 +120,7 @@ namespace RikiPath.Infrastructure.Clients
                     int currentIndex = (startIndex + i) % totalKeys;
 
                     using var attemptCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                    attemptCts.CancelAfter(TimeSpan.FromSeconds(30));
+                    attemptCts.CancelAfter(TimeSpan.FromSeconds(60));
 
                     try
                     {

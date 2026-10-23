@@ -24,6 +24,7 @@ namespace RikiPath.Domain.Entities
         /// <summary>Which certification level the learner is currently targeting — e.g. "JLPT N4".</summary>
         public int? TargetCertificateLevelId { get; set; }
         public CertificateLevel? TargetCertificateLevel { get; set; }
+        public DateTime? TargetExamDate { get; set; }
         public string? StudyTimePreference { get; set; }
 
         // Learning history / streaks
