@@ -29,8 +29,22 @@ namespace RikiPath.WebApi.Controllers
         [AllowAnonymous]
         public async Task<IActionResult> PayOsWebhook([FromBody] PayOsWebhookRequest webhook, CancellationToken cancellationToken)
         {
-            var result = await paymentService.HandlePayOsWebhookAsync(webhook, cancellationToken);
-            return StatusCode((int)result.StatusCode, result);
+            ////var result = await paymentService.HandlePayOsWebhookAsync(webhook, cancellationToken);
+            ////return StatusCode((int)result.StatusCode, result);
+            //return Ok(new ApiResponse<PayOsWebhookResponse>
+            //{
+            //    StatusCode = 200,
+            //    Message = "Webhook received and processed successfully.",
+            //    Data = new PayOsWebhookResponse
+            //    {
+            //        Code = webhook.Code,
+            //        Desc = webhook.Desc,
+            //        Success = webhook.Success,
+            //        Data = webhook.Data,
+            //        Signature = webhook.Signature
+            //    }
+            //});
+            return Ok(new { success = true });
         }
     }
 }
