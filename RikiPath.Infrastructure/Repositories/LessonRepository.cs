@@ -73,5 +73,13 @@ namespace RikiPath.Infrastructure.Repositories
 
             return (total, completed);
         }
+
+        public async Task<IReadOnlyList<Lesson>> GetByCertificateLevelAsync(int certificateLevelId, CancellationToken cancellationToken = default)
+             => await _context.Lessons
+                 .AsNoTracking()
+                 .Where(x => x.CertificateLevelId == certificateLevelId)
+                 .OrderBy(x => x.SortOrder)
+                 .ThenBy(x => x.Id)
+                 .ToListAsync(cancellationToken);
     }
 }

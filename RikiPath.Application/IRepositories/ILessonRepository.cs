@@ -15,5 +15,6 @@ namespace RikiPath.Application.IRepositories
             int lessonId,
             CancellationToken cancellationToken = default);
         Task<(int Total, int Completed)> GetCompletionStatsAsync(int userId);
+        Task<IReadOnlyList<Lesson>> GetByCertificateLevelAsync(int certificateLevelId, CancellationToken cancellationToken = default);
     }
 }

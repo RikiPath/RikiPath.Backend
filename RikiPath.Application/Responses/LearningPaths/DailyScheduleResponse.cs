@@ -5,11 +5,11 @@ namespace RikiPath.Application.Responses.LearningPaths
         public int Day { get; set; }
         public string Title { get; set; } = string.Empty;
         public string Focus { get; set; } = string.Empty;
-        public List<string> Lessons { get; set; } = new();
 
-        // Các thuộc tính có thể null, chỉ trả về khi người dùng chọn tương ứng
-        public List<string>? Vocabularies { get; set; }
-        public List<string>? Kanjis { get; set; }
-        public List<string>? Grammars { get; set; }
+        /// <summary>Id bài học trong hệ thống (để frontend mở đúng bài).</summary>
+        public List<int> LessonIds { get; set; } = new();
+
+        /// <summary>Tiêu đề các bài học tương ứng với LessonIds (cùng thứ tự).</summary>
+        public List<string> Lessons { get; set; } = new();
     }
 }
