@@ -9,6 +9,7 @@
 
         public int LanguageSkillId { get; set; }
         public string LanguageSkillName { get; set; } = string.Empty;
+        public string? CertificateSectionCode { get; set; }
         public List<MockQuestionPayloadResponse> Questions { get; set; } = [];
     }
 }

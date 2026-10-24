@@ -33,10 +33,17 @@ namespace RikiPath.Application.Handlers
             var (skillsByName, ambiguousSkillNames) = ImportHandlerSupport.IndexByKey(
                 skills, s => s.Name, StringComparer.OrdinalIgnoreCase);
 
+            // CertificateSection do Admin tạo sẵn; Excel chỉ mang SectionCode, FK được tra ở đây.
+            var certSections = await unitOfWork.CertificateSections.Query().Where(s => !s.IsDeleted).ToListAsync(cancellationToken);
+            var (certSectionsByCode, ambiguousSectionCodes) = ImportHandlerSupport.IndexByKey(
+                certSections, s => s.Code, StringComparer.OrdinalIgnoreCase);
+
             var openRowKeys = await ImportHandlerSupport.LoadOpenRowKeysAsync(unitOfWork, EntityType, cancellationToken);
 
             var ctx = new DiffContext(existingByKey, ambiguousKeys, levelsByCode, ambiguousLevelCodes,
-                skillsByName, ambiguousSkillNames, skills.ToDictionary(s => s.Id, s => s.Name), openRowKeys);
+                skillsByName, ambiguousSkillNames, skills.ToDictionary(s => s.Id, s => s.Name),
+                certSectionsByCode, ambiguousSectionCodes, certSections.ToDictionary(s => s.Id, s => s.Code),
+                openRowKeys);
 
             // Gộp dòng theo MockTestTitle (giữ thứ tự xuất hiện). Dòng thiếu tên đề -> 1 nhóm riêng để báo lỗi.
             var groups = new List<List<ExcelRow>>();
@@ -71,10 +78,14 @@ namespace RikiPath.Application.Handlers
             Dictionary<string, Domain.Entities.LanguageSkill> SkillsByName,
             HashSet<string> AmbiguousSkillNames,
             Dictionary<int, string> SkillNameById,
+            Dictionary<string, Domain.Entities.CertificateSection> CertSectionsByCode,
+            HashSet<string> AmbiguousSectionCodes,
+            Dictionary<int, string> SectionCodeById,
             HashSet<string> OpenRowKeys);
 
-        private sealed class SectionBuilder(string title, int sortOrder, int firstRow)
+        private sealed class SectionBuilder(string code, string title, int sortOrder, int firstRow)
         {
+            public string Code { get; } = code;
             public string Title { get; } = title;
             public int SortOrder { get; } = sortOrder;
             public int FirstRow { get; } = firstRow;
@@ -119,25 +130,45 @@ namespace RikiPath.Application.Handlers
                     ["timeLimitMinutes"] = timeRaw,
                     ["certificateLevelCode"] = levelCode,
                     ["rows"] = $"{group.Min(r => r.RowNumber)}–{group.Max(r => r.RowNumber)} ({group.Count} dòng)",
-                    ["sections"] = string.Join(" | ", group.Select(r => ImportHandlerSupport.Clean(r.Get("SectionTitle")))
-                        .Where(t => t is not null).Distinct()),
+                    ["sections"] = string.Join(" | ", group.Select(r => ImportHandlerSupport.Clean(r.Get("SectionCode")))
+                        .Where(c => c is not null).Distinct(StringComparer.OrdinalIgnoreCase)),
                 },
             };
 
-            // ---- Kỹ năng khai báo tường minh theo từng phần (cột tùy chọn) ----
-            var explicitSkills = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+            // ---- Phần thi nhận diện bằng SectionCode (CertificateSection do Admin tạo sẵn) ----
+            var certByCode = new Dictionary<string, Domain.Entities.CertificateSection?>(StringComparer.OrdinalIgnoreCase);
+            var explicitSkills = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
             foreach (var r in group)
             {
-                var st = ImportHandlerSupport.Clean(r.Get("SectionTitle"));
+                var code = ImportHandlerSupport.Clean(r.Get("SectionCode"));
+                if (code is null) continue;
+
+                if (!certByCode.ContainsKey(code))
+                {
+                    var rp0 = P(r);
+                    if (ctx.AmbiguousSectionCodes.Contains(code))
+                    {
+                        errors.Add($"{rp0}SectionCode '{code}' bị trùng trong hệ thống, không xác định được phần thi.");
+                        certByCode[code] = null;
+                    }
+                    else if (!ctx.CertSectionsByCode.TryGetValue(code, out var cs))
+                    {
+                        errors.Add($"{rp0}SectionCode '{code}' không tồn tại trong hệ thống (Admin cần tạo sẵn CertificateSection).");
+                        certByCode[code] = null;
+                    }
+                    else certByCode[code] = cs;
+                }
+
+                // Kỹ năng khai báo tường minh theo từng phần (cột tùy chọn)
                 var sk = ImportHandlerSupport.Clean(r.Get("Language Skill Name"));
-                if (st is null || sk is null) continue;
-                if (!explicitSkills.TryGetValue(st, out var set)) explicitSkills[st] = set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                if (sk is null) continue;
+                if (!explicitSkills.TryGetValue(code, out var set)) explicitSkills[code] = set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 set.Add(sk);
             }
 
             // ---- Câu hỏi: validate từng dòng, gom vào phần ----
             var sections = new List<SectionBuilder>();
-            var sectionByTitle = new Dictionary<string, SectionBuilder>(StringComparer.Ordinal);
+            var sectionByCode = new Dictionary<string, SectionBuilder>(StringComparer.OrdinalIgnoreCase);
             var seenSortOrders = new Dictionary<int, int>();
 
             foreach (var row in group)
@@ -145,8 +176,8 @@ namespace RikiPath.Application.Handlers
                 var rp = P(row);
                 var before = errors.Count;
 
-                var sectionTitle = ImportHandlerSupport.Clean(row.Get("SectionTitle"));
-                if (sectionTitle is null) errors.Add($"{rp}Thiếu cột SectionTitle.");
+                var sectionCode = ImportHandlerSupport.Clean(row.Get("SectionCode"));
+                if (sectionCode is null) errors.Add($"{rp}Thiếu cột SectionCode.");
 
                 var sortRaw = ImportHandlerSupport.Clean(row.Get("QuestionSortOrder"));
                 var sortOrder = 0;
@@ -164,12 +195,14 @@ namespace RikiPath.Application.Handlers
                 var image = ImportHandlerSupport.CheckUrl(row.Get("ImageUrl"), "ImageUrl", rp, errors);
                 var options = ImportHandlerSupport.ParseOptions(row, OptionHeaders, "CorrectOptionNumber", rp, errors);
 
-                if (errors.Count > before || sectionTitle is null || text is null || options is null) continue;
+                if (errors.Count > before || sectionCode is null || text is null || options is null) continue;
 
-                if (!sectionByTitle.TryGetValue(sectionTitle, out var section))
+                if (certByCode.GetValueOrDefault(sectionCode) is not { } certSection) continue; // lỗi đã ghi ở bước trên
+
+                if (!sectionByCode.TryGetValue(sectionCode, out var section))
                 {
-                    section = new SectionBuilder(sectionTitle, sections.Count + 1, row.RowNumber);
-                    sectionByTitle[sectionTitle] = section;
+                    section = new SectionBuilder(certSection.Code, SectionTitleOf(certSection), sections.Count + 1, row.RowNumber);
+                    sectionByCode[sectionCode] = section;
                     sections.Add(section);
                 }
                 section.Questions.Add(new MockQuestionPayloadResponse
@@ -183,7 +216,7 @@ namespace RikiPath.Application.Handlers
                 });
             }
 
-            // ---- Kỹ năng của từng phần ----
+            // ---- Kỹ năng + CertificateSection của từng phần ----
             var sectionPayloads = new List<MockTestSectionPayloadResponse>();
             foreach (var s in sections)
             {
@@ -195,6 +228,7 @@ namespace RikiPath.Application.Handlers
                     SortOrder = s.SortOrder,
                     LanguageSkillId = skill.Id,
                     LanguageSkillName = skill.Name,
+                    CertificateSectionCode = s.Code,
                     Questions = s.Questions.OrderBy(q => q.SortOrder).ToList(),
                 });
             }
@@ -242,8 +276,10 @@ namespace RikiPath.Application.Handlers
             var oldSections = existing.Sections?.Where(s => !s.IsDeleted).OrderBy(s => s.SortOrder).ToList()
                               ?? new List<Domain.Entities.MockTestSection>();
             ImportHandlerSupport.CompareField(changed, "sections",
-                string.Join(" | ", oldSections.Select(s => $"{s.Title} [{ctx.SkillNameById.GetValueOrDefault(s.LanguageSkillId, s.LanguageSkillId.ToString())}]")),
-                string.Join(" | ", payload.Sections.Select(s => $"{s.Title} [{s.LanguageSkillName}]")));
+                string.Join(" | ", oldSections.Select(s =>
+                    $"{s.Title} [{ctx.SkillNameById.GetValueOrDefault(s.LanguageSkillId, s.LanguageSkillId.ToString())}" +
+                    $"/{ctx.SectionCodeById.GetValueOrDefault(s.CertificateSectionId, s.CertificateSectionId.ToString())}]")),
+                string.Join(" | ", payload.Sections.Select(s => $"{s.Title} [{s.LanguageSkillName}/{s.CertificateSectionCode}]")));
 
             var oldQuestions = new Dictionary<int, string>();
             foreach (var s in oldSections)
@@ -279,11 +315,14 @@ namespace RikiPath.Application.Handlers
             return diff;
         }
 
+        /// <summary>Tên hiển thị của phần thi, lấy từ CertificateSection do Admin tạo sẵn (đổi property nếu entity đặt tên khác).</summary>
+        private static string SectionTitleOf(Domain.Entities.CertificateSection certSection) => certSection.Name;
+
         private static Domain.Entities.LanguageSkill? ResolveSkill(
             SectionBuilder section, Dictionary<string, HashSet<string>> explicitSkills, DiffContext ctx, List<string> errors)
         {
             var prefix = $"Dòng {section.FirstRow}: Phần '{section.Title}': ";
-            explicitSkills.TryGetValue(section.Title, out var names);
+            explicitSkills.TryGetValue(section.Code, out var names);
 
             if (names is { Count: > 1 })
             {
@@ -292,10 +331,10 @@ namespace RikiPath.Application.Handlers
             }
 
             var inferred = names is null || names.Count == 0;
-            var name = inferred ? InferSkillName(section.Title) : names!.First();
+            var name = inferred ? (InferSkillName(section.Title) ?? InferSkillName(section.Code)) : names!.First();
             if (name is null)
             {
-                errors.Add($"{prefix}không xác định được kỹ năng. Thêm cột 'Language Skill Name' hoặc đặt tên phần có từ khóa (Từ vựng, Ngữ pháp, Nghe hiểu, Đọc hiểu, Hán tự).");
+                errors.Add($"{prefix}không xác định được kỹ năng. Thêm cột 'Language Skill Name' hoặc đặt tên/code phần có từ khóa (Từ vựng, Ngữ pháp, Nghe hiểu, Đọc hiểu, Hán tự).");
                 return null;
             }
             if (ctx.AmbiguousSkillNames.Contains(name))

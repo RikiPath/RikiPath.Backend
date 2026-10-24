@@ -109,7 +109,7 @@ namespace RikiPath.Application.Services
             {
                 var query = unitOfWork.ContentApprovalRequests.Query()
                     .Include(r => r.SubmittedBy)
-                    .Where(r => !r.IsDeleted && r.Status == ContentApprovalStatus.Draft);
+                    .Where(r => !r.IsDeleted && (r.Status == ContentApprovalStatus.Draft || r.Status == ContentApprovalStatus.PendingReview));
 
                 if (entityType.HasValue)
                     query = query.Where(r => r.EntityType == entityType.Value);
@@ -176,7 +176,7 @@ namespace RikiPath.Application.Services
             {
                 var req = await unitOfWork.ContentApprovalRequests.GetByIdAsync(requestId, cancellationToken);
 
-                if (req is null || req.Status != ContentApprovalStatus.Draft)
+                if (req is null || !IsReviewable(req.Status))
                     return ApiResponse<bool>.Fail("Yêu cầu không tồn tại hoặc đã được xử lý.");
 
                 await ApplyReviewAsync(req, request.Approve, request.ReviewNote, cancellationToken);
@@ -219,7 +219,7 @@ namespace RikiPath.Application.Services
                 try
                 {
                     var req = await unitOfWork.ContentApprovalRequests.GetByIdAsync(item.RequestId, cancellationToken);
-                    if (req is null || req.Status != ContentApprovalStatus.Draft)
+                    if (req is null || !IsReviewable(req.Status))
                     {
                         result.Failures.Add(new BulkReviewItemResult
                         {
@@ -243,8 +243,15 @@ namespace RikiPath.Application.Services
             // các request lỗi/bị bỏ qua ở trên không ảnh hưởng tới các request khác.
             await unitOfWork.SaveChangesAsync(cancellationToken);
 
+            if (result.SuccessCount == 0 && result.Failures.Count > 0)
+                return ApiResponse<BulkReviewResponse>.Fail(
+                    string.Join("; ", result.Failures.Select(f => $"#{f.RequestId}: {f.Reason}")));
+
             return ApiResponse<BulkReviewResponse>.Success(result);
         }
+
+        private static bool IsReviewable(ContentApprovalStatus status) =>
+            status is ContentApprovalStatus.Draft or ContentApprovalStatus.PendingReview;
 
         private async Task ApplyReviewAsync(
             ContentApprovalRequest req, bool approve, string? reviewNote, CancellationToken cancellationToken)
@@ -268,6 +275,9 @@ namespace RikiPath.Application.Services
                     break;
                 case ImportEntityType.Grammar:
                     await ApplyGrammarApprovalAsync(req, cancellationToken);
+                    break;
+                case ImportEntityType.MockTest:
+                    await ApplyMockTestApprovalAsync(req, cancellationToken);
                     break;
                 default:
                     throw new NotSupportedException($"Chưa hỗ trợ phê duyệt tự động cho loại {req.EntityType}.");
@@ -421,6 +431,112 @@ namespace RikiPath.Application.Services
                         CertificateLevelId = p.CertificateLevelId
                     }, cancellationToken);
                 }
+            }
+        }
+
+        private async Task ApplyMockTestApprovalAsync(ContentApprovalRequest req, CancellationToken cancellationToken)
+        {
+            var p = JsonSerializer.Deserialize<MockTestImportPayloadResponse>(req.PayloadJson, JsonOptions)
+                ?? throw new InvalidOperationException("Payload MockTest rỗng.");
+
+            // Validate hết TRƯỚC khi add/sửa entity nào: trong ReviewBatchAsync, entity đã add mà sau đó throw
+            // vẫn nằm trong ChangeTracker và bị SaveChanges cuối lô ghi xuống.
+            if (req.Action == ImportRowAction.New || p.Sections is { Count: > 0 })
+            {
+                if (p.Sections is not { Count: > 0 })
+                    throw new InvalidOperationException("Đề thi chưa có phần (section) nào.");
+
+                foreach (var s in p.Sections)
+                {
+                    if (req.Action == ImportRowAction.New)
+                    {
+                        if (s.LanguageSkillId <= 0)
+                            throw new InvalidOperationException($"Phần '{s.Title}' thiếu LanguageSkillId.");
+                        if (string.IsNullOrWhiteSpace(s.CertificateSectionCode))
+                            throw new InvalidOperationException($"Phần '{s.Title}' thiếu CertificateSectionCode.");
+                    }
+
+                    foreach (var q in s.Questions)
+                    {
+                        if (q.Options.Count < 2)
+                            throw new InvalidOperationException($"Câu hỏi '{q.QuestionText}' phải có ít nhất 2 đáp án.");
+                        if (q.Options.Count(o => o.IsCorrect) != 1)
+                            throw new InvalidOperationException($"Câu hỏi '{q.QuestionText}' phải có đúng 1 đáp án đúng.");
+                    }
+                }
+            }
+
+            if (req.Action == ImportRowAction.New)
+            {
+                // Tra FK từ Code (admin tạo sẵn CertificateSection) TRƯỚC khi tạo entity,
+                // để lỗi thì throw sớm, không để entity dở dang trong ChangeTracker.
+                var codes = p.Sections!
+                    .Select(s => s.CertificateSectionCode!.Trim())
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+                var certSections = await unitOfWork.CertificateSections.Query()
+                    .Where(c => !c.IsDeleted && codes.Contains(c.Code))
+                    .ToListAsync(cancellationToken);
+
+                var duplicated = certSections
+                    .GroupBy(c => c.Code, StringComparer.OrdinalIgnoreCase)
+                    .Where(g => g.Count() > 1)
+                    .Select(g => g.Key)
+                    .ToList();
+                if (duplicated.Count > 0)
+                    throw new InvalidOperationException(
+                        $"Code CertificateSection bị trùng trong DB: {string.Join(", ", duplicated)}.");
+
+                var sectionIdByCode = certSections.ToDictionary(c => c.Code, c => c.Id, StringComparer.OrdinalIgnoreCase);
+
+                var missing = codes.Where(c => !sectionIdByCode.ContainsKey(c)).ToList();
+                if (missing.Count > 0)
+                    throw new InvalidOperationException(
+                        $"Không tìm thấy CertificateSection có Code: {string.Join(", ", missing)}. Admin cần tạo sẵn trước khi duyệt.");
+
+                var test = new MockTest
+                {
+                    Title = p.Title,
+                    Description = p.Description,
+                    TimeLimitMinutes = p.TimeLimitMinutes,
+                    CertificateLevelId = p.CertificateLevelId,
+                    Sections = p.Sections!.Select(s => new MockTestSection
+                    {
+                        Title = s.Title,
+                        SortOrder = s.SortOrder,
+                        LanguageSkillId = s.LanguageSkillId,
+                        CertificateSectionId = sectionIdByCode[s.CertificateSectionCode!.Trim()],
+                        Questions = s.Questions.Select(q => new MockQuestion
+                        {
+                            QuestionText = q.QuestionText,
+                            AudioUrl = q.AudioUrl,
+                            ImageUrl = q.ImageUrl,
+                            Explanation = q.Explanation,
+                            SortOrder = q.SortOrder,
+                            Options = q.Options.Select(o => new MockQuestionOption
+                            {
+                                OptionText = o.OptionText,
+                                IsCorrect = o.IsCorrect,
+                                SortOrder = o.SortOrder
+                            }).ToList()
+                        }).ToList()
+                    }).ToList()
+                };
+
+                await unitOfWork.MockTests.AddAsync(test, cancellationToken);
+            }
+            else
+            {
+                var test = await unitOfWork.MockTests.GetByIdAsync(req.TargetEntityId!.Value, cancellationToken)
+                    ?? throw new InvalidOperationException("Không tìm thấy đề thi gốc.");
+
+                test.Title = p.Title;
+                test.Description = p.Description;
+                test.TimeLimitMinutes = p.TimeLimitMinutes;
+                test.CertificateLevelId = p.CertificateLevelId;
+
+                unitOfWork.MockTests.Update(test);
             }
         }
         #endregion
