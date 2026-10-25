@@ -1,34 +1,41 @@
-using System.ComponentModel.DataAnnotations;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using RikiPath.Application.IServices;
+using RikiPath.Application.Responses;
 
 namespace RikiPath.WebApi.Controllers;
 
+/// <summary>
+/// HTTP endpoints dành cho Admin quản lý và kiểm duyệt lịch làm việc của Mentor.
+/// </summary>
 [ApiController]
-[Route("api/admin/mentor-availabilities")]
+[Route("api/admin/mentor-availability")]
 [Authorize(Roles = "Admin")]
-public sealed class AdminMentorAvailabilityController(IMentorAvailabilityReviewService service) : ControllerBase
+public sealed class AdminMentorMeetingsController(IMentorMeetingService service) : ControllerBase
 {
-    [HttpGet]
-    public async Task<IActionResult> GetSlots(CancellationToken cancellationToken)
-    {
-        var response = await service.GetSlotsAsync(cancellationToken);
-        return StatusCode(response.StatusCode, response);
-    }
+    /// <summary>Phê duyệt hoặc từ chối yêu cầu hủy slot trống của Mentor.</summary>
+    [HttpGet("pending")]
+    public async Task<IActionResult> GetPendingAvailabilities(CancellationToken cancellationToken)
+        => ToActionResult(await service.GetPendingAvailabilitiesAsync(cancellationToken));
 
+    /// <summary>Phê duyệt hoặc từ chối khung giờ trống Mentor mới đăng ký.</summary>
     [HttpPost("{id:int}/review")]
-    public async Task<IActionResult> Review(int id, ReviewMentorAvailabilityRequest request, CancellationToken cancellationToken)
-    {
-        var response = await service.ReviewAsync(id, request.Approve, request.Reason, cancellationToken);
-        return StatusCode(response.StatusCode, response);
-    }
-}
+    public async Task<IActionResult> ReviewAvailability(
+        int id,
+        [FromQuery] bool approve,
+        [FromQuery] string? rejectionReason,
+        CancellationToken cancellationToken)
+        => ToActionResult(await service.ReviewAvailabilityAsync(id, approve, rejectionReason, cancellationToken));
 
-public sealed class ReviewMentorAvailabilityRequest
-{
-    [Required]
-    public required bool Approve { get; init; }
-    [MaxLength(1000)]
-    public string? Reason { get; init; }
+    /// <summary>Phê duyệt hoặc từ chối yêu cầu hủy slot trống của Mentor.</summary>
+    [HttpPost("{id:int}/review-cancel")]
+    public async Task<IActionResult> ReviewCancelAvailability(
+        int id,
+        [FromQuery] bool approve,
+        [FromQuery] string? rejectionReason,
+        CancellationToken cancellationToken)
+        => ToActionResult(await service.ReviewCancelAvailabilityAsync(id, approve, rejectionReason, cancellationToken));
+
+    private IActionResult ToActionResult<T>(ApiResponse<T> response)
+        => StatusCode(response.StatusCode, response);
 }

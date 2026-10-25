@@ -14,5 +14,11 @@
         public int BookedCount { get; set; }
         public int MaxLearners { get; set; }
         public string? AdminName { get; set; }
+        public int AdvanceDaysAtCreation { get; set; }
+        public bool MeetsAdvanceRule { get; set; }
+        public DateTime? CancelRequestedAt { get; set; }
+        public string? CancelReason { get; set; }
+        public DateTime? CancelRejectedAt { get; set; }
+        public string? CancelRejectionReason { get; set; }
     }
 }

@@ -16,8 +16,12 @@ public interface IMentorMeetingService
     Task<ApiResponse<MentorMeetingPurchaseStatusResponse>> SyncPurchaseAsync(int subscriptionId, CancellationToken cancellationToken);
     Task<ApiResponse<List<MentorAvailabilityResponse>>> GetMyAvailabilityAsync(CancellationToken cancellationToken);
     Task<ApiResponse<MentorAvailabilityResponse>> CreateAvailabilityAsync(CreateMentorAvailabilityRequest request, CancellationToken cancellationToken);
-    Task<ApiResponse<bool>> DeleteAvailabilityAsync(int id, CancellationToken cancellationToken);
     Task<ApiResponse<List<MentorBookingResponse>>> GetMyMeetingsAsync(CancellationToken cancellationToken);
     Task<ApiResponse<MentorBookingResponse>> GetMentorBookingAsync(int bookingId, CancellationToken cancellationToken);
     Task<ApiResponse<MentorBookingResponse>> AcceptMentorBookingAsync(int bookingId, CancellationToken cancellationToken);
+    Task<ApiResponse<MentorAvailabilityResponse>> RequestCancelAvailabilityAsync(int id, CancelAvailabilityRequest request, CancellationToken cancellationToken);
+    Task<ApiResponse<bool>> ReviewCancelAvailabilityAsync(int id, bool approve, string? rejectionReason, CancellationToken cancellationToken);
+    Task<ApiResponse<List<MentorAvailabilityResponse>>> GetPendingAvailabilitiesAsync(CancellationToken cancellationToken);
+    Task<ApiResponse<MentorAvailabilityResponse>> ReviewAvailabilityAsync(
+    int id, bool approve, string? rejectionReason, CancellationToken cancellationToken);
 }

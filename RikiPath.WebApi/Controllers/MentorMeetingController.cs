@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using RikiPath.Application.IServices;
 using RikiPath.Application.Requests.MentorMeetings;
+using RikiPath.Application.Responses;
 
 namespace RikiPath.WebApi.Controllers;
 
@@ -10,62 +11,56 @@ namespace RikiPath.WebApi.Controllers;
 [Route("api/mentor-meetings")]
 public sealed class MentorMeetingController(IMentorMeetingService service) : ControllerBase
 {
-    /// <summary>Lists active mentor profiles for learner booking, without account credentials or contact details.</summary>
     [HttpGet("mentors")]
     [AllowAnonymous]
     public async Task<IActionResult> GetMentors(CancellationToken cancellationToken)
-        => ToActionResult(await service.GetMentorsAsync(cancellationToken));
+         => ToActionResult(await service.GetMentorsAsync(cancellationToken));
 
-    /// <summary>Lists active Mentor Meeting plans and their included Features.</summary>
+    /// <summary>Lấy danh sách các gói tư vấn 1-1 khả dụng.</summary>
     [HttpGet("plans")]
     [AllowAnonymous]
     public async Task<IActionResult> GetPlans(CancellationToken cancellationToken)
         => ToActionResult(await service.GetPlansAsync(cancellationToken));
 
-    /// <summary>Lists available Mentor slots within a date range (up to 90 days).</summary>
-    [HttpGet("availability")]
-    [Authorize(Roles = "Learner")]
-    public async Task<IActionResult> GetAvailability(
+    /// <summary>Tra cứu các khung giờ trống của Mentor theo khoảng thời gian.</summary>
+    [HttpGet("available-slots")]
+    public async Task<IActionResult> GetAvailableSlots(
         [FromQuery] DateTime from,
         [FromQuery] DateTime to,
         [FromQuery] int? mentorId,
         CancellationToken cancellationToken)
         => ToActionResult(await service.GetAvailableSlotsAsync(from, to, mentorId, cancellationToken));
 
-    /// <summary>Reserves the selected slot and returns a PayOS checkout link for the chosen plan.</summary>
+    /// <summary>Mua gói tư vấn 1-1 (Khởi tạo giao dịch PayOS).</summary>
     [HttpPost("purchase")]
-    [Authorize(Roles = "Learner")]
     public async Task<IActionResult> Purchase(
         [FromBody] PurchaseMentorPlanRequest request,
         CancellationToken cancellationToken)
         => ToActionResult(await service.PurchaseAsync(request, cancellationToken));
 
-    /// <summary>Books an additional session using an already paid meeting package.</summary>
-    [HttpPost("subscriptions/{subscriptionId:int}/bookings")]
-    [Authorize(Roles = "Learner")]
+    /// <summary>Đặt buổi hẹn 1-1 sử dụng gói tư vấn đã đăng ký (Subscription).</summary>
+    [HttpPost("subscriptions/{subscriptionId:int}/book")]
     public async Task<IActionResult> BookIncludedSession(
         int subscriptionId,
         [FromBody] BookIncludedMeetingRequest request,
         CancellationToken cancellationToken)
         => ToActionResult(await service.BookIncludedSessionAsync(subscriptionId, request, cancellationToken));
 
-    /// <summary>Lists the authenticated learner's Mentor bookings.</summary>
-    [HttpGet("bookings")]
-    [Authorize(Roles = "Learner")]
+    /// <summary>Lấy danh sách các buổi hẹn tư vấn cá nhân đã đặt.</summary>
+    [HttpGet("my-bookings")]
     public async Task<IActionResult> GetMyBookings(CancellationToken cancellationToken)
         => ToActionResult(await service.GetMyBookingsAsync(cancellationToken));
 
-    /// <summary>Returns payment and booking status for a meeting package purchase.</summary>
-    [HttpGet("purchases/{subscriptionId:int}")]
-    [Authorize(Roles = "Learner")]
+    /// <summary>Xem trạng thái gói tư vấn đã mua theo Subscription ID.</summary>
+    [HttpGet("subscriptions/{subscriptionId:int}/status")]
     public async Task<IActionResult> GetPurchaseStatus(int subscriptionId, CancellationToken cancellationToken)
         => ToActionResult(await service.GetPurchaseStatusAsync(subscriptionId, cancellationToken));
 
-    private IActionResult ToActionResult<T>(RikiPath.Application.Responses.ApiResponse<T> response)
-        => StatusCode(response.StatusCode, response);
-
-    [HttpPost("purchases/{subscriptionId:int}/sync")]
-    [Authorize(Roles = "Learner")]
+    /// <summary>Đồng bộ trạng thái thanh toán gói tư vấn từ Webhook/PayOS.</summary>
+    [HttpPost("subscriptions/{subscriptionId:int}/sync")]
     public async Task<IActionResult> SyncPurchase(int subscriptionId, CancellationToken cancellationToken)
         => ToActionResult(await service.SyncPurchaseAsync(subscriptionId, cancellationToken));
+
+    private IActionResult ToActionResult<T>(ApiResponse<T> response)
+        => StatusCode(response.StatusCode, response);
 }
