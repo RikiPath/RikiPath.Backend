@@ -7,6 +7,7 @@ namespace RikiPath.Application.IRepositories
 {
     public interface IKanjiRepository : IGenericRepository<Kanji>
     {
+        Task<List<Kanji>> GetDictionaryEntriesAsync(CancellationToken cancellationToken = default);
         Task<(List<Kanji> Items, int TotalCount)> SearchAsync(
             int? jlptLevelId,
             string? keyword,

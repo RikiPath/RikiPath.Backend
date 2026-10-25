@@ -6,6 +6,17 @@ namespace RikiPath.Infrastructure.Repositories
 {
     public class KanjiRepository(AppDbContext context) : GenericRepository<Kanji>(context), IKanjiRepository
     {
+        public Task<List<Kanji>> GetDictionaryEntriesAsync(CancellationToken cancellationToken = default)
+            => _context.Kanjis.AsNoTracking()
+                .WherePubliclyVisible()
+                .Where(x => x.OnYomi != null || x.KunYomi != null)
+                .Select(x => new Kanji
+                {
+                    Id = x.Id, Character = x.Character, Meaning = x.Meaning,
+                    SinoVietnamese = x.SinoVietnamese, OnYomi = x.OnYomi, KunYomi = x.KunYomi,
+                })
+                .ToListAsync(cancellationToken);
+
         private IQueryable<Kanji> BuildSearchQuery(int? jlptLevelId, string? keyword, bool publicOnly = false)
         {
             IQueryable<Kanji> query = _context.Kanjis.AsQueryable();
