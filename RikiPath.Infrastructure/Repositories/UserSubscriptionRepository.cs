@@ -30,5 +30,17 @@ namespace RikiPath.Infrastructure.Repositories
                 .Include(x => x.MentorBookings!)
                     .ThenInclude(x => x.MentorAvailability).ThenInclude(x => x!.Mentor)
                 .FirstOrDefaultAsync(x => x.Id == subscriptionId && x.UserId == userId && !x.IsDeleted, ct);
+
+        public Task<UserSubscription?> GetWithPlanAsync(int id, CancellationToken ct) =>
+    _context.UserSubscriptions
+        .Include(s => s.SubscriptionPlan)
+        .FirstOrDefaultAsync(s => s.Id == id, ct);
+
+        public async Task<DateTime?> GetActiveEndDateAsync(int userId, DateTime now, CancellationToken ct) =>
+            await _context.UserSubscriptions
+                .Where(s => s.UserId == userId
+                         && s.PaymentStatus == PaymentStatus.Paid
+                         && s.EndDate > now)
+                .MaxAsync(s => (DateTime?)s.EndDate, ct);
     }
 }

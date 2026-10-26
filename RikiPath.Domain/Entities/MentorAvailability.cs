@@ -28,9 +28,12 @@ namespace RikiPath.Domain.Entities
 
         public bool IsApproved { get; set; } = false;
         public string? AdminName { get; set; }
-        public string? RejectionReason { get; set; }
+        public DateTime? CancelRequestedAt { get; set; }
+        public string? CancelReason { get; set; }
+        public DateTime? CancelRejectedAt { get; set; }
+        public string? CancelRejectionReason { get; set; }
         public DateTime? RejectedAt { get; set; }
-
+        public string? RejectionReason { get; set; }
         /// <summary>One slot, many bookings (one per learner).</summary>
         public ICollection<MentorBooking> MentorBookings { get; set; } = new List<MentorBooking>();
     }
