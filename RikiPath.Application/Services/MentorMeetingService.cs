@@ -26,6 +26,13 @@ public sealed class MentorMeetingService(
     /// <summary>Mentor chỉ được yêu cầu hủy lịch trống (chưa có người đặt) trước giờ bắt đầu ít nhất số ngày này.</summary>
     private const int MinCancelAdvanceDays = 7;
 
+    /// <summary>Mỗi slot mà learner đặt dài bao nhiêu phút. Server tự chia khoảng mentor đăng ký thành các slot này.</summary>
+    private const int SlotMinutes = 60;
+
+    /// <summary>Tối đa số slot xử lý trong một lần gọi duyệt/hủy hàng loạt.</summary>
+    private const int MaxBulkSlots = 50;
+
+    /// <summary>Một lần đăng ký (cả khoảng) không được dài quá mức này.</summary>
     private static readonly TimeSpan MaxSlotDuration = TimeSpan.FromHours(4);
 
     public async Task<ApiResponse<List<BookableMentorResponse>>> GetMentorsAsync(CancellationToken cancellationToken)
@@ -376,99 +383,129 @@ public sealed class MentorMeetingService(
         }
     }
 
-    public async Task<ApiResponse<MentorAvailabilityResponse>> CreateAvailabilityAsync(
+    /// <summary>
+    /// Mentor đăng ký một khoảng thời gian (ví dụ thứ Ba 17:00-21:00). Server tự chia thành các slot
+    /// <see cref="SlotMinutes"/> phút (17-18, 18-19, 19-20, 20-21) và lưu trong một lần SaveChanges.
+    /// </summary>
+    public async Task<ApiResponse<List<MentorAvailabilityResponse>>> CreateAvailabilityAsync(
         CreateMentorAvailabilityRequest request, CancellationToken cancellationToken)
     {
         try
         {
             var claims = claimService.GetUserClaim();
             if (claims.Role != Role.Mentor)
-                return ApiResponse<MentorAvailabilityResponse>.Fail("Chỉ Mentor mới có thể tạo lịch trống.", HttpStatusCode.Forbidden);
+                return ApiResponse<List<MentorAvailabilityResponse>>.Fail("Chỉ Mentor mới có thể tạo lịch trống.", HttpStatusCode.Forbidden);
 
             var now = DateTime.UtcNow;
             var start = request.StartTime.ToUniversalTime();
             var end = request.EndTime.ToUniversalTime();
+            var step = TimeSpan.FromMinutes(SlotMinutes);
 
             if (end <= start)
-                return ApiResponse<MentorAvailabilityResponse>.Fail("Thời gian bắt đầu phải trước thời gian kết thúc.");
+                return ApiResponse<List<MentorAvailabilityResponse>>.Fail("Thời gian bắt đầu phải trước thời gian kết thúc.");
             if (start < now.AddMonths(MinAdvanceMonths))
-                return ApiResponse<MentorAvailabilityResponse>.Fail(
+                return ApiResponse<List<MentorAvailabilityResponse>>.Fail(
                     $"Lịch trống phải được đăng ký trước ít nhất {MinAdvanceMonths} tháng so với thời điểm bắt đầu.");
             if (end - start > MaxSlotDuration)
-                return ApiResponse<MentorAvailabilityResponse>.Fail("Một slot không được dài quá 4 giờ.");
+                return ApiResponse<List<MentorAvailabilityResponse>>.Fail("Một lần đăng ký không được dài quá 4 giờ.");
+            if ((end - start).Ticks % step.Ticks != 0)
+                return ApiResponse<List<MentorAvailabilityResponse>>.Fail(
+                    $"Khoảng thời gian phải chia hết cho {SlotMinutes} phút.");
             if (await unitOfWork.MentorAvailabilities.HasOverlappingSlotAsync(claims.Id, start, end, cancellationToken))
-                return ApiResponse<MentorAvailabilityResponse>.Fail("Slot bị trùng với lịch đã tạo.", HttpStatusCode.Conflict);
+                return ApiResponse<List<MentorAvailabilityResponse>>.Fail("Khoảng thời gian bị trùng với lịch đã tạo.", HttpStatusCode.Conflict);
 
-            var slot = new MentorAvailability
+            var slots = new List<MentorAvailability>();
+            for (var t = start; t < end; t += step)
             {
-                MentorId = claims.Id,
-                StartTime = start,
-                EndTime = end,
-                IsApproved = false
-            };
-            await unitOfWork.MentorAvailabilities.AddAsync(slot, cancellationToken);
-            await unitOfWork.SaveChangesAsync(cancellationToken);
-            slot.Mentor = await unitOfWork.UserAccounts.GetByIdAsync(claims.Id, cancellationToken) ?? null!;
-            return ApiResponse<MentorAvailabilityResponse>.Success(MapAvailability(slot), HttpStatusCode.Created);
+                slots.Add(new MentorAvailability
+                {
+                    MentorId = claims.Id,
+                    StartTime = t,
+                    EndTime = t + step,
+                    IsApproved = false,
+                });
+            }
+
+            foreach (var slot in slots)
+                await unitOfWork.MentorAvailabilities.AddAsync(slot, cancellationToken);
+            await unitOfWork.SaveChangesAsync(cancellationToken); // một lần lưu: tất cả slot cùng thành công hoặc cùng thất bại
+
+            var mentor = await unitOfWork.UserAccounts.GetByIdAsync(claims.Id, cancellationToken);
+            foreach (var slot in slots) slot.Mentor = mentor!;
+
+            return ApiResponse<List<MentorAvailabilityResponse>>.Success(
+                slots.Select(MapAvailability).ToList(), HttpStatusCode.Created);
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "Could not create Mentor availability.");
-            return ApiResponse<MentorAvailabilityResponse>.Fail("Không thể tạo khung giờ trống.", HttpStatusCode.InternalServerError);
+            return ApiResponse<List<MentorAvailabilityResponse>>.Fail("Không thể tạo khung giờ trống.", HttpStatusCode.InternalServerError);
         }
     }
 
     /// <summary>
-    /// Mentor gửi yêu cầu hủy lịch trống. Chỉ được gửi khi slot chưa có ai đặt và còn cách giờ bắt đầu
+    /// Mentor gửi yêu cầu hủy một hoặc nhiều slot trống. Mọi slot phải chưa có ai đặt và còn cách giờ bắt đầu
     /// ít nhất <see cref="MinCancelAdvanceDays"/> ngày. Slot chỉ thực sự bị hủy sau khi Admin duyệt.
+    /// Nếu có bất kỳ slot nào không hợp lệ thì không slot nào được gửi yêu cầu.
     /// </summary>
-    public async Task<ApiResponse<MentorAvailabilityResponse>> RequestCancelAvailabilityAsync(
-        int id, CancelAvailabilityRequest request, CancellationToken cancellationToken)
+    public async Task<ApiResponse<List<MentorAvailabilityResponse>>> RequestCancelAvailabilitiesAsync(
+        CancelAvailabilitiesRequest request, CancellationToken cancellationToken)
     {
-        if (id <= 0) return ApiResponse<MentorAvailabilityResponse>.Fail("AvailabilityId phải lớn hơn 0.");
+        var ids = NormalizeIds(request.Ids);
+        if (ids.Count == 0 || ids.Count > MaxBulkSlots || ids.Any(x => x <= 0))
+            return ApiResponse<List<MentorAvailabilityResponse>>.Fail($"Danh sách slot không hợp lệ (1-{MaxBulkSlots} slot).");
         if (request.Reason?.Length > 1000)
-            return ApiResponse<MentorAvailabilityResponse>.Fail("Lý do hủy tối đa 1000 ký tự.");
+            return ApiResponse<List<MentorAvailabilityResponse>>.Fail("Lý do hủy tối đa 1000 ký tự.");
 
         try
         {
             var claims = claimService.GetUserClaim();
             if (claims.Role != Role.Mentor)
-                return ApiResponse<MentorAvailabilityResponse>.Fail("Chỉ Mentor mới có thể hủy lịch của mình.", HttpStatusCode.Forbidden);
+                return ApiResponse<List<MentorAvailabilityResponse>>.Fail("Chỉ Mentor mới có thể hủy lịch của mình.", HttpStatusCode.Forbidden);
 
             await ExpirePendingPaymentsAsync(cancellationToken);
-            var slot = await unitOfWork.MentorAvailabilities.GetByIdAsync(id, cancellationToken);
-            if (slot is null || slot.IsDeleted || slot.MentorId != claims.Id)
-                return ApiResponse<MentorAvailabilityResponse>.Fail("Không tìm thấy khung giờ.", HttpStatusCode.NotFound);
-            if (slot.CancelRequestedAt is not null)
-                return ApiResponse<MentorAvailabilityResponse>.Fail("Yêu cầu hủy đang chờ admin duyệt.", HttpStatusCode.Conflict);
-            if (await HasActiveBookingAsync(slot, cancellationToken))
-                return ApiResponse<MentorAvailabilityResponse>.Fail("Slot đã có người đặt, không thể hủy.", HttpStatusCode.Conflict);
-            if (slot.StartTime - DateTime.UtcNow < TimeSpan.FromDays(MinCancelAdvanceDays))
-                return ApiResponse<MentorAvailabilityResponse>.Fail(
-                    $"Chỉ được yêu cầu hủy trước giờ bắt đầu ít nhất {MinCancelAdvanceDays} ngày.", HttpStatusCode.Conflict);
+            var slots = await unitOfWork.MentorAvailabilities.Query()
+                .Include(x => x.Mentor)
+                .Where(x => ids.Contains(x.Id) && !x.IsDeleted && x.MentorId == claims.Id)
+                .ToListAsync(cancellationToken);
+            if (slots.Count != ids.Count)
+                return ApiResponse<List<MentorAvailabilityResponse>>.Fail("Có khung giờ không tồn tại.", HttpStatusCode.NotFound);
 
             var now = DateTime.UtcNow;
-            slot.CancelRequestedAt = now;
-            slot.CancelReason = request.Reason?.Trim();
-            slot.CancelRejectedAt = null;
-            slot.CancelRejectionReason = null;
-            slot.ModifiedDate = now;
-            unitOfWork.MentorAvailabilities.Update(slot);
+            if (slots.Any(x => x.CancelRequestedAt is not null))
+                return ApiResponse<List<MentorAvailabilityResponse>>.Fail("Có slot đang chờ admin duyệt hủy.", HttpStatusCode.Conflict);
+            if (slots.Any(x => x.StartTime - now < TimeSpan.FromDays(MinCancelAdvanceDays)))
+                return ApiResponse<List<MentorAvailabilityResponse>>.Fail(
+                    $"Chỉ được yêu cầu hủy trước giờ bắt đầu ít nhất {MinCancelAdvanceDays} ngày.", HttpStatusCode.Conflict);
+            if ((await GetSlotIdsWithActiveBookingsAsync(slots, cancellationToken)).Count > 0)
+                return ApiResponse<List<MentorAvailabilityResponse>>.Fail("Có slot đã có người đặt, không thể hủy.", HttpStatusCode.Conflict);
+
+            foreach (var slot in slots)
+            {
+                slot.CancelRequestedAt = now;
+                slot.CancelReason = request.Reason?.Trim();
+                slot.CancelRejectedAt = null;
+                slot.CancelRejectionReason = null;
+                slot.ModifiedDate = now;
+                unitOfWork.MentorAvailabilities.Update(slot);
+            }
             await unitOfWork.SaveChangesAsync(cancellationToken);
-            return ApiResponse<MentorAvailabilityResponse>.Success(MapAvailability(slot));
+            return ApiResponse<List<MentorAvailabilityResponse>>.Success(slots.OrderBy(x => x.StartTime).Select(MapAvailability).ToList());
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Could not request cancel for Mentor availability {AvailabilityId}.", id);
-            return ApiResponse<MentorAvailabilityResponse>.Fail("Không thể gửi yêu cầu hủy.", HttpStatusCode.InternalServerError);
+            logger.LogError(ex, "Could not request cancel for Mentor availabilities.");
+            return ApiResponse<List<MentorAvailabilityResponse>>.Fail("Không thể gửi yêu cầu hủy.", HttpStatusCode.InternalServerError);
         }
     }
 
-    /// <summary>Admin duyệt (xóa slot) hoặc từ chối (giữ slot) yêu cầu hủy của Mentor.</summary>
-    public async Task<ApiResponse<bool>> ReviewCancelAvailabilityAsync(
-        int id, bool approve, string? rejectionReason, CancellationToken cancellationToken)
+    /// <summary>Admin duyệt (xóa slot) hoặc từ chối (giữ slot) yêu cầu hủy của Mentor, cho một hoặc nhiều slot.</summary>
+    public async Task<ApiResponse<bool>> ReviewCancelAvailabilitiesAsync(
+        List<int> ids, bool approve, string? rejectionReason, CancellationToken cancellationToken)
     {
-        if (id <= 0) return ApiResponse<bool>.Fail("AvailabilityId phải lớn hơn 0.");
+        var distinctIds = NormalizeIds(ids);
+        if (distinctIds.Count == 0 || distinctIds.Count > MaxBulkSlots || distinctIds.Any(x => x <= 0))
+            return ApiResponse<bool>.Fail($"Danh sách slot không hợp lệ (1-{MaxBulkSlots} slot).");
         if (rejectionReason?.Length > 1000)
             return ApiResponse<bool>.Fail("Lý do từ chối tối đa 1000 ký tự.");
 
@@ -479,32 +516,43 @@ public sealed class MentorMeetingService(
                 return ApiResponse<bool>.Fail("Chỉ Admin mới được duyệt yêu cầu hủy.", HttpStatusCode.Forbidden);
 
             await ExpirePendingPaymentsAsync(cancellationToken);
-            var slot = await unitOfWork.MentorAvailabilities.GetByIdAsync(id, cancellationToken);
-            if (slot is null || slot.IsDeleted || slot.CancelRequestedAt is null)
-                return ApiResponse<bool>.Fail("Không có yêu cầu hủy cho slot này.", HttpStatusCode.NotFound);
+            var slots = await unitOfWork.MentorAvailabilities.Query()
+                .Where(x => distinctIds.Contains(x.Id) && !x.IsDeleted)
+                .ToListAsync(cancellationToken);
+            if (slots.Count != distinctIds.Count)
+                return ApiResponse<bool>.Fail("Có slot không tồn tại.", HttpStatusCode.NotFound);
+            if (slots.Any(x => x.CancelRequestedAt is null))
+                return ApiResponse<bool>.Fail("Có slot không có yêu cầu hủy.", HttpStatusCode.Conflict);
 
             var now = DateTime.UtcNow;
             if (approve)
             {
                 // Re-check: trong lúc chờ duyệt có thể đã có người đặt.
-                if (await HasActiveBookingAsync(slot, cancellationToken))
-                    return ApiResponse<bool>.Fail("Slot đã có người đặt, không thể duyệt hủy.", HttpStatusCode.Conflict);
-                slot.IsDeleted = true;
+                if ((await GetSlotIdsWithActiveBookingsAsync(slots, cancellationToken)).Count > 0)
+                    return ApiResponse<bool>.Fail("Có slot đã có người đặt, không thể duyệt hủy.", HttpStatusCode.Conflict);
             }
-            else
+
+            foreach (var slot in slots)
             {
-                slot.CancelRequestedAt = null;
-                slot.CancelRejectedAt = now;
-                slot.CancelRejectionReason = rejectionReason?.Trim();
+                if (approve)
+                {
+                    slot.IsDeleted = true;
+                }
+                else
+                {
+                    slot.CancelRequestedAt = null;
+                    slot.CancelRejectedAt = now;
+                    slot.CancelRejectionReason = rejectionReason?.Trim();
+                }
+                slot.ModifiedDate = now;
+                unitOfWork.MentorAvailabilities.Update(slot);
             }
-            slot.ModifiedDate = now;
-            unitOfWork.MentorAvailabilities.Update(slot);
             await unitOfWork.SaveChangesAsync(cancellationToken);
             return ApiResponse<bool>.Success(true);
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Could not review cancel request for Mentor availability {AvailabilityId}.", id);
+            logger.LogError(ex, "Could not review cancel requests for Mentor availabilities.");
             return ApiResponse<bool>.Fail("Không thể xử lý yêu cầu hủy.", HttpStatusCode.InternalServerError);
         }
     }
@@ -537,6 +585,7 @@ public sealed class MentorMeetingService(
             return ApiResponse<MentorBookingResponse>.Fail("Không tìm thấy yêu cầu tư vấn.", HttpStatusCode.NotFound);
         return ApiResponse<MentorBookingResponse>.Success(MapBooking(booking, claims.Id));
     }
+
     public async Task<ApiResponse<List<MentorAvailabilityResponse>>> GetPendingAvailabilitiesAsync(CancellationToken cancellationToken)
     {
         try
@@ -548,7 +597,7 @@ public sealed class MentorMeetingService(
             var slots = await unitOfWork.MentorAvailabilities.Query()
                 .Include(x => x.Mentor)
                 .Where(x => !x.IsDeleted && !x.IsApproved && x.RejectedAt == null && x.StartTime > DateTime.UtcNow)
-                .OrderBy(x => x.CreatedDate)
+                .OrderBy(x => x.MentorId).ThenBy(x => x.StartTime)
                 .ToListAsync(cancellationToken);
             return ApiResponse<List<MentorAvailabilityResponse>>.Success(slots.Select(MapAvailability).ToList());
         }
@@ -559,57 +608,57 @@ public sealed class MentorMeetingService(
         }
     }
 
-    public async Task<ApiResponse<MentorAvailabilityResponse>> ReviewAvailabilityAsync(
-        int id, bool approve, string? rejectionReason, CancellationToken cancellationToken)
+    /// <summary>Admin duyệt hoặc từ chối một hoặc nhiều slot mới của Mentor (giao diện gom các slot cùng buổi rồi gửi danh sách id).</summary>
+    public async Task<ApiResponse<bool>> ReviewAvailabilitiesAsync(
+        List<int> ids, bool approve, string? rejectionReason, CancellationToken cancellationToken)
     {
-        if (id <= 0) return ApiResponse<MentorAvailabilityResponse>.Fail("AvailabilityId phải lớn hơn 0.");
+        var distinctIds = NormalizeIds(ids);
+        if (distinctIds.Count == 0 || distinctIds.Count > MaxBulkSlots || distinctIds.Any(x => x <= 0))
+            return ApiResponse<bool>.Fail($"Danh sách slot không hợp lệ (1-{MaxBulkSlots} slot).");
         if (!approve && string.IsNullOrWhiteSpace(rejectionReason))
-            return ApiResponse<MentorAvailabilityResponse>.Fail("Vui lòng nhập lý do từ chối.");
+            return ApiResponse<bool>.Fail("Vui lòng nhập lý do từ chối.");
         if (rejectionReason?.Length > 1000)
-            return ApiResponse<MentorAvailabilityResponse>.Fail("Lý do từ chối tối đa 1000 ký tự.");
+            return ApiResponse<bool>.Fail("Lý do từ chối tối đa 1000 ký tự.");
 
         try
         {
             var claims = claimService.GetUserClaim();
             if (claims.Role != Role.Admin)
-                return ApiResponse<MentorAvailabilityResponse>.Fail("Chỉ Admin mới được duyệt lịch.", HttpStatusCode.Forbidden);
+                return ApiResponse<bool>.Fail("Chỉ Admin mới được duyệt lịch.", HttpStatusCode.Forbidden);
 
             var user = await unitOfWork.UserAccounts.GetByIdAsync(claims.Id, cancellationToken);
-            var slot = await unitOfWork.MentorAvailabilities.Query()
-                .Include(x => x.Mentor)
-                .FirstOrDefaultAsync(x => x.Id == id && !x.IsDeleted, cancellationToken);
-            if (slot is null)
-                return ApiResponse<MentorAvailabilityResponse>.Fail("Không tìm thấy khung giờ.", HttpStatusCode.NotFound);
-            if (slot.IsApproved || slot.RejectedAt is not null)
-                return ApiResponse<MentorAvailabilityResponse>.Fail("Lịch này đã được xử lý.", HttpStatusCode.Conflict);
-            if (slot.StartTime <= DateTime.UtcNow)
-                return ApiResponse<MentorAvailabilityResponse>.Fail("Lịch đã quá hạn, không thể duyệt.", HttpStatusCode.Conflict);
+            var adminName = user is not null ? $"{user.FirstName} {user.LastName}".Trim() : null;
 
+            var slots = await unitOfWork.MentorAvailabilities.Query()
+                .Where(x => distinctIds.Contains(x.Id) && !x.IsDeleted)
+                .ToListAsync(cancellationToken);
             var now = DateTime.UtcNow;
-            if (approve)
+            if (slots.Count != distinctIds.Count)
+                return ApiResponse<bool>.Fail("Có khung giờ không tồn tại.", HttpStatusCode.NotFound);
+            if (slots.Any(x => x.IsApproved || x.RejectedAt is not null))
+                return ApiResponse<bool>.Fail("Có lịch đã được xử lý.", HttpStatusCode.Conflict);
+            if (slots.Any(x => x.StartTime <= now))
+                return ApiResponse<bool>.Fail("Có lịch đã quá hạn, không thể duyệt.", HttpStatusCode.Conflict);
+
+            foreach (var slot in slots)
             {
-                slot.IsApproved = true;
-                slot.RejectedAt = null;
-                slot.RejectionReason = null;
+                slot.IsApproved = approve;
+                slot.RejectedAt = approve ? null : now;
+                slot.RejectionReason = approve ? null : rejectionReason!.Trim();
+                slot.AdminName = adminName;
+                slot.ModifiedDate = now;
+                unitOfWork.MentorAvailabilities.Update(slot);
             }
-            else
-            {
-                slot.IsApproved = false;
-                slot.RejectedAt = now;
-                slot.RejectionReason = rejectionReason!.Trim();
-            }
-            slot.AdminName = user is not null ? $"{user.FirstName} {user.LastName}".Trim() : null;
-            slot.ModifiedDate = now;
-            unitOfWork.MentorAvailabilities.Update(slot);
             await unitOfWork.SaveChangesAsync(cancellationToken);
-            return ApiResponse<MentorAvailabilityResponse>.Success(MapAvailability(slot));
+            return ApiResponse<bool>.Success(true);
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Could not review Mentor availability {AvailabilityId}.", id);
-            return ApiResponse<MentorAvailabilityResponse>.Fail("Không thể xử lý duyệt lịch.", HttpStatusCode.InternalServerError);
+            logger.LogError(ex, "Could not review Mentor availabilities.");
+            return ApiResponse<bool>.Fail("Không thể xử lý duyệt lịch.", HttpStatusCode.InternalServerError);
         }
     }
+
     public async Task<ApiResponse<MentorBookingResponse>> AcceptMentorBookingAsync(int bookingId, CancellationToken cancellationToken)
     {
         var claims = claimService.GetUserClaim();
@@ -635,14 +684,27 @@ public sealed class MentorMeetingService(
         return ApiResponse<MentorBookingResponse>.Success(MapBooking(booking, claims.Id));
     }
 
-    /// <summary>Slot được coi là "đã có người đặt" nếu BookedCount > 0 hoặc còn booking chưa hủy (kể cả đang giữ chỗ thanh toán).</summary>
-    private async Task<bool> HasActiveBookingAsync(MentorAvailability slot, CancellationToken cancellationToken)
+    private static List<int> NormalizeIds(List<int>? ids) => ids?.Distinct().ToList() ?? [];
+
+    /// <summary>
+    /// Trả về id các slot "đã có người đặt": BookedCount > 0 hoặc còn booking chưa hủy
+    /// (kể cả booking đang giữ chỗ chờ thanh toán). Truy vấn một lần cho cả danh sách slot.
+    /// </summary>
+    private async Task<HashSet<int>> GetSlotIdsWithActiveBookingsAsync(
+        IReadOnlyCollection<MentorAvailability> slots, CancellationToken cancellationToken)
     {
-        if (slot.BookedCount > 0) return true;
-        return await unitOfWork.MentorBookings.Query()
-            .AnyAsync(b => b.MentorAvailabilityId == slot.Id
+        var result = slots.Where(x => x.BookedCount > 0).Select(x => x.Id).ToHashSet();
+        var slotIds = slots.Select(x => x.Id).ToList();
+        var bookedIds = await unitOfWork.MentorBookings.Query()
+            .Where(b => b.MentorAvailabilityId != null
+                && slotIds.Contains(b.MentorAvailabilityId.Value)
                 && !b.IsDeleted
-                && b.Status != MentorStatus.Cancelled, cancellationToken);
+                && b.Status != MentorStatus.Cancelled)
+            .Select(b => b.MentorAvailabilityId!.Value)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+        result.UnionWith(bookedIds);
+        return result;
     }
 
     private async Task ExpirePendingPaymentsAsync(CancellationToken cancellationToken)

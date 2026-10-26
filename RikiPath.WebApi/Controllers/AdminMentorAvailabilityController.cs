@@ -13,29 +13,35 @@ namespace RikiPath.WebApi.Controllers;
 [Authorize(Roles = "Admin")]
 public sealed class AdminMentorMeetingsController(IMentorMeetingService service) : ControllerBase
 {
-    /// <summary>Phê duyệt hoặc từ chối yêu cầu hủy slot trống của Mentor.</summary>
+    /// <summary>
+    /// Lấy danh sách các khung giờ trống mới đăng ký đang chờ Admin phê duyệt.
+    /// </summary>
     [HttpGet("pending")]
     public async Task<IActionResult> GetPendingAvailabilities(CancellationToken cancellationToken)
         => ToActionResult(await service.GetPendingAvailabilitiesAsync(cancellationToken));
 
-    /// <summary>Phê duyệt hoặc từ chối khung giờ trống Mentor mới đăng ký.</summary>
-    [HttpPost("{id:int}/review")]
-    public async Task<IActionResult> ReviewAvailability(
-        int id,
+    /// <summary>
+    /// Phê duyệt hoặc từ chối một hoặc nhiều khung giờ trống mới do Mentor đăng ký.
+    /// </summary>
+    [HttpPost("review")]
+    public async Task<IActionResult> ReviewAvailabilities(
+        [FromBody] List<int> ids,
         [FromQuery] bool approve,
         [FromQuery] string? rejectionReason,
         CancellationToken cancellationToken)
-        => ToActionResult(await service.ReviewAvailabilityAsync(id, approve, rejectionReason, cancellationToken));
+        => ToActionResult(await service.ReviewAvailabilitiesAsync(ids, approve, rejectionReason, cancellationToken));
 
-    /// <summary>Phê duyệt hoặc từ chối yêu cầu hủy slot trống của Mentor.</summary>
-    [HttpPost("{id:int}/review-cancel")]
-    public async Task<IActionResult> ReviewCancelAvailability(
-        int id,
+    /// <summary>
+    /// Phê duyệt hoặc từ chối một hoặc nhiều yêu cầu hủy slot trống từ Mentor.
+    /// </summary>
+    [HttpPost("review-cancel")]
+    public async Task<IActionResult> ReviewCancelAvailabilities(
+        [FromBody] List<int> ids,
         [FromQuery] bool approve,
         [FromQuery] string? rejectionReason,
         CancellationToken cancellationToken)
-        => ToActionResult(await service.ReviewCancelAvailabilityAsync(id, approve, rejectionReason, cancellationToken));
+        => ToActionResult(await service.ReviewCancelAvailabilitiesAsync(ids, approve, rejectionReason, cancellationToken));
 
     private IActionResult ToActionResult<T>(ApiResponse<T> response)
-        => StatusCode(response.StatusCode, response);
+        => StatusCode((int)response.StatusCode, response);
 }
