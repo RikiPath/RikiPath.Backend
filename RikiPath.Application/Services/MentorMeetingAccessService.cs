@@ -63,7 +63,8 @@ namespace RikiPath.Application.Services
         public async Task<MeetingAccessInfoResponse?> GetMeetingAsync(Guid roomId, CancellationToken cancellationToken)
         {
             var slot = await unitOfWork.MentorAvailabilities.GetActiveSlotByRoomIdAsync(roomId, cancellationToken);
-            if (slot is null)
+            if (slot is null || slot.IsDeleted || !slot.IsApproved || slot.RejectedAt != null
+                || DateTime.UtcNow < slot.StartTime.AddMinutes(-10) || DateTime.UtcNow >= slot.EndTime)
                 return null;
 
             // Giữ đúng guard cũ: chỉ coi là Mentor hợp lệ nếu Role thực sự là Mentor

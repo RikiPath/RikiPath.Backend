@@ -1,4 +1,6 @@
 using Moq;
+using Microsoft.EntityFrameworkCore;
+using RikiPath.Infrastructure;
 using RikiPath.Application;
 using RikiPath.Application.IRepositories;
 using RikiPath.Application.IServices;
@@ -14,13 +16,22 @@ public sealed class MentorPrivateChatTests
         int userId = 1, Role role = Role.Learner, PaymentStatus payment = PaymentStatus.Paid,
         bool expired = false)
     {
+        var learner = new UserAccount { Id = 1, FirstName = "Learner", Role = Role.Learner, PasswordHash = [], PasswordSalt = [] };
+        var mentor = new UserAccount { Id = 2, FirstName = "Mentor", Role = Role.Mentor, PasswordHash = [], PasswordSalt = [] };
         var booking = new MentorBooking
         {
             Id = 10, Status = MentorStatus.Assigned,
-            UserSubscription = new UserSubscription { UserId = 1, MentorId = 2, PaymentStatus = payment },
-            MentorAvailability = new MentorAvailability { MentorId = 2, EndTime = DateTime.UtcNow.AddHours(expired ? -1 : 1) }
+            UserSubscription = new UserSubscription { UserId = 1, MentorId = 2, PaymentStatus = payment,
+                UserAccount = learner, Mentor = mentor, SubscriptionPlan = new SubscriptionPlan { Name = "Chat test", MeetingSessionCount = 1 },
+                MeetingSessionsIncluded = 1, StartDate = DateTime.UtcNow.AddDays(-1), EndDate = DateTime.UtcNow.AddDays(expired ? -1 : 1) },
+            MentorAvailability = new MentorAvailability { Mentor = mentor, MentorId = 2, EndTime = DateTime.UtcNow.AddHours(expired ? -1 : 1) }
         };
         var bookings = new Mock<IMentorBookingRepository>();
+        var db = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
+        db.MentorBookings.Add(booking); db.SaveChanges();
+        bookings.Setup(x => x.Query()).Returns(db.MentorBookings);
+        var subscriptions = new Mock<IUserSubscriptionRepository>();
+        subscriptions.Setup(x => x.Query()).Returns(db.UserSubscriptions);
         bookings.Setup(x => x.GetForChatAsync(10, It.IsAny<CancellationToken>())).ReturnsAsync(booking);
         var messages = new Mock<IMentorChatMessageRepository>();
         messages.Setup(x => x.AddAsync(It.IsAny<MentorChatMessage>(), It.IsAny<CancellationToken>()))
@@ -32,6 +43,7 @@ public sealed class MentorPrivateChatTests
         });
         var uow = new Mock<IUnitOfWork>();
         uow.SetupGet(x => x.MentorBookings).Returns(bookings.Object);
+        uow.SetupGet(x => x.UserSubscriptions).Returns(subscriptions.Object);
         uow.SetupGet(x => x.MentorChatMessages).Returns(messages.Object);
         var claims = new Mock<IClaimService>();
         claims.Setup(x => x.GetUserClaim()).Returns(new ClaimDTO { Id = userId, Role = role });

@@ -10,6 +10,8 @@ namespace RikiPath.Application.Responses.MentorMeetings
         public bool IsCheckoutExpired { get; set; }
         public decimal AmountPaid { get; set; }
         public DateTime? PaymentExpiresAt { get; set; }
+        public DateTime? EndDate { get; set; }
+        public int? MentorId { get; set; }
         public int MeetingSessionsIncluded { get; set; }
         public int MeetingSessionsUsed { get; set; }
         public List<MentorBookingResponse> Bookings { get; set; } = [];

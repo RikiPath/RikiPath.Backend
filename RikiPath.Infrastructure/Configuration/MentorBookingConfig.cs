@@ -10,6 +10,7 @@ namespace RikiPath.Infrastructure.Configuration
         public void Configure(EntityTypeBuilder<MentorBooking> builder)
         {
             builder.HasKey(x => x.Id);
+            builder.Property(x => x.Version).IsRowVersion();
             builder.Property(x => x.Status).HasConversion<string>().HasMaxLength(20);
             builder.Property(x => x.MeetingLink).HasMaxLength(500);
 
@@ -25,7 +26,8 @@ namespace RikiPath.Infrastructure.Configuration
 
             builder.HasIndex(x => new { x.UserSubscriptionId, x.Status });
 
-            builder.HasIndex(x => new { x.MentorAvailabilityId, x.UserSubscriptionId }).IsUnique();
+            builder.HasIndex(x => new { x.MentorAvailabilityId, x.UserSubscriptionId }).IsUnique()
+                .HasFilter("NOT \"IsDeleted\" AND \"Status\" <> 'Cancelled'");
 
             builder.HasData(
                new MentorBooking

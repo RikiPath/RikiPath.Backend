@@ -76,6 +76,7 @@ namespace RikiPath.Infrastructure
         public IMentorChatMessageRepository MentorChatMessages { get; }
         public INoteRepository Notes { get; }
         public IMentorAvailabilityRepository MentorAvailabilities { get; }
+        public IMentorWeeklyAvailabilityRepository MentorWeeklyAvailabilities { get; }
         public IContentApprovalRequestRepository ContentApprovalRequests { get; }
         public UnitOfWork(AppDbContext context)
         {
@@ -139,6 +140,7 @@ namespace RikiPath.Infrastructure
             MentorChatMessages = new MentorChatMessageRepository(_context);
             Notes = new NoteRepository(_context);
             MentorAvailabilities = new MentorAvailabilityRepository(_context);
+            MentorWeeklyAvailabilities = new MentorWeeklyAvailabilityRepository(_context);
             ContentApprovalRequests = new ContentApprovalRequestRepository(_context);
         }
 

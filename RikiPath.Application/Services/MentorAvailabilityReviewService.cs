@@ -1,4 +1,5 @@
 using System.Net;
+using Microsoft.EntityFrameworkCore;
 using RikiPath.Application.IServices;
 using RikiPath.Application.Responses;
 using RikiPath.Application.Responses.MentorMeetings;
@@ -10,6 +11,37 @@ namespace RikiPath.Application.Services;
 public sealed class MentorAvailabilityReviewService(IUnitOfWork unitOfWork, IClaimService claimService)
     : IMentorAvailabilityReviewService
 {
+    public async Task<ApiResponse<List<AdminMentorScheduleResponse>>> GetScheduleAsync(int mentorId, DateTime from, DateTime to, CancellationToken ct)
+    {
+        if (claimService.GetUserClaim().Role != Role.Admin)
+            return ApiResponse<List<AdminMentorScheduleResponse>>.Fail("Chỉ admin được xem lịch chi tiết mentor.", HttpStatusCode.Forbidden);
+        if (mentorId <= 0 || to <= from || to - from > TimeSpan.FromDays(31))
+            return ApiResponse<List<AdminMentorScheduleResponse>>.Fail("Chọn mentor và khoảng thời gian hợp lệ, tối đa 31 ngày.");
+        var mentor = await unitOfWork.UserAccounts.GetByIdAsync(mentorId, ct);
+        if (mentor is null || mentor.Role != Role.Mentor)
+            return ApiResponse<List<AdminMentorScheduleResponse>>.NotFound("Không tìm thấy mentor.");
+        var slots = await unitOfWork.MentorAvailabilities.Query().AsNoTracking()
+            .Include(s => s.MentorBookings).ThenInclude(b => b.UserSubscription).ThenInclude(s => s.UserAccount)
+            .Where(s => s.MentorId == mentorId && s.StartTime >= from && s.StartTime < to)
+            .OrderBy(s => s.StartTime).ToListAsync(ct);
+        var now = DateTime.UtcNow;
+        return ApiResponse<List<AdminMentorScheduleResponse>>.Success(slots.Select(s => {
+            var bookings = s.MentorBookings.Where(b => !b.IsDeleted && !b.UserSubscription.IsDeleted).ToList();
+            var paid = bookings.Any(b => b.UserSubscription.PaymentStatus == PaymentStatus.Paid
+                && b.Status is MentorStatus.Assigned or MentorStatus.Accepted or MentorStatus.Completed);
+            var held = bookings.Any(b => b.Status == MentorStatus.AwaitingPayment && b.UserSubscription.PaymentStatus == PaymentStatus.Pending
+                && b.UserSubscription.PaymentExpiresAt > now);
+            var expiredHold = bookings.Any(b => b.Status == MentorStatus.AwaitingPayment && b.UserSubscription.PaymentStatus == PaymentStatus.Pending
+                && b.UserSubscription.PaymentExpiresAt <= now);
+            var status = s.IsDeleted ? "Cancelled" : s.RejectedAt != null ? "Rejected" : !s.IsApproved ? "Draft" :
+                s.EndTime <= now ? "Ended" : paid ? "Booked" : held ? "Held" : expiredHold ? "HeldExpired" : "Available";
+            return new AdminMentorScheduleResponse(s.Id, s.StartTime, s.EndTime, status, bookings
+                .Select(b => new AdminMentorScheduleBookingResponse(b.Id, b.UserSubscription.UserId,
+                    $"{b.UserSubscription.UserAccount.FirstName} {b.UserSubscription.UserAccount.LastName}".Trim(),
+                    b.Question, b.Status.ToString(), b.UserSubscription.PaymentStatus.ToString())).ToList());
+        }).ToList());
+    }
+
     public async Task<ApiResponse<List<MentorAvailabilityResponse>>> GetSlotsAsync(CancellationToken cancellationToken)
     {
         if (claimService.GetUserClaim().Role != Role.Admin)
@@ -35,6 +67,8 @@ public sealed class MentorAvailabilityReviewService(IUnitOfWork unitOfWork, ICla
         var slot = await unitOfWork.MentorAvailabilities.GetByIdAsync(id, cancellationToken);
         if (slot is null || slot.IsDeleted)
             return ApiResponse<MentorAvailabilityResponse>.Fail("Không tìm thấy lịch Mentor.", HttpStatusCode.NotFound);
+        if (slot.MentorWeeklyAvailabilityId != null)
+            return ApiResponse<MentorAvailabilityResponse>.Fail("Dùng Công bố lịch tuần để kiểm tra đủ 5 tiết trước khi mở đặt lịch.");
         if (slot.IsApproved || slot.RejectedAt != null)
             return ApiResponse<MentorAvailabilityResponse>.Fail("Lịch đã được xử lý. Vui lòng tải lại danh sách.", HttpStatusCode.Conflict);
         if (slot.StartTime <= DateTime.UtcNow)
@@ -62,5 +96,8 @@ public sealed class MentorAvailabilityReviewService(IUnitOfWork unitOfWork, ICla
         RejectedAt = slot.RejectedAt, RejectionReason = slot.RejectionReason,
         IsBooked = slot.IsFull, BookedCount = slot.BookedCount, MaxLearners = slot.MaxLearners,
         AdminName = slot.AdminName
+        , MentorWeeklyAvailabilityId = slot.MentorWeeklyAvailabilityId, PublishedAt = slot.PublishedAt,
+        ChangeRequestReason = slot.ChangeRequestReason, ChangeRequestedAt = slot.ChangeRequestedAt,
+        ChangeResolution = slot.ChangeResolution
     };
 }

@@ -12,7 +12,8 @@ internal static class MentorPurchaseFinalizer
         subscription.PaymentStatus = PaymentStatus.Paid;
         subscription.PaymentTransactionId = reference ?? subscription.PaymentTransactionId;
         subscription.StartDate = now;
-        subscription.EndDate = subscription.SubscriptionPlan.DurationDays > 0 ? now.AddDays(subscription.SubscriptionPlan.DurationDays) : null;
+        var duration = subscription.MeetingSessionsIncluded switch { 1 => 14, 3 => 35, _ => subscription.SubscriptionPlan.DurationDays };
+        subscription.EndDate = duration > 0 ? now.AddDays(duration) : null;
         subscription.PaymentExpiresAt = null;
         foreach (var booking in subscription.MentorBookings)
         {

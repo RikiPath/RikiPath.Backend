@@ -5,12 +5,13 @@ namespace RikiPath.Domain.Entities
     public class UserSubscription : Base
     {
         public int Id { get; set; }
+        public uint Version { get; set; }
 
         public int UserId { get; set; }
         public UserAccount UserAccount { get; set; }
         public int SubscriptionPlanId { get; set; }
         public SubscriptionPlan SubscriptionPlan { get; set; }
-        /// <summary>Mentor selected for this purchased booking package; all included slots use this mentor.</summary>
+        /// <summary>Legacy package mentor. New account-credit purchases leave this null; bookings determine their own mentor.</summary>
         public int? MentorId { get; set; }
         public UserAccount? Mentor { get; set; }
 

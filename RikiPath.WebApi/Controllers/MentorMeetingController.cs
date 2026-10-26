@@ -24,6 +24,8 @@ public sealed class MentorMeetingController(IMentorMeetingService service) : Con
 
     /// <summary>Tra cứu các khung giờ trống của Mentor theo khoảng thời gian.</summary>
     [HttpGet("available-slots")]
+    [HttpGet("availability")]
+    [Authorize(Roles = "Learner")]
     public async Task<IActionResult> GetAvailableSlots(
         [FromQuery] DateTime from,
         [FromQuery] DateTime to,
@@ -31,8 +33,9 @@ public sealed class MentorMeetingController(IMentorMeetingService service) : Con
         CancellationToken cancellationToken)
         => ToActionResult(await service.GetAvailableSlotsAsync(from, to, mentorId, cancellationToken));
 
-    /// <summary>Mua gói tư vấn 1-1 (Khởi tạo giao dịch PayOS).</summary>
+    /// <summary>Creates a package checkout without reserving a mentor slot.</summary>
     [HttpPost("purchase")]
+    [Authorize(Roles = "Learner")]
     public async Task<IActionResult> Purchase(
         [FromBody] PurchaseMentorPlanRequest request,
         CancellationToken cancellationToken)
@@ -40,6 +43,8 @@ public sealed class MentorMeetingController(IMentorMeetingService service) : Con
 
     /// <summary>Đặt buổi hẹn 1-1 sử dụng gói tư vấn đã đăng ký (Subscription).</summary>
     [HttpPost("subscriptions/{subscriptionId:int}/book")]
+    [HttpPost("subscriptions/{subscriptionId:int}/bookings")]
+    [Authorize(Roles = "Learner")]
     public async Task<IActionResult> BookIncludedSession(
         int subscriptionId,
         [FromBody] BookIncludedMeetingRequest request,
@@ -48,16 +53,32 @@ public sealed class MentorMeetingController(IMentorMeetingService service) : Con
 
     /// <summary>Lấy danh sách các buổi hẹn tư vấn cá nhân đã đặt.</summary>
     [HttpGet("my-bookings")]
+    [HttpGet("bookings")]
+    [Authorize(Roles = "Learner")]
     public async Task<IActionResult> GetMyBookings(CancellationToken cancellationToken)
         => ToActionResult(await service.GetMyBookingsAsync(cancellationToken));
 
     /// <summary>Xem trạng thái gói tư vấn đã mua theo Subscription ID.</summary>
     [HttpGet("subscriptions/{subscriptionId:int}/status")]
+    [HttpGet("purchases/{subscriptionId:int}")]
+    [Authorize(Roles = "Learner")]
     public async Task<IActionResult> GetPurchaseStatus(int subscriptionId, CancellationToken cancellationToken)
         => ToActionResult(await service.GetPurchaseStatusAsync(subscriptionId, cancellationToken));
 
-    /// <summary>Đồng bộ trạng thái thanh toán gói tư vấn từ Webhook/PayOS.</summary>
+    [HttpGet("purchases")]
+    [Authorize(Roles = "Learner")]
+    public async Task<IActionResult> GetMyPurchases(CancellationToken ct)
+        => ToActionResult(await service.GetMyPurchasesAsync(ct));
+
+    [HttpPost("bookings")]
+    [Authorize(Roles = "Learner")]
+    public async Task<IActionResult> BookFromBalance([FromBody] BookIncludedMeetingRequest request, CancellationToken ct)
+        => ToActionResult(await service.BookFromBalanceAsync(request, ct));
+
+
+    [HttpPost("purchases/{subscriptionId:int}/sync")]
     [HttpPost("subscriptions/{subscriptionId:int}/sync")]
+    [Authorize(Roles = "Learner")]
     public async Task<IActionResult> SyncPurchase(int subscriptionId, CancellationToken cancellationToken)
         => ToActionResult(await service.SyncPurchaseAsync(subscriptionId, cancellationToken));
 

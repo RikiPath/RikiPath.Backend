@@ -3,5 +3,6 @@
     public sealed class BookIncludedMeetingRequest
     {
         public int MentorAvailabilityId { get; set; }
+        public string? Question { get; set; }
     }
 }

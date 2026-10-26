@@ -5,7 +5,14 @@ namespace RikiPath.Domain.Entities
 {
     public class MentorAvailability : Base
     {
-        public const int DefaultMaxLearners = 4;
+        public const int DefaultMaxLearners = 1;
+
+        public int? MentorWeeklyAvailabilityId { get; set; }
+        public MentorWeeklyAvailability? WeeklyAvailability { get; set; }
+        public DateTime? PublishedAt { get; set; }
+        public string? ChangeRequestReason { get; set; }
+        public DateTime? ChangeRequestedAt { get; set; }
+        public string? ChangeResolution { get; set; }
 
         public int Id { get; set; }
 
@@ -22,6 +29,7 @@ namespace RikiPath.Domain.Entities
         public int BookedCount { get; set; }
 
         public byte[]? RowVersion { get; set; }
+        public uint Version { get; set; }
 
         [NotMapped]
         public bool IsFull => BookedCount >= MaxLearners;
@@ -34,7 +42,8 @@ namespace RikiPath.Domain.Entities
         public string? CancelRejectionReason { get; set; }
         public DateTime? RejectedAt { get; set; }
         public string? RejectionReason { get; set; }
-        /// <summary>One slot, many bookings (one per learner).</summary>
+
+        /// <summary>New scheduled slots allow one learner; historical group slots are preserved.</summary>
         public ICollection<MentorBooking> MentorBookings { get; set; } = new List<MentorBooking>();
     }
 }

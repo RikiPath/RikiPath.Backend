@@ -18,9 +18,9 @@ namespace RikiPath.Infrastructure.Repositories
         {
             IQueryable<MentorAvailability> query = _context.MentorAvailabilities
                 .Where(x => x.IsApproved && x.RejectedAt == null
-                    && x.BookedCount < x.MaxLearners && !x.IsDeleted
+                    && x.MaxLearners == 1 && x.BookedCount < x.MaxLearners && !x.IsDeleted
                     && x.StartTime >= from && x.EndTime <= to
-                    && x.EndTime > DateTime.UtcNow && x.Mentor != null && !x.Mentor.IsDeleted && x.Mentor.Role == Role.Mentor);
+                    && x.StartTime > DateTime.UtcNow && x.Mentor != null && !x.Mentor.IsDeleted && x.Mentor.Role == Role.Mentor);
 
             if (mentorId.HasValue)
                 query = query.Where(x => x.MentorId == mentorId.Value);
@@ -31,7 +31,7 @@ namespace RikiPath.Infrastructure.Repositories
         public Task<MentorAvailability?> GetAvailableSlotByIdAsync(int id, DateTime after, CancellationToken cancellationToken = default)
             => _context.MentorAvailabilities.Include(x => x.Mentor)
                 .FirstOrDefaultAsync(x => x.Id == id && !x.IsDeleted
-                    && x.IsApproved && x.RejectedAt == null && x.BookedCount < x.MaxLearners
+                    && x.IsApproved && x.RejectedAt == null && x.MaxLearners == 1 && x.BookedCount < x.MaxLearners
                     && x.StartTime > after
                     && x.Mentor != null && !x.Mentor.IsDeleted && x.Mentor.Role == Role.Mentor, cancellationToken);
 

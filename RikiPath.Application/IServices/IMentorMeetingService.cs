@@ -9,6 +9,9 @@ namespace RikiPath.Application.IServices;
 /// </summary>
 public interface IMentorMeetingService
 {
+    Task<ApiResponse<List<MentorMeetingPurchaseStatusResponse>>> GetMyPurchasesAsync(CancellationToken ct);
+    Task<ApiResponse<MentorBookingResponse>> BookFromBalanceAsync(BookIncludedMeetingRequest request, CancellationToken ct);
+    Task<ApiResponse<bool>> DeleteAvailabilityAsync(int id, CancellationToken ct);
     #region Shared / General
     Task<ApiResponse<List<BookableMentorResponse>>> GetMentorsAsync(CancellationToken cancellationToken = default);
     Task<ApiResponse<List<MentorMeetingPlanResponse>>> GetPlansAsync(CancellationToken cancellationToken = default);

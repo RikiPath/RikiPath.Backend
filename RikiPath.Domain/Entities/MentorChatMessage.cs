@@ -1,6 +1,6 @@
 namespace RikiPath.Domain.Entities;
 
-/// <summary>A persisted text message exchanged privately within one paid mentor booking.</summary>
+/// <summary>A persisted private message. Services aggregate booking-linked history by learner/mentor pair.</summary>
 public sealed class MentorChatMessage : Base
 {
     public int Id { get; set; }
