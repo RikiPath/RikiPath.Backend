@@ -41,7 +41,7 @@ public sealed class MentorPaymentFlowTests
         gateway.Setup(x => x.CreatePaymentLinkAsync(It.IsAny<long>(), 1000, It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new PaymentLinkResult("https://pay.payos.vn/test-checkout", "test-payment-link", "test-qr"));
         var result = await Service(db, gateway).PurchaseAsync(new PurchaseMentorPlanRequest
-        { SubscriptionPlanId = plan.Id, MentorAvailabilityId = slot.Id, Question = "Câu hỏi gửi tới Mentor" }, default);
+        { SubscriptionPlanId = plan.Id }, default);
         Assert.True(result.IsSuccess, result.ErrorMessage);
         gateway.Verify(x => x.CreatePaymentLinkAsync(result.Result!.SubscriptionId, 1000, It.IsAny<string>(),
             It.Is<string>(url => url.Contains($"subscriptionId={result.Result.SubscriptionId}")),
@@ -58,13 +58,19 @@ public sealed class MentorPaymentFlowTests
             .ReturnsAsync(new PaymentLinkInformation(id, 1000, 0, "PENDING", "test-payment-link"));
         var pending = await Service(db, gateway).SyncPurchaseAsync(id, default);
         Assert.Equal(PaymentStatus.Pending, pending.Result!.PaymentStatus);
-        Assert.Equal(MentorStatus.AwaitingPayment, Assert.Single(pending.Result.Bookings).Status);
+        Assert.Empty(pending.Result.Bookings);
+        Assert.Equal(0, pending.Result.MeetingSessionsUsed);
+        Assert.Equal(0, (await db.MentorAvailabilities.SingleAsync()).BookedCount);
         Assert.Empty((await Service(db, gateway, 2, Role.Mentor).GetMyMeetingsAsync(default)).Result!);
 
         gateway.Setup(x => x.GetPaymentInformationAsync(id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new PaymentLinkInformation(id, 1000, 1000, "PAID", "test-payment-link"));
         var paid = await Service(db, gateway).SyncPurchaseAsync(id, default);
         Assert.Equal(PaymentStatus.Paid, paid.Result!.PaymentStatus);
+        Assert.Empty(paid.Result.Bookings);
+        Assert.Equal(3, paid.Result.MeetingSessionsIncluded - paid.Result.MeetingSessionsUsed);
+        var booked = await Service(db, gateway).BookFromBalanceAsync(new BookIncludedMeetingRequest { MentorAvailabilityId = (await db.MentorAvailabilities.SingleAsync()).Id, Question = "Câu hỏi gửi tới Mentor" }, default);
+        Assert.True(booked.IsSuccess, booked.ErrorMessage);
         db.ChangeTracker.Clear();
         var booking = Assert.Single((await Service(db, gateway, 2, Role.Mentor).GetMyMeetingsAsync(default)).Result!);
         Assert.Equal(MentorStatus.Assigned, booking.Status);
@@ -110,7 +116,8 @@ public sealed class MentorPaymentFlowTests
         Assert.True((await service.HandlePayOsWebhookAsync(webhook, default)).IsSuccess);
         Assert.True((await service.HandlePayOsWebhookAsync(webhook, default)).IsSuccess);
         Assert.Equal(PaymentStatus.Paid, (await db.UserSubscriptions.FindAsync(id))!.PaymentStatus);
-        Assert.Equal(MentorStatus.Assigned, Assert.Single(db.MentorBookings).Status);
+        Assert.Empty(db.MentorBookings);
+        Assert.Equal(0, (await db.UserSubscriptions.FindAsync(id))!.MeetingSessionsUsed);
         Assert.Equal("bank-ref", (await db.UserSubscriptions.FindAsync(id))!.PaymentTransactionId);
     }
 
@@ -137,7 +144,47 @@ public sealed class MentorPaymentFlowTests
             .ReturnsAsync(new PaymentLinkInformation(id, 1000, 0, "CANCELLED", "test-payment-link"));
         var result = await Service(db, gateway).SyncPurchaseAsync(id, default);
         Assert.Equal(PaymentStatus.Failed, result.Result!.PaymentStatus);
-        Assert.Equal(MentorStatus.Cancelled, Assert.Single(db.MentorBookings).Status);
+        Assert.Empty(db.MentorBookings);
         Assert.Empty((await Service(db, gateway, 2, Role.Mentor).GetMyMeetingsAsync(default)).Result!);
+    }
+
+    [Fact]
+    public async Task Account_credits_can_book_different_mentors_and_failed_booking_does_not_debit()
+    {
+        await using var db = Context(); var gateway = new Mock<IPaymentGatewayClient>();
+        var id = await Purchase(db, gateway);
+        var first = await db.MentorAvailabilities.SingleAsync();
+        Assert.False((await Service(db, gateway).BookFromBalanceAsync(new() { MentorAvailabilityId = first.Id }, default)).IsSuccess);
+        gateway.Setup(x => x.GetPaymentInformationAsync(id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PaymentLinkInformation(id,1000,1000,"PAID","test-payment-link"));
+        await Service(db,gateway).SyncPurchaseAsync(id,default);
+        Assert.True((await Service(db,gateway).BookFromBalanceAsync(new(){MentorAvailabilityId=first.Id},default)).IsSuccess);
+        db.ChangeTracker.Clear();
+        var other = new UserAccount { Id=3, Role=Role.Mentor, PasswordHash=[], PasswordSalt=[] };
+        var second = new MentorAvailability { Mentor=other, IsApproved=true, StartTime=DateTime.UtcNow.AddDays(2), EndTime=DateTime.UtcNow.AddDays(2).AddMinutes(50) };
+        db.Users.Add(other); db.MentorAvailabilities.Add(second); await db.SaveChangesAsync();
+        Assert.True((await Service(db,gateway).BookFromBalanceAsync(new(){MentorAvailabilityId=second.Id},default)).IsSuccess);
+        db.ChangeTracker.Clear();
+        Assert.False((await Service(db,gateway).BookFromBalanceAsync(new(){MentorAvailabilityId=second.Id},default)).IsSuccess);
+        Assert.Equal(2,(await db.UserSubscriptions.FindAsync(id))!.MeetingSessionsUsed);
+        Assert.Null((await db.UserSubscriptions.FindAsync(id))!.MentorId);
+        Assert.Equal(2,await db.MentorBookings.CountAsync());
+        Assert.Equal(1,(await Service(db,gateway).GetMyPurchasesAsync(default)).Result!.Single().MeetingSessionsIncluded - (await db.UserSubscriptions.FindAsync(id))!.MeetingSessionsUsed);
+    }
+
+    [Fact]
+    public async Task Booking_spends_earliest_expiring_eligible_package_and_excludes_expired_or_unpaid()
+    {
+        await using var db = Context(); var gateway = new Mock<IPaymentGatewayClient>();
+        var id=await Purchase(db,gateway);
+        var plan=await db.SubscriptionPlans.SingleAsync();
+        var original=await db.UserSubscriptions.FindAsync(id);
+        original!.PaymentStatus=PaymentStatus.Paid; original.EndDate=DateTime.UtcNow.AddDays(35);
+        var sooner=new UserSubscription {UserId=1,SubscriptionPlan=plan,PaymentStatus=PaymentStatus.Paid,MeetingSessionsIncluded=1,EndDate=DateTime.UtcNow.AddDays(3)};
+        var expired=new UserSubscription {UserId=1,SubscriptionPlan=plan,PaymentStatus=PaymentStatus.Paid,MeetingSessionsIncluded=3,EndDate=DateTime.UtcNow.AddDays(-1)};
+        db.UserSubscriptions.AddRange(sooner,expired); await db.SaveChangesAsync();
+        Assert.True((await Service(db,gateway).BookFromBalanceAsync(new(){MentorAvailabilityId=(await db.MentorAvailabilities.SingleAsync()).Id},default)).IsSuccess);
+        Assert.Equal(1,sooner.MeetingSessionsUsed); Assert.Equal(0,original.MeetingSessionsUsed); Assert.Equal(0,expired.MeetingSessionsUsed);
+        Assert.Empty((await Service(db,gateway,99).GetMyPurchasesAsync(default)).Result!);
     }
 }

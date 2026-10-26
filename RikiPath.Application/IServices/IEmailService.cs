@@ -26,5 +26,6 @@ namespace RikiPath.Application.IServices
     public interface IEmailService
     {
         Task<EmailSendResult> SendValidationEmailAsync(string toEmail, string htmlContent, CancellationToken cancellationToken);
+        Task<EmailSendResult> SendEmailAsync(string toEmail, string subject, string htmlContent, CancellationToken cancellationToken);
     }
 }

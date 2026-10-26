@@ -73,7 +73,7 @@ namespace RikiPath.Infrastructure.Repositories
                 .Include(x => x.UserSubscription).ThenInclude(x => x.Mentor)
                 .Include(x => x.MentorAvailability).ThenInclude(x => x!.Mentor)
                 .Where(x => (x.MentorAvailability != null && x.MentorAvailability.MentorId == mentorId
-                    || x.UserSubscription.MentorId == mentorId)
+                    || (x.MentorAvailability == null && x.UserSubscription.MentorId == mentorId))
                     && !x.IsDeleted && x.UserSubscription.PaymentStatus == PaymentStatus.Paid)
                 .OrderBy(x => x.ScheduledAt)
                 .ToListAsync(cancellationToken);

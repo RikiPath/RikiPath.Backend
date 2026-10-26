@@ -5,6 +5,7 @@ namespace RikiPath.Domain.Entities
     public class MentorBooking : Base
     {
         public int Id { get; set; }
+        public uint Version { get; set; }
 
         public int UserSubscriptionId { get; set; }
         public UserSubscription UserSubscription { get; set; } = null!;

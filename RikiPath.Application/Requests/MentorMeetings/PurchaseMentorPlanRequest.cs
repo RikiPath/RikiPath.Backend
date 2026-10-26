@@ -3,7 +3,5 @@
     public sealed class PurchaseMentorPlanRequest
     {
         public int SubscriptionPlanId { get; set; }
-        public int MentorAvailabilityId { get; set; }
-        public string? Question { get; set; }
     }
 }

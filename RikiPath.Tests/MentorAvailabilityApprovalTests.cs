@@ -40,8 +40,12 @@ public sealed class MentorAvailabilityApprovalTests
         var meeting = new MentorMeetingService(uow, Mock.Of<IPaymentGatewayClient>(), Claims(Role.Mentor, 501),
             new AppSettings(), NullLogger<MentorMeetingService>.Instance);
         var start = DateTime.UtcNow.AddDays(1);
-        var created = await meeting.CreateAvailabilityAsync(new CreateMentorAvailabilityRequest
-        { StartTime = start, EndTime = start.AddHours(1) }, default);
+        Assert.False((await meeting.CreateAvailabilityAsync(new CreateMentorAvailabilityRequest
+        { StartTime = start, EndTime = start.AddHours(1) }, default)).IsSuccess);
+        var legacySlot = new MentorAvailability { MentorId = 501, StartTime = start, EndTime = start.AddHours(1) };
+        db.MentorAvailabilities.Add(legacySlot); await db.SaveChangesAsync();
+        var created = RikiPath.Application.Responses.ApiResponse<RikiPath.Application.Responses.MentorMeetings.MentorAvailabilityResponse>.Success(
+            new() { Id = legacySlot.Id, IsApproved = false });
         Assert.True(created.IsSuccess);
         Assert.False(created.Result!.IsApproved);
         Assert.False(created.Result.IsBooked);

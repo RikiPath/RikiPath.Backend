@@ -93,6 +93,8 @@ public sealed class PaymentService(
                 booking.Status = MentorStatus.Cancelled;
                 if (booking.MentorAvailability is not null)
                 {
+                    booking.MentorAvailability.BookedCount = Math.Max(0, booking.MentorAvailability.BookedCount - 1);
+                    subscription.MeetingSessionsUsed = Math.Max(0, subscription.MeetingSessionsUsed - 1);
                     booking.MentorAvailability = null;
                     booking.MentorAvailabilityId = null;
                 }

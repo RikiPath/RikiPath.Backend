@@ -3,7 +3,7 @@
     public sealed class MentorMeetingPurchaseResponse
     {
         public int SubscriptionId { get; set; }
-        public int BookingId { get; set; }
+        public int? BookingId { get; set; }
         public long OrderCode { get; set; }
         public string PlanName { get; set; } = string.Empty;
         public int MeetingSessionCount { get; set; }

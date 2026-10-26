@@ -9,6 +9,10 @@ namespace RikiPath.Application.Services
     {
         public async Task<EmailSendResult> SendValidationEmailAsync(
             string toEmail, string htmlContent, CancellationToken cancellationToken)
+            => await SendEmailAsync(toEmail, "Xác thực tài khoản RikiPath", htmlContent, cancellationToken);
+
+        public async Task<EmailSendResult> SendEmailAsync(
+            string toEmail, string subject, string htmlContent, CancellationToken cancellationToken)
         {
             try
             {
@@ -23,7 +27,7 @@ namespace RikiPath.Application.Services
                 using var message = new MailMessage
                 {
                     From = new MailAddress(smtp.FromEmail, smtp.FromName),
-                    Subject = "Xác thực tài khoản RikiPath",
+                    Subject = subject,
                     Body = htmlContent,
                     IsBodyHtml = true,
                 };

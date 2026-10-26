@@ -5,7 +5,7 @@ using RikiPath.Application.Requests.MentorMeetings;
 
 namespace RikiPath.WebApi.Hubs;
 
-/// <summary>Private realtime chat scoped to one paid MentorBooking, separate from meeting-room chat.</summary>
+/// <summary>Private realtime conversation per learner/mentor; booking IDs resolve to one canonical group.</summary>
 [Authorize(Roles = "Learner,Mentor")]
 public sealed class MentorChatHub(IMentorChatService chatService) : Hub
 {
@@ -14,15 +14,21 @@ public sealed class MentorChatHub(IMentorChatService chatService) : Hub
         var response = await chatService.GetThreadAsync(bookingId, Context.ConnectionAborted);
         if (!response.IsSuccess)
             throw new HubException(response.ErrorMessage ?? "Bạn không có quyền truy cập cuộc trò chuyện này.");
+        var requestedId = bookingId;
+        bookingId = response.Result!.BookingId;
+        Context.Items[ContextKey(requestedId)] = bookingId;
 
         await Groups.AddToGroupAsync(Context.ConnectionId, Group(bookingId), Context.ConnectionAborted);
-        Context.Items[ContextKey(bookingId)] = true;
+        Context.Items[ContextKey(bookingId)] = bookingId;
     }
 
     public async Task LeaveBookingChat(int bookingId)
     {
+        bookingId = Context.Items.TryGetValue(ContextKey(bookingId), out var canonical) && canonical is int id ? id : bookingId;
         await Groups.RemoveFromGroupAsync(Context.ConnectionId, Group(bookingId), Context.ConnectionAborted);
-        Context.Items.Remove(ContextKey(bookingId));
+        foreach (var key in Context.Items.Where(x => x.Key is string name && name.StartsWith("mentor-chat-joined:")
+            && x.Value is int conversationId && conversationId == bookingId).Select(x => x.Key).ToList())
+            Context.Items.Remove(key);
     }
 
     public async Task SendChatMessage(int bookingId, SendMentorChatMessageRequest request)
@@ -32,7 +38,7 @@ public sealed class MentorChatHub(IMentorChatService chatService) : Hub
         if (!response.IsSuccess || response.Result is null)
             throw new HubException(response.ErrorMessage ?? "Không gửi được tin nhắn.");
 
-        await Clients.Group(Group(bookingId)).SendAsync(
+        await Clients.Group(Group(response.Result.BookingId)).SendAsync(
             "ReceiveMentorChatMessage", response.Result, Context.ConnectionAborted);
     }
 
@@ -43,6 +49,7 @@ public sealed class MentorChatHub(IMentorChatService chatService) : Hub
         if (!response.IsSuccess)
             throw new HubException(response.ErrorMessage ?? "Không thể cập nhật trạng thái đã đọc.");
 
+        bookingId = (int)Context.Items[ContextKey(bookingId)]!;
         await Clients.OthersInGroup(Group(bookingId)).SendAsync(
             "MentorChatRead", bookingId, Context.ConnectionAborted);
     }

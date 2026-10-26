@@ -87,10 +87,8 @@ public sealed class MentorMeetingService(
     public async Task<ApiResponse<MentorMeetingPurchaseResponse>> PurchaseAsync(
         PurchaseMentorPlanRequest request, CancellationToken cancellationToken)
     {
-        if (request.SubscriptionPlanId <= 0 || request.MentorAvailabilityId <= 0)
-            return ApiResponse<MentorMeetingPurchaseResponse>.Fail("SubscriptionPlanId và MentorAvailabilityId phải lớn hơn 0.");
-        if (request.Question?.Length > 2000)
-            return ApiResponse<MentorMeetingPurchaseResponse>.Fail("Câu hỏi tối đa 2000 ký tự.");
+        if (request.SubscriptionPlanId <= 0)
+            return ApiResponse<MentorMeetingPurchaseResponse>.Fail("SubscriptionPlanId phải lớn hơn 0.");
 
         try
         {
@@ -101,52 +99,30 @@ public sealed class MentorMeetingService(
             var plan = await unitOfWork.SubscriptionPlans.GetMeetingPlanAsync(request.SubscriptionPlanId, cancellationToken);
             if (plan is null)
                 return ApiResponse<MentorMeetingPurchaseResponse>.Fail("Không tìm thấy gói meeting đang hoạt động.", HttpStatusCode.NotFound);
+            if (plan.MeetingSessionCount is not (1 or 3))
+                return ApiResponse<MentorMeetingPurchaseResponse>.Fail("Chỉ hỗ trợ gói 1 hoặc 3 buổi.");
             if (plan.Price <= 0 || plan.Price != decimal.Truncate(plan.Price) || plan.Price > int.MaxValue)
                 return ApiResponse<MentorMeetingPurchaseResponse>.Fail("Giá gói phải là số tiền VND nguyên dương.");
 
             var now = DateTime.UtcNow;
             await ExpirePendingPaymentsAsync(cancellationToken);
-            var slot = await unitOfWork.MentorAvailabilities.GetAvailableSlotByIdAsync(request.MentorAvailabilityId, now, cancellationToken);
-            if (slot is null || slot.CancelRequestedAt is not null)
-                return ApiResponse<MentorMeetingPurchaseResponse>.Fail("Slot không còn trống hoặc không hợp lệ.", HttpStatusCode.Conflict);
-
             var expiresAt = now.AddMinutes(15);
             var subscription = new UserSubscription
             {
                 UserId = claims.Id,
                 SubscriptionPlanId = plan.Id,
                 SubscriptionPlan = plan,
-                MentorId = slot.MentorId,
+                MentorId = null,
                 AmountPaid = plan.Price,
                 PaymentStatus = PaymentStatus.Pending,
                 MeetingSessionsIncluded = plan.MeetingSessionCount,
-                MeetingSessionsUsed = 1,
+                MeetingSessionsUsed = 0,
                 PaymentExpiresAt = expiresAt,
                 PurchasedAt = now,
                 AiGradingQuota = plan.AiGradingQuota
             };
-            var booking = new MentorBooking
-            {
-                UserSubscription = subscription,
-                MentorAvailability = slot,
-                Status = MentorStatus.AwaitingPayment,
-                Question = request.Question?.Trim(),
-                ScheduledAt = slot.StartTime
-            };
-
-            unitOfWork.MentorAvailabilities.Update(slot);
             await unitOfWork.UserSubscriptions.AddAsync(subscription, cancellationToken);
-            await unitOfWork.MentorBookings.AddAsync(booking, cancellationToken);
-            try
-            {
-                // One SaveChanges persists the slot hold, subscription, and booking atomically.
-                await unitOfWork.SaveChangesAsync(cancellationToken);
-            }
-            catch (Exception ex)
-            {
-                logger.LogInformation(ex, "Mentor slot {SlotId} was reserved concurrently.", request.MentorAvailabilityId);
-                return ApiResponse<MentorMeetingPurchaseResponse>.Fail("Slot vừa được người khác đặt. Vui lòng chọn slot khác.", HttpStatusCode.Conflict);
-            }
+            await unitOfWork.SaveChangesAsync(cancellationToken);
 
             PaymentLinkResult checkout;
             try
@@ -170,14 +146,9 @@ public sealed class MentorMeetingService(
                 logger.LogError(ex, "PayOS checkout creation failed for subscription {SubscriptionId}.", subscription.Id);
                 subscription.PaymentStatus = PaymentStatus.Failed;
                 subscription.PaymentExpiresAt = null;
-                booking.Status = MentorStatus.Cancelled;
-                booking.MentorAvailability = null;
-                booking.MentorAvailabilityId = null;
                 unitOfWork.UserSubscriptions.Update(subscription);
-                unitOfWork.MentorBookings.Update(booking);
-                unitOfWork.MentorAvailabilities.Update(slot);
                 await unitOfWork.SaveChangesAsync(cancellationToken);
-                return ApiResponse<MentorMeetingPurchaseResponse>.Fail("Không thể tạo liên kết thanh toán. Slot đã được giải phóng.", HttpStatusCode.BadGateway);
+                return ApiResponse<MentorMeetingPurchaseResponse>.Fail("Không thể tạo liên kết thanh toán. Chưa cộng hoặc trừ lượt.", HttpStatusCode.BadGateway);
             }
 
             subscription.PaymentTransactionId = checkout.PaymentLinkId;
@@ -187,7 +158,7 @@ public sealed class MentorMeetingService(
             return ApiResponse<MentorMeetingPurchaseResponse>.Success(new MentorMeetingPurchaseResponse
             {
                 SubscriptionId = subscription.Id,
-                BookingId = booking.Id,
+                BookingId = null,
                 OrderCode = subscription.Id,
                 PlanName = plan.Name,
                 MeetingSessionCount = plan.MeetingSessionCount,
@@ -212,6 +183,9 @@ public sealed class MentorMeetingService(
         if (subscriptionId <= 0 || request.MentorAvailabilityId <= 0)
             return ApiResponse<MentorBookingResponse>.Fail("SubscriptionId và MentorAvailabilityId phải lớn hơn 0.");
 
+        if (request.Question?.Length > 2000)
+            return ApiResponse<MentorBookingResponse>.Fail("Câu hỏi tối đa 2000 ký tự.");
+
         try
         {
             var claims = claimService.GetUserClaim();
@@ -225,6 +199,8 @@ public sealed class MentorMeetingService(
                 return ApiResponse<MentorBookingResponse>.Fail("Không tìm thấy gói meeting.", HttpStatusCode.NotFound);
             if (subscription.PaymentStatus != PaymentStatus.Paid)
                 return ApiResponse<MentorBookingResponse>.Fail("Gói chưa thanh toán thành công.", HttpStatusCode.Conflict);
+            if (subscription.StartDate > DateTime.UtcNow)
+                return ApiResponse<MentorBookingResponse>.Fail("Gói chưa có hiệu lực.", HttpStatusCode.Conflict);
             if (subscription.EndDate is DateTime endDate && endDate < DateTime.UtcNow)
                 return ApiResponse<MentorBookingResponse>.Fail("Gói meeting đã hết hạn.", HttpStatusCode.Conflict);
             if (subscription.MeetingSessionsUsed >= subscription.MeetingSessionsIncluded)
@@ -234,23 +210,13 @@ public sealed class MentorMeetingService(
                 request.MentorAvailabilityId, DateTime.UtcNow, cancellationToken);
             if (slot is null || slot.CancelRequestedAt is not null)
                 return ApiResponse<MentorBookingResponse>.Fail("Slot không còn trống hoặc không hợp lệ.", HttpStatusCode.Conflict);
-
-            // A purchased meeting package is tied to its original Mentor. To book a different
-            // Mentor, the learner must purchase a separate package.
-            var existingMentorIds = (subscription.MentorBookings ?? [])
-                .Where(x => !x.IsDeleted && x.MentorAvailability is not null)
-                .Select(x => x.MentorAvailability!.MentorId)
-                .Distinct()
-                .ToList();
-            var packageMentorId = subscription.MentorId ?? existingMentorIds.SingleOrDefault();
-            if (existingMentorIds.Count > 1 || (packageMentorId > 0 && packageMentorId != slot.MentorId))
-                return ApiResponse<MentorBookingResponse>.Fail(
-                    "Gói meeting này chỉ dùng được với Mentor đã chọn ban đầu. Muốn đặt Mentor khác, vui lòng mua gói riêng.",
-                    HttpStatusCode.Conflict);
-            subscription.MentorId = packageMentorId > 0 ? packageMentorId : slot.MentorId;
+            if (subscription.EndDate is DateTime expiry && slot.EndTime > expiry)
+                return ApiResponse<MentorBookingResponse>.Fail("Tiết phải kết thúc trước khi gói hết hạn.");
+            slot.BookedCount++;
 
             subscription.MeetingSessionsUsed++;
             var booking = CreateConfirmedBooking(subscription, slot);
+            booking.Question = request.Question?.Trim();
             unitOfWork.MentorAvailabilities.Update(slot);
             unitOfWork.UserSubscriptions.Update(subscription);
             await unitOfWork.MentorBookings.AddAsync(booking, cancellationToken);
@@ -271,6 +237,42 @@ public sealed class MentorMeetingService(
             logger.LogError(ex, "Could not book an included Mentor Meeting session.");
             return ApiResponse<MentorBookingResponse>.Fail("Không thể đặt buổi meeting.", HttpStatusCode.InternalServerError);
         }
+    }
+
+    public async Task<ApiResponse<List<MentorMeetingPurchaseStatusResponse>>> GetMyPurchasesAsync(CancellationToken ct)
+    {
+        var user = claimService.GetUserClaim();
+        if (user.Role != Role.Learner)
+            return ApiResponse<List<MentorMeetingPurchaseStatusResponse>>.Fail("Chỉ học viên được xem lượt của mình.", HttpStatusCode.Forbidden);
+        var ids = await unitOfWork.UserSubscriptions.Query().AsNoTracking()
+            .Where(x => x.UserId == user.Id && !x.IsDeleted && x.MeetingSessionsIncluded > 0)
+            .OrderByDescending(x => x.Id).Select(x => x.Id).ToListAsync(ct);
+        var result = new List<MentorMeetingPurchaseStatusResponse>();
+        foreach (var id in ids)
+        {
+            var purchase = await GetPurchaseStatusAsync(id, ct);
+            if (!purchase.IsSuccess) return ApiResponse<List<MentorMeetingPurchaseStatusResponse>>.Fail("Không tải được số lượt.");
+            result.Add(purchase.Result!);
+        }
+        return ApiResponse<List<MentorMeetingPurchaseStatusResponse>>.Success(result);
+    }
+
+    public async Task<ApiResponse<MentorBookingResponse>> BookFromBalanceAsync(BookIncludedMeetingRequest request, CancellationToken ct)
+    {
+        var user = claimService.GetUserClaim();
+        if (user.Role != Role.Learner)
+            return ApiResponse<MentorBookingResponse>.Fail("Chỉ học viên được đặt lịch.", HttpStatusCode.Forbidden);
+        var slot = await unitOfWork.MentorAvailabilities.GetAvailableSlotByIdAsync(request.MentorAvailabilityId, DateTime.UtcNow, ct);
+        if (slot is null) return ApiResponse<MentorBookingResponse>.Fail("Tiết không còn trống.", HttpStatusCode.Conflict);
+        var now = DateTime.UtcNow;
+        var subscriptionId = await unitOfWork.UserSubscriptions.Query()
+            .Where(x => x.UserId == user.Id && !x.IsDeleted && x.PaymentStatus == PaymentStatus.Paid
+                && x.MeetingSessionsIncluded > x.MeetingSessionsUsed && (x.StartDate == null || x.StartDate <= now)
+                && (x.EndDate == null || x.EndDate >= slot.EndTime))
+            .OrderBy(x => x.EndDate == null).ThenBy(x => x.EndDate).ThenBy(x => x.Id)
+            .Select(x => (int?)x.Id).FirstOrDefaultAsync(ct);
+        if (subscriptionId is null) return ApiResponse<MentorBookingResponse>.Fail("Không đủ lượt còn hạn cho tiết này. Vui lòng mua gói trước.", HttpStatusCode.Conflict);
+        return await BookIncludedSessionAsync(subscriptionId.Value, request, ct);
     }
 
     public async Task<ApiResponse<List<MentorBookingResponse>>> GetMyBookingsAsync(CancellationToken cancellationToken)
@@ -310,6 +312,8 @@ public sealed class MentorMeetingService(
                     && subscription.PaymentExpiresAt is DateTime expiresAt && expiresAt <= DateTime.UtcNow,
                 AmountPaid = subscription.AmountPaid,
                 PaymentExpiresAt = subscription.PaymentExpiresAt,
+                EndDate = subscription.EndDate,
+                MentorId = subscription.MentorId,
                 MeetingSessionsIncluded = subscription.MeetingSessionsIncluded,
                 MeetingSessionsUsed = subscription.MeetingSessionsUsed,
                 Bookings = subscription.MentorBookings.Select(x => MapBooking(x, learnerId)).ToList(),
@@ -351,6 +355,8 @@ public sealed class MentorMeetingService(
                     foreach (var booking in subscription.MentorBookings.Where(b => b.Status == MentorStatus.AwaitingPayment))
                     {
                         booking.Status = MentorStatus.Cancelled;
+                        if (booking.MentorAvailability is {} heldSlot) heldSlot.BookedCount = Math.Max(0, heldSlot.BookedCount - 1);
+                        subscription.MeetingSessionsUsed = Math.Max(0, subscription.MeetingSessionsUsed - 1);
                         booking.MentorAvailability = null;
                         booking.MentorAvailabilityId = null;
                     }
@@ -383,71 +389,12 @@ public sealed class MentorMeetingService(
         }
     }
 
-    /// <summary>
-    /// Mentor đăng ký một khoảng thời gian (ví dụ thứ Ba 17:00-21:00). Server tự chia thành các slot
-    /// <see cref="SlotMinutes"/> phút (17-18, 18-19, 19-20, 20-21) và lưu trong một lần SaveChanges.
-    /// </summary>
-    public async Task<ApiResponse<List<MentorAvailabilityResponse>>> CreateAvailabilityAsync(
-        CreateMentorAvailabilityRequest request, CancellationToken cancellationToken)
-    {
-        try
-        {
-            var claims = claimService.GetUserClaim();
-            if (claims.Role != Role.Mentor)
-                return ApiResponse<List<MentorAvailabilityResponse>>.Fail("Chỉ Mentor mới có thể tạo lịch trống.", HttpStatusCode.Forbidden);
+    public Task<ApiResponse<List<MentorAvailabilityResponse>>> CreateAvailabilityAsync(CreateMentorAvailabilityRequest request, CancellationToken cancellationToken)
+        => Task.FromResult(ApiResponse<List<MentorAvailabilityResponse>>.Fail("Hãy đăng ký buổi rảnh tuần sau; admin sẽ xếp các tiết 50 phút."));
 
-            var now = DateTime.UtcNow;
-            var start = request.StartTime.ToUniversalTime();
-            var end = request.EndTime.ToUniversalTime();
-            var step = TimeSpan.FromMinutes(SlotMinutes);
+    public Task<ApiResponse<bool>> DeleteAvailabilityAsync(int id, CancellationToken cancellationToken)
+        => Task.FromResult(ApiResponse<bool>.Fail("Tiết do admin xếp. Hãy gửi yêu cầu điều chỉnh."));
 
-            if (end <= start)
-                return ApiResponse<List<MentorAvailabilityResponse>>.Fail("Thời gian bắt đầu phải trước thời gian kết thúc.");
-            if (start < now.AddMonths(MinAdvanceMonths))
-                return ApiResponse<List<MentorAvailabilityResponse>>.Fail(
-                    $"Lịch trống phải được đăng ký trước ít nhất {MinAdvanceMonths} tháng so với thời điểm bắt đầu.");
-            if (end - start > MaxSlotDuration)
-                return ApiResponse<List<MentorAvailabilityResponse>>.Fail("Một lần đăng ký không được dài quá 4 giờ.");
-            if ((end - start).Ticks % step.Ticks != 0)
-                return ApiResponse<List<MentorAvailabilityResponse>>.Fail(
-                    $"Khoảng thời gian phải chia hết cho {SlotMinutes} phút.");
-            if (await unitOfWork.MentorAvailabilities.HasOverlappingSlotAsync(claims.Id, start, end, cancellationToken))
-                return ApiResponse<List<MentorAvailabilityResponse>>.Fail("Khoảng thời gian bị trùng với lịch đã tạo.", HttpStatusCode.Conflict);
-
-            var slots = new List<MentorAvailability>();
-            for (var t = start; t < end; t += step)
-            {
-                slots.Add(new MentorAvailability
-                {
-                    MentorId = claims.Id,
-                    StartTime = t,
-                    EndTime = t + step,
-                    IsApproved = false,
-                });
-            }
-
-            foreach (var slot in slots)
-                await unitOfWork.MentorAvailabilities.AddAsync(slot, cancellationToken);
-            await unitOfWork.SaveChangesAsync(cancellationToken); // một lần lưu: tất cả slot cùng thành công hoặc cùng thất bại
-
-            var mentor = await unitOfWork.UserAccounts.GetByIdAsync(claims.Id, cancellationToken);
-            foreach (var slot in slots) slot.Mentor = mentor!;
-
-            return ApiResponse<List<MentorAvailabilityResponse>>.Success(
-                slots.Select(MapAvailability).ToList(), HttpStatusCode.Created);
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "Could not create Mentor availability.");
-            return ApiResponse<List<MentorAvailabilityResponse>>.Fail("Không thể tạo khung giờ trống.", HttpStatusCode.InternalServerError);
-        }
-    }
-
-    /// <summary>
-    /// Mentor gửi yêu cầu hủy một hoặc nhiều slot trống. Mọi slot phải chưa có ai đặt và còn cách giờ bắt đầu
-    /// ít nhất <see cref="MinCancelAdvanceDays"/> ngày. Slot chỉ thực sự bị hủy sau khi Admin duyệt.
-    /// Nếu có bất kỳ slot nào không hợp lệ thì không slot nào được gửi yêu cầu.
-    /// </summary>
     public async Task<ApiResponse<List<MentorAvailabilityResponse>>> RequestCancelAvailabilitiesAsync(
         CancelAvailabilitiesRequest request, CancellationToken cancellationToken)
     {
@@ -718,6 +665,7 @@ public sealed class MentorMeetingService(
             if (booking.MentorAvailability is not null)
             {
                 var slot = booking.MentorAvailability;
+                slot.BookedCount = Math.Max(0, slot.BookedCount - 1);
                 unitOfWork.MentorAvailabilities.Update(slot);
                 booking.MentorAvailability = null;
                 booking.MentorAvailabilityId = null;
@@ -732,23 +680,23 @@ public sealed class MentorMeetingService(
 
     private MentorBooking CreateConfirmedBooking(UserSubscription subscription, MentorAvailability slot)
     {
-        var roomId = Guid.NewGuid();
         return new MentorBooking
         {
             UserSubscription = subscription,
             MentorAvailability = slot,
             Status = MentorStatus.Assigned,
             ScheduledAt = slot.StartTime,
-            MeetingLink = $"{appSettings.FrontendBaseUrl.TrimEnd('/')}/mentor-meeting/{roomId:D}"
+            MeetingLink = $"{appSettings.FrontendBaseUrl.TrimEnd('/')}/consultation-room/{slot.RoomId:D}/"
         };
     }
 
     private static MentorMeetingPlanResponse MapPlan(SubscriptionPlan plan) => new()
     {
+        IsActive = plan.IsActive,
         Id = plan.Id,
         Name = plan.Name,
         Description = plan.Description,
-        DurationDays = plan.DurationDays,
+        DurationDays = plan.MeetingSessionCount switch { 1 => 14, 3 => 35, _ => plan.DurationDays },
         Price = plan.Price,
         MeetingSessionCount = plan.MeetingSessionCount,
         Features = plan.Features.Where(x => !x.IsDeleted).Select(MapFeature).ToList()
@@ -785,6 +733,9 @@ public sealed class MentorMeetingService(
         CancelReason = slot.CancelReason,
         CancelRejectedAt = slot.CancelRejectedAt,
         CancelRejectionReason = slot.CancelRejectionReason,
+        MentorWeeklyAvailabilityId = slot.MentorWeeklyAvailabilityId, PublishedAt = slot.PublishedAt,
+        ChangeRequestReason = slot.ChangeRequestReason, ChangeRequestedAt = slot.ChangeRequestedAt,
+        ChangeResolution = slot.ChangeResolution,
     };
 
     private static MentorBookingResponse MapBooking(MentorBooking booking, int currentUserId)

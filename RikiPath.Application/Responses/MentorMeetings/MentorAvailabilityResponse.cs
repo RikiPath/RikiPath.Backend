@@ -20,5 +20,10 @@
         public string? CancelReason { get; set; }
         public DateTime? CancelRejectedAt { get; set; }
         public string? CancelRejectionReason { get; set; }
+        public int? MentorWeeklyAvailabilityId { get; set; }
+        public DateTime? PublishedAt { get; set; }
+        public string? ChangeRequestReason { get; set; }
+        public DateTime? ChangeRequestedAt { get; set; }
+        public string? ChangeResolution { get; set; }
     }
 }

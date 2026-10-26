@@ -70,6 +70,7 @@ namespace RikiPath.Application
         IMentorChatMessageRepository MentorChatMessages { get; }
         INoteRepository Notes { get; }
         IMentorAvailabilityRepository MentorAvailabilities { get; }
+        IMentorWeeklyAvailabilityRepository MentorWeeklyAvailabilities { get; }
 
         IContentApprovalRequestRepository ContentApprovalRequests { get; }
         // Db Helpers

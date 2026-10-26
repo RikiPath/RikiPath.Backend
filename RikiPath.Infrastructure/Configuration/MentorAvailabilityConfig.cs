@@ -22,6 +22,9 @@ namespace RikiPath.Infrastructure.Configuration
 
             builder.Property(x => x.MaxLearners).HasDefaultValue(MentorAvailability.DefaultMaxLearners);
             builder.Property(x => x.RowVersion).IsRowVersion();
+            builder.Property(x => x.Version).IsRowVersion();
+            builder.Property(x => x.ChangeRequestReason).HasMaxLength(1000);
+            builder.Property(x => x.ChangeResolution).HasMaxLength(1000);
             builder.ToTable(t => t.HasCheckConstraint(
                 "CK_MentorAvailability_BookedCount",
                 "\"BookedCount\" >= 0 AND \"BookedCount\" <= \"MaxLearners\""));

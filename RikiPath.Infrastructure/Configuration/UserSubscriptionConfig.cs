@@ -10,6 +10,7 @@ namespace RikiPath.Infrastructure.Configuration
         public void Configure(EntityTypeBuilder<UserSubscription> builder)
         {
             builder.HasKey(x => x.Id);
+            builder.Property(x => x.Version).IsRowVersion();
 
             builder.Property(x => x.AmountPaid).HasColumnType("decimal(18,2)");
             builder.Property(x => x.PaymentStatus).HasConversion<string>().HasMaxLength(20);

@@ -64,6 +64,7 @@ namespace RikiPath.Infrastructure
         public DbSet<MentorChatMessage> MentorChatMessages { get; set; }
         public DbSet<Note> Notes { get; set; }
         public DbSet<MentorAvailability> MentorAvailabilities { get; set; }
+        public DbSet<MentorWeeklyAvailability> MentorWeeklyAvailabilities { get; set; }
 
         // Subscription / payments
         public DbSet<SubscriptionPlan> SubscriptionPlans { get; set; }
@@ -81,6 +82,7 @@ namespace RikiPath.Infrastructure
         public DbSet<ContentApprovalRequest> ContentApprovalRequests { get; set; }
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
+            modelBuilder.ApplyConfiguration(new MentorWeeklyAvailabilityConfig());
             modelBuilder.ApplyConfiguration(new UserConfig());
             modelBuilder.ApplyConfiguration(new CertificateTypeConfig());
             modelBuilder.ApplyConfiguration(new CertificateLevelConfig());
