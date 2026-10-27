@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using RikiPath.Domain.Entities;
+using RikiPath.Domain.Enums;
 
 namespace RikiPath.Infrastructure.Configuration
 {
@@ -10,7 +11,17 @@ namespace RikiPath.Infrastructure.Configuration
         {
             builder.HasKey(x => x.Id);
 
+            builder.Property(x => x.AttemptKind)
+                .HasConversion<int>()
+                .HasDefaultValue(AttemptKind.MockTest)
+                .IsRequired();
+
             builder.Property(x => x.StartedAt).IsRequired();
+
+            builder.Property(x => x.ExpiresAt);
+
+            builder.Property(x => x.QuestionSnapshotJson)
+                .HasColumnType("text");
 
             // Quan hệ với UserAccount (1 - N)
             builder.HasOne(x => x.UserAccount)
@@ -21,6 +32,9 @@ namespace RikiPath.Infrastructure.Configuration
             // Index tối ưu truy vấn lịch sử làm bài của người dùng
             builder.HasIndex(x => x.UserId);
             builder.HasIndex(x => x.StartedAt);
+            builder.HasIndex(x => new { x.UserId, x.AttemptKind })
+                .IsUnique()
+                .HasFilter("\"AttemptKind\" = 1 AND \"IsCompleted\" = false AND \"IsDeleted\" = false");
         }
     }
 }

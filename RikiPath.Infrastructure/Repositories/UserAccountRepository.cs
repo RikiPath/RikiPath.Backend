@@ -13,6 +13,33 @@ namespace RikiPath.Infrastructure.Repositories
             return await _context.Users.FirstOrDefaultAsync(x => x.Email == normalizedEmail);
         }
 
+        public async Task<UserAccount?> GetWithLearningGoalAsync(
+            int userId,
+            CancellationToken cancellationToken = default)
+            => await _context.Users
+                .Include(user => user.TargetCertificateLevel)
+                    .ThenInclude(level => level!.CertificateType)
+                .Include(user => user.StartingCertificateLevel)
+                .Include(user => user.AssessedCertificateLevel)
+                .FirstOrDefaultAsync(user => user.Id == userId, cancellationToken);
+
+        public async Task<UserAccount?> GetByIdForUpdateAsync(
+            int userId,
+            CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                return await _context.Users
+                    .FromSqlInterpolated($"SELECT * FROM \"Users\" WHERE \"Id\" = {userId} FOR UPDATE")
+                    .SingleOrDefaultAsync(cancellationToken);
+            }
+            catch (InvalidOperationException)
+            {
+                return await _context.Users
+                    .FirstOrDefaultAsync(user => user.Id == userId, cancellationToken);
+            }
+        }
+
         public async Task<List<UserAccount>> GetByRoleAsync(Role role, int pageIndex, int pageSize)
             => await _context.Users
                 .Where(x => x.Role == role)

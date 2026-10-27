@@ -24,6 +24,14 @@ namespace RikiPath.Domain.Entities
         /// <summary>Which certification level the learner is currently targeting — e.g. "JLPT N4".</summary>
         public int? TargetCertificateLevelId { get; set; }
         public CertificateLevel? TargetCertificateLevel { get; set; }
+        /// <summary>Self-selected starting level; never inferred from an assessment.</summary>
+        public int? StartingCertificateLevelId { get; set; }
+        public CertificateLevel? StartingCertificateLevel { get; set; }
+        /// <summary>Only a valid completed Placement Test may set this value.</summary>
+        public int? AssessedCertificateLevelId { get; set; }
+        public CertificateLevel? AssessedCertificateLevel { get; set; }
+        public PlacementDecision PlacementDecision { get; set; } = PlacementDecision.NotTaken;
+        public LearningMode LearningMode { get; set; } = LearningMode.Standard;
         public DateTime? TargetExamDate { get; set; }
         public string? StudyTimePreference { get; set; }
 
