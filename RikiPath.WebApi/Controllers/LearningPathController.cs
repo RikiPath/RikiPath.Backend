@@ -11,6 +11,55 @@ namespace RikiPath.WebApi.Controllers
     [Authorize(Roles = "Learner")]
     public class LearningPathController(ILearningPathService learningPathService) : ControllerBase
     {
+        /// <summary>Lấy lộ trình học gần nhất đã được tạo cho Learner hiện tại.</summary>
+        /// <remarks>Không tự gọi AI. Result là null khi người học chưa từng tạo lộ trình.</remarks>
+        [HttpGet("latest")]
+        public async Task<IActionResult> GetLatest(CancellationToken cancellationToken)
+        {
+            var response = await learningPathService.GetLatestLearningPathAsync(cancellationToken);
+            return StatusCode((int)response.StatusCode, response);
+        }
+
+        /// <summary>Lấy lộ trình ACTIVE; tương đương GET /latest.</summary>
+        [HttpGet("active")]
+        public async Task<IActionResult> GetActive(CancellationToken cancellationToken)
+        {
+            var response = await learningPathService.GetLatestLearningPathAsync(cancellationToken);
+            return StatusCode((int)response.StatusCode, response);
+        }
+
+        /// <summary>Lịch sử lộ trình của Learner, gồm ACTIVE và SUPERSEDED.</summary>
+        [HttpGet("history")]
+        public async Task<IActionResult> GetHistory(CancellationToken cancellationToken)
+        {
+            var response = await learningPathService.GetHistoryAsync(cancellationToken);
+            return StatusCode((int)response.StatusCode, response);
+        }
+
+        /// <summary>Xem trước thay đổi cấp độ mà không thay thế lộ trình đang ACTIVE.</summary>
+        [HttpPost("preview")]
+        public async Task<IActionResult> Preview([FromBody] PreviewLearningPathRequest request, CancellationToken cancellationToken)
+        {
+            var response = await learningPathService.PreviewLearningPathAsync(request, cancellationToken);
+            return StatusCode((int)response.StatusCode, response);
+        }
+
+        /// <summary>Xác nhận preview và kích hoạt atomically; retry cùng ID trả lại bản ACTIVE.</summary>
+        [HttpPost("previews/{previewId:int}/confirm")]
+        public async Task<IActionResult> Confirm(int previewId, CancellationToken cancellationToken)
+        {
+            var response = await learningPathService.ConfirmPreviewAsync(previewId, cancellationToken);
+            return StatusCode((int)response.StatusCode, response);
+        }
+
+        /// <summary>Hủy preview; không thay đổi lộ trình hiện tại.</summary>
+        [HttpDelete("previews/{previewId:int}")]
+        public async Task<IActionResult> Cancel(int previewId, CancellationToken cancellationToken)
+        {
+            var response = await learningPathService.CancelPreviewAsync(previewId, cancellationToken);
+            return StatusCode((int)response.StatusCode, response);
+        }
+
         /// <summary>
         /// Tạo đề xuất lộ trình học cá nhân hóa bằng AI cho người dùng.
         /// </summary>
@@ -21,7 +70,7 @@ namespace RikiPath.WebApi.Controllers
         /// 
         /// Lưu ý cho FE: Yêu cầu Bearer Token (Role = Learner). Quá trình gọi có thể mất từ 1-5s do xử lý AI; FE nên hiển thị trạng thái loading và hỗ trợ cancellationToken.
         /// </remarks>
-        /// <param name="request">Thông tin cấu hình lộ trình học (isBeginner, targetCertification, durationDays, includeVocabulary, includeKanji, includeGrammar).</param>
+        /// <param name="request">Object rỗng; Backend lấy mục tiêu và cấp độ bắt đầu từ hồ sơ đã lưu.</param>
         /// <param name="cancellationToken">Token hủy request (Optional).</param>
         /// <response code="200">Thành công: Trả về lộ trình học tập được thiết kế bởi AI.</response>
         /// <response code="400">Yêu cầu không hợp lệ: Thiếu thông tin profile hoặc định dạng JSON không đúng.</response>

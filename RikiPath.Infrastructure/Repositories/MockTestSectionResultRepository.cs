@@ -1,5 +1,6 @@
 using RikiPath.Application.IRepositories;
 using RikiPath.Domain.Entities;
+using RikiPath.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 using System.Collections.Generic;
 using System.Linq;
@@ -19,15 +20,20 @@ namespace RikiPath.Infrastructure.Repositories
             => await _context.MockTestSectionResults
                 .Include(x => x.MockTestSection)
                     .ThenInclude(s => s.LanguageSkill)
-                .Where(x => x.MockTestAttemptId == practiceTestAttemptId)
+                .Where(x => !x.IsDeleted && x.MockTestAttemptId == practiceTestAttemptId)
                 .OrderBy(x => x.MockTestSection.SortOrder)
                 .ToListAsync(cancellationToken);
+
         public async Task<List<MockTestSectionResult>> GetLanguageSkillBreakdownAsync(int userId)
         {
             return await _context.MockTestSectionResults
                 .Include(x => x.MockTestSection)
                     .ThenInclude(s => s.LanguageSkill)
-                .Where(x => x.MockTestAttempt.UserId == userId && x.MockTestAttempt.IsCompleted)
+                .Where(x => !x.IsDeleted &&
+                            !x.MockTestAttempt.IsDeleted &&
+                            x.MockTestAttempt.UserId == userId &&
+                            x.MockTestAttempt.IsCompleted &&
+                            x.MockTestAttempt.AttemptKind == AttemptKind.MockTest)
                 .ToListAsync();
         }
     }

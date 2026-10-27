@@ -13,6 +13,8 @@ namespace RikiPath.Application.Responses.Notebook
     {
         public int NoteEntryId { get; set; }
         public int? ReviewCardId { get; set; }
+        public int? VocabularyId { get; set; }
+        public int? KanjiId { get; set; }
         public string ContentType { get; set; } = string.Empty; // "vocabulary" | "kanji" | "manual"
         public string Term { get; set; } = string.Empty;
         public string? Reading { get; set; }

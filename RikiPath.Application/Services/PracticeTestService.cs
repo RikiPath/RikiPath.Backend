@@ -1,4 +1,5 @@
 using RikiPath.Domain.Entities;
+using RikiPath.Domain.Enums;
 using RikiPath.Application.IServices;
 using RikiPath.Application.Requests.MockTests;
 using RikiPath.Application.Responses;
@@ -18,14 +19,16 @@ namespace RikiPath.Application.Services
             {
                 var userId = claimService.GetUserClaim().Id;
                 var test = await unitOfWork.MockTests.GetWithSectionsAndQuestionsAsync(practiceTestId, cancellationToken);
-                if (test is null)
+                if (test is null || test.IsDeleted)
                     return ApiResponse<StartAttemptResponse>.NotFound(
                         $"Không tìm thấy MockTest có Id = {practiceTestId}.");
 
                 var orderedQuestions = (test.Sections ?? [])
+                    .Where(section => !section.IsDeleted)
                     .OrderBy(section => section.SortOrder)
                     .ThenBy(section => section.Id)
                     .SelectMany(section => (section.Questions ?? [])
+                        .Where(question => !question.IsDeleted)
                         .OrderBy(question => question.SortOrder)
                         .ThenBy(question => question.Id)
                         .Select(question => (Section: section, Question: question)))
@@ -35,8 +38,10 @@ namespace RikiPath.Application.Services
                     return ApiResponse<StartAttemptResponse>.Fail(
                         "Đề thi chưa có câu hỏi để bắt đầu.", HttpStatusCode.BadRequest);
 
-                var previousAttempts = await unitOfWork.MockTestAttempts.FindAsync(a =>
-                    a.UserId == userId && a.IsCompleted, cancellationToken);
+                var previousAttempts = (await unitOfWork.MockTestAttempts.FindAsync(a =>
+                    a.UserId == userId && a.IsCompleted && !a.IsDeleted && a.AttemptKind == AttemptKind.MockTest, cancellationToken))
+                    .Where(a => !a.IsDeleted && a.AttemptKind == AttemptKind.MockTest)
+                    .ToList();
 
                 var previousAttemptIds = previousAttempts.Select(a => a.Id).ToList();
                 var previouslyWrongQuestionIds = new List<int>();
@@ -64,6 +69,7 @@ namespace RikiPath.Application.Services
                     var attempt = new MockTestAttempt
                     {
                         UserId = userId,
+                        AttemptKind = AttemptKind.MockTest,
                         StartedAt = DateTime.UtcNow,
                         SubmittedAt = null,
                         TotalScore = 0,
@@ -103,6 +109,7 @@ namespace RikiPath.Application.Services
                             AudioUrl = item.Question.AudioUrl,
                             ImageUrl = item.Question.ImageUrl,
                             Options = (item.Question.Options ?? [])
+                                .Where(option => !option.IsDeleted)
                                 .OrderBy(option => option.SortOrder)
                                 .ThenBy(option => option.Id)
                                 .Select(option => new StartAttemptOptionResponse
@@ -151,7 +158,7 @@ namespace RikiPath.Application.Services
                 {
                     var attempt = await unitOfWork.MockTestAttempts.GetForSubmissionAsync(
                         attemptId, transactionCancellationToken);
-                    if (attempt is null)
+                    if (attempt is null || attempt.IsDeleted || attempt.AttemptKind != AttemptKind.MockTest)
                     {
                         response = ApiResponse<AttemptResultResponse>.NotFound(
                             $"Không tìm thấy MockTestAttempt có Id = {attemptId}.");
@@ -294,7 +301,7 @@ namespace RikiPath.Application.Services
             {
                 var userId = claimService.GetUserClaim().Id;
                 var attempt = await unitOfWork.MockTestAttempts.GetByIdAsync(attemptId, cancellationToken);
-                if (attempt is null)
+                if (attempt is null || attempt.IsDeleted || attempt.AttemptKind != AttemptKind.MockTest)
                     return ApiResponse<AttemptResultResponse>.NotFound(
                         $"Không tìm thấy MockTestAttempt có Id = {attemptId}.");
 
@@ -374,7 +381,7 @@ namespace RikiPath.Application.Services
             {
                 var userId = claimService.GetUserClaim().Id;
                 var attempt = await unitOfWork.MockTestAttempts.GetByIdAsync(attemptId, cancellationToken);
-                if (attempt is null)
+                if (attempt is null || attempt.IsDeleted || attempt.AttemptKind != AttemptKind.MockTest)
                     return ApiResponse<DetailedAttemptResultResponse>.NotFound(
                         $"Không tìm thấy MockTestAttempt có Id = {attemptId}.");
 
@@ -433,8 +440,10 @@ namespace RikiPath.Application.Services
             {
                 var userId = claimService.GetUserClaim().Id;
                 // 1. Lấy tất cả lượt làm bài đã hoàn thành
-                var attempts = await unitOfWork.MockTestAttempts.FindAsync(a =>
-                    a.UserId == userId && a.IsCompleted && (!practiceTestId.HasValue));
+                var attempts = (await unitOfWork.MockTestAttempts.FindAsync(a =>
+                    a.UserId == userId && a.IsCompleted && !a.IsDeleted && a.AttemptKind == AttemptKind.MockTest && (!practiceTestId.HasValue), cancellationToken))
+                    .Where(a => !a.IsDeleted && a.AttemptKind == AttemptKind.MockTest)
+                    .ToList();
 
                 var attemptIds = attempts.Select(a => a.Id).ToList();
                 if (attemptIds.Count == 0)
@@ -443,7 +452,7 @@ namespace RikiPath.Application.Services
                 }
 
                 // 2. Lấy tất cả câu trả lời của Learner trong các lượt làm bài đó
-                var pastAnswers = await unitOfWork.MockTestAnswers.FindAsync(ans => attemptIds.Contains(ans.MockTestAttemptId));
+                var pastAnswers = await unitOfWork.MockTestAnswers.FindAsync(ans => attemptIds.Contains(ans.MockTestAttemptId), cancellationToken);
 
                 // 3. Nhóm câu hỏi & lọc câu mà lần trả lời gần đây nhất bị SAI
                 var wrongStats = pastAnswers

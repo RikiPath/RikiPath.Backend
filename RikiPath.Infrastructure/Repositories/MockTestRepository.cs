@@ -12,7 +12,7 @@ namespace RikiPath.Infrastructure.Repositories
     {
         private IQueryable<MockTest> BuildSearchQuery(int? jlptLevelId, ContentStatus? status, string? keyword)
         {
-            IQueryable<MockTest> query = _context.MockTests.AsQueryable();
+            IQueryable<MockTest> query = _context.MockTests.Where(x => !x.IsDeleted);
             if (jlptLevelId.HasValue) query = query.Where(x => x.CertificateLevelId == jlptLevelId.Value);
             if (!string.IsNullOrEmpty(keyword)) query = query.Where(x => x.Title.ToLower().Contains(keyword.ToLower()));
             return query;
@@ -33,15 +33,33 @@ namespace RikiPath.Infrastructure.Repositories
             int practiceTestId,
             CancellationToken cancellationToken = default)
             => await _context.MockTests
-                .Include(x => x.Sections).ThenInclude(s => s.Questions).ThenInclude(q => q.Options)
+                .Where(x => !x.IsDeleted)
+                .Include(x => x.CertificateLevel)
+                .Include(x => x.Sections.Where(s => !s.IsDeleted)).ThenInclude(s => s.LanguageSkill)
+                .Include(x => x.Sections.Where(s => !s.IsDeleted))
+                    .ThenInclude(s => s.Questions.Where(q => !q.IsDeleted))
+                    .ThenInclude(q => q.Options.Where(o => !o.IsDeleted))
                 .AsSplitQuery()
                 .FirstOrDefaultAsync(x => x.Id == practiceTestId, cancellationToken);
+
+        public async Task<List<MockTest>> GetAllWithSectionsAndQuestionsAsync(
+            CancellationToken cancellationToken = default)
+            => await _context.MockTests
+                .Where(x => !x.IsDeleted)
+                .Include(x => x.CertificateLevel)
+                .Include(x => x.Sections.Where(s => !s.IsDeleted)).ThenInclude(s => s.LanguageSkill)
+                .Include(x => x.Sections.Where(s => !s.IsDeleted))
+                    .ThenInclude(s => s.Questions.Where(q => !q.IsDeleted))
+                    .ThenInclude(q => q.Options.Where(o => !o.IsDeleted))
+                .AsSplitQuery()
+                .OrderBy(x => x.Id)
+                .ToListAsync(cancellationToken);
 
         public async Task<List<MockTest>> GetByLevelAsync(int jlptLevelId)
         {
             return await _context.MockTests
                 .Include(t => t.CertificateLevel)
-                .Where(t => t.CertificateLevelId == jlptLevelId)
+                .Where(t => !t.IsDeleted && t.CertificateLevelId == jlptLevelId)
                 .ToListAsync();
         }
     }

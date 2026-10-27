@@ -7,6 +7,105 @@ namespace RikiPath.Infrastructure.Configuration
 {
     public class KanaCharacterConfig : IEntityTypeConfiguration<KanaCharacter>
     {
+        // Keep HasData stable: Base.CreatedDate defaults to UtcNow for runtime entities.
+        // These values match the already-published Kana seed timestamps so migration
+        // scaffolding never rewrites existing seed rows just because time has passed.
+        private static readonly DateTime[] SeedCreatedDates =
+        {
+new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(1757),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(1766),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(1768),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(1770),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(1771),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(1774),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(1775),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(1776),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(1830),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(1832),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(1833),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(1834),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(1835),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(1836),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(1837),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(1838),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(1838),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(1840),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(1841),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(1842),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(1843),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(1844),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(1845),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(1845),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(1846),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(1847),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(1848),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(1849),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(1849),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(1850),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(1851),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(1852),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(1852),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(1913),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(1915),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(1915),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(1916),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(1917),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(1918),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(1919),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(1920),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(1920),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(1922),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(1922),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(1923),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(1924),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(1955),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(1958),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(1959),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(1960),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(1961),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(1961),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(1962),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(1963),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(1964),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(2006),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(2009),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(2010),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(2011),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(2012),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(2014),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(2015),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(2016),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(2017),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(2019),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(2022),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(2023),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(2024),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(2026),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(2027),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(2028),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(2029),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(2030),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(2032),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(2033),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(2034),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(2036),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(2037),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(2038),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(2039),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(2086),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(2087),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(2088),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(2089),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(2090),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(2092),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(2093),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(2094),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(2096),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(2097),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(2098),
+            new DateTime(2026, 10, 26, 16, 6, 11, 768, DateTimeKind.Utc).AddTicks(2099),
+        };
+
         public void Configure(EntityTypeBuilder<KanaCharacter> builder)
         {
             builder.HasKey(x => x.Id);
@@ -189,6 +288,11 @@ namespace RikiPath.Infrastructure.Configuration
                     StrokeCount = item.Strokes,
                     AudioUrl = $"{baseAudioUrl}{item.AudioPath}"
                 });
+            }
+
+            foreach (var seed in result)
+            {
+                seed.CreatedDate = SeedCreatedDates[seed.Id - 1];
             }
 
             return result;

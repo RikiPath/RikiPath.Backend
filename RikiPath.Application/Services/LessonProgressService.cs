@@ -287,6 +287,49 @@ namespace RikiPath.Application.Services
             ResumePositionSeconds = progress?.LastPositionSeconds ?? 0,
             IsCompleted = progress?.IsCompleted ?? false,
             CompletedAt = progress?.ModifiedDate,
+            Vocabularies = (lesson.LessonVocabularies ?? new List<LessonVocabulary>())
+                .Where(link => link.Vocabulary is not null && !link.Vocabulary.IsDeleted)
+                .OrderBy(link => link.VocabularyId)
+                .Select(link => new LessonVocabularyResponse
+                {
+                    VocabularyId = link.VocabularyId,
+                    Word = link.Vocabulary.Word,
+                    Reading = link.Vocabulary.Reading,
+                    Meaning = link.Vocabulary.Meaning,
+                    ExampleSentence = link.Vocabulary.ExampleSentence,
+                    ExampleSentenceMeaning = link.Vocabulary.ExampleSentenceMeaning,
+                    AudioUrl = link.Vocabulary.AudioUrl,
+                })
+                .ToList(),
+            Kanjis = (lesson.LessonKanjis ?? new List<LessonKanji>())
+                .Where(link => link.Kanji is not null && !link.Kanji.IsDeleted)
+                .OrderBy(link => link.KanjiId)
+                .Select(link => new LessonKanjiResponse
+                {
+                    KanjiId = link.KanjiId,
+                    Character = link.Kanji.Character,
+                    Meaning = link.Kanji.Meaning,
+                    SinoVietnamese = link.Kanji.SinoVietnamese,
+                    OnYomi = link.Kanji.OnYomi,
+                    KunYomi = link.Kanji.KunYomi,
+                    StrokeCount = link.Kanji.StrokeCount,
+                    StrokeOrderImageUrl = link.Kanji.StrokeOrderImageUrl,
+                    AudioUrl = link.Kanji.AudioUrl,
+                })
+                .ToList(),
+            Grammars = (lesson.LessonGrammars ?? new List<LessonGrammar>())
+                .Where(link => link.GrammarPattern is not null && !link.GrammarPattern.IsDeleted)
+                .OrderBy(link => link.GrammarPatternId)
+                .Select(link => new LessonGrammarResponse
+                {
+                    GrammarPatternId = link.GrammarPatternId,
+                    Title = link.GrammarPattern.Title,
+                    Structure = link.GrammarPattern.Structure,
+                    UsageNotes = link.GrammarPattern.UsageNotes,
+                    ExampleSentence = link.GrammarPattern.ExampleSentence,
+                    ExampleSentenceMeaning = link.GrammarPattern.ExampleSentenceMeaning,
+                })
+                .ToList(),
         };
     }
 }

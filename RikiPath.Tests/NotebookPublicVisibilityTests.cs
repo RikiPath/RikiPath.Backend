@@ -32,6 +32,8 @@ public sealed class NotebookPublicVisibilityTests
 
         Assert.True(result.IsSuccess);
         Assert.Equal((int)HttpStatusCode.Created, result.StatusCode);
+        Assert.Equal(101, result.Result!.VocabularyId);
+        Assert.Null(result.Result.KanjiId);
         fixture.NoteEntries.Verify(
             x => x.AddAsync(It.IsAny<LearnerNoteEntry>(), It.IsAny<CancellationToken>()),
             Times.Once);
@@ -41,6 +43,52 @@ public sealed class NotebookPublicVisibilityTests
         fixture.UnitOfWork.Verify(
             x => x.SaveChangesAsync(It.IsAny<CancellationToken>()),
             Times.Once);
+    }
+
+    [Fact]
+    public async Task Repeated_vocabulary_bookmark_returns_existing_source_identity_without_duplicate_write()
+    {
+        var fixture = CreateFixture();
+        var vocabulary = new Vocabulary
+        {
+            Id = 101,
+            Word = "公開",
+            Reading = "こうかい",
+            Meaning = "published",
+        };
+        fixture.Vocabularies
+            .Setup(x => x.GetPublicByIdAsync(101, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(vocabulary);
+        fixture.NoteEntries
+            .Setup(x => x.GetByUserAsync(1, 10))
+            .ReturnsAsync([
+                new LearnerNoteEntry
+                {
+                    Id = 77,
+                    LearnerNoteId = 10,
+                    VocabularyId = 101,
+                    Vocabulary = vocabulary,
+                    CreatedDate = DateTime.UtcNow,
+                    ReviewCards = [new ReviewCard { Id = 88, UserId = 1 }],
+                },
+            ]);
+
+        var result = await fixture.Service.BookmarkVocabularyAsync(
+            new BookmarkVocabularyRequest { LearnerNoteId = 10, VocabularyId = 101 },
+            CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal((int)HttpStatusCode.OK, result.StatusCode);
+        Assert.Equal(77, result.Result!.NoteEntryId);
+        Assert.Equal(88, result.Result.ReviewCardId);
+        Assert.Equal(101, result.Result.VocabularyId);
+        Assert.Null(result.Result.KanjiId);
+        fixture.NoteEntries.Verify(
+            x => x.AddAsync(It.IsAny<LearnerNoteEntry>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        fixture.UnitOfWork.Verify(
+            x => x.SaveChangesAsync(It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 
     [Fact]
@@ -98,6 +146,8 @@ public sealed class NotebookPublicVisibilityTests
 
         Assert.True(result.IsSuccess);
         Assert.Equal((int)HttpStatusCode.Created, result.StatusCode);
+        Assert.Equal(106, result.Result!.KanjiId);
+        Assert.Null(result.Result.VocabularyId);
         fixture.NoteEntries.Verify(
             x => x.AddAsync(It.IsAny<LearnerNoteEntry>(), It.IsAny<CancellationToken>()),
             Times.Once);
@@ -164,6 +214,9 @@ public sealed class NotebookPublicVisibilityTests
         noteEntries
             .Setup(x => x.AddAsync(It.IsAny<LearnerNoteEntry>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((LearnerNoteEntry entry, CancellationToken _) => entry);
+        noteEntries
+            .Setup(x => x.GetByUserAsync(1, 10))
+            .ReturnsAsync([]);
         reviewCards
             .Setup(x => x.AddAsync(It.IsAny<ReviewCard>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((ReviewCard card, CancellationToken _) => card);

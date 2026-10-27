@@ -15,6 +15,8 @@ namespace RikiPath.Application.IServices
 
         Task<ApiResponse<UserProfileResponse>> SetJlptGoalAsync(SetJlptGoalRequest request, CancellationToken cancellationToken);
 
+        Task<ApiResponse<UserProfileResponse>> SetStudyLevelAsync(SetStudyLevelRequest request, CancellationToken cancellationToken);
+
         Task<ApiResponse<UserProfileResponse>> UpdateNotificationSettingsAsync(UpdateNotificationSettingsRequest request, CancellationToken cancellationToken);
     }
 }
