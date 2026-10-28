@@ -12,8 +12,8 @@ using RikiPath.Infrastructure;
 namespace RikiPath.Infrastructure.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20261016093648_AddSeedKanaCharacter")]
-    partial class AddSeedKanaCharacter
+    [Migration("20261027081217_InitalCreate")]
+    partial class InitalCreate
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -1139,7 +1139,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 1,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/2/22/Ja-a.ogg",
                             Character = "あ",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7153),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6493),
                             IsDeleted = false,
                             Romaji = "a",
                             StrokeCount = 3,
@@ -1150,7 +1150,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 2,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/2/28/Ja-i.ogg",
                             Character = "い",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7176),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6507),
                             IsDeleted = false,
                             Romaji = "i",
                             StrokeCount = 2,
@@ -1161,7 +1161,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 3,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/a/a2/Ja-u.ogg",
                             Character = "う",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7178),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6509),
                             IsDeleted = false,
                             Romaji = "u",
                             StrokeCount = 2,
@@ -1172,7 +1172,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 4,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/2/21/Ja-e.ogg",
                             Character = "え",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7180),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6510),
                             IsDeleted = false,
                             Romaji = "e",
                             StrokeCount = 2,
@@ -1183,7 +1183,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 5,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/d/df/Ja-o.ogg",
                             Character = "お",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7181),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6512),
                             IsDeleted = false,
                             Romaji = "o",
                             StrokeCount = 3,
@@ -1194,7 +1194,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 6,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/2/2e/Ja-ka.ogg",
                             Character = "か",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7185),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6516),
                             IsDeleted = false,
                             Romaji = "ka",
                             StrokeCount = 3,
@@ -1205,7 +1205,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 7,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/8/87/Ja-ki.ogg",
                             Character = "き",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7186),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6517),
                             IsDeleted = false,
                             Romaji = "ki",
                             StrokeCount = 4,
@@ -1216,7 +1216,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 8,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/a/a3/Ja-ku.ogg",
                             Character = "く",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7187),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6519),
                             IsDeleted = false,
                             Romaji = "ku",
                             StrokeCount = 1,
@@ -1227,7 +1227,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 9,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/b/b3/Ja-ke.ogg",
                             Character = "け",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7188),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6520),
                             IsDeleted = false,
                             Romaji = "ke",
                             StrokeCount = 3,
@@ -1238,7 +1238,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 10,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/1/18/Ja-ko.ogg",
                             Character = "こ",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7190),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6522),
                             IsDeleted = false,
                             Romaji = "ko",
                             StrokeCount = 2,
@@ -1249,7 +1249,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 11,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/a/a9/Ja-sa.ogg",
                             Character = "さ",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7192),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6523),
                             IsDeleted = false,
                             Romaji = "sa",
                             StrokeCount = 3,
@@ -1260,7 +1260,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 12,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/8/80/Ja-shi.ogg",
                             Character = "し",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7193),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6525),
                             IsDeleted = false,
                             Romaji = "shi",
                             StrokeCount = 1,
@@ -1271,7 +1271,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 13,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/a/a7/Ja-su.ogg",
                             Character = "す",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7194),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6526),
                             IsDeleted = false,
                             Romaji = "su",
                             StrokeCount = 2,
@@ -1282,7 +1282,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 14,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/a/a8/Ja-se.ogg",
                             Character = "せ",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7195),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6528),
                             IsDeleted = false,
                             Romaji = "se",
                             StrokeCount = 3,
@@ -1293,7 +1293,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 15,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/0/00/Ja-so.ogg",
                             Character = "そ",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7196),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6529),
                             IsDeleted = false,
                             Romaji = "so",
                             StrokeCount = 1,
@@ -1304,7 +1304,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 16,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/d/d2/Ja-ta.ogg",
                             Character = "た",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7198),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6574),
                             IsDeleted = false,
                             Romaji = "ta",
                             StrokeCount = 4,
@@ -1315,7 +1315,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 17,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/3/38/Ja-chi.ogg",
                             Character = "ち",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7199),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6576),
                             IsDeleted = false,
                             Romaji = "chi",
                             StrokeCount = 2,
@@ -1326,7 +1326,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 18,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/3/32/Ja-tsu.ogg",
                             Character = "つ",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7202),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6578),
                             IsDeleted = false,
                             Romaji = "tsu",
                             StrokeCount = 1,
@@ -1337,7 +1337,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 19,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/1/10/Ja-te.ogg",
                             Character = "て",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7203),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6580),
                             IsDeleted = false,
                             Romaji = "te",
                             StrokeCount = 1,
@@ -1348,7 +1348,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 20,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/a/a5/Ja-to.ogg",
                             Character = "と",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7204),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6581),
                             IsDeleted = false,
                             Romaji = "to",
                             StrokeCount = 2,
@@ -1359,7 +1359,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 21,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/9/92/Ja-na.ogg",
                             Character = "な",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7205),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6582),
                             IsDeleted = false,
                             Romaji = "na",
                             StrokeCount = 4,
@@ -1370,7 +1370,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 22,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/b/b7/Ja-ni.ogg",
                             Character = "に",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7206),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6584),
                             IsDeleted = false,
                             Romaji = "ni",
                             StrokeCount = 3,
@@ -1381,7 +1381,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 23,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/b/b1/Ja-nu.ogg",
                             Character = "ぬ",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7207),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6585),
                             IsDeleted = false,
                             Romaji = "nu",
                             StrokeCount = 2,
@@ -1392,7 +1392,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 24,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/8/86/Ja-ne.ogg",
                             Character = "ね",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7285),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6587),
                             IsDeleted = false,
                             Romaji = "ne",
                             StrokeCount = 2,
@@ -1403,7 +1403,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 25,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/5/54/Ja-no.ogg",
                             Character = "の",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7286),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6589),
                             IsDeleted = false,
                             Romaji = "no",
                             StrokeCount = 1,
@@ -1414,7 +1414,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 26,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/0/08/Ja-ha.ogg",
                             Character = "は",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7287),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6590),
                             IsDeleted = false,
                             Romaji = "ha",
                             StrokeCount = 3,
@@ -1425,7 +1425,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 27,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/9/99/Ja-hi.ogg",
                             Character = "ひ",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7288),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6591),
                             IsDeleted = false,
                             Romaji = "hi",
                             StrokeCount = 1,
@@ -1436,7 +1436,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 28,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/7/70/Ja-fu.ogg",
                             Character = "ふ",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7290),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6593),
                             IsDeleted = false,
                             Romaji = "fu",
                             StrokeCount = 4,
@@ -1447,7 +1447,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 29,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/2/2a/Ja-he.ogg",
                             Character = "へ",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7291),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6594),
                             IsDeleted = false,
                             Romaji = "he",
                             StrokeCount = 1,
@@ -1458,7 +1458,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 30,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/a/a4/Ja-ho.ogg",
                             Character = "ほ",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7293),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6596),
                             IsDeleted = false,
                             Romaji = "ho",
                             StrokeCount = 4,
@@ -1469,7 +1469,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 31,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/0/0d/Ja-ma.ogg",
                             Character = "ま",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7294),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6597),
                             IsDeleted = false,
                             Romaji = "ma",
                             StrokeCount = 3,
@@ -1480,7 +1480,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 32,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/1/16/Ja-mi.ogg",
                             Character = "み",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7295),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6599),
                             IsDeleted = false,
                             Romaji = "mi",
                             StrokeCount = 2,
@@ -1491,7 +1491,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 33,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/e/eb/Ja-mu.ogg",
                             Character = "む",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7296),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6600),
                             IsDeleted = false,
                             Romaji = "mu",
                             StrokeCount = 3,
@@ -1502,7 +1502,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 34,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/8/8b/Ja-me.ogg",
                             Character = "め",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7298),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6602),
                             IsDeleted = false,
                             Romaji = "me",
                             StrokeCount = 2,
@@ -1513,7 +1513,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 35,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/c/c1/Ja-mo.ogg",
                             Character = "も",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7299),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6604),
                             IsDeleted = false,
                             Romaji = "mo",
                             StrokeCount = 3,
@@ -1524,7 +1524,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 36,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/e/e8/Ja-ya.ogg",
                             Character = "や",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7300),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6605),
                             IsDeleted = false,
                             Romaji = "ya",
                             StrokeCount = 3,
@@ -1535,7 +1535,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 37,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/7/7b/Ja-yu.ogg",
                             Character = "ゆ",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7301),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6607),
                             IsDeleted = false,
                             Romaji = "yu",
                             StrokeCount = 2,
@@ -1546,7 +1546,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 38,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/c/c9/Ja-yo.ogg",
                             Character = "よ",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7302),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6608),
                             IsDeleted = false,
                             Romaji = "yo",
                             StrokeCount = 2,
@@ -1557,7 +1557,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 39,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/0/04/Ja-ra.ogg",
                             Character = "ら",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7303),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6610),
                             IsDeleted = false,
                             Romaji = "ra",
                             StrokeCount = 2,
@@ -1568,7 +1568,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 40,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/7/76/Ja-ri.ogg",
                             Character = "り",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7304),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6695),
                             IsDeleted = false,
                             Romaji = "ri",
                             StrokeCount = 2,
@@ -1579,7 +1579,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 41,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/5/56/Ja-ru.ogg",
                             Character = "る",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7306),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6697),
                             IsDeleted = false,
                             Romaji = "ru",
                             StrokeCount = 1,
@@ -1590,7 +1590,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 42,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/5/57/Ja-re.ogg",
                             Character = "れ",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7307),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6698),
                             IsDeleted = false,
                             Romaji = "re",
                             StrokeCount = 2,
@@ -1601,7 +1601,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 43,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/e/ed/Ja-ro.ogg",
                             Character = "ろ",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7308),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6700),
                             IsDeleted = false,
                             Romaji = "ro",
                             StrokeCount = 1,
@@ -1612,7 +1612,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 44,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/f/f2/Ja-wa.ogg",
                             Character = "わ",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7309),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6701),
                             IsDeleted = false,
                             Romaji = "wa",
                             StrokeCount = 2,
@@ -1623,7 +1623,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 45,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/7/77/Ja-wo.ogg",
                             Character = "を",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7310),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6702),
                             IsDeleted = false,
                             Romaji = "wo",
                             StrokeCount = 3,
@@ -1634,7 +1634,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 46,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/0/0c/Ja-n.ogg",
                             Character = "ん",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7311),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6704),
                             IsDeleted = false,
                             Romaji = "n",
                             StrokeCount = 1,
@@ -1645,7 +1645,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 47,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/2/22/Ja-a.ogg",
                             Character = "ア",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7395),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6739),
                             IsDeleted = false,
                             Romaji = "a",
                             StrokeCount = 2,
@@ -1656,7 +1656,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 48,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/2/28/Ja-i.ogg",
                             Character = "イ",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7398),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6742),
                             IsDeleted = false,
                             Romaji = "i",
                             StrokeCount = 2,
@@ -1667,7 +1667,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 49,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/a/a2/Ja-u.ogg",
                             Character = "ウ",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7399),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6744),
                             IsDeleted = false,
                             Romaji = "u",
                             StrokeCount = 3,
@@ -1678,7 +1678,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 50,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/2/21/Ja-e.ogg",
                             Character = "エ",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7400),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6745),
                             IsDeleted = false,
                             Romaji = "e",
                             StrokeCount = 3,
@@ -1689,7 +1689,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 51,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/d/df/Ja-o.ogg",
                             Character = "オ",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7401),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6746),
                             IsDeleted = false,
                             Romaji = "o",
                             StrokeCount = 3,
@@ -1700,7 +1700,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 52,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/2/2e/Ja-ka.ogg",
                             Character = "カ",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7402),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6748),
                             IsDeleted = false,
                             Romaji = "ka",
                             StrokeCount = 2,
@@ -1711,7 +1711,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 53,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/8/87/Ja-ki.ogg",
                             Character = "キ",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7403),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6749),
                             IsDeleted = false,
                             Romaji = "ki",
                             StrokeCount = 3,
@@ -1722,7 +1722,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 54,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/a/a3/Ja-ku.ogg",
                             Character = "ク",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7404),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6750),
                             IsDeleted = false,
                             Romaji = "ku",
                             StrokeCount = 2,
@@ -1733,7 +1733,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 55,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/b/b3/Ja-ke.ogg",
                             Character = "ケ",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7405),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6752),
                             IsDeleted = false,
                             Romaji = "ke",
                             StrokeCount = 3,
@@ -1744,7 +1744,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 56,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/1/18/Ja-ko.ogg",
                             Character = "コ",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7407),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6753),
                             IsDeleted = false,
                             Romaji = "ko",
                             StrokeCount = 2,
@@ -1755,7 +1755,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 57,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/a/a9/Ja-sa.ogg",
                             Character = "サ",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7408),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6755),
                             IsDeleted = false,
                             Romaji = "sa",
                             StrokeCount = 3,
@@ -1766,7 +1766,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 58,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/8/80/Ja-shi.ogg",
                             Character = "シ",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7409),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6756),
                             IsDeleted = false,
                             Romaji = "shi",
                             StrokeCount = 3,
@@ -1777,7 +1777,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 59,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/a/a7/Ja-su.ogg",
                             Character = "ス",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7410),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6757),
                             IsDeleted = false,
                             Romaji = "su",
                             StrokeCount = 2,
@@ -1788,7 +1788,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 60,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/a/a8/Ja-se.ogg",
                             Character = "セ",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7411),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6759),
                             IsDeleted = false,
                             Romaji = "se",
                             StrokeCount = 2,
@@ -1799,7 +1799,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 61,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/0/00/Ja-so.ogg",
                             Character = "ソ",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7412),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6760),
                             IsDeleted = false,
                             Romaji = "so",
                             StrokeCount = 2,
@@ -1810,7 +1810,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 62,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/d/d2/Ja-ta.ogg",
                             Character = "タ",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7413),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6831),
                             IsDeleted = false,
                             Romaji = "ta",
                             StrokeCount = 3,
@@ -1821,7 +1821,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 63,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/3/38/Ja-chi.ogg",
                             Character = "チ",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7414),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6833),
                             IsDeleted = false,
                             Romaji = "chi",
                             StrokeCount = 3,
@@ -1832,7 +1832,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 64,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/3/32/Ja-tsu.ogg",
                             Character = "ツ",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7415),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6835),
                             IsDeleted = false,
                             Romaji = "tsu",
                             StrokeCount = 3,
@@ -1843,7 +1843,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 65,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/1/10/Ja-te.ogg",
                             Character = "テ",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7416),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6836),
                             IsDeleted = false,
                             Romaji = "te",
                             StrokeCount = 3,
@@ -1854,7 +1854,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 66,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/a/a5/Ja-to.ogg",
                             Character = "ト",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7419),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6839),
                             IsDeleted = false,
                             Romaji = "to",
                             StrokeCount = 2,
@@ -1865,7 +1865,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 67,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/9/92/Ja-na.ogg",
                             Character = "ナ",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7420),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6840),
                             IsDeleted = false,
                             Romaji = "na",
                             StrokeCount = 2,
@@ -1876,7 +1876,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 68,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/b/b7/Ja-ni.ogg",
                             Character = "ニ",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7421),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6842),
                             IsDeleted = false,
                             Romaji = "ni",
                             StrokeCount = 2,
@@ -1887,7 +1887,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 69,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/b/b1/Ja-nu.ogg",
                             Character = "ヌ",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7463),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6843),
                             IsDeleted = false,
                             Romaji = "nu",
                             StrokeCount = 2,
@@ -1898,7 +1898,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 70,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/8/86/Ja-ne.ogg",
                             Character = "ネ",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7464),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6845),
                             IsDeleted = false,
                             Romaji = "ne",
                             StrokeCount = 4,
@@ -1909,7 +1909,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 71,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/5/54/Ja-no.ogg",
                             Character = "ノ",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7465),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6846),
                             IsDeleted = false,
                             Romaji = "no",
                             StrokeCount = 1,
@@ -1920,7 +1920,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 72,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/0/08/Ja-ha.ogg",
                             Character = "ハ",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7466),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6847),
                             IsDeleted = false,
                             Romaji = "ha",
                             StrokeCount = 2,
@@ -1931,7 +1931,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 73,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/9/99/Ja-hi.ogg",
                             Character = "ヒ",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7468),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6848),
                             IsDeleted = false,
                             Romaji = "hi",
                             StrokeCount = 2,
@@ -1942,7 +1942,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 74,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/7/70/Ja-fu.ogg",
                             Character = "フ",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7469),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6850),
                             IsDeleted = false,
                             Romaji = "fu",
                             StrokeCount = 1,
@@ -1953,7 +1953,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 75,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/2/2a/Ja-he.ogg",
                             Character = "ヘ",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7470),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6851),
                             IsDeleted = false,
                             Romaji = "he",
                             StrokeCount = 1,
@@ -1964,7 +1964,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 76,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/a/a4/Ja-ho.ogg",
                             Character = "ホ",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7471),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6852),
                             IsDeleted = false,
                             Romaji = "ho",
                             StrokeCount = 4,
@@ -1975,7 +1975,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 77,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/0/0d/Ja-ma.ogg",
                             Character = "マ",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7472),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6854),
                             IsDeleted = false,
                             Romaji = "ma",
                             StrokeCount = 2,
@@ -1986,7 +1986,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 78,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/1/16/Ja-mi.ogg",
                             Character = "ミ",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7473),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6855),
                             IsDeleted = false,
                             Romaji = "mi",
                             StrokeCount = 3,
@@ -1997,7 +1997,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 79,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/e/eb/Ja-mu.ogg",
                             Character = "ム",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7474),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6857),
                             IsDeleted = false,
                             Romaji = "mu",
                             StrokeCount = 2,
@@ -2008,7 +2008,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 80,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/8/8b/Ja-me.ogg",
                             Character = "メ",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7475),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6858),
                             IsDeleted = false,
                             Romaji = "me",
                             StrokeCount = 2,
@@ -2019,7 +2019,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 81,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/c/c1/Ja-mo.ogg",
                             Character = "モ",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7477),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6860),
                             IsDeleted = false,
                             Romaji = "mo",
                             StrokeCount = 3,
@@ -2030,7 +2030,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 82,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/e/e8/Ja-ya.ogg",
                             Character = "ヤ",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7478),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6861),
                             IsDeleted = false,
                             Romaji = "ya",
                             StrokeCount = 2,
@@ -2041,7 +2041,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 83,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/7/7b/Ja-yu.ogg",
                             Character = "ユ",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7479),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6863),
                             IsDeleted = false,
                             Romaji = "yu",
                             StrokeCount = 2,
@@ -2052,7 +2052,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 84,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/c/c9/Ja-yo.ogg",
                             Character = "ヨ",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7481),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6864),
                             IsDeleted = false,
                             Romaji = "yo",
                             StrokeCount = 3,
@@ -2063,7 +2063,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 85,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/0/04/Ja-ra.ogg",
                             Character = "ラ",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7482),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6865),
                             IsDeleted = false,
                             Romaji = "ra",
                             StrokeCount = 2,
@@ -2074,7 +2074,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 86,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/7/76/Ja-ri.ogg",
                             Character = "リ",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7483),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6914),
                             IsDeleted = false,
                             Romaji = "ri",
                             StrokeCount = 2,
@@ -2085,7 +2085,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 87,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/5/56/Ja-ru.ogg",
                             Character = "ル",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7484),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6916),
                             IsDeleted = false,
                             Romaji = "ru",
                             StrokeCount = 2,
@@ -2096,7 +2096,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 88,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/5/57/Ja-re.ogg",
                             Character = "レ",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7485),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6917),
                             IsDeleted = false,
                             Romaji = "re",
                             StrokeCount = 1,
@@ -2107,7 +2107,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 89,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/e/ed/Ja-ro.ogg",
                             Character = "ロ",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7486),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6919),
                             IsDeleted = false,
                             Romaji = "ro",
                             StrokeCount = 3,
@@ -2118,7 +2118,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 90,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/f/f2/Ja-wa.ogg",
                             Character = "ワ",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7487),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6920),
                             IsDeleted = false,
                             Romaji = "wa",
                             StrokeCount = 2,
@@ -2129,7 +2129,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 91,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/7/77/Ja-wo.ogg",
                             Character = "ヲ",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7488),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6922),
                             IsDeleted = false,
                             Romaji = "wo",
                             StrokeCount = 3,
@@ -2140,7 +2140,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 92,
                             AudioUrl = "https://upload.wikimedia.org/wikipedia/commons/0/0c/Ja-n.ogg",
                             Character = "ン",
-                            CreatedDate = new DateTime(2026, 10, 16, 9, 36, 46, 252, DateTimeKind.Utc).AddTicks(7489),
+                            CreatedDate = new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6923),
                             IsDeleted = false,
                             Romaji = "n",
                             StrokeCount = 2,
@@ -2900,6 +2900,29 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Property<int>("BookedCount")
                         .HasColumnType("integer");
 
+                    b.Property<string>("CancelReason")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("CancelRejectedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("CancelRejectionReason")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("CancelRequestedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("ChangeRequestReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<DateTime?>("ChangeRequestedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("ChangeResolution")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
                     b.Property<Guid?>("CreatedBy")
                         .HasColumnType("uuid");
 
@@ -2918,15 +2941,21 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Property<int>("MaxLearners")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("integer")
-                        .HasDefaultValue(4);
+                        .HasDefaultValue(1);
 
                     b.Property<int>("MentorId")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("MentorWeeklyAvailabilityId")
                         .HasColumnType("integer");
 
                     b.Property<Guid?>("ModifiedBy")
                         .HasColumnType("uuid");
 
                     b.Property<DateTime?>("ModifiedDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<DateTime?>("PublishedAt")
                         .HasColumnType("timestamp without time zone");
 
                     b.Property<DateTime?>("RejectedAt")
@@ -2946,7 +2975,15 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Property<DateTime>("StartTime")
                         .HasColumnType("timestamp without time zone");
 
+                    b.Property<uint>("Version")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
                     b.HasKey("Id");
+
+                    b.HasIndex("MentorWeeklyAvailabilityId");
 
                     b.HasIndex("RoomId")
                         .IsUnique();
@@ -2971,7 +3008,8 @@ namespace RikiPath.Infrastructure.Migrations
                             MaxLearners = 4,
                             MentorId = 900002,
                             RoomId = new Guid("a1000000-0000-0000-0000-000000990001"),
-                            StartTime = new DateTime(2026, 10, 2, 9, 0, 0, 0, DateTimeKind.Unspecified)
+                            StartTime = new DateTime(2026, 10, 2, 9, 0, 0, 0, DateTimeKind.Unspecified),
+                            Version = 0u
                         },
                         new
                         {
@@ -2985,7 +3023,8 @@ namespace RikiPath.Infrastructure.Migrations
                             MaxLearners = 4,
                             MentorId = 900002,
                             RoomId = new Guid("a1000000-0000-0000-0000-000000990002"),
-                            StartTime = new DateTime(2026, 10, 3, 13, 0, 0, 0, DateTimeKind.Unspecified)
+                            StartTime = new DateTime(2026, 10, 3, 13, 0, 0, 0, DateTimeKind.Unspecified),
+                            Version = 0u
                         },
                         new
                         {
@@ -2999,7 +3038,8 @@ namespace RikiPath.Infrastructure.Migrations
                             MaxLearners = 4,
                             MentorId = 900003,
                             RoomId = new Guid("a1000000-0000-0000-0000-000000990003"),
-                            StartTime = new DateTime(2026, 10, 4, 9, 0, 0, 0, DateTimeKind.Unspecified)
+                            StartTime = new DateTime(2026, 10, 4, 9, 0, 0, 0, DateTimeKind.Unspecified),
+                            Version = 0u
                         },
                         new
                         {
@@ -3013,7 +3053,8 @@ namespace RikiPath.Infrastructure.Migrations
                             MaxLearners = 4,
                             MentorId = 900003,
                             RoomId = new Guid("a1000000-0000-0000-0000-000000990004"),
-                            StartTime = new DateTime(2026, 10, 5, 13, 0, 0, 0, DateTimeKind.Unspecified)
+                            StartTime = new DateTime(2026, 10, 5, 13, 0, 0, 0, DateTimeKind.Unspecified),
+                            Version = 0u
                         });
                 });
 
@@ -3064,10 +3105,17 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Property<int>("UserSubscriptionId")
                         .HasColumnType("integer");
 
+                    b.Property<uint>("Version")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
                     b.HasKey("Id");
 
                     b.HasIndex("MentorAvailabilityId", "UserSubscriptionId")
-                        .IsUnique();
+                        .IsUnique()
+                        .HasFilter("NOT \"IsDeleted\" AND \"Status\" <> 'Cancelled'");
 
                     b.HasIndex("UserSubscriptionId", "Status");
 
@@ -3084,7 +3132,8 @@ namespace RikiPath.Infrastructure.Migrations
                             Question = "Meeting demo để kiểm thử phòng họp trên frontend.",
                             ScheduledAt = new DateTime(2026, 10, 2, 9, 0, 0, 0, DateTimeKind.Unspecified),
                             Status = "Assigned",
-                            UserSubscriptionId = 990001
+                            UserSubscriptionId = 990001,
+                            Version = 0u
                         },
                         new
                         {
@@ -3096,7 +3145,8 @@ namespace RikiPath.Infrastructure.Migrations
                             Question = "Em muốn nhờ Mentor giải đáp phần ngữ pháp N3 bài 5.",
                             ScheduledAt = new DateTime(2026, 10, 2, 9, 0, 0, 0, DateTimeKind.Unspecified),
                             Status = "Assigned",
-                            UserSubscriptionId = 990002
+                            UserSubscriptionId = 990002,
+                            Version = 0u
                         },
                         new
                         {
@@ -3108,7 +3158,8 @@ namespace RikiPath.Infrastructure.Migrations
                             Question = "Hỏi về cách phân biệt giữa ~てくる và ~ていく.",
                             ScheduledAt = new DateTime(2026, 10, 2, 9, 0, 0, 0, DateTimeKind.Unspecified),
                             Status = "Assigned",
-                            UserSubscriptionId = 990003
+                            UserSubscriptionId = 990003,
+                            Version = 0u
                         },
                         new
                         {
@@ -3120,7 +3171,111 @@ namespace RikiPath.Infrastructure.Migrations
                             Question = "Tư vấn phương pháp luyện nghe JLPT N3 hiệu quả.",
                             ScheduledAt = new DateTime(2026, 10, 2, 9, 0, 0, 0, DateTimeKind.Unspecified),
                             Status = "Assigned",
-                            UserSubscriptionId = 990004
+                            UserSubscriptionId = 990004,
+                            Version = 0u
+                        });
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.MentorChatMessage", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("CreatedDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("MentorBookingId")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid?>("ModifiedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("ModifiedDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<DateTime?>("ReadAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int>("SenderUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("SentAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("Text")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SenderUserId");
+
+                    b.HasIndex("MentorBookingId", "Id");
+
+                    b.HasIndex("MentorBookingId", "ReadAt", "SenderUserId");
+
+                    b.ToTable("MentorChatMessages");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.MentorWeeklyAvailability", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("CreatedDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<DateOnly>("Date")
+                        .HasColumnType("date");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("MentorId")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid?>("ModifiedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("ModifiedDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("Period")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)");
+
+                    b.Property<uint>("Version")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MentorId", "Date", "Period")
+                        .IsUnique()
+                        .HasFilter("NOT \"IsDeleted\"");
+
+                    b.ToTable("MentorWeeklyAvailabilities", t =>
+                        {
+                            t.HasCheckConstraint("CK_MentorWeeklyAvailability_Period", "\"Period\" IN ('Morning', 'Afternoon', 'Evening')");
                         });
                 });
 
@@ -3131,6 +3286,9 @@ namespace RikiPath.Infrastructure.Migrations
                         .HasColumnType("integer");
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("AnswerKeyJson")
+                        .HasColumnType("jsonb");
 
                     b.Property<string>("AudioUrl")
                         .HasColumnType("text");
@@ -3146,6 +3304,9 @@ namespace RikiPath.Infrastructure.Migrations
 
                     b.Property<string>("ImageUrl")
                         .HasColumnType("text");
+
+                    b.Property<string>("InteractionDataJson")
+                        .HasColumnType("jsonb");
 
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
@@ -3163,6 +3324,13 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Property<string>("QuestionText")
                         .IsRequired()
                         .HasColumnType("text");
+
+                    b.Property<string>("QuestionType")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasDefaultValue("SingleChoice");
 
                     b.Property<int>("SortOrder")
                         .HasColumnType("integer");
@@ -3243,6 +3411,11 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
 
+                    b.Property<bool>("IsPlacementAssessment")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
                     b.Property<Guid?>("ModifiedBy")
                         .HasColumnType("uuid");
 
@@ -3303,6 +3476,9 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Property<DateTime?>("ModifiedDate")
                         .HasColumnType("timestamp without time zone");
 
+                    b.Property<string>("ResponseJson")
+                        .HasColumnType("jsonb");
+
                     b.Property<int?>("SelectedOptionId")
                         .HasColumnType("integer");
 
@@ -3337,6 +3513,11 @@ namespace RikiPath.Infrastructure.Migrations
 
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
+
+                    b.Property<bool>("IsPlacementAssessment")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
 
                     b.Property<Guid?>("ModifiedBy")
                         .HasColumnType("uuid");
@@ -4168,7 +4349,7 @@ namespace RikiPath.Infrastructure.Migrations
                             IsTrial = false,
                             MeetingSessionCount = 12,
                             Name = "Meeting 1-1 với Mentor - 12 buổi",
-                            Price = 459000m,
+                            Price = 1000m,
                             SortOrder = 7
                         });
                 });
@@ -4262,6 +4443,9 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Property<int?>("TargetCertificateLevelId")
                         .HasColumnType("integer")
                         .HasColumnName("TargetCertificationLevelId");
+
+                    b.Property<DateTime?>("TargetExamDate")
+                        .HasColumnType("timestamp without time zone");
 
                     b.HasKey("Id");
 
@@ -4485,6 +4669,9 @@ namespace RikiPath.Infrastructure.Migrations
                         .HasColumnType("integer")
                         .HasDefaultValue(0);
 
+                    b.Property<int?>("MentorId")
+                        .HasColumnType("integer");
+
                     b.Property<Guid?>("ModifiedBy")
                         .HasColumnType("uuid");
 
@@ -4515,7 +4702,15 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Property<int>("UserId")
                         .HasColumnType("integer");
 
+                    b.Property<uint>("Version")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
                     b.HasKey("Id");
+
+                    b.HasIndex("MentorId");
 
                     b.HasIndex("SubscriptionPlanId");
 
@@ -4540,7 +4735,8 @@ namespace RikiPath.Infrastructure.Migrations
                             PurchasedAt = new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
                             StartDate = new DateTime(2026, 10, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
                             SubscriptionPlanId = 7,
-                            UserId = 900006
+                            UserId = 900006,
+                            Version = 0u
                         },
                         new
                         {
@@ -4558,7 +4754,8 @@ namespace RikiPath.Infrastructure.Migrations
                             PurchasedAt = new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
                             StartDate = new DateTime(2026, 10, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
                             SubscriptionPlanId = 7,
-                            UserId = 900007
+                            UserId = 900007,
+                            Version = 0u
                         },
                         new
                         {
@@ -4576,7 +4773,8 @@ namespace RikiPath.Infrastructure.Migrations
                             PurchasedAt = new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
                             StartDate = new DateTime(2026, 10, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
                             SubscriptionPlanId = 7,
-                            UserId = 900008
+                            UserId = 900008,
+                            Version = 0u
                         },
                         new
                         {
@@ -4594,7 +4792,8 @@ namespace RikiPath.Infrastructure.Migrations
                             PurchasedAt = new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
                             StartDate = new DateTime(2026, 10, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
                             SubscriptionPlanId = 7,
-                            UserId = 900009
+                            UserId = 900009,
+                            Version = 0u
                         });
                 });
 
@@ -5053,7 +5252,14 @@ namespace RikiPath.Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("RikiPath.Domain.Entities.MentorWeeklyAvailability", "WeeklyAvailability")
+                        .WithMany("Slots")
+                        .HasForeignKey("MentorWeeklyAvailabilityId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.Navigation("Mentor");
+
+                    b.Navigation("WeeklyAvailability");
                 });
 
             modelBuilder.Entity("RikiPath.Domain.Entities.MentorBooking", b =>
@@ -5072,6 +5278,36 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Navigation("MentorAvailability");
 
                     b.Navigation("UserSubscription");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.MentorChatMessage", b =>
+                {
+                    b.HasOne("RikiPath.Domain.Entities.MentorBooking", "MentorBooking")
+                        .WithMany()
+                        .HasForeignKey("MentorBookingId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "Sender")
+                        .WithMany()
+                        .HasForeignKey("SenderUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("MentorBooking");
+
+                    b.Navigation("Sender");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.MentorWeeklyAvailability", b =>
+                {
+                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "Mentor")
+                        .WithMany()
+                        .HasForeignKey("MentorId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Mentor");
                 });
 
             modelBuilder.Entity("RikiPath.Domain.Entities.MockQuestion", b =>
@@ -5373,6 +5609,11 @@ namespace RikiPath.Infrastructure.Migrations
 
             modelBuilder.Entity("RikiPath.Domain.Entities.UserSubscription", b =>
                 {
+                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "Mentor")
+                        .WithMany()
+                        .HasForeignKey("MentorId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("RikiPath.Domain.Entities.SubscriptionPlan", "SubscriptionPlan")
                         .WithMany("UserSubscriptions")
                         .HasForeignKey("SubscriptionPlanId")
@@ -5384,6 +5625,8 @@ namespace RikiPath.Infrastructure.Migrations
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.Navigation("Mentor");
 
                     b.Navigation("SubscriptionPlan");
 
@@ -5496,6 +5739,11 @@ namespace RikiPath.Infrastructure.Migrations
             modelBuilder.Entity("RikiPath.Domain.Entities.MentorBooking", b =>
                 {
                     b.Navigation("Note");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.MentorWeeklyAvailability", b =>
+                {
+                    b.Navigation("Slots");
                 });
 
             modelBuilder.Entity("RikiPath.Domain.Entities.MockQuestion", b =>

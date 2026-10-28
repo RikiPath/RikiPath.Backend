@@ -32,6 +32,9 @@ namespace RikiPath.Application.IServices
         Task<ApiResponse<bool>> ReviewRequestAsync(
             int requestId, ReviewContentRequest request, CancellationToken cancellationToken = default);
 
+        Task<ApiResponse<BulkReviewResponse>> ReviewLessonGroupAsync(
+            int lessonRequestId, ReviewContentRequest request, CancellationToken cancellationToken = default);
+
         /// <summary>
         /// Duyệt hoặc từ chối hàng loạt nhiều yêu cầu cùng lúc.
         /// </summary>

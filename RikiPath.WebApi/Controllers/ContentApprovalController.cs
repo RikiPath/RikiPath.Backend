@@ -58,6 +58,18 @@ namespace RikiPath.Api.Controllers
             return StatusCode((int)result.StatusCode, result);
         }
 
+        [HttpPost("requests/{requestId:int}/review-lesson-group")]
+        [Authorize(Roles = "Admin")]
+        [ProducesResponseType(typeof(ApiResponse<BulkReviewResponse>), StatusCodes.Status200OK)]
+        public async Task<IActionResult> ReviewLessonGroup(
+            [FromRoute] int requestId,
+            [FromBody] ReviewContentRequest request,
+            CancellationToken cancellationToken)
+        {
+            var result = await approvalService.ReviewLessonGroupAsync(requestId, request, cancellationToken);
+            return StatusCode((int)result.StatusCode, result);
+        }
+
         /// <summary>
         /// Admin thực hiện Phê duyệt hoặc Từ chối hàng loạt yêu cầu cùng lúc.
         /// </summary>

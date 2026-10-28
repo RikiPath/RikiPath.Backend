@@ -11,6 +11,7 @@ namespace RikiPath.Infrastructure.Configuration
             builder.HasKey(x => x.Id);
 
             builder.Property(x => x.StartedAt).IsRequired();
+            builder.Property(x => x.IsPlacementAssessment).HasDefaultValue(false);
 
             // Quan hệ với UserAccount (1 - N)
             builder.HasOne(x => x.UserAccount)

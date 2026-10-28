@@ -238,7 +238,8 @@ namespace RikiPath.Application.Services
 
             // LƯU Ý: giả định repository trả attempts mới nhất trước.
             // Nếu phân biệt bài "đánh giá đầu vào" với mock test thường, lọc thêm tại đây.
-            var latestAttempt = attempts.FirstOrDefault(a => a.IsCompleted);
+            var latestAttempt = attempts.FirstOrDefault(a => a.IsCompleted && a.IsPlacementAssessment)
+                ?? attempts.FirstOrDefault(a => a.IsCompleted);
 
             IReadOnlyDictionary<string, double>? skillBreakdown = null;
             if (latestAttempt is not null)

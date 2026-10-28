@@ -33,5 +33,18 @@ namespace RikiPath.Application.Responses.Content
 
         /// <summary>Cờ đánh dấu bản ghi gốc trong DB đã bị xóa trong lúc chờ duyệt.</summary>
         public bool TargetMissing { get; set; }
+
+        /// <summary>Requests nội dung có cùng Lesson, phục vụ admin xem và duyệt chung.</summary>
+        public List<PendingLessonContentResponse> RelatedLessonContent { get; set; } = new();
+    }
+
+    public sealed class PendingLessonContentResponse
+    {
+        public int? RequestId { get; set; }
+        public string EntityType { get; set; } = string.Empty;
+        public string Action { get; set; } = string.Empty;
+        public string RowKey { get; set; } = string.Empty;
+        public string Status { get; set; } = string.Empty;
+        public List<ApprovalFieldDiffResponse> Fields { get; set; } = new();
     }
 }

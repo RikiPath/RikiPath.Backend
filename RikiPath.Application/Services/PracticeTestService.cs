@@ -4,6 +4,8 @@ using RikiPath.Application.Requests.MockTests;
 using RikiPath.Application.Responses;
 using RikiPath.Application.Responses.MockTests;
 using System.Net;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace RikiPath.Application.Services
 {
@@ -11,6 +13,45 @@ namespace RikiPath.Application.Services
     {
         private const string StatusInProgress = "in_progress";
         private const string StatusCompleted = "completed";
+
+        private static JsonElement? ParseJsonElement(string? json)
+        {
+            if (string.IsNullOrWhiteSpace(json)) return null;
+            using var document = JsonDocument.Parse(json);
+            return document.RootElement.Clone();
+        }
+
+        private static bool IsStructuredResponseCorrect(MockQuestion question, JsonElement? response)
+        {
+            if (response is null || string.IsNullOrWhiteSpace(question.AnswerKeyJson)) return false;
+            try
+            {
+                using var expectedDocument = JsonDocument.Parse(question.AnswerKeyJson);
+                return JsonNode.DeepEquals(JsonNode.Parse(question.AnswerKeyJson), JsonNode.Parse(response.Value.GetRawText()));
+            }
+            catch (JsonException)
+            {
+                return false;
+            }
+        }
+
+        private static bool IsMultipleChoiceCorrect(MockQuestion question, JsonElement? response)
+        {
+            if (response is not { ValueKind: JsonValueKind.Array }) return false;
+            var submittedIds = response.Value.EnumerateArray()
+                .Where(x => x.ValueKind == JsonValueKind.Number && x.TryGetInt32(out _))
+                .Select(x => x.GetInt32())
+                .Distinct()
+                .OrderBy(x => x)
+                .ToArray();
+            if (submittedIds.Length != response.Value.GetArrayLength()) return false;
+            var correctIds = (question.Options ?? [])
+                .Where(x => x.IsCorrect)
+                .Select(x => x.Id)
+                .OrderBy(x => x)
+                .ToArray();
+            return submittedIds.SequenceEqual(correctIds);
+        }
 
         public async Task<ApiResponse<StartAttemptResponse>> StartAttemptAsync(int practiceTestId, CancellationToken cancellationToken = default)
         {
@@ -64,6 +105,8 @@ namespace RikiPath.Application.Services
                     var attempt = new MockTestAttempt
                     {
                         UserId = userId,
+                        IsPlacementAssessment = test.IsPlacementAssessment
+                            && !previousAttempts.Any(attempt => attempt.IsPlacementAssessment),
                         StartedAt = DateTime.UtcNow,
                         SubmittedAt = null,
                         TotalScore = 0,
@@ -100,6 +143,8 @@ namespace RikiPath.Application.Services
                             SectionOrder = item.Section.SortOrder,
                             Order = item.Question.SortOrder,
                             Content = item.Question.QuestionText,
+                            QuestionType = item.Question.QuestionType,
+                            InteractionData = ParseJsonElement(item.Question.InteractionDataJson),
                             AudioUrl = item.Question.AudioUrl,
                             ImageUrl = item.Question.ImageUrl,
                             Options = (item.Question.Options ?? [])
@@ -224,6 +269,30 @@ namespace RikiPath.Application.Services
                     foreach (var submittedAnswer in request.Answers)
                     {
                         var question = snapshotsByQuestionId[submittedAnswer.QuestionId].MockQuestion;
+                        if (question.QuestionType.Equals("SingleChoice", StringComparison.OrdinalIgnoreCase))
+                        {
+                            if (submittedAnswer.Response.HasValue)
+                            {
+                                response = ApiResponse<AttemptResultResponse>.Fail(
+                                    $"Câu hỏi {submittedAnswer.QuestionId} yêu cầu chọn một đáp án.", HttpStatusCode.BadRequest);
+                                return;
+                            }
+                        }
+                        else if (question.QuestionType.Equals("MultipleChoice", StringComparison.OrdinalIgnoreCase))
+                        {
+                            if (submittedAnswer.Response is not { ValueKind: JsonValueKind.Array })
+                            {
+                                response = ApiResponse<AttemptResultResponse>.Fail(
+                                    $"Câu hỏi {submittedAnswer.QuestionId} yêu cầu danh sách OptionId.", HttpStatusCode.BadRequest);
+                                return;
+                            }
+                        }
+                        else if (submittedAnswer.SelectedOptionId is not null || submittedAnswer.Response is null)
+                        {
+                            response = ApiResponse<AttemptResultResponse>.Fail(
+                                $"Câu hỏi {submittedAnswer.QuestionId} yêu cầu câu trả lời theo dạng {question.QuestionType}.", HttpStatusCode.BadRequest);
+                            return;
+                        }
                         // Option phải thuộc đúng Question để client không thể ghép ID tùy ý khi chấm điểm.
                         if (submittedAnswer.SelectedOptionId is not null &&
                             !(question.Options ?? []).Any(option => option.Id == submittedAnswer.SelectedOptionId))
@@ -241,12 +310,18 @@ namespace RikiPath.Application.Services
                     foreach (var submittedAnswer in request.Answers)
                     {
                         var snapshot = snapshotsByQuestionId[submittedAnswer.QuestionId];
+                        var question = snapshot.MockQuestion;
                         var selectedOption = submittedAnswer.SelectedOptionId is null
                             ? null
                             : snapshot.MockQuestion.Options?.Single(
                                 option => option.Id == submittedAnswer.SelectedOptionId);
                         snapshot.SelectedOptionId = submittedAnswer.SelectedOptionId;
-                        snapshot.IsCorrect = selectedOption?.IsCorrect == true;
+                        snapshot.ResponseJson = submittedAnswer.Response?.GetRawText();
+                        snapshot.IsCorrect = question.QuestionType.Equals("SingleChoice", StringComparison.OrdinalIgnoreCase)
+                            ? selectedOption?.IsCorrect == true
+                            : question.QuestionType.Equals("MultipleChoice", StringComparison.OrdinalIgnoreCase)
+                                ? IsMultipleChoiceCorrect(question, submittedAnswer.Response)
+                                : IsStructuredResponseCorrect(question, submittedAnswer.Response);
                         correctByQuestion[submittedAnswer.QuestionId] = snapshot.IsCorrect;
                     }
                     var questions = snapshotAnswers.Select(answer => answer.MockQuestion).ToList();
@@ -368,6 +443,42 @@ namespace RikiPath.Application.Services
             }
         }
 
+        public async Task<ApiResponse<List<TestSummaryResponse>>> GetPlacementTestsByCertificateLevelAsync(
+     int certificateLevelId,
+     CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                if (certificateLevelId <= 0)
+                    return ApiResponse<List<TestSummaryResponse>>.Fail(
+                        "Cấp độ chứng chỉ không hợp lệ.", HttpStatusCode.BadRequest);
+
+                var levelExists = await unitOfWork.CertificateLevels
+                    .AnyAsync(l => l.Id == certificateLevelId, cancellationToken);
+                if (!levelExists)
+                    return ApiResponse<List<TestSummaryResponse>>.NotFound("Không tìm thấy cấp độ chứng chỉ.");
+
+                var tests = await unitOfWork.MockTests
+                    .GetLearnerPlacementTestsByLevelAsync(certificateLevelId, cancellationToken);
+
+                var result = tests.Select(test => new TestSummaryResponse
+                {
+                    MockTestId = test.Id,
+                    Title = test.Title,
+                    Description = test.Description,
+                    JlptLevelName = test.CertificateLevel?.Code ?? string.Empty,
+                    TimeLimitMinutes = test.TimeLimitMinutes,
+                }).ToList();
+
+                return ApiResponse<List<TestSummaryResponse>>.Success(result);
+            }
+            catch (Exception)
+            {
+                return ApiResponse<List<TestSummaryResponse>>.Fail(
+                    "Không thể tải bài đánh giá năng lực.", HttpStatusCode.InternalServerError);
+            }
+        }
+
         public async Task<ApiResponse<DetailedAttemptResultResponse>> GetDetailedResultAsync(int attemptId, CancellationToken cancellationToken = default)
         {
             try
@@ -393,6 +504,9 @@ namespace RikiPath.Application.Services
                 {
                     QuestionId = a.MockQuestionId,
                     QuestionText = a.MockQuestion.QuestionText,
+                    QuestionType = a.MockQuestion.QuestionType,
+                    Response = ParseJsonElement(a.ResponseJson),
+                    AnswerKey = ParseJsonElement(a.MockQuestion.AnswerKeyJson),
                     Explanation = a.MockQuestion.Explanation,
                     SelectedOptionId = a.SelectedOptionId,
                     IsCorrect = a.IsCorrect,
@@ -401,11 +515,11 @@ namespace RikiPath.Application.Services
                         .OrderBy(option => option.SortOrder)
                         .ThenBy(option => option.Id)
                         .Select(o => new QuestionOptionReview
-                    {
-                        OptionId = o.Id,
-                        OptionText = o.OptionText,
-                        IsCorrect = o.IsCorrect,
-                    }).ToList(),
+                        {
+                            OptionId = o.Id,
+                            OptionText = o.OptionText,
+                            IsCorrect = o.IsCorrect,
+                        }).ToList(),
                 }).ToList();
 
                 return ApiResponse<DetailedAttemptResultResponse>.Success(new DetailedAttemptResultResponse

@@ -9,7 +9,7 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace RikiPath.Infrastructure.Migrations
 {
     /// <inheritdoc />
-    public partial class InitialCreate : Migration
+    public partial class InitalCreate : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
@@ -52,6 +52,29 @@ namespace RikiPath.Infrastructure.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_Features", x => x.Id);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "KanaCharacters",
+                columns: table => new
+                {
+                    Id = table.Column<int>(type: "integer", nullable: false)
+                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
+                    Character = table.Column<string>(type: "character varying(10)", maxLength: 10, nullable: false),
+                    Type = table.Column<string>(type: "character varying(20)", maxLength: 20, nullable: false),
+                    Romaji = table.Column<string>(type: "character varying(20)", maxLength: 20, nullable: false),
+                    StrokeCount = table.Column<int>(type: "integer", nullable: false),
+                    StrokeOrderImageUrl = table.Column<string>(type: "text", nullable: true),
+                    AudioUrl = table.Column<string>(type: "text", nullable: true),
+                    CreatedDate = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
+                    ModifiedDate = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
+                    CreatedBy = table.Column<Guid>(type: "uuid", nullable: true),
+                    ModifiedBy = table.Column<Guid>(type: "uuid", nullable: true),
+                    IsDeleted = table.Column<bool>(type: "boolean", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_KanaCharacters", x => x.Id);
                 });
 
             migrationBuilder.CreateTable(
@@ -203,6 +226,7 @@ namespace RikiPath.Infrastructure.Migrations
                     EmailNotificationsEnabled = table.Column<bool>(type: "boolean", nullable: false),
                     DailyStudyMinutes = table.Column<int>(type: "integer", nullable: false),
                     TargetCertificationLevelId = table.Column<int>(type: "integer", nullable: true),
+                    TargetExamDate = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
                     StudyTimePreference = table.Column<string>(type: "character varying(50)", maxLength: 50, nullable: true),
                     CurrentStreak = table.Column<int>(type: "integer", nullable: false),
                     LongestStreak = table.Column<int>(type: "integer", nullable: false),
@@ -343,18 +367,18 @@ namespace RikiPath.Infrastructure.Migrations
                 });
 
             migrationBuilder.CreateTable(
-                name: "KanaCharacters",
+                name: "KanaWritingPracticeCards",
                 columns: table => new
                 {
                     Id = table.Column<int>(type: "integer", nullable: false)
                         .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
-                    Character = table.Column<string>(type: "character varying(10)", maxLength: 10, nullable: false),
-                    Type = table.Column<string>(type: "character varying(20)", maxLength: 20, nullable: false),
-                    Romaji = table.Column<string>(type: "character varying(20)", maxLength: 20, nullable: false),
-                    StrokeCount = table.Column<int>(type: "integer", nullable: false),
-                    StrokeOrderImageUrl = table.Column<string>(type: "text", nullable: true),
-                    AudioUrl = table.Column<string>(type: "text", nullable: true),
-                    ContentAuthorId = table.Column<int>(type: "integer", nullable: false),
+                    UserId = table.Column<int>(type: "integer", nullable: false),
+                    KanaCharacterId = table.Column<int>(type: "integer", nullable: false),
+                    EaseFactor = table.Column<double>(type: "double precision", nullable: false),
+                    IntervalDays = table.Column<int>(type: "integer", nullable: false),
+                    Repetitions = table.Column<int>(type: "integer", nullable: false),
+                    NextReviewDate = table.Column<DateTime>(type: "timestamp without time zone", nullable: false),
+                    LastReviewedAt = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
                     CreatedDate = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
                     ModifiedDate = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
                     CreatedBy = table.Column<Guid>(type: "uuid", nullable: true),
@@ -363,13 +387,19 @@ namespace RikiPath.Infrastructure.Migrations
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PK_KanaCharacters", x => x.Id);
+                    table.PrimaryKey("PK_KanaWritingPracticeCards", x => x.Id);
                     table.ForeignKey(
-                        name: "FK_KanaCharacters_Users_ContentAuthorId",
-                        column: x => x.ContentAuthorId,
-                        principalTable: "Users",
+                        name: "FK_KanaWritingPracticeCards_KanaCharacters_KanaCharacterId",
+                        column: x => x.KanaCharacterId,
+                        principalTable: "KanaCharacters",
                         principalColumn: "Id",
                         onDelete: ReferentialAction.Restrict);
+                    table.ForeignKey(
+                        name: "FK_KanaWritingPracticeCards_Users_UserId",
+                        column: x => x.UserId,
+                        principalTable: "Users",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Cascade);
                 });
 
             migrationBuilder.CreateTable(
@@ -500,22 +530,15 @@ namespace RikiPath.Infrastructure.Migrations
                 });
 
             migrationBuilder.CreateTable(
-                name: "MentorAvailabilities",
+                name: "MentorWeeklyAvailabilities",
                 columns: table => new
                 {
                     Id = table.Column<int>(type: "integer", nullable: false)
                         .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
                     MentorId = table.Column<int>(type: "integer", nullable: false),
-                    StartTime = table.Column<DateTime>(type: "timestamp without time zone", nullable: false),
-                    EndTime = table.Column<DateTime>(type: "timestamp without time zone", nullable: false),
-                    RoomId = table.Column<Guid>(type: "uuid", nullable: false),
-                    MaxLearners = table.Column<int>(type: "integer", nullable: false, defaultValue: 4),
-                    BookedCount = table.Column<int>(type: "integer", nullable: false),
-                    RowVersion = table.Column<byte[]>(type: "bytea", rowVersion: true, nullable: true),
-                    IsApproved = table.Column<bool>(type: "boolean", nullable: false),
-                    AdminName = table.Column<string>(type: "text", nullable: true),
-                    RejectionReason = table.Column<string>(type: "text", nullable: true),
-                    RejectedAt = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
+                    Date = table.Column<DateOnly>(type: "date", nullable: false),
+                    Period = table.Column<string>(type: "character varying(10)", maxLength: 10, nullable: false),
+                    xmin = table.Column<uint>(type: "xid", rowVersion: true, nullable: false),
                     CreatedDate = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
                     ModifiedDate = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
                     CreatedBy = table.Column<Guid>(type: "uuid", nullable: true),
@@ -524,14 +547,14 @@ namespace RikiPath.Infrastructure.Migrations
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PK_MentorAvailabilities", x => x.Id);
-                    table.CheckConstraint("CK_MentorAvailability_BookedCount", "\"BookedCount\" >= 0 AND \"BookedCount\" <= \"MaxLearners\"");
+                    table.PrimaryKey("PK_MentorWeeklyAvailabilities", x => x.Id);
+                    table.CheckConstraint("CK_MentorWeeklyAvailability_Period", "\"Period\" IN ('Morning', 'Afternoon', 'Evening')");
                     table.ForeignKey(
-                        name: "FK_MentorAvailabilities_Users_MentorId",
+                        name: "FK_MentorWeeklyAvailabilities_Users_MentorId",
                         column: x => x.MentorId,
                         principalTable: "Users",
                         principalColumn: "Id",
-                        onDelete: ReferentialAction.Cascade);
+                        onDelete: ReferentialAction.Restrict);
                 });
 
             migrationBuilder.CreateTable(
@@ -545,6 +568,7 @@ namespace RikiPath.Infrastructure.Migrations
                     SubmittedAt = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
                     IsCompleted = table.Column<bool>(type: "boolean", nullable: false),
                     TotalScore = table.Column<double>(type: "double precision", nullable: true),
+                    IsPlacementAssessment = table.Column<bool>(type: "boolean", nullable: false, defaultValue: false),
                     UserAccountId = table.Column<int>(type: "integer", nullable: true),
                     CreatedDate = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
                     ModifiedDate = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
@@ -577,6 +601,7 @@ namespace RikiPath.Infrastructure.Migrations
                     Title = table.Column<string>(type: "character varying(300)", maxLength: 300, nullable: false),
                     Description = table.Column<string>(type: "text", nullable: true),
                     TimeLimitMinutes = table.Column<int>(type: "integer", nullable: false),
+                    IsPlacementAssessment = table.Column<bool>(type: "boolean", nullable: false, defaultValue: false),
                     CertificationLevelId = table.Column<int>(type: "integer", nullable: false),
                     UserAccountId = table.Column<int>(type: "integer", nullable: true),
                     CreatedDate = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
@@ -700,8 +725,10 @@ namespace RikiPath.Infrastructure.Migrations
                 {
                     Id = table.Column<int>(type: "integer", nullable: false)
                         .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
+                    xmin = table.Column<uint>(type: "xid", rowVersion: true, nullable: false),
                     UserId = table.Column<int>(type: "integer", nullable: false),
                     SubscriptionPlanId = table.Column<int>(type: "integer", nullable: false),
+                    MentorId = table.Column<int>(type: "integer", nullable: true),
                     AmountPaid = table.Column<decimal>(type: "numeric(18,2)", nullable: false),
                     PaymentStatus = table.Column<string>(type: "character varying(20)", maxLength: 20, nullable: false),
                     PaymentTransactionId = table.Column<string>(type: "character varying(200)", maxLength: 200, nullable: true),
@@ -726,6 +753,12 @@ namespace RikiPath.Infrastructure.Migrations
                         name: "FK_UserSubscriptions_SubscriptionPlans_SubscriptionPlanId",
                         column: x => x.SubscriptionPlanId,
                         principalTable: "SubscriptionPlans",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Restrict);
+                    table.ForeignKey(
+                        name: "FK_UserSubscriptions_Users_MentorId",
+                        column: x => x.MentorId,
+                        principalTable: "Users",
                         principalColumn: "Id",
                         onDelete: ReferentialAction.Restrict);
                     table.ForeignKey(
@@ -766,18 +799,16 @@ namespace RikiPath.Infrastructure.Migrations
                 });
 
             migrationBuilder.CreateTable(
-                name: "KanaWritingPracticeCards",
+                name: "KanaWritingPracticeHistories",
                 columns: table => new
                 {
                     Id = table.Column<int>(type: "integer", nullable: false)
                         .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
-                    UserId = table.Column<int>(type: "integer", nullable: false),
-                    KanaCharacterId = table.Column<int>(type: "integer", nullable: false),
-                    EaseFactor = table.Column<double>(type: "double precision", nullable: false),
-                    IntervalDays = table.Column<int>(type: "integer", nullable: false),
-                    Repetitions = table.Column<int>(type: "integer", nullable: false),
-                    NextReviewDate = table.Column<DateTime>(type: "timestamp without time zone", nullable: false),
-                    LastReviewedAt = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
+                    KanaWritingPracticeCardId = table.Column<int>(type: "integer", nullable: false),
+                    TotalMistakes = table.Column<int>(type: "integer", nullable: false),
+                    Quality = table.Column<int>(type: "integer", nullable: false),
+                    Rating = table.Column<string>(type: "character varying(20)", maxLength: 20, nullable: false),
+                    ReviewedAt = table.Column<DateTime>(type: "timestamp without time zone", nullable: false),
                     CreatedDate = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
                     ModifiedDate = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
                     CreatedBy = table.Column<Guid>(type: "uuid", nullable: true),
@@ -786,17 +817,11 @@ namespace RikiPath.Infrastructure.Migrations
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PK_KanaWritingPracticeCards", x => x.Id);
+                    table.PrimaryKey("PK_KanaWritingPracticeHistories", x => x.Id);
                     table.ForeignKey(
-                        name: "FK_KanaWritingPracticeCards_KanaCharacters_KanaCharacterId",
-                        column: x => x.KanaCharacterId,
-                        principalTable: "KanaCharacters",
-                        principalColumn: "Id",
-                        onDelete: ReferentialAction.Restrict);
-                    table.ForeignKey(
-                        name: "FK_KanaWritingPracticeCards_Users_UserId",
-                        column: x => x.UserId,
-                        principalTable: "Users",
+                        name: "FK_KanaWritingPracticeHistories_KanaWritingPracticeCards_KanaW~",
+                        column: x => x.KanaWritingPracticeCardId,
+                        principalTable: "KanaWritingPracticeCards",
                         principalColumn: "Id",
                         onDelete: ReferentialAction.Cascade);
                 });
@@ -961,6 +986,57 @@ namespace RikiPath.Infrastructure.Migrations
                 });
 
             migrationBuilder.CreateTable(
+                name: "MentorAvailabilities",
+                columns: table => new
+                {
+                    Id = table.Column<int>(type: "integer", nullable: false)
+                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
+                    MentorWeeklyAvailabilityId = table.Column<int>(type: "integer", nullable: true),
+                    PublishedAt = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
+                    ChangeRequestReason = table.Column<string>(type: "character varying(1000)", maxLength: 1000, nullable: true),
+                    ChangeRequestedAt = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
+                    ChangeResolution = table.Column<string>(type: "character varying(1000)", maxLength: 1000, nullable: true),
+                    MentorId = table.Column<int>(type: "integer", nullable: false),
+                    StartTime = table.Column<DateTime>(type: "timestamp without time zone", nullable: false),
+                    EndTime = table.Column<DateTime>(type: "timestamp without time zone", nullable: false),
+                    RoomId = table.Column<Guid>(type: "uuid", nullable: false),
+                    MaxLearners = table.Column<int>(type: "integer", nullable: false, defaultValue: 1),
+                    BookedCount = table.Column<int>(type: "integer", nullable: false),
+                    RowVersion = table.Column<byte[]>(type: "bytea", rowVersion: true, nullable: true),
+                    xmin = table.Column<uint>(type: "xid", rowVersion: true, nullable: false),
+                    IsApproved = table.Column<bool>(type: "boolean", nullable: false),
+                    AdminName = table.Column<string>(type: "text", nullable: true),
+                    CancelRequestedAt = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
+                    CancelReason = table.Column<string>(type: "text", nullable: true),
+                    CancelRejectedAt = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
+                    CancelRejectionReason = table.Column<string>(type: "text", nullable: true),
+                    RejectedAt = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
+                    RejectionReason = table.Column<string>(type: "text", nullable: true),
+                    CreatedDate = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
+                    ModifiedDate = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
+                    CreatedBy = table.Column<Guid>(type: "uuid", nullable: true),
+                    ModifiedBy = table.Column<Guid>(type: "uuid", nullable: true),
+                    IsDeleted = table.Column<bool>(type: "boolean", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_MentorAvailabilities", x => x.Id);
+                    table.CheckConstraint("CK_MentorAvailability_BookedCount", "\"BookedCount\" >= 0 AND \"BookedCount\" <= \"MaxLearners\"");
+                    table.ForeignKey(
+                        name: "FK_MentorAvailabilities_MentorWeeklyAvailabilities_MentorWeekl~",
+                        column: x => x.MentorWeeklyAvailabilityId,
+                        principalTable: "MentorWeeklyAvailabilities",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Restrict);
+                    table.ForeignKey(
+                        name: "FK_MentorAvailabilities_Users_MentorId",
+                        column: x => x.MentorId,
+                        principalTable: "Users",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Cascade);
+                });
+
+            migrationBuilder.CreateTable(
                 name: "MockTestSections",
                 columns: table => new
                 {
@@ -998,42 +1074,6 @@ namespace RikiPath.Infrastructure.Migrations
                         principalTable: "MockTests",
                         principalColumn: "Id",
                         onDelete: ReferentialAction.Cascade);
-                });
-
-            migrationBuilder.CreateTable(
-                name: "MentorBookings",
-                columns: table => new
-                {
-                    Id = table.Column<int>(type: "integer", nullable: false)
-                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
-                    UserSubscriptionId = table.Column<int>(type: "integer", nullable: false),
-                    MentorAvailabilityId = table.Column<int>(type: "integer", nullable: true),
-                    Status = table.Column<string>(type: "character varying(20)", maxLength: 20, nullable: false),
-                    Question = table.Column<string>(type: "text", nullable: true),
-                    ScheduledAt = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
-                    MeetingLink = table.Column<string>(type: "character varying(500)", maxLength: 500, nullable: true),
-                    CompletedAt = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
-                    CreatedDate = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
-                    ModifiedDate = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
-                    CreatedBy = table.Column<Guid>(type: "uuid", nullable: true),
-                    ModifiedBy = table.Column<Guid>(type: "uuid", nullable: true),
-                    IsDeleted = table.Column<bool>(type: "boolean", nullable: false)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_MentorBookings", x => x.Id);
-                    table.ForeignKey(
-                        name: "FK_MentorBookings_MentorAvailabilities_MentorAvailabilityId",
-                        column: x => x.MentorAvailabilityId,
-                        principalTable: "MentorAvailabilities",
-                        principalColumn: "Id",
-                        onDelete: ReferentialAction.Restrict);
-                    table.ForeignKey(
-                        name: "FK_MentorBookings_UserSubscriptions_UserSubscriptionId",
-                        column: x => x.UserSubscriptionId,
-                        principalTable: "UserSubscriptions",
-                        principalColumn: "Id",
-                        onDelete: ReferentialAction.Restrict);
                 });
 
             migrationBuilder.CreateTable(
@@ -1149,34 +1189,6 @@ namespace RikiPath.Infrastructure.Migrations
                 });
 
             migrationBuilder.CreateTable(
-                name: "KanaWritingPracticeHistories",
-                columns: table => new
-                {
-                    Id = table.Column<int>(type: "integer", nullable: false)
-                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
-                    KanaWritingPracticeCardId = table.Column<int>(type: "integer", nullable: false),
-                    TotalMistakes = table.Column<int>(type: "integer", nullable: false),
-                    Quality = table.Column<int>(type: "integer", nullable: false),
-                    Rating = table.Column<string>(type: "character varying(20)", maxLength: 20, nullable: false),
-                    ReviewedAt = table.Column<DateTime>(type: "timestamp without time zone", nullable: false),
-                    CreatedDate = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
-                    ModifiedDate = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
-                    CreatedBy = table.Column<Guid>(type: "uuid", nullable: true),
-                    ModifiedBy = table.Column<Guid>(type: "uuid", nullable: true),
-                    IsDeleted = table.Column<bool>(type: "boolean", nullable: false)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_KanaWritingPracticeHistories", x => x.Id);
-                    table.ForeignKey(
-                        name: "FK_KanaWritingPracticeHistories_KanaWritingPracticeCards_KanaW~",
-                        column: x => x.KanaWritingPracticeCardId,
-                        principalTable: "KanaWritingPracticeCards",
-                        principalColumn: "Id",
-                        onDelete: ReferentialAction.Cascade);
-                });
-
-            migrationBuilder.CreateTable(
                 name: "HomeworkSubmissions",
                 columns: table => new
                 {
@@ -1280,12 +1292,52 @@ namespace RikiPath.Infrastructure.Migrations
                 });
 
             migrationBuilder.CreateTable(
+                name: "MentorBookings",
+                columns: table => new
+                {
+                    Id = table.Column<int>(type: "integer", nullable: false)
+                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
+                    xmin = table.Column<uint>(type: "xid", rowVersion: true, nullable: false),
+                    UserSubscriptionId = table.Column<int>(type: "integer", nullable: false),
+                    MentorAvailabilityId = table.Column<int>(type: "integer", nullable: true),
+                    Status = table.Column<string>(type: "character varying(20)", maxLength: 20, nullable: false),
+                    Question = table.Column<string>(type: "text", nullable: true),
+                    ScheduledAt = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
+                    MeetingLink = table.Column<string>(type: "character varying(500)", maxLength: 500, nullable: true),
+                    CompletedAt = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
+                    CreatedDate = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
+                    ModifiedDate = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
+                    CreatedBy = table.Column<Guid>(type: "uuid", nullable: true),
+                    ModifiedBy = table.Column<Guid>(type: "uuid", nullable: true),
+                    IsDeleted = table.Column<bool>(type: "boolean", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_MentorBookings", x => x.Id);
+                    table.ForeignKey(
+                        name: "FK_MentorBookings_MentorAvailabilities_MentorAvailabilityId",
+                        column: x => x.MentorAvailabilityId,
+                        principalTable: "MentorAvailabilities",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Restrict);
+                    table.ForeignKey(
+                        name: "FK_MentorBookings_UserSubscriptions_UserSubscriptionId",
+                        column: x => x.UserSubscriptionId,
+                        principalTable: "UserSubscriptions",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Restrict);
+                });
+
+            migrationBuilder.CreateTable(
                 name: "MockQuestions",
                 columns: table => new
                 {
                     Id = table.Column<int>(type: "integer", nullable: false)
                         .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
                     QuestionText = table.Column<string>(type: "text", nullable: false),
+                    QuestionType = table.Column<string>(type: "character varying(40)", maxLength: 40, nullable: false, defaultValue: "SingleChoice"),
+                    InteractionDataJson = table.Column<string>(type: "jsonb", nullable: true),
+                    AnswerKeyJson = table.Column<string>(type: "jsonb", nullable: true),
                     AudioUrl = table.Column<string>(type: "text", nullable: true),
                     ImageUrl = table.Column<string>(type: "text", nullable: true),
                     Explanation = table.Column<string>(type: "text", nullable: true),
@@ -1338,40 +1390,6 @@ namespace RikiPath.Infrastructure.Migrations
                         name: "FK_MockTestSectionResults_MockTestSections_MockTestSectionId",
                         column: x => x.MockTestSectionId,
                         principalTable: "MockTestSections",
-                        principalColumn: "Id",
-                        onDelete: ReferentialAction.Restrict);
-                });
-
-            migrationBuilder.CreateTable(
-                name: "Notes",
-                columns: table => new
-                {
-                    Id = table.Column<int>(type: "integer", nullable: false)
-                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
-                    MentorBookingId = table.Column<int>(type: "integer", nullable: false),
-                    UserId = table.Column<int>(type: "integer", nullable: false),
-                    AuthorRole = table.Column<string>(type: "text", nullable: false),
-                    Content = table.Column<string>(type: "text", nullable: true),
-                    AnsweredAt = table.Column<DateTime>(type: "timestamp without time zone", nullable: false),
-                    CreatedDate = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
-                    ModifiedDate = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
-                    CreatedBy = table.Column<Guid>(type: "uuid", nullable: true),
-                    ModifiedBy = table.Column<Guid>(type: "uuid", nullable: true),
-                    IsDeleted = table.Column<bool>(type: "boolean", nullable: false)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_Notes", x => x.Id);
-                    table.ForeignKey(
-                        name: "FK_Notes_MentorBookings_MentorBookingId",
-                        column: x => x.MentorBookingId,
-                        principalTable: "MentorBookings",
-                        principalColumn: "Id",
-                        onDelete: ReferentialAction.Cascade);
-                    table.ForeignKey(
-                        name: "FK_Notes_Users_UserId",
-                        column: x => x.UserId,
-                        principalTable: "Users",
                         principalColumn: "Id",
                         onDelete: ReferentialAction.Restrict);
                 });
@@ -1494,6 +1512,74 @@ namespace RikiPath.Infrastructure.Migrations
                 });
 
             migrationBuilder.CreateTable(
+                name: "MentorChatMessages",
+                columns: table => new
+                {
+                    Id = table.Column<int>(type: "integer", nullable: false)
+                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
+                    MentorBookingId = table.Column<int>(type: "integer", nullable: false),
+                    SenderUserId = table.Column<int>(type: "integer", nullable: false),
+                    Text = table.Column<string>(type: "character varying(2000)", maxLength: 2000, nullable: false),
+                    SentAt = table.Column<DateTime>(type: "timestamp without time zone", nullable: false),
+                    ReadAt = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
+                    CreatedDate = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
+                    ModifiedDate = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
+                    CreatedBy = table.Column<Guid>(type: "uuid", nullable: true),
+                    ModifiedBy = table.Column<Guid>(type: "uuid", nullable: true),
+                    IsDeleted = table.Column<bool>(type: "boolean", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_MentorChatMessages", x => x.Id);
+                    table.ForeignKey(
+                        name: "FK_MentorChatMessages_MentorBookings_MentorBookingId",
+                        column: x => x.MentorBookingId,
+                        principalTable: "MentorBookings",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Cascade);
+                    table.ForeignKey(
+                        name: "FK_MentorChatMessages_Users_SenderUserId",
+                        column: x => x.SenderUserId,
+                        principalTable: "Users",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Restrict);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "Notes",
+                columns: table => new
+                {
+                    Id = table.Column<int>(type: "integer", nullable: false)
+                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
+                    MentorBookingId = table.Column<int>(type: "integer", nullable: false),
+                    UserId = table.Column<int>(type: "integer", nullable: false),
+                    AuthorRole = table.Column<string>(type: "text", nullable: false),
+                    Content = table.Column<string>(type: "text", nullable: true),
+                    AnsweredAt = table.Column<DateTime>(type: "timestamp without time zone", nullable: false),
+                    CreatedDate = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
+                    ModifiedDate = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
+                    CreatedBy = table.Column<Guid>(type: "uuid", nullable: true),
+                    ModifiedBy = table.Column<Guid>(type: "uuid", nullable: true),
+                    IsDeleted = table.Column<bool>(type: "boolean", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_Notes", x => x.Id);
+                    table.ForeignKey(
+                        name: "FK_Notes_MentorBookings_MentorBookingId",
+                        column: x => x.MentorBookingId,
+                        principalTable: "MentorBookings",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Cascade);
+                    table.ForeignKey(
+                        name: "FK_Notes_Users_UserId",
+                        column: x => x.UserId,
+                        principalTable: "Users",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Restrict);
+                });
+
+            migrationBuilder.CreateTable(
                 name: "MockQuestionOptions",
                 columns: table => new
                 {
@@ -1596,6 +1682,7 @@ namespace RikiPath.Infrastructure.Migrations
                     PracticeTestAttemptId = table.Column<int>(type: "integer", nullable: false),
                     PracticeQuestionId = table.Column<int>(type: "integer", nullable: false),
                     SelectedOptionId = table.Column<int>(type: "integer", nullable: true),
+                    ResponseJson = table.Column<string>(type: "jsonb", nullable: true),
                     IsCorrect = table.Column<bool>(type: "boolean", nullable: false),
                     CreatedDate = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
                     ModifiedDate = table.Column<DateTime>(type: "timestamp without time zone", nullable: true),
@@ -1647,6 +1734,105 @@ namespace RikiPath.Infrastructure.Migrations
                 });
 
             migrationBuilder.InsertData(
+                table: "KanaCharacters",
+                columns: new[] { "Id", "AudioUrl", "Character", "CreatedBy", "CreatedDate", "IsDeleted", "ModifiedBy", "ModifiedDate", "Romaji", "StrokeCount", "StrokeOrderImageUrl", "Type" },
+                values: new object[,]
+                {
+                    { 1, "https://upload.wikimedia.org/wikipedia/commons/2/22/Ja-a.ogg", "あ", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6493), false, null, null, "a", 3, null, "Hiragana" },
+                    { 2, "https://upload.wikimedia.org/wikipedia/commons/2/28/Ja-i.ogg", "い", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6507), false, null, null, "i", 2, null, "Hiragana" },
+                    { 3, "https://upload.wikimedia.org/wikipedia/commons/a/a2/Ja-u.ogg", "う", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6509), false, null, null, "u", 2, null, "Hiragana" },
+                    { 4, "https://upload.wikimedia.org/wikipedia/commons/2/21/Ja-e.ogg", "え", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6510), false, null, null, "e", 2, null, "Hiragana" },
+                    { 5, "https://upload.wikimedia.org/wikipedia/commons/d/df/Ja-o.ogg", "お", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6512), false, null, null, "o", 3, null, "Hiragana" },
+                    { 6, "https://upload.wikimedia.org/wikipedia/commons/2/2e/Ja-ka.ogg", "か", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6516), false, null, null, "ka", 3, null, "Hiragana" },
+                    { 7, "https://upload.wikimedia.org/wikipedia/commons/8/87/Ja-ki.ogg", "き", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6517), false, null, null, "ki", 4, null, "Hiragana" },
+                    { 8, "https://upload.wikimedia.org/wikipedia/commons/a/a3/Ja-ku.ogg", "く", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6519), false, null, null, "ku", 1, null, "Hiragana" },
+                    { 9, "https://upload.wikimedia.org/wikipedia/commons/b/b3/Ja-ke.ogg", "け", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6520), false, null, null, "ke", 3, null, "Hiragana" },
+                    { 10, "https://upload.wikimedia.org/wikipedia/commons/1/18/Ja-ko.ogg", "こ", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6522), false, null, null, "ko", 2, null, "Hiragana" },
+                    { 11, "https://upload.wikimedia.org/wikipedia/commons/a/a9/Ja-sa.ogg", "さ", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6523), false, null, null, "sa", 3, null, "Hiragana" },
+                    { 12, "https://upload.wikimedia.org/wikipedia/commons/8/80/Ja-shi.ogg", "し", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6525), false, null, null, "shi", 1, null, "Hiragana" },
+                    { 13, "https://upload.wikimedia.org/wikipedia/commons/a/a7/Ja-su.ogg", "す", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6526), false, null, null, "su", 2, null, "Hiragana" },
+                    { 14, "https://upload.wikimedia.org/wikipedia/commons/a/a8/Ja-se.ogg", "せ", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6528), false, null, null, "se", 3, null, "Hiragana" },
+                    { 15, "https://upload.wikimedia.org/wikipedia/commons/0/00/Ja-so.ogg", "そ", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6529), false, null, null, "so", 1, null, "Hiragana" },
+                    { 16, "https://upload.wikimedia.org/wikipedia/commons/d/d2/Ja-ta.ogg", "た", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6574), false, null, null, "ta", 4, null, "Hiragana" },
+                    { 17, "https://upload.wikimedia.org/wikipedia/commons/3/38/Ja-chi.ogg", "ち", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6576), false, null, null, "chi", 2, null, "Hiragana" },
+                    { 18, "https://upload.wikimedia.org/wikipedia/commons/3/32/Ja-tsu.ogg", "つ", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6578), false, null, null, "tsu", 1, null, "Hiragana" },
+                    { 19, "https://upload.wikimedia.org/wikipedia/commons/1/10/Ja-te.ogg", "て", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6580), false, null, null, "te", 1, null, "Hiragana" },
+                    { 20, "https://upload.wikimedia.org/wikipedia/commons/a/a5/Ja-to.ogg", "と", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6581), false, null, null, "to", 2, null, "Hiragana" },
+                    { 21, "https://upload.wikimedia.org/wikipedia/commons/9/92/Ja-na.ogg", "な", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6582), false, null, null, "na", 4, null, "Hiragana" },
+                    { 22, "https://upload.wikimedia.org/wikipedia/commons/b/b7/Ja-ni.ogg", "に", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6584), false, null, null, "ni", 3, null, "Hiragana" },
+                    { 23, "https://upload.wikimedia.org/wikipedia/commons/b/b1/Ja-nu.ogg", "ぬ", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6585), false, null, null, "nu", 2, null, "Hiragana" },
+                    { 24, "https://upload.wikimedia.org/wikipedia/commons/8/86/Ja-ne.ogg", "ね", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6587), false, null, null, "ne", 2, null, "Hiragana" },
+                    { 25, "https://upload.wikimedia.org/wikipedia/commons/5/54/Ja-no.ogg", "の", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6589), false, null, null, "no", 1, null, "Hiragana" },
+                    { 26, "https://upload.wikimedia.org/wikipedia/commons/0/08/Ja-ha.ogg", "は", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6590), false, null, null, "ha", 3, null, "Hiragana" },
+                    { 27, "https://upload.wikimedia.org/wikipedia/commons/9/99/Ja-hi.ogg", "ひ", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6591), false, null, null, "hi", 1, null, "Hiragana" },
+                    { 28, "https://upload.wikimedia.org/wikipedia/commons/7/70/Ja-fu.ogg", "ふ", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6593), false, null, null, "fu", 4, null, "Hiragana" },
+                    { 29, "https://upload.wikimedia.org/wikipedia/commons/2/2a/Ja-he.ogg", "へ", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6594), false, null, null, "he", 1, null, "Hiragana" },
+                    { 30, "https://upload.wikimedia.org/wikipedia/commons/a/a4/Ja-ho.ogg", "ほ", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6596), false, null, null, "ho", 4, null, "Hiragana" },
+                    { 31, "https://upload.wikimedia.org/wikipedia/commons/0/0d/Ja-ma.ogg", "ま", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6597), false, null, null, "ma", 3, null, "Hiragana" },
+                    { 32, "https://upload.wikimedia.org/wikipedia/commons/1/16/Ja-mi.ogg", "み", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6599), false, null, null, "mi", 2, null, "Hiragana" },
+                    { 33, "https://upload.wikimedia.org/wikipedia/commons/e/eb/Ja-mu.ogg", "む", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6600), false, null, null, "mu", 3, null, "Hiragana" },
+                    { 34, "https://upload.wikimedia.org/wikipedia/commons/8/8b/Ja-me.ogg", "め", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6602), false, null, null, "me", 2, null, "Hiragana" },
+                    { 35, "https://upload.wikimedia.org/wikipedia/commons/c/c1/Ja-mo.ogg", "も", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6604), false, null, null, "mo", 3, null, "Hiragana" },
+                    { 36, "https://upload.wikimedia.org/wikipedia/commons/e/e8/Ja-ya.ogg", "や", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6605), false, null, null, "ya", 3, null, "Hiragana" },
+                    { 37, "https://upload.wikimedia.org/wikipedia/commons/7/7b/Ja-yu.ogg", "ゆ", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6607), false, null, null, "yu", 2, null, "Hiragana" },
+                    { 38, "https://upload.wikimedia.org/wikipedia/commons/c/c9/Ja-yo.ogg", "よ", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6608), false, null, null, "yo", 2, null, "Hiragana" },
+                    { 39, "https://upload.wikimedia.org/wikipedia/commons/0/04/Ja-ra.ogg", "ら", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6610), false, null, null, "ra", 2, null, "Hiragana" },
+                    { 40, "https://upload.wikimedia.org/wikipedia/commons/7/76/Ja-ri.ogg", "り", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6695), false, null, null, "ri", 2, null, "Hiragana" },
+                    { 41, "https://upload.wikimedia.org/wikipedia/commons/5/56/Ja-ru.ogg", "る", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6697), false, null, null, "ru", 1, null, "Hiragana" },
+                    { 42, "https://upload.wikimedia.org/wikipedia/commons/5/57/Ja-re.ogg", "れ", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6698), false, null, null, "re", 2, null, "Hiragana" },
+                    { 43, "https://upload.wikimedia.org/wikipedia/commons/e/ed/Ja-ro.ogg", "ろ", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6700), false, null, null, "ro", 1, null, "Hiragana" },
+                    { 44, "https://upload.wikimedia.org/wikipedia/commons/f/f2/Ja-wa.ogg", "わ", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6701), false, null, null, "wa", 2, null, "Hiragana" },
+                    { 45, "https://upload.wikimedia.org/wikipedia/commons/7/77/Ja-wo.ogg", "を", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6702), false, null, null, "wo", 3, null, "Hiragana" },
+                    { 46, "https://upload.wikimedia.org/wikipedia/commons/0/0c/Ja-n.ogg", "ん", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6704), false, null, null, "n", 1, null, "Hiragana" },
+                    { 47, "https://upload.wikimedia.org/wikipedia/commons/2/22/Ja-a.ogg", "ア", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6739), false, null, null, "a", 2, null, "Katakana" },
+                    { 48, "https://upload.wikimedia.org/wikipedia/commons/2/28/Ja-i.ogg", "イ", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6742), false, null, null, "i", 2, null, "Katakana" },
+                    { 49, "https://upload.wikimedia.org/wikipedia/commons/a/a2/Ja-u.ogg", "ウ", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6744), false, null, null, "u", 3, null, "Katakana" },
+                    { 50, "https://upload.wikimedia.org/wikipedia/commons/2/21/Ja-e.ogg", "エ", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6745), false, null, null, "e", 3, null, "Katakana" },
+                    { 51, "https://upload.wikimedia.org/wikipedia/commons/d/df/Ja-o.ogg", "オ", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6746), false, null, null, "o", 3, null, "Katakana" },
+                    { 52, "https://upload.wikimedia.org/wikipedia/commons/2/2e/Ja-ka.ogg", "カ", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6748), false, null, null, "ka", 2, null, "Katakana" },
+                    { 53, "https://upload.wikimedia.org/wikipedia/commons/8/87/Ja-ki.ogg", "キ", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6749), false, null, null, "ki", 3, null, "Katakana" },
+                    { 54, "https://upload.wikimedia.org/wikipedia/commons/a/a3/Ja-ku.ogg", "ク", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6750), false, null, null, "ku", 2, null, "Katakana" },
+                    { 55, "https://upload.wikimedia.org/wikipedia/commons/b/b3/Ja-ke.ogg", "ケ", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6752), false, null, null, "ke", 3, null, "Katakana" },
+                    { 56, "https://upload.wikimedia.org/wikipedia/commons/1/18/Ja-ko.ogg", "コ", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6753), false, null, null, "ko", 2, null, "Katakana" },
+                    { 57, "https://upload.wikimedia.org/wikipedia/commons/a/a9/Ja-sa.ogg", "サ", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6755), false, null, null, "sa", 3, null, "Katakana" },
+                    { 58, "https://upload.wikimedia.org/wikipedia/commons/8/80/Ja-shi.ogg", "シ", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6756), false, null, null, "shi", 3, null, "Katakana" },
+                    { 59, "https://upload.wikimedia.org/wikipedia/commons/a/a7/Ja-su.ogg", "ス", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6757), false, null, null, "su", 2, null, "Katakana" },
+                    { 60, "https://upload.wikimedia.org/wikipedia/commons/a/a8/Ja-se.ogg", "セ", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6759), false, null, null, "se", 2, null, "Katakana" },
+                    { 61, "https://upload.wikimedia.org/wikipedia/commons/0/00/Ja-so.ogg", "ソ", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6760), false, null, null, "so", 2, null, "Katakana" },
+                    { 62, "https://upload.wikimedia.org/wikipedia/commons/d/d2/Ja-ta.ogg", "タ", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6831), false, null, null, "ta", 3, null, "Katakana" },
+                    { 63, "https://upload.wikimedia.org/wikipedia/commons/3/38/Ja-chi.ogg", "チ", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6833), false, null, null, "chi", 3, null, "Katakana" },
+                    { 64, "https://upload.wikimedia.org/wikipedia/commons/3/32/Ja-tsu.ogg", "ツ", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6835), false, null, null, "tsu", 3, null, "Katakana" },
+                    { 65, "https://upload.wikimedia.org/wikipedia/commons/1/10/Ja-te.ogg", "テ", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6836), false, null, null, "te", 3, null, "Katakana" },
+                    { 66, "https://upload.wikimedia.org/wikipedia/commons/a/a5/Ja-to.ogg", "ト", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6839), false, null, null, "to", 2, null, "Katakana" },
+                    { 67, "https://upload.wikimedia.org/wikipedia/commons/9/92/Ja-na.ogg", "ナ", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6840), false, null, null, "na", 2, null, "Katakana" },
+                    { 68, "https://upload.wikimedia.org/wikipedia/commons/b/b7/Ja-ni.ogg", "ニ", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6842), false, null, null, "ni", 2, null, "Katakana" },
+                    { 69, "https://upload.wikimedia.org/wikipedia/commons/b/b1/Ja-nu.ogg", "ヌ", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6843), false, null, null, "nu", 2, null, "Katakana" },
+                    { 70, "https://upload.wikimedia.org/wikipedia/commons/8/86/Ja-ne.ogg", "ネ", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6845), false, null, null, "ne", 4, null, "Katakana" },
+                    { 71, "https://upload.wikimedia.org/wikipedia/commons/5/54/Ja-no.ogg", "ノ", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6846), false, null, null, "no", 1, null, "Katakana" },
+                    { 72, "https://upload.wikimedia.org/wikipedia/commons/0/08/Ja-ha.ogg", "ハ", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6847), false, null, null, "ha", 2, null, "Katakana" },
+                    { 73, "https://upload.wikimedia.org/wikipedia/commons/9/99/Ja-hi.ogg", "ヒ", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6848), false, null, null, "hi", 2, null, "Katakana" },
+                    { 74, "https://upload.wikimedia.org/wikipedia/commons/7/70/Ja-fu.ogg", "フ", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6850), false, null, null, "fu", 1, null, "Katakana" },
+                    { 75, "https://upload.wikimedia.org/wikipedia/commons/2/2a/Ja-he.ogg", "ヘ", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6851), false, null, null, "he", 1, null, "Katakana" },
+                    { 76, "https://upload.wikimedia.org/wikipedia/commons/a/a4/Ja-ho.ogg", "ホ", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6852), false, null, null, "ho", 4, null, "Katakana" },
+                    { 77, "https://upload.wikimedia.org/wikipedia/commons/0/0d/Ja-ma.ogg", "マ", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6854), false, null, null, "ma", 2, null, "Katakana" },
+                    { 78, "https://upload.wikimedia.org/wikipedia/commons/1/16/Ja-mi.ogg", "ミ", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6855), false, null, null, "mi", 3, null, "Katakana" },
+                    { 79, "https://upload.wikimedia.org/wikipedia/commons/e/eb/Ja-mu.ogg", "ム", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6857), false, null, null, "mu", 2, null, "Katakana" },
+                    { 80, "https://upload.wikimedia.org/wikipedia/commons/8/8b/Ja-me.ogg", "メ", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6858), false, null, null, "me", 2, null, "Katakana" },
+                    { 81, "https://upload.wikimedia.org/wikipedia/commons/c/c1/Ja-mo.ogg", "モ", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6860), false, null, null, "mo", 3, null, "Katakana" },
+                    { 82, "https://upload.wikimedia.org/wikipedia/commons/e/e8/Ja-ya.ogg", "ヤ", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6861), false, null, null, "ya", 2, null, "Katakana" },
+                    { 83, "https://upload.wikimedia.org/wikipedia/commons/7/7b/Ja-yu.ogg", "ユ", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6863), false, null, null, "yu", 2, null, "Katakana" },
+                    { 84, "https://upload.wikimedia.org/wikipedia/commons/c/c9/Ja-yo.ogg", "ヨ", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6864), false, null, null, "yo", 3, null, "Katakana" },
+                    { 85, "https://upload.wikimedia.org/wikipedia/commons/0/04/Ja-ra.ogg", "ラ", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6865), false, null, null, "ra", 2, null, "Katakana" },
+                    { 86, "https://upload.wikimedia.org/wikipedia/commons/7/76/Ja-ri.ogg", "リ", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6914), false, null, null, "ri", 2, null, "Katakana" },
+                    { 87, "https://upload.wikimedia.org/wikipedia/commons/5/56/Ja-ru.ogg", "ル", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6916), false, null, null, "ru", 2, null, "Katakana" },
+                    { 88, "https://upload.wikimedia.org/wikipedia/commons/5/57/Ja-re.ogg", "レ", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6917), false, null, null, "re", 1, null, "Katakana" },
+                    { 89, "https://upload.wikimedia.org/wikipedia/commons/e/ed/Ja-ro.ogg", "ロ", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6919), false, null, null, "ro", 3, null, "Katakana" },
+                    { 90, "https://upload.wikimedia.org/wikipedia/commons/f/f2/Ja-wa.ogg", "ワ", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6920), false, null, null, "wa", 2, null, "Katakana" },
+                    { 91, "https://upload.wikimedia.org/wikipedia/commons/7/77/Ja-wo.ogg", "ヲ", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6922), false, null, null, "wo", 3, null, "Katakana" },
+                    { 92, "https://upload.wikimedia.org/wikipedia/commons/0/0c/Ja-n.ogg", "ン", null, new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6923), false, null, null, "n", 2, null, "Katakana" }
+                });
+
+            migrationBuilder.InsertData(
                 table: "Kanjis",
                 columns: new[] { "Id", "AudioUrl", "Character", "CreatedBy", "CreatedDate", "IsDeleted", "KunYomi", "Meaning", "ModifiedBy", "ModifiedDate", "OnYomi", "SinoVietnamese", "StrokeCount", "StrokeOrderImageUrl", "UserAccountId" },
                 values: new object[,]
@@ -1691,22 +1877,22 @@ namespace RikiPath.Infrastructure.Migrations
             migrationBuilder.InsertData(
                 table: "SubscriptionPlans",
                 columns: new[] { "Id", "AiGradingQuota", "CreatedBy", "CreatedDate", "Description", "DurationDays", "IsActive", "IsDeleted", "IsPopular", "IsTrial", "MeetingSessionCount", "ModifiedBy", "ModifiedDate", "Name", "Price", "SortOrder" },
-                values: new object[] { 7, 0, null, new DateTime(2026, 10, 1, 0, 0, 0, 0, DateTimeKind.Utc), "Gói demo gồm 12 buổi ôn luyện 1-1 với Mentor, thời hạn 90 ngày. Dữ liệu thanh toán demo được seed để kiểm thử đặt lịch trên frontend.", 90, true, false, false, false, 12, null, null, "Meeting 1-1 với Mentor - 12 buổi", 459000m, 7 });
+                values: new object[] { 7, 0, null, new DateTime(2026, 10, 1, 0, 0, 0, 0, DateTimeKind.Utc), "Gói demo gồm 12 buổi ôn luyện 1-1 với Mentor, thời hạn 90 ngày. Dữ liệu thanh toán demo được seed để kiểm thử đặt lịch trên frontend.", 90, true, false, false, false, 12, null, null, "Meeting 1-1 với Mentor - 12 buổi", 1000m, 7 });
 
             migrationBuilder.InsertData(
                 table: "Users",
-                columns: new[] { "Id", "AvatarUrl", "CreatedBy", "CreatedDate", "CurrentStreak", "DailyStudyMinutes", "Email", "EmailNotificationsEnabled", "FirebaseUid", "FirstName", "IsDeleted", "IsEmailVerified", "IsPhoneVerified", "LastName", "LastStudyDate", "LongestStreak", "ModifiedBy", "ModifiedDate", "PasswordHash", "PasswordSalt", "PhoneNumber", "Role", "StudyTimePreference", "SystemNotificationsEnabled", "TargetCertificationLevelId" },
+                columns: new[] { "Id", "AvatarUrl", "CreatedBy", "CreatedDate", "CurrentStreak", "DailyStudyMinutes", "Email", "EmailNotificationsEnabled", "FirebaseUid", "FirstName", "IsDeleted", "IsEmailVerified", "IsPhoneVerified", "LastName", "LastStudyDate", "LongestStreak", "ModifiedBy", "ModifiedDate", "PasswordHash", "PasswordSalt", "PhoneNumber", "Role", "StudyTimePreference", "SystemNotificationsEnabled", "TargetCertificationLevelId", "TargetExamDate" },
                 values: new object[,]
                 {
-                    { 900001, null, null, new DateTime(2026, 9, 28, 0, 0, 0, 0, DateTimeKind.Utc), 0, 30, "admin@rikipath.local", true, null, "Admin", false, true, false, "System", null, 0, null, null, new byte[] { 91, 215, 217, 54, 239, 206, 181, 216, 143, 33, 82, 211, 9, 70, 197, 173, 197, 0, 72, 71, 59, 150, 46, 114, 96, 137, 52, 174, 137, 29, 196, 61, 50, 254, 249, 101, 114, 92, 149, 32, 55, 127, 205, 126, 216, 147, 197, 192, 248, 173, 158, 92, 104, 42, 195, 107, 150, 15, 3, 74, 103, 104, 3, 229 }, new byte[] { 61, 240, 150, 172, 239, 48, 224, 17, 192, 54, 50, 58, 91, 100, 55, 168, 18, 69, 137, 112, 110, 59, 180, 37, 201, 241, 143, 238, 139, 33, 128, 70, 87, 158, 235, 219, 229, 184, 94, 72, 41, 160, 160, 197, 158, 217, 128, 188, 156, 255, 147, 13, 151, 37, 133, 164, 9, 252, 175, 124, 21, 15, 152, 196 }, null, "Admin", null, true, null },
-                    { 900002, null, null, new DateTime(2026, 9, 28, 0, 0, 0, 0, DateTimeKind.Utc), 0, 30, "mentor1@rikipath.local", true, null, "Mentor", false, true, false, "One", null, 0, null, null, new byte[] { 17, 253, 106, 25, 89, 176, 204, 31, 142, 252, 245, 31, 64, 101, 213, 135, 164, 116, 40, 46, 173, 175, 8, 0, 69, 101, 65, 4, 90, 25, 176, 223, 153, 237, 220, 94, 55, 133, 227, 181, 70, 97, 155, 122, 50, 139, 216, 136, 88, 52, 76, 98, 250, 64, 52, 71, 146, 221, 225, 137, 106, 6, 178, 239 }, new byte[] { 233, 77, 244, 252, 171, 97, 38, 140, 50, 138, 10, 54, 122, 165, 186, 85, 129, 82, 49, 10, 98, 44, 165, 57, 50, 7, 238, 166, 142, 224, 94, 49, 134, 226, 247, 110, 154, 139, 99, 204, 95, 39, 171, 235, 212, 26, 217, 87, 139, 118, 253, 125, 241, 255, 57, 22, 140, 171, 11, 168, 174, 202, 32, 17 }, null, "Mentor", null, true, null },
-                    { 900003, null, null, new DateTime(2026, 9, 28, 0, 0, 0, 0, DateTimeKind.Utc), 0, 30, "mentor2@rikipath.local", true, null, "Mentor", false, true, false, "Two", null, 0, null, null, new byte[] { 93, 130, 109, 171, 238, 187, 245, 15, 202, 89, 247, 220, 95, 192, 246, 138, 5, 75, 250, 28, 208, 28, 51, 79, 127, 28, 214, 237, 93, 221, 108, 26, 152, 66, 73, 65, 11, 147, 154, 102, 113, 49, 51, 24, 51, 197, 248, 254, 22, 98, 87, 249, 250, 104, 131, 74, 16, 18, 179, 200, 3, 3, 79, 47 }, new byte[] { 240, 155, 254, 183, 129, 162, 74, 247, 41, 9, 67, 242, 128, 8, 226, 85, 5, 104, 104, 72, 101, 75, 130, 95, 47, 101, 116, 89, 207, 23, 119, 178, 38, 180, 185, 145, 58, 115, 14, 30, 85, 216, 169, 133, 94, 115, 11, 117, 96, 87, 227, 240, 204, 48, 51, 144, 170, 248, 167, 56, 175, 194, 253, 135 }, null, "Mentor", null, true, null },
-                    { 900004, null, null, new DateTime(2026, 9, 28, 0, 0, 0, 0, DateTimeKind.Utc), 0, 30, "author1@rikipath.local", true, null, "Content", false, true, false, "Author One", null, 0, null, null, new byte[] { 168, 249, 82, 144, 178, 145, 94, 164, 34, 152, 2, 74, 204, 105, 84, 145, 96, 199, 153, 136, 110, 82, 114, 113, 22, 139, 117, 143, 50, 239, 197, 4, 51, 189, 137, 48, 175, 14, 104, 164, 218, 249, 148, 217, 33, 44, 202, 128, 237, 183, 110, 228, 185, 36, 209, 254, 183, 182, 55, 1, 78, 16, 234, 50 }, new byte[] { 19, 216, 84, 143, 3, 184, 50, 39, 209, 137, 149, 82, 224, 206, 6, 240, 237, 242, 172, 27, 55, 92, 242, 101, 149, 76, 104, 38, 176, 43, 40, 8, 102, 202, 146, 224, 62, 43, 147, 132, 2, 158, 81, 170, 29, 103, 76, 248, 101, 105, 213, 205, 32, 51, 59, 39, 221, 11, 135, 250, 193, 8, 78, 219 }, null, "ContentAuthor", null, true, null },
-                    { 900005, null, null, new DateTime(2026, 9, 28, 0, 0, 0, 0, DateTimeKind.Utc), 0, 30, "author2@rikipath.local", true, null, "Content", false, true, false, "Author Two", null, 0, null, null, new byte[] { 189, 121, 9, 1, 230, 137, 43, 239, 79, 56, 195, 196, 66, 116, 42, 1, 137, 55, 54, 249, 55, 231, 79, 224, 182, 182, 199, 133, 100, 39, 138, 5, 223, 215, 48, 46, 60, 214, 49, 88, 42, 186, 232, 116, 237, 89, 55, 144, 4, 78, 215, 231, 237, 220, 96, 225, 202, 97, 61, 165, 246, 28, 126, 198 }, new byte[] { 66, 178, 77, 56, 234, 206, 29, 78, 136, 190, 160, 142, 226, 249, 14, 17, 26, 101, 167, 36, 193, 55, 150, 94, 239, 81, 69, 54, 81, 171, 80, 22, 208, 38, 242, 2, 55, 171, 64, 38, 48, 224, 36, 216, 133, 132, 147, 100, 174, 32, 65, 134, 128, 35, 50, 138, 204, 59, 167, 96, 11, 128, 101, 102 }, null, "ContentAuthor", null, true, null },
-                    { 900006, null, null, new DateTime(2026, 9, 28, 0, 0, 0, 0, DateTimeKind.Utc), 0, 30, "learner.meeting@rikipath.local", true, null, "Meeting", false, true, false, "Test Learner", null, 0, null, null, new byte[] { 9, 206, 219, 58, 155, 234, 107, 145, 121, 174, 134, 51, 96, 253, 64, 216, 157, 114, 92, 36, 123, 206, 67, 217, 207, 166, 54, 71, 254, 251, 156, 200, 185, 110, 198, 135, 221, 146, 243, 40, 237, 229, 16, 133, 163, 161, 156, 79, 138, 103, 85, 25, 114, 81, 99, 182, 25, 73, 212, 198, 212, 192, 54, 129 }, new byte[] { 231, 202, 97, 95, 11, 9, 242, 47, 62, 77, 67, 36, 170, 78, 120, 81, 56, 69, 47, 36, 209, 212, 107, 244, 15, 34, 189, 110, 57, 66, 205, 213, 224, 19, 245, 192, 104, 146, 130, 44, 54, 107, 2, 15, 109, 136, 118, 220, 228, 44, 110, 219, 31, 100, 161, 164, 63, 231, 196, 79, 120, 106, 181, 71 }, null, "Learner", null, true, null },
-                    { 900007, null, null, new DateTime(2026, 9, 28, 0, 0, 0, 0, DateTimeKind.Utc), 0, 30, "learner2.meeting@rikipath.local", true, null, "Linh", false, true, false, "Nguyen", null, 0, null, null, new byte[] { 217, 79, 50, 159, 85, 88, 67, 15, 23, 182, 103, 80, 220, 85, 86, 173, 204, 186, 57, 67, 183, 165, 253, 243, 150, 250, 150, 190, 122, 252, 55, 169, 85, 236, 69, 106, 19, 219, 244, 42, 239, 30, 189, 176, 52, 47, 30, 28, 125, 31, 162, 255, 61, 3, 238, 201, 168, 88, 161, 42, 216, 86, 172, 219 }, new byte[] { 85, 97, 108, 158, 219, 70, 81, 106, 73, 23, 205, 163, 105, 159, 117, 19, 175, 147, 178, 99, 112, 116, 163, 243, 109, 178, 129, 229, 245, 175, 91, 174, 66, 198, 122, 88, 80, 68, 160, 64, 85, 118, 105, 41, 135, 89, 49, 160, 120, 13, 116, 148, 255, 27, 157, 207, 106, 203, 127, 74, 19, 61, 148, 120 }, null, "Learner", null, true, null },
-                    { 900008, null, null, new DateTime(2026, 9, 28, 0, 0, 0, 0, DateTimeKind.Utc), 0, 30, "learner3.meeting@rikipath.local", true, null, "Minh", false, true, false, "Tran", null, 0, null, null, new byte[] { 84, 97, 164, 196, 63, 151, 182, 39, 139, 242, 152, 22, 179, 33, 174, 113, 0, 236, 253, 114, 234, 242, 209, 76, 196, 162, 143, 195, 180, 3, 178, 193, 205, 230, 18, 114, 49, 151, 198, 217, 254, 21, 94, 176, 146, 214, 235, 122, 28, 241, 164, 161, 4, 161, 209, 38, 102, 179, 31, 107, 157, 25, 35, 63 }, new byte[] { 26, 188, 78, 205, 57, 115, 100, 129, 148, 135, 165, 205, 148, 203, 245, 36, 244, 177, 9, 104, 120, 140, 21, 164, 36, 75, 122, 51, 115, 69, 174, 180, 120, 155, 62, 37, 97, 227, 212, 134, 200, 7, 66, 255, 219, 10, 140, 149, 67, 86, 164, 170, 142, 165, 181, 103, 47, 100, 238, 24, 178, 29, 171, 226 }, null, "Learner", null, true, null },
-                    { 900009, null, null, new DateTime(2026, 9, 28, 0, 0, 0, 0, DateTimeKind.Utc), 0, 30, "learner4.meeting@rikipath.local", true, null, "Hoang", false, true, false, "Pham", null, 0, null, null, new byte[] { 42, 30, 236, 129, 234, 192, 63, 84, 148, 163, 154, 246, 107, 147, 189, 95, 33, 141, 196, 67, 181, 51, 157, 136, 93, 228, 237, 165, 164, 49, 4, 146, 87, 84, 9, 47, 28, 59, 33, 130, 37, 63, 43, 229, 8, 178, 123, 74, 61, 159, 235, 68, 217, 51, 225, 29, 201, 104, 44, 152, 53, 255, 199, 28 }, new byte[] { 83, 214, 138, 3, 142, 91, 229, 97, 238, 61, 48, 237, 80, 82, 112, 249, 166, 81, 53, 95, 170, 120, 13, 87, 113, 159, 60, 37, 75, 229, 226, 107, 229, 89, 60, 57, 109, 196, 235, 81, 145, 154, 110, 120, 141, 13, 142, 77, 41, 132, 58, 80, 154, 57, 226, 168, 176, 251, 113, 167, 242, 139, 7, 177 }, null, "Learner", null, true, null }
+                    { 900001, null, null, new DateTime(2026, 9, 28, 0, 0, 0, 0, DateTimeKind.Utc), 0, 30, "admin@rikipath.local", true, null, "Admin", false, true, false, "System", null, 0, null, null, new byte[] { 91, 215, 217, 54, 239, 206, 181, 216, 143, 33, 82, 211, 9, 70, 197, 173, 197, 0, 72, 71, 59, 150, 46, 114, 96, 137, 52, 174, 137, 29, 196, 61, 50, 254, 249, 101, 114, 92, 149, 32, 55, 127, 205, 126, 216, 147, 197, 192, 248, 173, 158, 92, 104, 42, 195, 107, 150, 15, 3, 74, 103, 104, 3, 229 }, new byte[] { 61, 240, 150, 172, 239, 48, 224, 17, 192, 54, 50, 58, 91, 100, 55, 168, 18, 69, 137, 112, 110, 59, 180, 37, 201, 241, 143, 238, 139, 33, 128, 70, 87, 158, 235, 219, 229, 184, 94, 72, 41, 160, 160, 197, 158, 217, 128, 188, 156, 255, 147, 13, 151, 37, 133, 164, 9, 252, 175, 124, 21, 15, 152, 196 }, null, "Admin", null, true, null, null },
+                    { 900002, null, null, new DateTime(2026, 9, 28, 0, 0, 0, 0, DateTimeKind.Utc), 0, 30, "mentor1@rikipath.local", true, null, "Mentor", false, true, false, "One", null, 0, null, null, new byte[] { 17, 253, 106, 25, 89, 176, 204, 31, 142, 252, 245, 31, 64, 101, 213, 135, 164, 116, 40, 46, 173, 175, 8, 0, 69, 101, 65, 4, 90, 25, 176, 223, 153, 237, 220, 94, 55, 133, 227, 181, 70, 97, 155, 122, 50, 139, 216, 136, 88, 52, 76, 98, 250, 64, 52, 71, 146, 221, 225, 137, 106, 6, 178, 239 }, new byte[] { 233, 77, 244, 252, 171, 97, 38, 140, 50, 138, 10, 54, 122, 165, 186, 85, 129, 82, 49, 10, 98, 44, 165, 57, 50, 7, 238, 166, 142, 224, 94, 49, 134, 226, 247, 110, 154, 139, 99, 204, 95, 39, 171, 235, 212, 26, 217, 87, 139, 118, 253, 125, 241, 255, 57, 22, 140, 171, 11, 168, 174, 202, 32, 17 }, null, "Mentor", null, true, null, null },
+                    { 900003, null, null, new DateTime(2026, 9, 28, 0, 0, 0, 0, DateTimeKind.Utc), 0, 30, "mentor2@rikipath.local", true, null, "Mentor", false, true, false, "Two", null, 0, null, null, new byte[] { 93, 130, 109, 171, 238, 187, 245, 15, 202, 89, 247, 220, 95, 192, 246, 138, 5, 75, 250, 28, 208, 28, 51, 79, 127, 28, 214, 237, 93, 221, 108, 26, 152, 66, 73, 65, 11, 147, 154, 102, 113, 49, 51, 24, 51, 197, 248, 254, 22, 98, 87, 249, 250, 104, 131, 74, 16, 18, 179, 200, 3, 3, 79, 47 }, new byte[] { 240, 155, 254, 183, 129, 162, 74, 247, 41, 9, 67, 242, 128, 8, 226, 85, 5, 104, 104, 72, 101, 75, 130, 95, 47, 101, 116, 89, 207, 23, 119, 178, 38, 180, 185, 145, 58, 115, 14, 30, 85, 216, 169, 133, 94, 115, 11, 117, 96, 87, 227, 240, 204, 48, 51, 144, 170, 248, 167, 56, 175, 194, 253, 135 }, null, "Mentor", null, true, null, null },
+                    { 900004, null, null, new DateTime(2026, 9, 28, 0, 0, 0, 0, DateTimeKind.Utc), 0, 30, "author1@rikipath.local", true, null, "Content", false, true, false, "Author One", null, 0, null, null, new byte[] { 168, 249, 82, 144, 178, 145, 94, 164, 34, 152, 2, 74, 204, 105, 84, 145, 96, 199, 153, 136, 110, 82, 114, 113, 22, 139, 117, 143, 50, 239, 197, 4, 51, 189, 137, 48, 175, 14, 104, 164, 218, 249, 148, 217, 33, 44, 202, 128, 237, 183, 110, 228, 185, 36, 209, 254, 183, 182, 55, 1, 78, 16, 234, 50 }, new byte[] { 19, 216, 84, 143, 3, 184, 50, 39, 209, 137, 149, 82, 224, 206, 6, 240, 237, 242, 172, 27, 55, 92, 242, 101, 149, 76, 104, 38, 176, 43, 40, 8, 102, 202, 146, 224, 62, 43, 147, 132, 2, 158, 81, 170, 29, 103, 76, 248, 101, 105, 213, 205, 32, 51, 59, 39, 221, 11, 135, 250, 193, 8, 78, 219 }, null, "ContentAuthor", null, true, null, null },
+                    { 900005, null, null, new DateTime(2026, 9, 28, 0, 0, 0, 0, DateTimeKind.Utc), 0, 30, "author2@rikipath.local", true, null, "Content", false, true, false, "Author Two", null, 0, null, null, new byte[] { 189, 121, 9, 1, 230, 137, 43, 239, 79, 56, 195, 196, 66, 116, 42, 1, 137, 55, 54, 249, 55, 231, 79, 224, 182, 182, 199, 133, 100, 39, 138, 5, 223, 215, 48, 46, 60, 214, 49, 88, 42, 186, 232, 116, 237, 89, 55, 144, 4, 78, 215, 231, 237, 220, 96, 225, 202, 97, 61, 165, 246, 28, 126, 198 }, new byte[] { 66, 178, 77, 56, 234, 206, 29, 78, 136, 190, 160, 142, 226, 249, 14, 17, 26, 101, 167, 36, 193, 55, 150, 94, 239, 81, 69, 54, 81, 171, 80, 22, 208, 38, 242, 2, 55, 171, 64, 38, 48, 224, 36, 216, 133, 132, 147, 100, 174, 32, 65, 134, 128, 35, 50, 138, 204, 59, 167, 96, 11, 128, 101, 102 }, null, "ContentAuthor", null, true, null, null },
+                    { 900006, null, null, new DateTime(2026, 9, 28, 0, 0, 0, 0, DateTimeKind.Utc), 0, 30, "learner.meeting@rikipath.local", true, null, "Meeting", false, true, false, "Test Learner", null, 0, null, null, new byte[] { 9, 206, 219, 58, 155, 234, 107, 145, 121, 174, 134, 51, 96, 253, 64, 216, 157, 114, 92, 36, 123, 206, 67, 217, 207, 166, 54, 71, 254, 251, 156, 200, 185, 110, 198, 135, 221, 146, 243, 40, 237, 229, 16, 133, 163, 161, 156, 79, 138, 103, 85, 25, 114, 81, 99, 182, 25, 73, 212, 198, 212, 192, 54, 129 }, new byte[] { 231, 202, 97, 95, 11, 9, 242, 47, 62, 77, 67, 36, 170, 78, 120, 81, 56, 69, 47, 36, 209, 212, 107, 244, 15, 34, 189, 110, 57, 66, 205, 213, 224, 19, 245, 192, 104, 146, 130, 44, 54, 107, 2, 15, 109, 136, 118, 220, 228, 44, 110, 219, 31, 100, 161, 164, 63, 231, 196, 79, 120, 106, 181, 71 }, null, "Learner", null, true, null, null },
+                    { 900007, null, null, new DateTime(2026, 9, 28, 0, 0, 0, 0, DateTimeKind.Utc), 0, 30, "learner2.meeting@rikipath.local", true, null, "Linh", false, true, false, "Nguyen", null, 0, null, null, new byte[] { 217, 79, 50, 159, 85, 88, 67, 15, 23, 182, 103, 80, 220, 85, 86, 173, 204, 186, 57, 67, 183, 165, 253, 243, 150, 250, 150, 190, 122, 252, 55, 169, 85, 236, 69, 106, 19, 219, 244, 42, 239, 30, 189, 176, 52, 47, 30, 28, 125, 31, 162, 255, 61, 3, 238, 201, 168, 88, 161, 42, 216, 86, 172, 219 }, new byte[] { 85, 97, 108, 158, 219, 70, 81, 106, 73, 23, 205, 163, 105, 159, 117, 19, 175, 147, 178, 99, 112, 116, 163, 243, 109, 178, 129, 229, 245, 175, 91, 174, 66, 198, 122, 88, 80, 68, 160, 64, 85, 118, 105, 41, 135, 89, 49, 160, 120, 13, 116, 148, 255, 27, 157, 207, 106, 203, 127, 74, 19, 61, 148, 120 }, null, "Learner", null, true, null, null },
+                    { 900008, null, null, new DateTime(2026, 9, 28, 0, 0, 0, 0, DateTimeKind.Utc), 0, 30, "learner3.meeting@rikipath.local", true, null, "Minh", false, true, false, "Tran", null, 0, null, null, new byte[] { 84, 97, 164, 196, 63, 151, 182, 39, 139, 242, 152, 22, 179, 33, 174, 113, 0, 236, 253, 114, 234, 242, 209, 76, 196, 162, 143, 195, 180, 3, 178, 193, 205, 230, 18, 114, 49, 151, 198, 217, 254, 21, 94, 176, 146, 214, 235, 122, 28, 241, 164, 161, 4, 161, 209, 38, 102, 179, 31, 107, 157, 25, 35, 63 }, new byte[] { 26, 188, 78, 205, 57, 115, 100, 129, 148, 135, 165, 205, 148, 203, 245, 36, 244, 177, 9, 104, 120, 140, 21, 164, 36, 75, 122, 51, 115, 69, 174, 180, 120, 155, 62, 37, 97, 227, 212, 134, 200, 7, 66, 255, 219, 10, 140, 149, 67, 86, 164, 170, 142, 165, 181, 103, 47, 100, 238, 24, 178, 29, 171, 226 }, null, "Learner", null, true, null, null },
+                    { 900009, null, null, new DateTime(2026, 9, 28, 0, 0, 0, 0, DateTimeKind.Utc), 0, 30, "learner4.meeting@rikipath.local", true, null, "Hoang", false, true, false, "Pham", null, 0, null, null, new byte[] { 42, 30, 236, 129, 234, 192, 63, 84, 148, 163, 154, 246, 107, 147, 189, 95, 33, 141, 196, 67, 181, 51, 157, 136, 93, 228, 237, 165, 164, 49, 4, 146, 87, 84, 9, 47, 28, 59, 33, 130, 37, 63, 43, 229, 8, 178, 123, 74, 61, 159, 235, 68, 217, 51, 225, 29, 201, 104, 44, 152, 53, 255, 199, 28 }, new byte[] { 83, 214, 138, 3, 142, 91, 229, 97, 238, 61, 48, 237, 80, 82, 112, 249, 166, 81, 53, 95, 170, 120, 13, 87, 113, 159, 60, 37, 75, 229, 226, 107, 229, 89, 60, 57, 109, 196, 235, 81, 145, 154, 110, 120, 141, 13, 142, 77, 41, 132, 58, 80, 154, 57, 226, 168, 176, 251, 113, 167, 242, 139, 7, 177 }, null, "Learner", null, true, null, null }
                 });
 
             migrationBuilder.InsertData(
@@ -1768,24 +1954,24 @@ namespace RikiPath.Infrastructure.Migrations
 
             migrationBuilder.InsertData(
                 table: "MentorAvailabilities",
-                columns: new[] { "Id", "AdminName", "BookedCount", "CreatedBy", "CreatedDate", "EndTime", "IsApproved", "IsDeleted", "MaxLearners", "MentorId", "ModifiedBy", "ModifiedDate", "RejectedAt", "RejectionReason", "RoomId", "StartTime" },
+                columns: new[] { "Id", "AdminName", "BookedCount", "CancelReason", "CancelRejectedAt", "CancelRejectionReason", "CancelRequestedAt", "ChangeRequestReason", "ChangeRequestedAt", "ChangeResolution", "CreatedBy", "CreatedDate", "EndTime", "IsApproved", "IsDeleted", "MaxLearners", "MentorId", "MentorWeeklyAvailabilityId", "ModifiedBy", "ModifiedDate", "PublishedAt", "RejectedAt", "RejectionReason", "RoomId", "StartTime" },
                 values: new object[,]
                 {
-                    { 990001, "Seed Demo", 1, null, new DateTime(2026, 10, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new DateTime(2026, 10, 2, 10, 0, 0, 0, DateTimeKind.Unspecified), true, false, 4, 900002, null, null, null, null, new Guid("a1000000-0000-0000-0000-000000990001"), new DateTime(2026, 10, 2, 9, 0, 0, 0, DateTimeKind.Unspecified) },
-                    { 990002, "Seed Demo", 0, null, new DateTime(2026, 10, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new DateTime(2026, 10, 3, 14, 0, 0, 0, DateTimeKind.Unspecified), true, false, 4, 900002, null, null, null, null, new Guid("a1000000-0000-0000-0000-000000990002"), new DateTime(2026, 10, 3, 13, 0, 0, 0, DateTimeKind.Unspecified) },
-                    { 990003, "Seed Demo", 0, null, new DateTime(2026, 10, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new DateTime(2026, 10, 4, 10, 0, 0, 0, DateTimeKind.Unspecified), true, false, 4, 900003, null, null, null, null, new Guid("a1000000-0000-0000-0000-000000990003"), new DateTime(2026, 10, 4, 9, 0, 0, 0, DateTimeKind.Unspecified) },
-                    { 990004, "Seed Demo", 0, null, new DateTime(2026, 10, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new DateTime(2026, 10, 5, 14, 0, 0, 0, DateTimeKind.Unspecified), true, false, 4, 900003, null, null, null, null, new Guid("a1000000-0000-0000-0000-000000990004"), new DateTime(2026, 10, 5, 13, 0, 0, 0, DateTimeKind.Unspecified) }
+                    { 990001, "Seed Demo", 1, null, null, null, null, null, null, null, null, new DateTime(2026, 10, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new DateTime(2026, 10, 2, 10, 0, 0, 0, DateTimeKind.Unspecified), true, false, 4, 900002, null, null, null, null, null, null, new Guid("a1000000-0000-0000-0000-000000990001"), new DateTime(2026, 10, 2, 9, 0, 0, 0, DateTimeKind.Unspecified) },
+                    { 990002, "Seed Demo", 0, null, null, null, null, null, null, null, null, new DateTime(2026, 10, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new DateTime(2026, 10, 3, 14, 0, 0, 0, DateTimeKind.Unspecified), true, false, 4, 900002, null, null, null, null, null, null, new Guid("a1000000-0000-0000-0000-000000990002"), new DateTime(2026, 10, 3, 13, 0, 0, 0, DateTimeKind.Unspecified) },
+                    { 990003, "Seed Demo", 0, null, null, null, null, null, null, null, null, new DateTime(2026, 10, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new DateTime(2026, 10, 4, 10, 0, 0, 0, DateTimeKind.Unspecified), true, false, 4, 900003, null, null, null, null, null, null, new Guid("a1000000-0000-0000-0000-000000990003"), new DateTime(2026, 10, 4, 9, 0, 0, 0, DateTimeKind.Unspecified) },
+                    { 990004, "Seed Demo", 0, null, null, null, null, null, null, null, null, new DateTime(2026, 10, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new DateTime(2026, 10, 5, 14, 0, 0, 0, DateTimeKind.Unspecified), true, false, 4, 900003, null, null, null, null, null, null, new Guid("a1000000-0000-0000-0000-000000990004"), new DateTime(2026, 10, 5, 13, 0, 0, 0, DateTimeKind.Unspecified) }
                 });
 
             migrationBuilder.InsertData(
                 table: "UserSubscriptions",
-                columns: new[] { "Id", "AiGradingQuota", "AiGradingUsedCount", "AmountPaid", "CreatedBy", "CreatedDate", "EndDate", "IsDeleted", "MeetingSessionsIncluded", "MeetingSessionsUsed", "ModifiedBy", "ModifiedDate", "PaymentExpiresAt", "PaymentStatus", "PaymentTransactionId", "PurchasedAt", "StartDate", "SubscriptionPlanId", "UserId" },
+                columns: new[] { "Id", "AiGradingQuota", "AiGradingUsedCount", "AmountPaid", "CreatedBy", "CreatedDate", "EndDate", "IsDeleted", "MeetingSessionsIncluded", "MeetingSessionsUsed", "MentorId", "ModifiedBy", "ModifiedDate", "PaymentExpiresAt", "PaymentStatus", "PaymentTransactionId", "PurchasedAt", "StartDate", "SubscriptionPlanId", "UserId" },
                 values: new object[,]
                 {
-                    { 990001, 0, 0, 459000m, null, new DateTime(2026, 10, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new DateTime(2026, 12, 30, 23, 59, 59, 0, DateTimeKind.Unspecified), false, 12, 1, null, null, null, "Paid", "DEMO-MENTOR-12-SESSIONS", new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new DateTime(2026, 10, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), 7, 900006 },
-                    { 990002, 0, 0, 459000m, null, new DateTime(2026, 10, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new DateTime(2026, 12, 30, 23, 59, 59, 0, DateTimeKind.Unspecified), false, 12, 1, null, null, null, "Paid", "DEMO-MENTOR-12-SESSIONS-2", new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new DateTime(2026, 10, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), 7, 900007 },
-                    { 990003, 0, 0, 459000m, null, new DateTime(2026, 10, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new DateTime(2026, 12, 30, 23, 59, 59, 0, DateTimeKind.Unspecified), false, 12, 1, null, null, null, "Paid", "DEMO-MENTOR-12-SESSIONS-3", new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new DateTime(2026, 10, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), 7, 900008 },
-                    { 990004, 0, 0, 459000m, null, new DateTime(2026, 10, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new DateTime(2026, 12, 30, 23, 59, 59, 0, DateTimeKind.Unspecified), false, 12, 1, null, null, null, "Paid", "DEMO-MENTOR-12-SESSIONS-4", new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new DateTime(2026, 10, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), 7, 900009 }
+                    { 990001, 0, 0, 459000m, null, new DateTime(2026, 10, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new DateTime(2026, 12, 30, 23, 59, 59, 0, DateTimeKind.Unspecified), false, 12, 1, null, null, null, null, "Paid", "DEMO-MENTOR-12-SESSIONS", new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new DateTime(2026, 10, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), 7, 900006 },
+                    { 990002, 0, 0, 459000m, null, new DateTime(2026, 10, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new DateTime(2026, 12, 30, 23, 59, 59, 0, DateTimeKind.Unspecified), false, 12, 1, null, null, null, null, "Paid", "DEMO-MENTOR-12-SESSIONS-2", new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new DateTime(2026, 10, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), 7, 900007 },
+                    { 990003, 0, 0, 459000m, null, new DateTime(2026, 10, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new DateTime(2026, 12, 30, 23, 59, 59, 0, DateTimeKind.Unspecified), false, 12, 1, null, null, null, null, "Paid", "DEMO-MENTOR-12-SESSIONS-3", new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new DateTime(2026, 10, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), 7, 900008 },
+                    { 990004, 0, 0, 459000m, null, new DateTime(2026, 10, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new DateTime(2026, 12, 30, 23, 59, 59, 0, DateTimeKind.Unspecified), false, 12, 1, null, null, null, null, "Paid", "DEMO-MENTOR-12-SESSIONS-4", new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new DateTime(2026, 10, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), 7, 900009 }
                 });
 
             migrationBuilder.InsertData(
@@ -1959,11 +2145,6 @@ namespace RikiPath.Infrastructure.Migrations
                 unique: true);
 
             migrationBuilder.CreateIndex(
-                name: "IX_KanaCharacters_ContentAuthorId",
-                table: "KanaCharacters",
-                column: "ContentAuthorId");
-
-            migrationBuilder.CreateIndex(
                 name: "IX_KanaWritingPracticeCards_KanaCharacterId",
                 table: "KanaWritingPracticeCards",
                 column: "KanaCharacterId");
@@ -2088,6 +2269,11 @@ namespace RikiPath.Infrastructure.Migrations
                 columns: new[] { "MentorId", "StartTime", "EndTime" });
 
             migrationBuilder.CreateIndex(
+                name: "IX_MentorAvailabilities_MentorWeeklyAvailabilityId",
+                table: "MentorAvailabilities",
+                column: "MentorWeeklyAvailabilityId");
+
+            migrationBuilder.CreateIndex(
                 name: "IX_MentorAvailabilities_RoomId",
                 table: "MentorAvailabilities",
                 column: "RoomId",
@@ -2097,12 +2283,35 @@ namespace RikiPath.Infrastructure.Migrations
                 name: "IX_MentorBookings_MentorAvailabilityId_UserSubscriptionId",
                 table: "MentorBookings",
                 columns: new[] { "MentorAvailabilityId", "UserSubscriptionId" },
-                unique: true);
+                unique: true,
+                filter: "NOT \"IsDeleted\" AND \"Status\" <> 'Cancelled'");
 
             migrationBuilder.CreateIndex(
                 name: "IX_MentorBookings_UserSubscriptionId_Status",
                 table: "MentorBookings",
                 columns: new[] { "UserSubscriptionId", "Status" });
+
+            migrationBuilder.CreateIndex(
+                name: "IX_MentorChatMessages_MentorBookingId_Id",
+                table: "MentorChatMessages",
+                columns: new[] { "MentorBookingId", "Id" });
+
+            migrationBuilder.CreateIndex(
+                name: "IX_MentorChatMessages_MentorBookingId_ReadAt_SenderUserId",
+                table: "MentorChatMessages",
+                columns: new[] { "MentorBookingId", "ReadAt", "SenderUserId" });
+
+            migrationBuilder.CreateIndex(
+                name: "IX_MentorChatMessages_SenderUserId",
+                table: "MentorChatMessages",
+                column: "SenderUserId");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_MentorWeeklyAvailabilities_MentorId_Date_Period",
+                table: "MentorWeeklyAvailabilities",
+                columns: new[] { "MentorId", "Date", "Period" },
+                unique: true,
+                filter: "NOT \"IsDeleted\"");
 
             migrationBuilder.CreateIndex(
                 name: "IX_MockQuestionOptions_PracticeQuestionId",
@@ -2285,6 +2494,11 @@ namespace RikiPath.Infrastructure.Migrations
                 column: "TargetCertificationLevelId");
 
             migrationBuilder.CreateIndex(
+                name: "IX_UserSubscriptions_MentorId",
+                table: "UserSubscriptions",
+                column: "MentorId");
+
+            migrationBuilder.CreateIndex(
                 name: "IX_UserSubscriptions_SubscriptionPlanId",
                 table: "UserSubscriptions",
                 column: "SubscriptionPlanId");
@@ -2346,6 +2560,9 @@ namespace RikiPath.Infrastructure.Migrations
 
             migrationBuilder.DropTable(
                 name: "LessonVocabularies");
+
+            migrationBuilder.DropTable(
+                name: "MentorChatMessages");
 
             migrationBuilder.DropTable(
                 name: "MockTestAnswers");
@@ -2424,6 +2641,9 @@ namespace RikiPath.Infrastructure.Migrations
 
             migrationBuilder.DropTable(
                 name: "MockTestSections");
+
+            migrationBuilder.DropTable(
+                name: "MentorWeeklyAvailabilities");
 
             migrationBuilder.DropTable(
                 name: "SubscriptionPlans");

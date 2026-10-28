@@ -9,6 +9,8 @@ namespace RikiPath.Application.Handlers
     public sealed class MockTestImportHandler(IUnitOfWork unitOfWork) : ISheetImportHandler
     {
         private static readonly string[] OptionHeaders = ["Option1", "Option2", "Option3", "Option4"];
+        private static readonly HashSet<string> StructuredQuestionTypes = new(StringComparer.OrdinalIgnoreCase)
+            { "Ordering", "FillBlank", "Matching", "ShortAnswer" };
 
         public ImportEntityType EntityType => ImportEntityType.MockTest;
         public string SheetName => "Mock Test";
@@ -105,6 +107,10 @@ namespace RikiPath.Application.Handlers
             var description = ImportHandlerSupport.Consistent(group, "MockTestDescription", errors);
             var levelCode = ImportHandlerSupport.Consistent(group, "CertificateLevelCode", errors);
             var timeRaw = ImportHandlerSupport.Consistent(group, "TimeLimitMinutes", errors);
+            var placementRaw = ImportHandlerSupport.Consistent(group, "IsPlacementAssessment", errors);
+            var isPlacement = false;
+            if (placementRaw is not null && !bool.TryParse(placementRaw, out isPlacement))
+                errors.Add($"{P(first)}IsPlacementAssessment chỉ nhận true hoặc false.");
 
             var levelErrors = new List<string>();
             ImportHandlerSupport.CheckLevel(levelCode, ctx.LevelsByCode, ctx.AmbiguousLevelCodes, levelErrors);
@@ -129,7 +135,13 @@ namespace RikiPath.Application.Handlers
                     ["mockTestDescription"] = description,
                     ["timeLimitMinutes"] = timeRaw,
                     ["certificateLevelCode"] = levelCode,
+                    ["isPlacementAssessment"] = isPlacement.ToString().ToLowerInvariant(),
                     ["rows"] = $"{group.Min(r => r.RowNumber)}–{group.Max(r => r.RowNumber)} ({group.Count} dòng)",
+                    ["questionCount"] = group.Count(row => ImportHandlerSupport.Clean(row.Get("QuestionText")) is not null).ToString(),
+                    ["questionTypes"] = string.Join(", ", group
+                        .Select(row => ImportHandlerSupport.Clean(row.Get("QuestionType")) ?? "SingleChoice")
+                        .GroupBy(type => type, StringComparer.OrdinalIgnoreCase)
+                        .Select(types => $"{types.Key}: {types.Count()}")),
                     ["sections"] = string.Join(" | ", group.Select(r => ImportHandlerSupport.Clean(r.Get("SectionCode")))
                         .Where(c => c is not null).Distinct(StringComparer.OrdinalIgnoreCase)),
                 },
@@ -177,7 +189,13 @@ namespace RikiPath.Application.Handlers
                 var before = errors.Count;
 
                 var sectionCode = ImportHandlerSupport.Clean(row.Get("SectionCode"));
-                if (sectionCode is null) errors.Add($"{rp}Thiếu cột SectionCode.");
+                if (sectionCode is null)
+                {
+                    var sectionTitle = ImportHandlerSupport.Clean(row.Get("SectionTitle"));
+                    errors.Add(sectionTitle is null
+                        ? $"{rp}Thiếu SectionCode (mã CertificateSection)."
+                        : $"{rp}Có SectionTitle '{sectionTitle}' nhưng thiếu SectionCode; thêm mã CertificateSection tương ứng để hệ thống gắn đúng phần thi.");
+                }
 
                 var sortRaw = ImportHandlerSupport.Clean(row.Get("QuestionSortOrder"));
                 var sortOrder = 0;
@@ -191,9 +209,26 @@ namespace RikiPath.Application.Handlers
                 var text = ImportHandlerSupport.Clean(row.Get("QuestionText"));
                 if (text is null) errors.Add($"{rp}Thiếu cột QuestionText.");
 
+                var questionType = ImportHandlerSupport.Clean(row.Get("QuestionType")) ?? "SingleChoice";
+                var supportedQuestionTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                    { "SingleChoice", "MultipleChoice", "Ordering", "FillBlank", "Matching", "ShortAnswer", "Listening", "Reading" };
+                if (!supportedQuestionTypes.Contains(questionType))
+                    errors.Add($"{rp}QuestionType '{questionType}' không hợp lệ. Dùng SingleChoice, MultipleChoice, Ordering, FillBlank, Matching hoặc ShortAnswer.");
+                else
+                    questionType = supportedQuestionTypes.First(type => type.Equals(questionType, StringComparison.OrdinalIgnoreCase));
+
+                JsonElement? interactionData = ParseJsonCell(row.Get("InteractionDataJson"), "InteractionDataJson", rp, errors);
+                JsonElement? answerKey = ParseJsonCell(row.Get("AnswerKeyJson"), "AnswerKeyJson", rp, errors);
+
                 var audio = ImportHandlerSupport.CheckUrl(row.Get("AudioUrl"), "AudioUrl", rp, errors);
                 var image = ImportHandlerSupport.CheckUrl(row.Get("ImageUrl"), "ImageUrl", rp, errors);
-                var options = ImportHandlerSupport.ParseOptions(row, OptionHeaders, "CorrectOptionNumber", rp, errors);
+                var options = questionType.Equals("SingleChoice", StringComparison.OrdinalIgnoreCase)
+                    || questionType.Equals("Listening", StringComparison.OrdinalIgnoreCase)
+                    || questionType.Equals("Reading", StringComparison.OrdinalIgnoreCase)
+                    ? ImportHandlerSupport.ParseOptions(row, OptionHeaders, "CorrectOptionNumber", rp, errors)
+                    : questionType.Equals("MultipleChoice", StringComparison.OrdinalIgnoreCase)
+                        ? ParseMultipleChoiceOptions(row, rp, errors)
+                        : ParseStructuredQuestion(questionType, interactionData, answerKey, rp, errors);
 
                 if (errors.Count > before || sectionCode is null || text is null || options is null) continue;
 
@@ -209,6 +244,9 @@ namespace RikiPath.Application.Handlers
                 {
                     SortOrder = sortOrder,
                     QuestionText = text,
+                    QuestionType = questionType,
+                    InteractionData = interactionData,
+                    AnswerKey = answerKey,
                     AudioUrl = audio,
                     ImageUrl = image,
                     Explanation = ImportHandlerSupport.Clean(row.Get("Explanation")),
@@ -254,6 +292,7 @@ namespace RikiPath.Application.Handlers
                 Title = title!,
                 Description = description,
                 TimeLimitMinutes = timeLimit,
+                IsPlacementAssessment = isPlacement,
                 CertificateLevelCode = levelCode!,
                 CertificateLevelId = levelId,
                 Sections = sectionPayloads,
@@ -272,6 +311,7 @@ namespace RikiPath.Application.Handlers
 
             ImportHandlerSupport.CompareField(changed, "description", existing.Description, payload.Description);
             ImportHandlerSupport.CompareField(changed, "timeLimitMinutes", existing.TimeLimitMinutes.ToString(), payload.TimeLimitMinutes.ToString());
+            ImportHandlerSupport.CompareField(changed, "isPlacementAssessment", existing.IsPlacementAssessment.ToString(), payload.IsPlacementAssessment.ToString());
 
             var oldSections = existing.Sections?.Where(s => !s.IsDeleted).OrderBy(s => s.SortOrder).ToList()
                               ?? new List<Domain.Entities.MockTestSection>();
@@ -289,7 +329,7 @@ namespace RikiPath.Application.Handlers
                 {
                     var opts = (q.Options ?? []).Where(o => !o.IsDeleted).OrderBy(o => o.SortOrder).Select(o => (o.OptionText, o.IsCorrect));
                     oldQuestions[q.SortOrder] = ImportHandlerSupport.QuestionSignature(
-                        s.Title, q.QuestionText, q.Explanation, q.AudioUrl, q.ImageUrl, opts);
+                        s.Title, $"{q.QuestionType}|{q.InteractionDataJson}|{q.AnswerKeyJson}|{q.QuestionText}", q.Explanation, q.AudioUrl, q.ImageUrl, opts);
                 }
             }
 
@@ -297,7 +337,7 @@ namespace RikiPath.Application.Handlers
             foreach (var s in payload.Sections)
                 foreach (var q in s.Questions)
                     newQuestions[q.SortOrder] = ImportHandlerSupport.QuestionSignature(
-                        s.Title, q.QuestionText, q.Explanation, q.AudioUrl, q.ImageUrl,
+                        s.Title, $"{q.QuestionType}|{q.InteractionData?.GetRawText()}|{q.AnswerKey?.GetRawText()}|{q.QuestionText}", q.Explanation, q.AudioUrl, q.ImageUrl,
                         q.Options.Select(o => (o.OptionText, o.IsCorrect)));
 
             var questionSummary = ImportHandlerSupport.QuestionDiffSummary(oldQuestions, newQuestions);
@@ -317,6 +357,101 @@ namespace RikiPath.Application.Handlers
 
         /// <summary>Tên hiển thị của phần thi, lấy từ CertificateSection do Admin tạo sẵn (đổi property nếu entity đặt tên khác).</summary>
         private static string SectionTitleOf(Domain.Entities.CertificateSection certSection) => certSection.Name;
+
+        private static JsonElement? ParseJsonCell(string? raw, string header, string rowPrefix, List<string> errors)
+        {
+            var value = ImportHandlerSupport.Clean(raw);
+            if (value is null) return null;
+            try
+            {
+                using var document = JsonDocument.Parse(value);
+                var element = document.RootElement;
+                if (element.ValueKind is not (JsonValueKind.Object or JsonValueKind.Array or JsonValueKind.String))
+                {
+                    errors.Add($"{rowPrefix}{header} phải là object, array hoặc string JSON.");
+                    return null;
+                }
+                return element.Clone();
+            }
+            catch (JsonException)
+            {
+                errors.Add($"{rowPrefix}{header} phải là JSON hợp lệ.");
+                return null;
+            }
+        }
+
+        private static List<ImportOptionPayloadResponse>? ParseMultipleChoiceOptions(
+            ExcelRow row, string rowPrefix, List<string> errors)
+        {
+            var initialErrorCount = errors.Count;
+            var values = OptionHeaders.Select(header => ImportHandlerSupport.Clean(row.Get(header))).ToList();
+            if (values.Count(value => value is not null) < 2)
+                errors.Add($"{rowPrefix}MultipleChoice cần ít nhất 2 lựa chọn trong Option1..Option4.");
+            var lastFilled = values.FindLastIndex(value => value is not null);
+            if (lastFilled >= 0 && values.Take(lastFilled).Any(value => value is null))
+                errors.Add($"{rowPrefix}Option1..Option4 không được để trống xen giữa các lựa chọn.");
+
+            var correctRaw = ImportHandlerSupport.Clean(row.Get("CorrectOptionNumbers"));
+            if (correctRaw is null)
+                correctRaw = ImportHandlerSupport.Clean(row.Get("CorrectOptionNumber"));
+            var correct = new HashSet<int>();
+            if (correctRaw is null)
+                errors.Add($"{rowPrefix}MultipleChoice cần CorrectOptionNumbers (ví dụ 1,3).");
+            else
+            {
+                foreach (var token in correctRaw.Split([',', ';', '|'], StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+                {
+                    if (!int.TryParse(token, out var index) || index < 1 || index > values.Count || values[index - 1] is null)
+                        errors.Add($"{rowPrefix}CorrectOptionNumbers '{correctRaw}' chứa số không trỏ tới lựa chọn hợp lệ.");
+                    else correct.Add(index);
+                }
+                if (correct.Count == 0) errors.Add($"{rowPrefix}Phải có ít nhất một lựa chọn đúng.");
+            }
+
+            if (errors.Count > initialErrorCount) return null;
+            return values.Select((value, index) => (value, index))
+                .Where(item => item.value is not null)
+                .Select(item => new ImportOptionPayloadResponse
+                {
+                    SortOrder = item.index + 1,
+                    OptionText = item.value!,
+                    IsCorrect = correct.Contains(item.index + 1)
+                }).ToList();
+        }
+
+        private static List<ImportOptionPayloadResponse>? ParseStructuredQuestion(
+            string questionType, JsonElement? interactionData, JsonElement? answerKey,
+            string rowPrefix, List<string> errors)
+        {
+            var initialErrorCount = errors.Count;
+            if (interactionData is null)
+                errors.Add($"{rowPrefix}{questionType} cần InteractionDataJson.");
+            if (answerKey is null)
+                errors.Add($"{rowPrefix}{questionType} cần AnswerKeyJson.");
+            if (interactionData is { ValueKind: JsonValueKind.Object } interaction
+                && !interaction.EnumerateObject().Any())
+                errors.Add($"{rowPrefix}InteractionDataJson không được là object rỗng.");
+            if (interactionData is { ValueKind: JsonValueKind.Array } dataArray && dataArray.GetArrayLength() == 0)
+                errors.Add($"{rowPrefix}InteractionDataJson không được là array rỗng.");
+            if (answerKey is { ValueKind: JsonValueKind.Object } keyObject
+                && !keyObject.EnumerateObject().Any())
+                errors.Add($"{rowPrefix}AnswerKeyJson không được là object rỗng.");
+            if (answerKey is { ValueKind: JsonValueKind.Array } keyArray && keyArray.GetArrayLength() == 0)
+                errors.Add($"{rowPrefix}AnswerKeyJson không được là array rỗng.");
+
+            if (questionType.Equals("Ordering", StringComparison.OrdinalIgnoreCase)
+                && interactionData is { ValueKind: JsonValueKind.Object } orderingData
+                && orderingData.TryGetProperty("tokens", out var tokens))
+            {
+                if (tokens.ValueKind != JsonValueKind.Array || tokens.GetArrayLength() == 0)
+                    errors.Add($"{rowPrefix}Ordering cần InteractionDataJson.tokens là array có phần tử.");
+                else if (answerKey is null || answerKey.Value.ValueKind != JsonValueKind.Array)
+                    errors.Add($"{rowPrefix}Ordering cần AnswerKeyJson là array đúng thứ tự.");
+                else if (tokens.GetArrayLength() != answerKey.Value.GetArrayLength())
+                    errors.Add($"{rowPrefix}Ordering: số token phải bằng số phần tử trong AnswerKeyJson.");
+            }
+            return errors.Count == initialErrorCount ? [] : null;
+        }
 
         private static Domain.Entities.LanguageSkill? ResolveSkill(
             SectionBuilder section, Dictionary<string, HashSet<string>> explicitSkills, DiffContext ctx, List<string> errors)

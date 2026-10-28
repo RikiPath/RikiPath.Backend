@@ -11,6 +11,7 @@ namespace RikiPath.Infrastructure.Configuration
             builder.HasKey(x => x.Id);
             builder.Property(x => x.MockTestAttemptId).HasColumnName("PracticeTestAttemptId");
             builder.Property(x => x.MockQuestionId).HasColumnName("PracticeQuestionId");
+            builder.Property(x => x.ResponseJson).HasColumnType("jsonb");
 
             builder.HasOne(x => x.MockTestAttempt)
                 .WithMany(x => x.Answers)

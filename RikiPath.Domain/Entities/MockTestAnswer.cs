@@ -11,6 +11,8 @@ namespace RikiPath.Domain.Entities
         public MockQuestion MockQuestion { get; set; }
         public int? SelectedOptionId { get; set; }
         public MockQuestionOption? SelectedOption { get; set; }
+        /// <summary>Structured learner response, such as ordered token IDs or blank-to-answer mappings.</summary>
+        public string? ResponseJson { get; set; }
 
         public bool IsCorrect { get; set; }
     }

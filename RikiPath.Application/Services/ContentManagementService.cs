@@ -284,6 +284,8 @@ namespace RikiPath.Application.Services
                                     Description = GetOptional(row, "Description"),
                                     TimeLimitMinutes = GetRequiredInt(row, "TimeLimitMinutes"),
                                     CertificateLevelId = certificateLevelId,
+                                    IsPlacementAssessment = string.Equals(
+                                        GetOptional(row, "IsPlacementAssessment"), "true", StringComparison.OrdinalIgnoreCase),
                                 }, cancellationToken);
                                 break;
 
