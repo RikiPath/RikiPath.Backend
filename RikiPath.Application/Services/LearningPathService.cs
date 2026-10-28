@@ -32,6 +32,12 @@ namespace RikiPath.Application.Services
 
         public Func<DateTime> UtcNowProvider { get; init; } = static () => DateTime.UtcNow;
 
+        private static readonly JsonSerializerOptions StoreJsonOptions = new()
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            WriteIndented = false,
+        };
+
         /// <summary>Một bài học trong DB thuộc cấp độ mục tiêu, kèm tiến độ của người học.</summary>
         private sealed record CatalogLesson(int Id, string Title, double ProgressPercent);
 
@@ -54,14 +60,19 @@ namespace RikiPath.Application.Services
         private async Task<ApiResponse<LearningPathResponse>> GenerateInternalAsync(
             PreviewLearningPathRequest? preview, bool isPreview, CancellationToken cancellationToken)
         {
-            // ---------- 1. Lấy user ----------
+            // ---------- 1. Lấy user + tên chứng chỉ mục tiêu ----------
             int userId = 0;
             UserAccount? user;
+            string? certName = null;
 
             try
             {
                 userId = claimService.GetUserClaim().Id;
-                user = await unitOfWork.UserAccounts.GetWithLearningGoalAsync(userId, cancellationToken);
+                user = await unitOfWork.UserAccounts.GetByIdAsync(userId, cancellationToken);
+
+                // Không phụ thuộc Include của GetByIdAsync: tự tra level và type theo id
+                if (user?.TargetCertificateLevelId is int targetLevelId)
+                    certName = await ResolveCertificateNameAsync(targetLevelId, cancellationToken);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -73,47 +84,20 @@ namespace RikiPath.Application.Services
             if (user is null)
                 return ApiResponse<LearningPathResponse>.NotFound($"Không tìm thấy user Id = {userId}.");
 
-            var targetLevelId = preview?.TargetJlptLevelId ?? user.TargetCertificateLevelId;
-            var startLevelId = preview?.StartingJlptLevelId ??
-                user.StartingCertificateLevelId ?? user.TargetCertificateLevelId;
-            if (!startLevelId.HasValue || !targetLevelId.HasValue)
-                return ApiResponse<LearningPathResponse>.Fail(
-                    "Bạn cần chọn cấp độ bắt đầu và mục tiêu JLPT.", HttpStatusCode.BadRequest,
-                    errorCode: "LEARNING_PATH_GOAL_REQUIRED");
-
-            var visibleLevels = await unitOfWork.CertificateLevels.GetLearnerVisibleJlptLevelsAsync(cancellationToken);
-            var starting = visibleLevels.FirstOrDefault(level => level.Id == startLevelId.Value);
-            var target = visibleLevels.FirstOrDefault(level => level.Id == targetLevelId.Value);
-            if (starting is null || target is null || !JlptCurriculum.IsValidSpan(starting, target))
-                return ApiResponse<LearningPathResponse>.Fail(
-                    "Lộ trình chỉ hỗ trợ cấp độ bắt đầu đến mục tiêu theo thứ tự N5 → N4 → N3.",
-                    HttpStatusCode.BadRequest, errorCode: "LEARNING_PATH_LEVEL_UNSUPPORTED");
-
-            var spanLevels = visibleLevels
-                .Where(level => JlptCurriculum.Rank(level.Code) >= JlptCurriculum.Rank(starting.Code)
-                    && JlptCurriculum.Rank(level.Code) <= JlptCurriculum.Rank(target.Code))
-                .OrderBy(level => JlptCurriculum.Rank(level.Code))
-                .ToList();
-
-            // Initial generate must never silently replace an active path.
-            if (!isPreview && await unitOfWork.RecommendedLearningPaths.GetActiveByUserIdAsync(
-                    userId, cancellationToken) is not null)
-                return ApiResponse<LearningPathResponse>.Fail(
-                    "Đã có lộ trình hoạt động; hãy xem trước rồi xác nhận thay đổi.",
-                    HttpStatusCode.Conflict, errorCode: "PATH_PREVIEW_REQUIRED");
-
-            var (certName, examDate) = ResolveLearningGoal(user);
-            certName = $"JLPT {target.Code}";
-
-            if (examDate is null)
+            // ---------- 2. Mục tiêu học tập lấy từ HỒ SƠ user ----------
+            if (string.IsNullOrWhiteSpace(certName)
+                || user.TargetExamDate is not DateTime examDate
+                || user.TargetCertificateLevelId is not int levelId)
             {
                 return ApiResponse<LearningPathResponse>.Fail(
                     "Bạn cần chọn chứng chỉ, cấp độ và ngày dự định thi trước khi tạo lộ trình.",
                     HttpStatusCode.BadRequest);
             }
 
-            var utcNow = BusinessDateHelper.EnsureUtc(UtcNowProvider());
-            if (!BusinessDateHelper.IsFutureExamDate(examDate, utcNow))
+            DateTime today = (DateTime.UtcNow + VietnamOffset).Date;
+            int daysUntilExam = (examDate.Date - today).Days;
+
+            if (daysUntilExam < 1)
             {
                 return ApiResponse<LearningPathResponse>.Fail(
                     "Ngày dự định thi phải sau hôm nay. Vui lòng cập nhật ngày thi để tạo lộ trình.",
@@ -131,8 +115,8 @@ namespace RikiPath.Application.Services
             Dictionary<int, CatalogLesson> catalogById;
             try
             {
-                var (promptContext, catalog) = await LoadLearnerDataAsync(
-                    userId, spanLevels, certName);
+                var (promptContext, catalog) = await LoadLearnerDataAsync(userId, levelId, certName);
+
                 if (!promptContext.LatestTestScorePercent.HasValue)
                     return ApiResponse<LearningPathResponse>.Fail(
                         "Bạn cần hoàn thành bài Placement Test hợp lệ trước khi tạo lộ trình AI.",
@@ -147,7 +131,7 @@ namespace RikiPath.Application.Services
 
                 catalogById = catalog.ToDictionary(c => c.Id);
 
-                promptText = BuildPrompt(promptContext, catalog, $"JLPT {starting.Code} → {target.Code}", normalizedExamDate, today,
+                promptText = BuildPrompt(promptContext, catalog, certName, examDate, today,
                     daysUntilExam, planDays, user.DailyStudyMinutes, user.StudyTimePreference);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
@@ -158,7 +142,6 @@ namespace RikiPath.Application.Services
             }
 
             // ---------- 4. Gọi AI (retry khi sai định dạng / thiếu ngày / bài học không hợp lệ) ----------
-            string rawJson = string.Empty;
             AiLearningPathResult? aiResult = null;
             string? lastError = null;
 
@@ -168,8 +151,13 @@ namespace RikiPath.Application.Services
                 {
                     cancellationToken.ThrowIfCancellationRequested();
 
-                    rawJson = StripCodeFence(
-                        await aiClient.GenerateLearningPathJsonAsync(userId, promptText, cancellationToken));
+                    // Lần retry: nói rõ lý do lần trước bị từ chối để AI sửa
+                    string currentPrompt = lastError is null
+                        ? promptText
+                        : $"{promptText}\n\n[LƯU Ý] Lần trả lời trước bị từ chối vì: {lastError}. Hãy sửa đúng lỗi này.";
+
+                    string rawJson = StripCodeFence(
+                        await aiClient.GenerateLearningPathJsonAsync(userId, currentPrompt, cancellationToken));
 
                     try
                     {
@@ -222,12 +210,19 @@ namespace RikiPath.Application.Services
                 var response = new LearningPathResponse
                 {
                     UserId = userId,
-                    GeneratedAt = generatedAt,
-                    Status = isPreview ? "DRAFT" : "ACTIVE",
-                    StartingJlptLevelId = starting.Id,
-                    TargetJlptLevelId = target.Id,
-                    PreviewExpiresAt = isPreview ? generatedAt.AddHours(24) : null,
-                    ConfirmedAt = isPreview ? null : generatedAt,
+                    GeneratedAt = DateTime.UtcNow,
+                    // Lưu bản ĐÃ chuẩn hóa (id bài học hợp lệ + tiêu đề), không lưu JSON thô của AI
+                    SuggestionJson = JsonSerializer.Serialize(aiResult, StoreJsonOptions),
+                    Summary = aiResult.Summary,
+                    IsViewed = false,
+                };
+                await unitOfWork.RecommendedLearningPaths.AddAsync(suggestion, cancellationToken);
+                await unitOfWork.SaveChangesAsync(cancellationToken);
+
+                return ApiResponse<LearningPathResponse>.Success(new LearningPathResponse
+                {
+                    UserId = userId,
+                    GeneratedAt = suggestion.GeneratedAt,
                     Summary = aiResult.Summary,
                     Strengths = aiResult.Strengths,
                     Weaknesses = aiResult.Weaknesses,
@@ -491,21 +486,20 @@ namespace RikiPath.Application.Services
         }
 
         // =====================================================================
-        // GOAL
-        // YÊU CẦU: GetByIdAsync phải Include(TargetCertificateLevel).ThenInclude(CertificateType)
+        // GOAL: tên chứng chỉ = "{CertificateType.Name} {CertificateLevel.Code}", vd "JLPT N3"
         // =====================================================================
-        private static (string? CertName, DateTime? ExamDate) ResolveLearningGoal(UserAccount user)
+        private async Task<string?> ResolveCertificateNameAsync(int certificateLevelId, CancellationToken cancellationToken)
         {
-            var level = user.TargetCertificateLevel;
+            var level = await unitOfWork.CertificateLevels.GetByIdAsync(certificateLevelId, cancellationToken);
+            if (level is null) return null;
 
-            string? typeName = level?.CertificateType?.Name;
-            string? levelCode = level?.Code;
+            var type = await unitOfWork.CertificateTypes.GetByIdAsync(level.CertificateTypeId, cancellationToken);
+            if (type is null) return null;
 
-            string? certName = string.IsNullOrWhiteSpace(typeName) || string.IsNullOrWhiteSpace(levelCode)
-                ? null
-                : $"{typeName.Trim()} {levelCode.Trim()}";
+            if (string.IsNullOrWhiteSpace(type.Name) || string.IsNullOrWhiteSpace(level.Code))
+                return null;
 
-            return (certName, user.TargetExamDate);
+            return $"{type.Name.Trim()} {level.Code.Trim()}";
         }
 
         // =====================================================================
@@ -518,19 +512,23 @@ namespace RikiPath.Application.Services
             var notebookEntries = await unitOfWork.LearnerNoteEntries.GetByUserAsync(userId, vocabularyListId: null);
             var attempts = await unitOfWork.MockTestAttempts.GetByUserAsync(userId);
 
-            // LƯU Ý: giả định repository trả attempts mới nhất trước.
-            // Nếu phân biệt bài "đánh giá đầu vào" với mock test thường, lọc thêm tại đây.
-            var latestAttempt = attempts.FirstOrDefault(a => a.IsCompleted && a.IsPlacementAssessment)
-                ?? attempts.FirstOrDefault(a => a.IsCompleted);
+            // Không phụ thuộc thứ tự repository: tự sắp xếp mới nhất trước,
+            // ưu tiên bài đánh giá đầu vào, nếu không có thì lấy mock test hoàn thành gần nhất.
+            var completedAttempts = attempts
+                .Where(a => a.IsCompleted)
+                .OrderByDescending(a => a.SubmittedAt ?? a.StartedAt)
+                .ToList();
+
+            var latestAttempt = completedAttempts.FirstOrDefault(a => a.IsPlacementAssessment)
+                ?? completedAttempts.FirstOrDefault();
 
             IReadOnlyDictionary<string, double>? skillBreakdown = null;
             if (immutableResult?.Sections is { Count: > 0 } sections)
             {
-                var sectionScores = sections
-                    .Where(section => !string.IsNullOrWhiteSpace(section.SectionTitle))
-                    .GroupBy(section => section.SectionTitle)
-                    .ToDictionary(group => group.Key, group => group.Average(section => section.ScorePercent));
-                skillBreakdown = sectionScores.Count > 0 ? sectionScores : null;
+                var withBreakdown = await unitOfWork.MockTestAttempts.GetWithBreakdownAsync(latestAttempt.Id);
+                skillBreakdown = withBreakdown?.SectionResults
+                    .GroupBy(r => r.MockTestSection?.Title ?? "Khác")
+                    .ToDictionary(g => g.Key, g => g.Average(r => r.ScorePercent));
             }
 
             // A completed Placement result is valid only when the immutable completed
@@ -555,7 +553,7 @@ namespace RikiPath.Application.Services
                 targetJlptLevel: targetCertification,
                 lessonProgress: lessonProgresses
                     .Take(MaxLessonProgressItems)
-                    .Select(p => (p.Lesson.Title, p.ProgressPercent))
+                    .Select(p => (p.Lesson?.Title ?? string.Empty, p.ProgressPercent))
                     .ToList(),
                 notebookWords: notebookEntries
                     .Select(n => n.Vocabulary?.Word ?? n.Kanji?.Character ?? n.ManualWord ?? string.Empty)
