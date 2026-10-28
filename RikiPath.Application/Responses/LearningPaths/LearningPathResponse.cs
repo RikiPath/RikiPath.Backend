@@ -2,6 +2,14 @@ namespace RikiPath.Application.Responses.LearningPaths
 {
     public class LearningPathResponse
     {
+        public int PathId { get; set; }
+        public int Version { get; set; }
+        public string Status { get; set; } = "ACTIVE";
+        public int? StartingJlptLevelId { get; set; }
+        public int? TargetJlptLevelId { get; set; }
+        public int? BaseActivePathId { get; set; }
+        public DateTime? PreviewExpiresAt { get; set; }
+        public DateTime? ConfirmedAt { get; set; }
         public int UserId { get; set; }
         public DateTime GeneratedAt { get; set; }
         public string Summary { get; set; } = string.Empty;

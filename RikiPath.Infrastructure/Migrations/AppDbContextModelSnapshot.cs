@@ -3592,10 +3592,18 @@ namespace RikiPath.Infrastructure.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
+                    b.Property<int>("AttemptKind")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
                     b.Property<Guid?>("CreatedBy")
                         .HasColumnType("uuid");
 
                     b.Property<DateTime?>("CreatedDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<DateTime?>("ExpiresAt")
                         .HasColumnType("timestamp without time zone");
 
                     b.Property<bool>("IsCompleted")
@@ -3614,6 +3622,9 @@ namespace RikiPath.Infrastructure.Migrations
 
                     b.Property<DateTime?>("ModifiedDate")
                         .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("QuestionSnapshotJson")
+                        .HasColumnType("text");
 
                     b.Property<DateTime>("StartedAt")
                         .HasColumnType("timestamp without time zone");
@@ -3637,6 +3648,10 @@ namespace RikiPath.Infrastructure.Migrations
                     b.HasIndex("UserAccountId");
 
                     b.HasIndex("UserId");
+
+                    b.HasIndex("UserId", "AttemptKind")
+                        .IsUnique()
+                        .HasFilter("\"AttemptKind\" = 1 AND \"IsCompleted\" = false AND \"IsDeleted\" = false");
 
                     b.ToTable("MockTestAttempts");
                 });
@@ -4097,6 +4112,12 @@ namespace RikiPath.Infrastructure.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
+                    b.Property<int?>("BaseActivePathId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("ConfirmedAt")
+                        .HasColumnType("timestamp without time zone");
+
                     b.Property<Guid?>("CreatedBy")
                         .HasColumnType("uuid");
 
@@ -4118,6 +4139,17 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Property<DateTime?>("ModifiedDate")
                         .HasColumnType("timestamp without time zone");
 
+                    b.Property<DateTime?>("PreviewExpiresAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("StartingCertificateLevelId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
                     b.Property<string>("SuggestionJson")
                         .IsRequired()
                         .HasColumnType("text");
@@ -4125,12 +4157,25 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Property<string>("Summary")
                         .HasColumnType("text");
 
+                    b.Property<int?>("TargetCertificateLevelId")
+                        .HasColumnType("integer");
+
                     b.Property<int>("UserId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Version")
                         .HasColumnType("integer");
 
                     b.HasKey("Id");
 
+                    b.HasIndex("UserId")
+                        .IsUnique()
+                        .HasFilter("\"Status\" = 'Active'");
+
                     b.HasIndex("UserId", "GeneratedAt");
+
+                    b.HasIndex("UserId", "Version")
+                        .IsUnique();
 
                     b.ToTable("RecommendedLearningPaths");
                 });
@@ -4452,6 +4497,9 @@ namespace RikiPath.Infrastructure.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
+                    b.Property<int?>("AssessedCertificateLevelId")
+                        .HasColumnType("integer");
+
                     b.Property<string>("AvatarUrl")
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)");
@@ -4497,6 +4545,11 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Property<DateTime?>("LastStudyDate")
                         .HasColumnType("timestamp without time zone");
 
+                    b.Property<string>("LearningMode")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
                     b.Property<int>("LongestStreak")
                         .HasColumnType("integer");
 
@@ -4518,10 +4571,18 @@ namespace RikiPath.Infrastructure.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("character varying(20)");
 
+                    b.Property<string>("PlacementDecision")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
                     b.Property<string>("Role")
                         .IsRequired()
                         .HasMaxLength(20)
                         .HasColumnType("character varying(20)");
+
+                    b.Property<int?>("StartingCertificateLevelId")
+                        .HasColumnType("integer");
 
                     b.Property<string>("StudyTimePreference")
                         .HasMaxLength(50)
@@ -4539,8 +4600,12 @@ namespace RikiPath.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("AssessedCertificateLevelId");
+
                     b.HasIndex("Email")
                         .IsUnique();
+
+                    b.HasIndex("StartingCertificateLevelId");
 
                     b.HasIndex("TargetCertificateLevelId");
 
@@ -4560,9 +4625,11 @@ namespace RikiPath.Infrastructure.Migrations
                             IsEmailVerified = true,
                             IsPhoneVerified = false,
                             LastName = "System",
+                            LearningMode = "Standard",
                             LongestStreak = 0,
                             PasswordHash = new byte[] { 91, 215, 217, 54, 239, 206, 181, 216, 143, 33, 82, 211, 9, 70, 197, 173, 197, 0, 72, 71, 59, 150, 46, 114, 96, 137, 52, 174, 137, 29, 196, 61, 50, 254, 249, 101, 114, 92, 149, 32, 55, 127, 205, 126, 216, 147, 197, 192, 248, 173, 158, 92, 104, 42, 195, 107, 150, 15, 3, 74, 103, 104, 3, 229 },
                             PasswordSalt = new byte[] { 61, 240, 150, 172, 239, 48, 224, 17, 192, 54, 50, 58, 91, 100, 55, 168, 18, 69, 137, 112, 110, 59, 180, 37, 201, 241, 143, 238, 139, 33, 128, 70, 87, 158, 235, 219, 229, 184, 94, 72, 41, 160, 160, 197, 158, 217, 128, 188, 156, 255, 147, 13, 151, 37, 133, 164, 9, 252, 175, 124, 21, 15, 152, 196 },
+                            PlacementDecision = "NotTaken",
                             Role = "Admin",
                             SystemNotificationsEnabled = true
                         },
@@ -4579,9 +4646,11 @@ namespace RikiPath.Infrastructure.Migrations
                             IsEmailVerified = true,
                             IsPhoneVerified = false,
                             LastName = "One",
+                            LearningMode = "Standard",
                             LongestStreak = 0,
                             PasswordHash = new byte[] { 17, 253, 106, 25, 89, 176, 204, 31, 142, 252, 245, 31, 64, 101, 213, 135, 164, 116, 40, 46, 173, 175, 8, 0, 69, 101, 65, 4, 90, 25, 176, 223, 153, 237, 220, 94, 55, 133, 227, 181, 70, 97, 155, 122, 50, 139, 216, 136, 88, 52, 76, 98, 250, 64, 52, 71, 146, 221, 225, 137, 106, 6, 178, 239 },
                             PasswordSalt = new byte[] { 233, 77, 244, 252, 171, 97, 38, 140, 50, 138, 10, 54, 122, 165, 186, 85, 129, 82, 49, 10, 98, 44, 165, 57, 50, 7, 238, 166, 142, 224, 94, 49, 134, 226, 247, 110, 154, 139, 99, 204, 95, 39, 171, 235, 212, 26, 217, 87, 139, 118, 253, 125, 241, 255, 57, 22, 140, 171, 11, 168, 174, 202, 32, 17 },
+                            PlacementDecision = "NotTaken",
                             Role = "Mentor",
                             SystemNotificationsEnabled = true
                         },
@@ -4598,9 +4667,11 @@ namespace RikiPath.Infrastructure.Migrations
                             IsEmailVerified = true,
                             IsPhoneVerified = false,
                             LastName = "Two",
+                            LearningMode = "Standard",
                             LongestStreak = 0,
                             PasswordHash = new byte[] { 93, 130, 109, 171, 238, 187, 245, 15, 202, 89, 247, 220, 95, 192, 246, 138, 5, 75, 250, 28, 208, 28, 51, 79, 127, 28, 214, 237, 93, 221, 108, 26, 152, 66, 73, 65, 11, 147, 154, 102, 113, 49, 51, 24, 51, 197, 248, 254, 22, 98, 87, 249, 250, 104, 131, 74, 16, 18, 179, 200, 3, 3, 79, 47 },
                             PasswordSalt = new byte[] { 240, 155, 254, 183, 129, 162, 74, 247, 41, 9, 67, 242, 128, 8, 226, 85, 5, 104, 104, 72, 101, 75, 130, 95, 47, 101, 116, 89, 207, 23, 119, 178, 38, 180, 185, 145, 58, 115, 14, 30, 85, 216, 169, 133, 94, 115, 11, 117, 96, 87, 227, 240, 204, 48, 51, 144, 170, 248, 167, 56, 175, 194, 253, 135 },
+                            PlacementDecision = "NotTaken",
                             Role = "Mentor",
                             SystemNotificationsEnabled = true
                         },
@@ -4617,9 +4688,11 @@ namespace RikiPath.Infrastructure.Migrations
                             IsEmailVerified = true,
                             IsPhoneVerified = false,
                             LastName = "Author One",
+                            LearningMode = "Standard",
                             LongestStreak = 0,
                             PasswordHash = new byte[] { 168, 249, 82, 144, 178, 145, 94, 164, 34, 152, 2, 74, 204, 105, 84, 145, 96, 199, 153, 136, 110, 82, 114, 113, 22, 139, 117, 143, 50, 239, 197, 4, 51, 189, 137, 48, 175, 14, 104, 164, 218, 249, 148, 217, 33, 44, 202, 128, 237, 183, 110, 228, 185, 36, 209, 254, 183, 182, 55, 1, 78, 16, 234, 50 },
                             PasswordSalt = new byte[] { 19, 216, 84, 143, 3, 184, 50, 39, 209, 137, 149, 82, 224, 206, 6, 240, 237, 242, 172, 27, 55, 92, 242, 101, 149, 76, 104, 38, 176, 43, 40, 8, 102, 202, 146, 224, 62, 43, 147, 132, 2, 158, 81, 170, 29, 103, 76, 248, 101, 105, 213, 205, 32, 51, 59, 39, 221, 11, 135, 250, 193, 8, 78, 219 },
+                            PlacementDecision = "NotTaken",
                             Role = "ContentAuthor",
                             SystemNotificationsEnabled = true
                         },
@@ -4636,9 +4709,11 @@ namespace RikiPath.Infrastructure.Migrations
                             IsEmailVerified = true,
                             IsPhoneVerified = false,
                             LastName = "Author Two",
+                            LearningMode = "Standard",
                             LongestStreak = 0,
                             PasswordHash = new byte[] { 189, 121, 9, 1, 230, 137, 43, 239, 79, 56, 195, 196, 66, 116, 42, 1, 137, 55, 54, 249, 55, 231, 79, 224, 182, 182, 199, 133, 100, 39, 138, 5, 223, 215, 48, 46, 60, 214, 49, 88, 42, 186, 232, 116, 237, 89, 55, 144, 4, 78, 215, 231, 237, 220, 96, 225, 202, 97, 61, 165, 246, 28, 126, 198 },
                             PasswordSalt = new byte[] { 66, 178, 77, 56, 234, 206, 29, 78, 136, 190, 160, 142, 226, 249, 14, 17, 26, 101, 167, 36, 193, 55, 150, 94, 239, 81, 69, 54, 81, 171, 80, 22, 208, 38, 242, 2, 55, 171, 64, 38, 48, 224, 36, 216, 133, 132, 147, 100, 174, 32, 65, 134, 128, 35, 50, 138, 204, 59, 167, 96, 11, 128, 101, 102 },
+                            PlacementDecision = "NotTaken",
                             Role = "ContentAuthor",
                             SystemNotificationsEnabled = true
                         },
@@ -4655,9 +4730,11 @@ namespace RikiPath.Infrastructure.Migrations
                             IsEmailVerified = true,
                             IsPhoneVerified = false,
                             LastName = "Test Learner",
+                            LearningMode = "Standard",
                             LongestStreak = 0,
                             PasswordHash = new byte[] { 9, 206, 219, 58, 155, 234, 107, 145, 121, 174, 134, 51, 96, 253, 64, 216, 157, 114, 92, 36, 123, 206, 67, 217, 207, 166, 54, 71, 254, 251, 156, 200, 185, 110, 198, 135, 221, 146, 243, 40, 237, 229, 16, 133, 163, 161, 156, 79, 138, 103, 85, 25, 114, 81, 99, 182, 25, 73, 212, 198, 212, 192, 54, 129 },
                             PasswordSalt = new byte[] { 231, 202, 97, 95, 11, 9, 242, 47, 62, 77, 67, 36, 170, 78, 120, 81, 56, 69, 47, 36, 209, 212, 107, 244, 15, 34, 189, 110, 57, 66, 205, 213, 224, 19, 245, 192, 104, 146, 130, 44, 54, 107, 2, 15, 109, 136, 118, 220, 228, 44, 110, 219, 31, 100, 161, 164, 63, 231, 196, 79, 120, 106, 181, 71 },
+                            PlacementDecision = "NotTaken",
                             Role = "Learner",
                             SystemNotificationsEnabled = true
                         },
@@ -4674,9 +4751,11 @@ namespace RikiPath.Infrastructure.Migrations
                             IsEmailVerified = true,
                             IsPhoneVerified = false,
                             LastName = "Nguyen",
+                            LearningMode = "Standard",
                             LongestStreak = 0,
                             PasswordHash = new byte[] { 217, 79, 50, 159, 85, 88, 67, 15, 23, 182, 103, 80, 220, 85, 86, 173, 204, 186, 57, 67, 183, 165, 253, 243, 150, 250, 150, 190, 122, 252, 55, 169, 85, 236, 69, 106, 19, 219, 244, 42, 239, 30, 189, 176, 52, 47, 30, 28, 125, 31, 162, 255, 61, 3, 238, 201, 168, 88, 161, 42, 216, 86, 172, 219 },
                             PasswordSalt = new byte[] { 85, 97, 108, 158, 219, 70, 81, 106, 73, 23, 205, 163, 105, 159, 117, 19, 175, 147, 178, 99, 112, 116, 163, 243, 109, 178, 129, 229, 245, 175, 91, 174, 66, 198, 122, 88, 80, 68, 160, 64, 85, 118, 105, 41, 135, 89, 49, 160, 120, 13, 116, 148, 255, 27, 157, 207, 106, 203, 127, 74, 19, 61, 148, 120 },
+                            PlacementDecision = "NotTaken",
                             Role = "Learner",
                             SystemNotificationsEnabled = true
                         },
@@ -4693,9 +4772,11 @@ namespace RikiPath.Infrastructure.Migrations
                             IsEmailVerified = true,
                             IsPhoneVerified = false,
                             LastName = "Tran",
+                            LearningMode = "Standard",
                             LongestStreak = 0,
                             PasswordHash = new byte[] { 84, 97, 164, 196, 63, 151, 182, 39, 139, 242, 152, 22, 179, 33, 174, 113, 0, 236, 253, 114, 234, 242, 209, 76, 196, 162, 143, 195, 180, 3, 178, 193, 205, 230, 18, 114, 49, 151, 198, 217, 254, 21, 94, 176, 146, 214, 235, 122, 28, 241, 164, 161, 4, 161, 209, 38, 102, 179, 31, 107, 157, 25, 35, 63 },
                             PasswordSalt = new byte[] { 26, 188, 78, 205, 57, 115, 100, 129, 148, 135, 165, 205, 148, 203, 245, 36, 244, 177, 9, 104, 120, 140, 21, 164, 36, 75, 122, 51, 115, 69, 174, 180, 120, 155, 62, 37, 97, 227, 212, 134, 200, 7, 66, 255, 219, 10, 140, 149, 67, 86, 164, 170, 142, 165, 181, 103, 47, 100, 238, 24, 178, 29, 171, 226 },
+                            PlacementDecision = "NotTaken",
                             Role = "Learner",
                             SystemNotificationsEnabled = true
                         },
@@ -4712,9 +4793,11 @@ namespace RikiPath.Infrastructure.Migrations
                             IsEmailVerified = true,
                             IsPhoneVerified = false,
                             LastName = "Pham",
+                            LearningMode = "Standard",
                             LongestStreak = 0,
                             PasswordHash = new byte[] { 42, 30, 236, 129, 234, 192, 63, 84, 148, 163, 154, 246, 107, 147, 189, 95, 33, 141, 196, 67, 181, 51, 157, 136, 93, 228, 237, 165, 164, 49, 4, 146, 87, 84, 9, 47, 28, 59, 33, 130, 37, 63, 43, 229, 8, 178, 123, 74, 61, 159, 235, 68, 217, 51, 225, 29, 201, 104, 44, 152, 53, 255, 199, 28 },
                             PasswordSalt = new byte[] { 83, 214, 138, 3, 142, 91, 229, 97, 238, 61, 48, 237, 80, 82, 112, 249, 166, 81, 53, 95, 170, 120, 13, 87, 113, 159, 60, 37, 75, 229, 226, 107, 229, 89, 60, 57, 109, 196, 235, 81, 145, 154, 110, 120, 141, 13, 142, 77, 41, 132, 58, 80, 154, 57, 226, 168, 176, 251, 113, 167, 242, 139, 7, 177 },
+                            PlacementDecision = "NotTaken",
                             Role = "Learner",
                             SystemNotificationsEnabled = true
                         });
@@ -5689,10 +5772,24 @@ namespace RikiPath.Infrastructure.Migrations
 
             modelBuilder.Entity("RikiPath.Domain.Entities.UserAccount", b =>
                 {
+                    b.HasOne("RikiPath.Domain.Entities.CertificateLevel", "AssessedCertificateLevel")
+                        .WithMany()
+                        .HasForeignKey("AssessedCertificateLevelId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("RikiPath.Domain.Entities.CertificateLevel", "StartingCertificateLevel")
+                        .WithMany()
+                        .HasForeignKey("StartingCertificateLevelId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("RikiPath.Domain.Entities.CertificateLevel", "TargetCertificateLevel")
                         .WithMany("LearnersTargeting")
                         .HasForeignKey("TargetCertificateLevelId")
                         .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("AssessedCertificateLevel");
+
+                    b.Navigation("StartingCertificateLevel");
 
                     b.Navigation("TargetCertificateLevel");
                 });

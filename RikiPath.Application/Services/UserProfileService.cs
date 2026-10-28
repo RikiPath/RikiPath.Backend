@@ -5,6 +5,7 @@ using RikiPath.Application.Requests.Profile;
 using RikiPath.Application.Responses;
 using RikiPath.Application.Responses.Profile;
 using System.Net;
+using RikiPath.Domain.Enums;
 
 namespace RikiPath.Application.Services
 {
@@ -17,12 +18,14 @@ namespace RikiPath.Application.Services
         private static readonly string[] AllowedAvatarContentTypes = { "image/jpeg", "image/png", "image/webp" };
         private const long MaxAvatarSizeBytes = 5 * 1024 * 1024; // 5MB
 
+        public Func<DateTime> UtcNowProvider { get; init; } = static () => DateTime.UtcNow;
+
         public async Task<ApiResponse<UserProfileResponse>> GetProfileAsync(CancellationToken cancellationToken)
         {
             try
             {
                 var userId = claimService.GetUserClaim().Id;
-                var user = await unitOfWork.UserAccounts.GetByIdAsync(userId);
+                var user = await unitOfWork.UserAccounts.GetWithLearningGoalAsync(userId, cancellationToken);
                 if (user is null)
                     return ApiResponse<UserProfileResponse>.NotFound("Không tìm thấy người dùng.");
 
@@ -104,8 +107,16 @@ namespace RikiPath.Application.Services
                 if (request.DailyStudyMinutes < 0 || request.DailyStudyMinutes > 1440)
                     return ApiResponse<UserProfileResponse>.Fail("Thời gian học/ngày không hợp lệ.");
 
+                var utcNow = BusinessDateHelper.EnsureUtc(UtcNowProvider());
+                if (request.TargetExamDate.HasValue
+                    && !BusinessDateHelper.IsFutureExamDate(request.TargetExamDate.Value, utcNow))
+                    return ApiResponse<UserProfileResponse>.Fail("Ngày dự định thi phải sau hôm nay.");
+
                 // Đã chuyển đổi sang CertificateLevels
-                var certificationLevel = await unitOfWork.CertificateLevels.GetByIdAsync(request.TargetJlptLevelId, cancellationToken);
+                if (request.ClearTargetExamDate && request.TargetExamDate.HasValue)
+                    return ApiResponse<UserProfileResponse>.Fail("Không thể vừa đặt vừa xóa ngày thi.");
+
+                var certificationLevel = await unitOfWork.CertificateLevels.GetActiveJlptLevelByIdAsync(request.TargetJlptLevelId, cancellationToken);
                 if (certificationLevel is null)
                     return ApiResponse<UserProfileResponse>.NotFound(
                         $"Không tìm thấy cấp độ Id = {request.TargetJlptLevelId}.");
@@ -114,8 +125,18 @@ namespace RikiPath.Application.Services
                 if (user is null)
                     return ApiResponse<UserProfileResponse>.NotFound("Không tìm thấy người dùng.");
 
+                var active = await unitOfWork.RecommendedLearningPaths.GetActiveByUserIdAsync(userId, cancellationToken);
+                if (active is not null && active.TargetCertificateLevelId != certificationLevel.Id)
+                    return ApiResponse<UserProfileResponse>.Fail(
+                        "Mục tiêu của lộ trình đang hoạt động chỉ có thể đổi qua xem trước và xác nhận.",
+                        HttpStatusCode.Conflict, errorCode: "PATH_PREVIEW_REQUIRED");
+
                 user.TargetCertificateLevelId = certificationLevel.Id;
                 user.DailyStudyMinutes = request.DailyStudyMinutes;
+                if (request.ClearTargetExamDate)
+                    user.TargetExamDate = null;
+                else if (request.TargetExamDate.HasValue)
+                    user.TargetExamDate = BusinessDateHelper.NormalizeExamDate(request.TargetExamDate.Value);
                 unitOfWork.UserAccounts.Update(user);
                 await unitOfWork.SaveChangesAsync(cancellationToken);
 
@@ -125,6 +146,42 @@ namespace RikiPath.Application.Services
             {
                 return ApiResponse<UserProfileResponse>.Fail(
                     "Không thể cập nhật mục tiêu học tập.", HttpStatusCode.InternalServerError, errors: BuildDebugErrors(ex));
+            }
+        }
+
+        public async Task<ApiResponse<UserProfileResponse>> SetStudyLevelAsync(
+            SetStudyLevelRequest request, CancellationToken cancellationToken)
+        {
+            try
+            {
+                if (!request.Confirmed)
+                    return ApiResponse<UserProfileResponse>.Fail(
+                        "Vui lòng xác nhận thay đổi cấp độ học.", HttpStatusCode.BadRequest,
+                        errorCode: "STUDY_LEVEL_CONFIRMATION_REQUIRED");
+                var userId = claimService.GetUserClaim().Id;
+                var level = await unitOfWork.CertificateLevels.GetActiveJlptLevelByIdAsync(
+                    request.CurrentStudyLevelId, cancellationToken);
+                if (level is null || JlptCurriculum.Rank(level.Code) == 0)
+                    return ApiResponse<UserProfileResponse>.Fail(
+                        "Cấp độ học không khả dụng; lộ trình tiêu chuẩn hiện hỗ trợ N5–N3.",
+                        HttpStatusCode.BadRequest, errorCode: "STUDY_LEVEL_UNSUPPORTED");
+
+                var user = await unitOfWork.UserAccounts.GetWithLearningGoalAsync(userId, cancellationToken);
+                if (user is null)
+                    return ApiResponse<UserProfileResponse>.NotFound("Không tìm thấy người dùng.");
+
+                user.StartingCertificateLevelId = level.Id;
+                user.StartingCertificateLevel = level;
+                user.LearningMode = LearningMode.Standard;
+                unitOfWork.UserAccounts.Update(user);
+                await unitOfWork.SaveChangesAsync(cancellationToken);
+                return ApiResponse<UserProfileResponse>.Success(MapToResponse(user));
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                return ApiResponse<UserProfileResponse>.Fail(
+                    "Không thể cập nhật cấp độ học.", HttpStatusCode.InternalServerError,
+                    errors: BuildDebugErrors(ex));
             }
         }
 
@@ -162,7 +219,22 @@ namespace RikiPath.Application.Services
             IsEmailVerified = user.IsEmailVerified,
             TargetJlptLevelId = user.TargetCertificateLevelId,
             TargetJlptLevelName = level?.Code ?? user.TargetCertificateLevel?.Code,
+            // Legacy profile: an old target remains a readable starting level until the learner confirms a new one.
+            StartingJlptLevelId = user.StartingCertificateLevelId ?? user.TargetCertificateLevelId,
+            StartingJlptLevelName = user.StartingCertificateLevel?.Code ?? level?.Code ?? user.TargetCertificateLevel?.Code,
+            CurrentStudyLevelId = user.StartingCertificateLevelId ?? user.TargetCertificateLevelId,
+            CurrentStudyLevelName = user.StartingCertificateLevel?.Code ?? level?.Code ?? user.TargetCertificateLevel?.Code,
+            LearningMode = user.LearningMode == LearningMode.AiPersonalized ? "AI_PERSONALIZED" : "STANDARD",
+            AssessedJlptLevelId = user.AssessedCertificateLevelId,
+            AssessedJlptLevelName = user.AssessedCertificateLevel?.Code,
+            PlacementDecision = user.PlacementDecision switch
+            {
+                PlacementDecision.Skipped => "SKIPPED",
+                PlacementDecision.Completed => "COMPLETED",
+                _ => "NOT_TAKEN",
+            },
             DailyStudyMinutes = user.DailyStudyMinutes,
+            TargetExamDate = user.TargetExamDate,
             EmailNotificationsEnabled = user.EmailNotificationsEnabled,
             SystemNotificationsEnabled = user.SystemNotificationsEnabled,
         };

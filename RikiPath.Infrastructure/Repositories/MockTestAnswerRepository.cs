@@ -22,6 +22,7 @@ namespace RikiPath.Infrastructure.Repositories
                 .Include(x => x.MockQuestion)
                     .ThenInclude(q => q.MockTestSection)
                         .ThenInclude(s => s.MockTest)
+                            .ThenInclude(t => t.CertificateLevel)
                 .Include(x => x.MockQuestion)
                     .ThenInclude(q => q.MockTestSection)
                         .ThenInclude(s => s.LanguageSkill)

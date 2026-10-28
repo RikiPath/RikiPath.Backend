@@ -12,6 +12,8 @@ namespace RikiPath.Application.IRepositories
         Task<MockTest?> GetWithSectionsAndQuestionsAsync(
             int practiceTestId,
             CancellationToken cancellationToken = default);
+        Task<List<MockTest>> GetAllWithSectionsAndQuestionsAsync(
+            CancellationToken cancellationToken = default);
         Task<List<MockTest>> GetByLevelAsync(int jlptLevelId);
         Task<List<MockTest>> GetLearnerPlacementTestsByLevelAsync(int certificateLevelId, CancellationToken cancellationToken = default);
     }
