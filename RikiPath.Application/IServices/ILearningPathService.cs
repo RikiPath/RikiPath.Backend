@@ -9,5 +9,14 @@ namespace RikiPath.Application.IServices
         Task<ApiResponse<LearningPathResponse>> GenerateLearningPathAsync(
              GenerateLearningPathRequest request,
              CancellationToken cancellationToken);
+
+        Task<ApiResponse<LearningPathResponse?>> GetLatestLearningPathAsync(
+             CancellationToken cancellationToken);
+
+        Task<ApiResponse<LearningPathResponse>> PreviewLearningPathAsync(
+            PreviewLearningPathRequest request, CancellationToken cancellationToken);
+        Task<ApiResponse<LearningPathResponse>> ConfirmPreviewAsync(int previewId, CancellationToken cancellationToken);
+        Task<ApiResponse<LearningPathResponse>> CancelPreviewAsync(int previewId, CancellationToken cancellationToken);
+        Task<ApiResponse<IReadOnlyList<LearningPathResponse>>> GetHistoryAsync(CancellationToken cancellationToken);
     }
 }

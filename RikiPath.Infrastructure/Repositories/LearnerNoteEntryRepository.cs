@@ -19,6 +19,7 @@ namespace RikiPath.Infrastructure.Repositories
                 .Include(x => x.LearnerNote)
                 .Include(x => x.Vocabulary)
                 .Include(x => x.Kanji)
+                .Include(x => x.ReviewCards!.Where(card => !card.IsDeleted))
                 .Where(x => x.LearnerNote.UserId == userId);
 
             if (vocabularyListId.HasValue)

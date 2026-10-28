@@ -160,6 +160,13 @@ namespace RikiPath.Application.Services
                 if (vocab is null)
                     return ApiResponse<NotebookEntryResponse>.NotFound("Không tìm thấy từ vựng trong ngân hàng chung.");
 
+                // Retry tuần tự cùng một bookmark trong cùng danh sách trả entry hiện có.
+                var existingEntries = await unitOfWork.LearnerNoteEntries.GetByUserAsync(userId, list.Id);
+                var existingEntry = existingEntries.FirstOrDefault(entry =>
+                    entry.VocabularyId == vocab.Id && !entry.IsDeleted);
+                if (existingEntry is not null)
+                    return ApiResponse<NotebookEntryResponse>.Success(MapEntry(existingEntry));
+
                 var note = new LearnerNoteEntry
                 {
                     LearnerNoteId = list.Id,
@@ -196,6 +203,13 @@ namespace RikiPath.Application.Services
                 var kanji = await unitOfWork.Kanjis.GetPublicByIdAsync(request.KanjiId, cancellationToken);
                 if (kanji is null)
                     return ApiResponse<NotebookEntryResponse>.NotFound("Không tìm thấy Kanji trong ngân hàng chung.");
+
+                // Retry tuần tự cùng một bookmark trong cùng danh sách trả entry hiện có.
+                var existingEntries = await unitOfWork.LearnerNoteEntries.GetByUserAsync(userId, list.Id);
+                var existingEntry = existingEntries.FirstOrDefault(entry =>
+                    entry.KanjiId == kanji.Id && !entry.IsDeleted);
+                if (existingEntry is not null)
+                    return ApiResponse<NotebookEntryResponse>.Success(MapEntry(existingEntry));
 
                 var note = new LearnerNoteEntry
                 {
@@ -393,6 +407,13 @@ namespace RikiPath.Application.Services
             return new NotebookEntryResponse
             {
                 NoteEntryId = note.Id,
+                ReviewCardId = note.ReviewCards?
+                    .Where(card => !card.IsDeleted)
+                    .OrderBy(card => card.Id)
+                    .Select(card => (int?)card.Id)
+                    .FirstOrDefault(),
+                VocabularyId = note.VocabularyId,
+                KanjiId = note.KanjiId,
                 ContentType = isFromVocabBank ? "vocabulary" : isFromKanjiBank ? "kanji" : "manual",
                 Term = isFromVocabBank ? note.Vocabulary!.Word
                      : isFromKanjiBank ? note.Kanji!.Character

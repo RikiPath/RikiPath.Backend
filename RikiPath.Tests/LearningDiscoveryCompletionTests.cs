@@ -56,6 +56,68 @@ public sealed class LearningDiscoveryCompletionTests
     }
 
     [Fact]
+    public async Task Detail_returns_structured_bank_content_with_real_ids_and_hides_deleted_items()
+    {
+        await using var fixture = await CreateFixtureAsync(userId: 7);
+        var level = await fixture.AddLevelAsync(11, "N5");
+        var skill = await fixture.AddSkillAsync(21, "Vocabulary");
+        var lesson = await fixture.AddLessonAsync(101, level, skill, 1, "Structured lesson");
+        var vocabulary = new Vocabulary
+        {
+            Id = 201,
+            Word = "学ぶ",
+            Reading = "まなぶ",
+            Meaning = "learn",
+            ExampleSentence = "日本語を学ぶ。",
+            ExampleSentenceMeaning = "Learn Japanese.",
+            AudioUrl = "https://cdn.example.test/vocabulary.mp3",
+        };
+        var deletedVocabulary = new Vocabulary
+        {
+            Id = 202,
+            Word = "hidden",
+            Reading = "hidden",
+            Meaning = "hidden",
+            IsDeleted = true,
+        };
+        var kanji = new Kanji
+        {
+            Id = 301,
+            Character = "学",
+            Meaning = "study",
+            OnYomi = "ガク",
+            KunYomi = "まなぶ",
+            StrokeCount = 8,
+        };
+        var grammar = new GrammarPattern
+        {
+            Id = 401,
+            Title = "〜たい",
+            Structure = "Vます + たい",
+            UsageNotes = "Express a desire",
+        };
+        fixture.Context.AddRange(vocabulary, deletedVocabulary, kanji, grammar);
+        fixture.Context.AddRange(
+            new LessonVocabulary { Lesson = lesson, Vocabulary = vocabulary },
+            new LessonVocabulary { Lesson = lesson, Vocabulary = deletedVocabulary },
+            new LessonKanji { Lesson = lesson, Kanji = kanji },
+            new LessonGrammar { Lesson = lesson, GrammarPattern = grammar });
+        await fixture.Context.SaveChangesAsync();
+        fixture.Context.ChangeTracker.Clear();
+
+        var result = await fixture.Service.GetLessonDetailAsync(101, CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        var detail = result.Result!;
+        var returnedVocabulary = Assert.Single(detail.Vocabularies);
+        Assert.Equal(201, returnedVocabulary.VocabularyId);
+        Assert.Equal("学ぶ", returnedVocabulary.Word);
+        Assert.Equal("https://cdn.example.test/vocabulary.mp3", returnedVocabulary.AudioUrl);
+        Assert.Equal(301, Assert.Single(detail.Kanjis).KanjiId);
+        Assert.Equal(401, Assert.Single(detail.Grammars).GrammarPatternId);
+    }
+
+    [Fact]
     public async Task Discovery_excludes_deleted_lessons_and_lessons_with_hidden_skills()
     {
         await using var fixture = await CreateFixtureAsync(userId: 7);

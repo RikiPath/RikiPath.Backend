@@ -1,9 +1,10 @@
 using System;
 using System.Collections.Generic;
+using RikiPath.Domain.Enums;
 
 namespace RikiPath.Domain.Entities
 {
-    /// <summary>One learner's attempt at a mock JLPT practice test.</summary>
+    /// <summary>One learner's attempt at a mock JLPT practice test or placement test.</summary>
     public class MockTestAttempt : Base
     {
         public int Id { get; set; }
@@ -11,7 +12,9 @@ namespace RikiPath.Domain.Entities
         public int UserId { get; set; }
         public UserAccount UserAccount { get; set; }
 
+        public AttemptKind AttemptKind { get; set; } = AttemptKind.MockTest;
         public DateTime StartedAt { get; set; }
+        public DateTime? ExpiresAt { get; set; }
         public DateTime? SubmittedAt { get; set; }
         public bool IsCompleted { get; set; }
         public double? TotalScore { get; set; }

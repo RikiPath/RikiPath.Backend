@@ -54,6 +54,15 @@ namespace RikiPath.Infrastructure.Repositories
                 .Include(lesson => lesson.CertificateLevel)
                     .ThenInclude(level => level.CertificateType)
                 .Include(lesson => lesson.LanguageSkill)
+                .Include(lesson => lesson.LessonVocabularies!
+                    .Where(link => !link.Vocabulary.IsDeleted))
+                    .ThenInclude(link => link.Vocabulary)
+                .Include(lesson => lesson.LessonKanjis!
+                    .Where(link => !link.Kanji.IsDeleted))
+                    .ThenInclude(link => link.Kanji)
+                .Include(lesson => lesson.LessonGrammars!
+                    .Where(link => !link.GrammarPattern.IsDeleted))
+                    .ThenInclude(link => link.GrammarPattern)
                 .FirstOrDefaultAsync(lesson =>
                     lesson.Id == lessonId
                     && !lesson.IsDeleted
@@ -77,7 +86,14 @@ namespace RikiPath.Infrastructure.Repositories
         public async Task<IReadOnlyList<Lesson>> GetByCertificateLevelAsync(int certificateLevelId, CancellationToken cancellationToken = default)
              => await _context.Lessons
                  .AsNoTracking()
-                 .Where(x => x.CertificateLevelId == certificateLevelId)
+                 .Where(lesson =>
+                     lesson.CertificateLevelId == certificateLevelId
+                     && !lesson.IsDeleted
+                     && !lesson.CertificateLevel.IsDeleted
+                     && !lesson.CertificateLevel.CertificateType.IsDeleted
+                     && lesson.CertificateLevel.CertificateType.IsActive
+                     && lesson.CertificateLevel.CertificateType.Name == "JLPT"
+                     && !lesson.LanguageSkill.IsDeleted)
                  .OrderBy(x => x.SortOrder)
                  .ThenBy(x => x.Id)
                  .ToListAsync(cancellationToken);

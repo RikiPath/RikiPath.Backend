@@ -85,7 +85,7 @@ namespace RikiPath.WebApi.Controllers
         /// - Luồng xử lý: Lưu mục tiêu JLPT vào profile và có thể kích hoạt tính năng tạo learning path.
         /// - Lưu ý cho FE: Yêu cầu Bearer Token. Field JlptLevelId là Required.
         /// </remarks>
-        /// <param name="request">SetJlptGoalRequest: JlptLevelId (Required).</param>
+        /// <param name="request">SetJlptGoalRequest: TargetJlptLevelId và DailyStudyMinutes; TargetExamDate (tùy chọn, phải sau hôm nay) để tạo lộ trình học.</param>
         /// <param name="cancellationToken">Token hủy request (Optional).</param>
         /// <response code="200">Thành công: Mục tiêu JLPT được lưu.</response>
         /// <response code="400">Dữ liệu không hợp lệ.</response>
@@ -96,6 +96,15 @@ namespace RikiPath.WebApi.Controllers
         {
 
             var result = await userProfileService.SetJlptGoalAsync(request, cancellationToken);
+            return StatusCode((int)result.StatusCode, result);
+        }
+
+        /// <summary>Xác nhận cấp độ đang học cho Standard Roadmap, độc lập mục tiêu JLPT.</summary>
+        /// <remarks>Chuyển mode về STANDARD; không xóa lộ trình AI, ngày thi hoặc tiến độ cũ.</remarks>
+        [HttpPut("me/study-level")]
+        public async Task<IActionResult> SetStudyLevel([FromBody] SetStudyLevelRequest request, CancellationToken cancellationToken)
+        {
+            var result = await userProfileService.SetStudyLevelAsync(request, cancellationToken);
             return StatusCode((int)result.StatusCode, result);
         }
 

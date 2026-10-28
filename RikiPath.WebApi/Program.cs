@@ -199,16 +199,24 @@ internal class Program
 
         if (Type.GetType("RikiPath.Infrastructure.Clients.AiLearningPathClient, RikiPath.Infrastructure") != null)
         {
-            builder.Services.AddHttpClient<IAiLearningPathClient, AiLearningPathClient>(client =>
+            if (builder.Environment.IsEnvironment("M4E2E"))
             {
-                var baseUrl = appSettings?.Ai?.BaseUrl;
-                if (!string.IsNullOrEmpty(baseUrl)) client.BaseAddress = new Uri(baseUrl);
-                client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+                // M4E2E must never fall through to an external AI provider.
+                builder.Services.AddSingleton<IAiLearningPathClient, M4E2eAiLearningPathClient>();
+            }
+            else
+            {
+                builder.Services.AddHttpClient<IAiLearningPathClient, AiLearningPathClient>(client =>
+                {
+                    var baseUrl = appSettings?.Ai?.BaseUrl;
+                    if (!string.IsNullOrEmpty(baseUrl)) client.BaseAddress = new Uri(baseUrl);
+                    client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
-                var apiKey = appSettings?.Ai?.ApiKey;
-                if (!string.IsNullOrWhiteSpace(apiKey))
-                    client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
-            });
+                    var apiKey = appSettings?.Ai?.ApiKey;
+                    if (!string.IsNullOrWhiteSpace(apiKey))
+                        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+                });
+            }
         }
 
         if (Type.GetType("RikiPath.Infrastructure.Clients.AiGradingClient, RikiPath.Infrastructure") != null)

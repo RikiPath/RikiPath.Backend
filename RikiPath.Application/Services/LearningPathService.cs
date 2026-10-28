@@ -7,6 +7,7 @@ using RikiPath.Application.Requests.LearningPath;
 using RikiPath.Application.Responses;
 using RikiPath.Application.Responses.LearningPaths;
 using RikiPath.Domain.Entities;
+using RikiPath.Domain.Enums;
 using System.Net;
 using System.Text;
 using System.Text.Json;
@@ -26,7 +27,10 @@ namespace RikiPath.Application.Services
         private const int MaxLessonProgressItems = 30;
         private const int MaxCatalogLessons = 200;    // Số bài học tối đa đưa vào prompt
         private const double CompletedPercent = 100;
-        private static readonly TimeSpan VietnamOffset = TimeSpan.FromHours(7);
+        private static readonly JsonSerializerOptions StoredPathJsonOptions =
+            new(JsonSerializerDefaults.Web);
+
+        public Func<DateTime> UtcNowProvider { get; init; } = static () => DateTime.UtcNow;
 
         private static readonly JsonSerializerOptions StoreJsonOptions = new()
         {
@@ -39,13 +43,22 @@ namespace RikiPath.Application.Services
 
         // =====================================================================
         // MAIN FLOW
-        // Đăng ký -> chọn certificate type -> level -> ngày thi -> làm bài đánh giá
+        // AI Personalized Learning Path requires a real completed Placement result.
+        // Standard Roadmap is the separate, non-AI path for learners who skip Placement.
         // -> AI phân tích DỮ LIỆU TRONG DB (bài đánh giá, tiến độ, notebook, danh mục bài học)
         //    + ngày thi => nhận xét + lộ trình dùng đúng bài học có trong hệ thống
         // =====================================================================
         public async Task<ApiResponse<LearningPathResponse>> GenerateLearningPathAsync(
             GenerateLearningPathRequest request,
             CancellationToken cancellationToken)
+            => await GenerateInternalAsync(null, isPreview: false, cancellationToken);
+
+        public async Task<ApiResponse<LearningPathResponse>> PreviewLearningPathAsync(
+            PreviewLearningPathRequest request, CancellationToken cancellationToken)
+            => await GenerateInternalAsync(request, isPreview: true, cancellationToken);
+
+        private async Task<ApiResponse<LearningPathResponse>> GenerateInternalAsync(
+            PreviewLearningPathRequest? preview, bool isPreview, CancellationToken cancellationToken)
         {
             // ---------- 1. Lấy user + tên chứng chỉ mục tiêu ----------
             int userId = 0;
@@ -91,9 +104,13 @@ namespace RikiPath.Application.Services
                     HttpStatusCode.BadRequest);
             }
 
+            DateTime today = BusinessDateHelper.GetVietnamToday(utcNow);
+            DateTime normalizedExamDate = BusinessDateHelper.NormalizeExamDate(examDate.Value);
+            int daysUntilExam = BusinessDateHelper.GetDaysUntilExam(normalizedExamDate, utcNow);
+
             int planDays = Math.Min(daysUntilExam, MaxPlanDays);
 
-            // ---------- 3. Đọc dữ liệu từ DB + kiểm tra đã làm bài đánh giá ----------
+            // ---------- 3. Valid owned Placement is mandatory for AI generation/preview ----------
             string promptText;
             Dictionary<int, CatalogLesson> catalogById;
             try
@@ -101,17 +118,15 @@ namespace RikiPath.Application.Services
                 var (promptContext, catalog) = await LoadLearnerDataAsync(userId, levelId, certName);
 
                 if (!promptContext.LatestTestScorePercent.HasValue)
-                {
                     return ApiResponse<LearningPathResponse>.Fail(
-                        "Bạn cần hoàn thành bài kiểm tra đánh giá năng lực đầu vào trước khi hệ thống tạo lộ trình.",
-                        HttpStatusCode.BadRequest);
-                }
+                        "Bạn cần hoàn thành bài Placement Test hợp lệ trước khi tạo lộ trình AI.",
+                        HttpStatusCode.BadRequest, errorCode: "LEARNING_PATH_PLACEMENT_REQUIRED");
 
                 if (catalog.Count == 0)
                 {
                     return ApiResponse<LearningPathResponse>.Fail(
                         $"Hiện chưa có bài học nào cho cấp độ {certName} (hoặc bạn đã hoàn thành tất cả).",
-                        HttpStatusCode.BadRequest);
+                        HttpStatusCode.BadRequest, errorCode: "LEARNING_PATH_NO_ELIGIBLE_LESSONS");
                 }
 
                 catalogById = catalog.ToDictionary(c => c.Id);
@@ -188,10 +203,11 @@ namespace RikiPath.Application.Services
                     $"AI trả về kết quả không hợp lệ ({lastError}). Vui lòng thử lại.", HttpStatusCode.BadGateway);
             }
 
-            // ---------- 5. Lưu DB ----------
+            // ---------- 5. Save DRAFT or first ACTIVE in a learner-row-locked transaction ----------
             try
             {
-                var suggestion = new RecommendedLearningPath
+                var generatedAt = BusinessDateHelper.EnsureUtc(UtcNowProvider());
+                var response = new LearningPathResponse
                 {
                     UserId = userId,
                     GeneratedAt = DateTime.UtcNow,
@@ -213,7 +229,56 @@ namespace RikiPath.Application.Services
                     Feasibility = aiResult.Feasibility,
                     FocusTopics = aiResult.FocusTopics,
                     DailySchedules = aiResult.DailySchedules,
-                });
+                };
+                ApiResponse<LearningPathResponse>? conflict = null;
+                await unitOfWork.ExecuteInTransactionAsync(async transactionCancellationToken =>
+                {
+                    var lockedUser = await unitOfWork.UserAccounts.GetByIdForUpdateAsync(
+                        userId, transactionCancellationToken);
+                    if (lockedUser is null)
+                    {
+                        conflict = ApiResponse<LearningPathResponse>.NotFound("Không tìm thấy người dùng.");
+                        return;
+                    }
+                    var current = await unitOfWork.RecommendedLearningPaths.GetActiveByUserIdAsync(
+                        userId, transactionCancellationToken);
+                    if ((!isPreview && current is not null) ||
+                        (!isPreview && (lockedUser.StartingCertificateLevelId ?? lockedUser.TargetCertificateLevelId) != starting.Id) ||
+                        lockedUser.TargetCertificateLevelId != target.Id && !isPreview)
+                    {
+                        conflict = ApiResponse<LearningPathResponse>.Fail(
+                            "Hồ sơ hoặc lộ trình đã thay đổi; vui lòng tải lại.",
+                            HttpStatusCode.Conflict, errorCode: "PATH_PREVIEW_REQUIRED");
+                        return;
+                    }
+
+                    var suggestion = new RecommendedLearningPath
+                    {
+                        UserId = userId,
+                        GeneratedAt = generatedAt,
+                        Version = await unitOfWork.RecommendedLearningPaths.GetNextVersionAsync(
+                            userId, transactionCancellationToken),
+                        Status = isPreview ? LearningPathStatus.Draft : LearningPathStatus.Active,
+                        StartingCertificateLevelId = starting.Id,
+                        TargetCertificateLevelId = target.Id,
+                        BaseActivePathId = current?.Id,
+                        PreviewExpiresAt = response.PreviewExpiresAt,
+                        ConfirmedAt = response.ConfirmedAt,
+                        SuggestionJson = JsonSerializer.Serialize(response, StoredPathJsonOptions),
+                        Summary = aiResult.Summary,
+                        IsViewed = false,
+                    };
+                    await unitOfWork.RecommendedLearningPaths.AddAsync(suggestion);
+                    await unitOfWork.SaveChangesAsync(transactionCancellationToken);
+                    response.PathId = suggestion.Id;
+                    response.Version = suggestion.Version;
+                    response.BaseActivePathId = current?.Id;
+                }, cancellationToken);
+
+                if (conflict is not null)
+                    return conflict;
+
+                return ApiResponse<LearningPathResponse>.Success(response);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -221,6 +286,203 @@ namespace RikiPath.Application.Services
                 return ApiResponse<LearningPathResponse>.Fail(
                     "Đã tạo lộ trình nhưng lưu trữ thất bại, vui lòng thử lại.", HttpStatusCode.InternalServerError, errors: BuildDebugErrors(ex));
             }
+        }
+
+        public async Task<ApiResponse<LearningPathResponse?>> GetLatestLearningPathAsync(
+            CancellationToken cancellationToken)
+        {
+            var userId = 0;
+            try
+            {
+                userId = claimService.GetUserClaim().Id;
+                var stored = await unitOfWork.RecommendedLearningPaths.GetLatestByUserIdAsync(
+                    userId,
+                    cancellationToken);
+                if (stored is null)
+                    return ApiResponse<LearningPathResponse?>.Success(null);
+                var response = await RestoreStoredPathAsync(stored, cancellationToken);
+                return ApiResponse<LearningPathResponse?>.Success(response);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Failed to restore latest learning path. UserId={UserId}", userId);
+                return ApiResponse<LearningPathResponse?>.Fail(
+                    "Không thể tải lộ trình học gần nhất.",
+                    HttpStatusCode.InternalServerError,
+                    errors: BuildDebugErrors(ex));
+            }
+        }
+
+        public async Task<ApiResponse<IReadOnlyList<LearningPathResponse>>> GetHistoryAsync(
+            CancellationToken cancellationToken)
+        {
+            try
+            {
+                var userId = claimService.GetUserClaim().Id;
+                var stored = await unitOfWork.RecommendedLearningPaths.GetByUserIdAsync(userId);
+                var history = new List<LearningPathResponse>();
+                foreach (var item in stored.Where(item => item.Status is LearningPathStatus.Active or LearningPathStatus.Superseded)
+                             .OrderByDescending(item => item.Version).ThenByDescending(item => item.Id))
+                    history.Add(await RestoreStoredPathAsync(item, cancellationToken));
+                return ApiResponse<IReadOnlyList<LearningPathResponse>>.Success(history);
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Failed to load path history");
+                return ApiResponse<IReadOnlyList<LearningPathResponse>>.Fail(
+                    "Không thể tải lịch sử lộ trình.", HttpStatusCode.InternalServerError);
+            }
+        }
+
+        public async Task<ApiResponse<LearningPathResponse>> ConfirmPreviewAsync(
+            int previewId, CancellationToken cancellationToken)
+        {
+            try
+            {
+                var userId = claimService.GetUserClaim().Id;
+                ApiResponse<LearningPathResponse>? outcome = null;
+                await unitOfWork.ExecuteInTransactionAsync(async ct =>
+                {
+                    var user = await unitOfWork.UserAccounts.GetByIdForUpdateAsync(userId, ct);
+                    if (user is null)
+                    {
+                        outcome = ApiResponse<LearningPathResponse>.NotFound("Không tìm thấy người dùng.");
+                        return;
+                    }
+                    var draft = await unitOfWork.RecommendedLearningPaths.GetOwnedByIdAsync(userId, previewId, ct);
+                    if (draft is null)
+                    {
+                        outcome = ApiResponse<LearningPathResponse>.NotFound("Không tìm thấy bản xem trước.");
+                        return;
+                    }
+                    if (draft.ConfirmedAt.HasValue && draft.Status is LearningPathStatus.Active or LearningPathStatus.Superseded)
+                    {
+                        outcome = ApiResponse<LearningPathResponse>.Success(
+                            await RestoreStoredPathAsync(draft, ct));
+                        return;
+                    }
+                    if (draft.Status != LearningPathStatus.Draft ||
+                        !draft.PreviewExpiresAt.HasValue ||
+                        BusinessDateHelper.EnsureUtc(UtcNowProvider()) >= draft.PreviewExpiresAt.Value)
+                    {
+                        outcome = ApiResponse<LearningPathResponse>.Fail(
+                            "Bản xem trước đã hết hiệu lực; vui lòng tạo lại.",
+                            HttpStatusCode.Conflict, errorCode: "PATH_PREVIEW_STALE");
+                        return;
+                    }
+                    var current = await unitOfWork.RecommendedLearningPaths.GetActiveByUserIdAsync(userId, ct);
+                    if (current?.Id != draft.BaseActivePathId)
+                    {
+                        outcome = ApiResponse<LearningPathResponse>.Fail(
+                            "Lộ trình hiện tại đã thay đổi; vui lòng xem trước lại.",
+                            HttpStatusCode.Conflict, errorCode: "PATH_PREVIEW_STALE");
+                        return;
+                    }
+
+                    // Under the learner row lock, retire the old plan before activating
+                    // the new one. A transaction rollback restores the old ACTIVE plan.
+                    if (current is not null)
+                    {
+                        current.Status = LearningPathStatus.Superseded;
+                        unitOfWork.RecommendedLearningPaths.Update(current);
+                        await unitOfWork.SaveChangesAsync(ct);
+                    }
+                    draft.Status = LearningPathStatus.Active;
+                    draft.ConfirmedAt = BusinessDateHelper.EnsureUtc(UtcNowProvider());
+                    draft.PreviewExpiresAt = null;
+                    unitOfWork.RecommendedLearningPaths.Update(draft);
+                    user.StartingCertificateLevelId = draft.StartingCertificateLevelId;
+                    user.TargetCertificateLevelId = draft.TargetCertificateLevelId;
+                    unitOfWork.UserAccounts.Update(user);
+                    await unitOfWork.SaveChangesAsync(ct);
+                    outcome = ApiResponse<LearningPathResponse>.Success(
+                        await RestoreStoredPathAsync(draft, ct));
+                }, cancellationToken);
+                return outcome!;
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Failed to confirm learning path preview. PreviewId={PreviewId}", previewId);
+                return ApiResponse<LearningPathResponse>.Fail(
+                    "Không thể kích hoạt lộ trình; lộ trình trước vẫn được giữ.",
+                    HttpStatusCode.Conflict, errorCode: "PATH_ACTIVATION_FAILED");
+            }
+        }
+
+        public async Task<ApiResponse<LearningPathResponse>> CancelPreviewAsync(
+            int previewId, CancellationToken cancellationToken)
+        {
+            try
+            {
+                var userId = claimService.GetUserClaim().Id;
+                var draft = await unitOfWork.RecommendedLearningPaths.GetOwnedByIdAsync(
+                    userId, previewId, cancellationToken);
+                if (draft is null)
+                    return ApiResponse<LearningPathResponse>.NotFound("Không tìm thấy bản xem trước.");
+                if (draft.Status is LearningPathStatus.Active or LearningPathStatus.Superseded)
+                    return ApiResponse<LearningPathResponse>.Fail(
+                        "Không thể hủy lộ trình đã xác nhận.", HttpStatusCode.Conflict,
+                        errorCode: "PATH_ALREADY_CONFIRMED");
+                if (draft.Status == LearningPathStatus.Draft)
+                {
+                    draft.Status = LearningPathStatus.Cancelled;
+                    unitOfWork.RecommendedLearningPaths.Update(draft);
+                    await unitOfWork.SaveChangesAsync(cancellationToken);
+                }
+                return ApiResponse<LearningPathResponse>.Success(
+                    await RestoreStoredPathAsync(draft, cancellationToken));
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Failed to cancel learning path preview. PreviewId={PreviewId}", previewId);
+                return ApiResponse<LearningPathResponse>.Fail(
+                    "Không thể hủy bản xem trước.", HttpStatusCode.InternalServerError);
+            }
+        }
+
+        private async Task<LearningPathResponse> RestoreStoredPathAsync(
+            RecommendedLearningPath stored, CancellationToken cancellationToken)
+        {
+            var response = JsonSerializer.Deserialize<LearningPathResponse>(stored.SuggestionJson, StoredPathJsonOptions);
+            if (response is null || response.UserId == 0 || response.GeneratedAt == default)
+            {
+                var user = await unitOfWork.UserAccounts.GetWithLearningGoalAsync(stored.UserId, cancellationToken);
+                if (user?.TargetCertificateLevelId is null)
+                    throw new InvalidOperationException("Legacy path has no target level.");
+                var lessons = await unitOfWork.Lessons.GetByCertificateLevelAsync(
+                    user.TargetCertificateLevelId.Value, cancellationToken);
+                var catalog = lessons.ToDictionary(lesson => lesson.Id,
+                    lesson => new CatalogLesson(lesson.Id, lesson.Title, 0));
+                var legacy = ParseAiResponse(stored.SuggestionJson);
+                NormalizeLessons(legacy, catalog);
+                response = new LearningPathResponse
+                {
+                    Summary = legacy.Summary,
+                    Strengths = legacy.Strengths,
+                    Weaknesses = legacy.Weaknesses,
+                    Feasibility = legacy.Feasibility,
+                    FocusTopics = legacy.FocusTopics,
+                    DailySchedules = legacy.DailySchedules,
+                };
+            }
+            response.UserId = stored.UserId;
+            response.PathId = stored.Id;
+            response.Version = stored.Version;
+            response.Status = stored.Status.ToString().ToUpperInvariant();
+            response.GeneratedAt = stored.GeneratedAt;
+            response.StartingJlptLevelId = stored.StartingCertificateLevelId;
+            response.TargetJlptLevelId = stored.TargetCertificateLevelId;
+            response.BaseActivePathId = stored.BaseActivePathId;
+            response.PreviewExpiresAt = stored.PreviewExpiresAt;
+            response.ConfirmedAt = stored.ConfirmedAt;
+            return response;
         }
 
         // =====================================================================
@@ -244,7 +506,7 @@ namespace RikiPath.Application.Services
         // DỮ LIỆU TỪ DB: bài đánh giá + tiến độ + notebook + DANH MỤC BÀI HỌC của cấp độ mục tiêu
         // =====================================================================
         private async Task<(LearningPathPromptContext Context, List<CatalogLesson> Catalog)> LoadLearnerDataAsync(
-            int userId, int certificateLevelId, string targetCertification)
+            int userId, IReadOnlyList<CertificateLevel> levels, string targetCertification)
         {
             var lessonProgresses = await unitOfWork.LessonProgresses.GetByUserAsync(userId);
             var notebookEntries = await unitOfWork.LearnerNoteEntries.GetByUserAsync(userId, vocabularyListId: null);
@@ -261,7 +523,7 @@ namespace RikiPath.Application.Services
                 ?? completedAttempts.FirstOrDefault();
 
             IReadOnlyDictionary<string, double>? skillBreakdown = null;
-            if (latestAttempt is not null)
+            if (immutableResult?.Sections is { Count: > 0 } sections)
             {
                 var withBreakdown = await unitOfWork.MockTestAttempts.GetWithBreakdownAsync(latestAttempt.Id);
                 skillBreakdown = withBreakdown?.SectionResults
@@ -269,9 +531,12 @@ namespace RikiPath.Application.Services
                     .ToDictionary(g => g.Key, g => g.Average(r => r.ScorePercent));
             }
 
+            // A completed Placement result is valid only when the immutable completed
+            // snapshot is intact. Never rebuild placement scoring from mutable banks.
             // ---- Danh mục bài học của cấp độ mục tiêu (nguồn duy nhất AI được phép chọn) ----
-            // TODO: chỉnh tên repository/method cho khớp project; CHỈ lấy bài đã duyệt/published.
-            var lessons = await unitOfWork.Lessons.GetByCertificateLevelAsync(certificateLevelId);
+            var lessons = new List<Lesson>();
+            foreach (var level in levels)
+                lessons.AddRange(await unitOfWork.Lessons.GetByCertificateLevelAsync(level.Id));
 
             var progressByLesson = lessonProgresses
                 .GroupBy(p => p.LessonId)
@@ -296,7 +561,7 @@ namespace RikiPath.Application.Services
                     .Distinct()
                     .Take(MaxNotebookWords)
                     .ToList(),
-                latestTestScorePercent: latestAttempt?.TotalScore,
+                latestTestScorePercent: immutableResult?.TotalScore,
                 latestTestLanguageSkillBreakdown: skillBreakdown);
 
             return (context, catalog);
@@ -339,7 +604,7 @@ namespace RikiPath.Application.Services
                 sb.AppendLine($"- id={l.Id} | {l.Title} | tiến độ hiện tại {l.ProgressPercent:0}%");
 
             sb.AppendLine("\n[YÊU CẦU 1 - NHẬN XÉT NĂNG LỰC]");
-            sb.AppendLine("- Dựa trên điểm bài đánh giá và điểm từng kỹ năng, nêu điểm mạnh và điểm yếu cụ thể của người học.");
+            sb.AppendLine("- Dựa trên điểm Placement và điểm từng kỹ năng, nêu điểm mạnh và điểm yếu cụ thể.");
             sb.AppendLine($"- Đánh giá mức độ khả thi đạt {certName} trong {daysUntilExam} ngày còn lại (thực tế, không phóng đại), kèm điều kiện cần để đạt.");
 
             sb.AppendLine("\n[YÊU CẦU 2 - LỘ TRÌNH ÔN LUYỆN THEO NGÀY]");
@@ -347,7 +612,7 @@ namespace RikiPath.Application.Services
             if (planDays < daysUntilExam)
                 sb.AppendLine($"- Đây là GIAI ĐOẠN 1 ({planDays}/{daysUntilExam} ngày). Trong summary nêu định hướng cho {daysUntilExam - planDays} ngày còn lại.");
             sb.AppendLine("- Mỗi ngày chọn các bài học từ DANH SÁCH ở trên bằng id. TUYỆT ĐỐI không tự bịa bài học hay id không có trong danh sách.");
-            sb.AppendLine("- Ưu tiên bài học thuộc kỹ năng/phần mà người học yếu nhất theo kết quả đánh giá; bài đang học dở (tiến độ > 0%) nên hoàn thành trước.");
+            sb.AppendLine("- Ưu tiên kỹ năng yếu theo Placement; bài đang học dở nên hoàn thành trước.");
             sb.AppendLine("- Nếu người học có từ trong sổ tay (notebook), có thể dành một số ngày/phần ôn lại các từ đó trong 'focus'.");
             sb.AppendLine("- Những ngày cuối trước kỳ thi: giảm nội dung mới, ưu tiên ôn lại và luyện đề.");
 

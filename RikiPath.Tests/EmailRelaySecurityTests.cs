@@ -41,6 +41,24 @@ public sealed class EmailRelaySecurityTests
     }
 
     [Fact]
+    public void Post_route_discovery_composes_multiple_controller_and_action_routes()
+    {
+        var routes = GetPostRoutes(typeof(MultiRouteController))
+            .OrderBy(route => route, StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.Equal(
+            new[]
+            {
+                "api/MultiRoute/send",
+                "api/MultiRoute/submit",
+                "legacy/MultiRoute/send",
+                "legacy/MultiRoute/submit"
+            },
+            routes);
+    }
+
+    [Fact]
     public void Resend_contract_accepts_email_only()
     {
         var properties = typeof(ResendVerificationEmailRequest)
@@ -296,24 +314,65 @@ public sealed class EmailRelaySecurityTests
 
     private static IEnumerable<string> GetPostRoutes(Type controllerType)
     {
-        var controllerTemplate = controllerType.GetCustomAttribute<RouteAttribute>()?.Template ?? string.Empty;
         var controllerName = controllerType.Name.EndsWith("Controller", StringComparison.Ordinal)
             ? controllerType.Name[..^"Controller".Length]
             : controllerType.Name;
-        controllerTemplate = controllerTemplate.Replace("[controller]", controllerName, StringComparison.OrdinalIgnoreCase);
+        var controllerTemplates = controllerType
+            .GetCustomAttributes<RouteAttribute>(inherit: true)
+            .Select(attribute => attribute.Template ?? string.Empty)
+            .DefaultIfEmpty(string.Empty)
+            .ToArray();
 
         foreach (var method in controllerType.GetMethods(BindingFlags.Instance | BindingFlags.Public))
         {
-            foreach (var attribute in method.GetCustomAttributes<HttpPostAttribute>())
+            var postAttributes = method.GetCustomAttributes<HttpPostAttribute>(inherit: true).ToArray();
+            if (postAttributes.Length == 0)
             {
+                continue;
+            }
+
+            var actionRouteTemplates = method
+                .GetCustomAttributes<RouteAttribute>(inherit: true)
+                .Select(attribute => attribute.Template ?? string.Empty)
+                .ToArray();
+            var actionTemplates = actionRouteTemplates.Length > 0
+                ? actionRouteTemplates
+                : postAttributes.Select(attribute => attribute.Template ?? string.Empty).ToArray();
+
+            foreach (var controllerTemplate in controllerTemplates)
+            foreach (var actionTemplate in actionTemplates)
+            {
+                var normalizedActionTemplate = actionTemplate
+                    .Replace("[controller]", controllerName, StringComparison.OrdinalIgnoreCase)
+                    .Replace("[action]", method.Name, StringComparison.OrdinalIgnoreCase);
+
+                if (normalizedActionTemplate.StartsWith("~/", StringComparison.Ordinal) ||
+                    normalizedActionTemplate.StartsWith("/", StringComparison.Ordinal))
+                {
+                    yield return normalizedActionTemplate.TrimStart('~', '/');
+                    continue;
+                }
+
+                var normalizedControllerTemplate = controllerTemplate
+                    .Replace("[controller]", controllerName, StringComparison.OrdinalIgnoreCase)
+                    .Replace("[action]", method.Name, StringComparison.OrdinalIgnoreCase);
                 var route = string.Join(
                     '/',
-                    new[] { controllerTemplate, attribute.Template ?? string.Empty }
+                    new[] { normalizedControllerTemplate, normalizedActionTemplate }
                         .Where(part => !string.IsNullOrWhiteSpace(part))
                         .Select(part => part.Trim('/')));
                 yield return route;
             }
         }
+    }
+
+    [Route("api/[controller]")]
+    [Route("legacy/[controller]")]
+    private sealed class MultiRouteController : ControllerBase
+    {
+        [HttpPost("send")]
+        [HttpPost("submit")]
+        public IActionResult Send() => new OkResult();
     }
 
     private static EmailFixture CreateFixture()

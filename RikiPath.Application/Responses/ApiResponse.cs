@@ -8,6 +8,8 @@ namespace RikiPath.Application.Responses
         public int StatusCode { get; protected set; }
         public bool IsSuccess { get; protected set; }
         public string? ErrorMessage { get; protected set; }
+        public string? ErrorCode { get; protected set; }
+        public bool? Retryable { get; protected set; }
         public List<string>? Errors { get; protected set; }
         public T? Result { get; protected set; }
 
@@ -37,8 +39,29 @@ namespace RikiPath.Application.Responses
             };
         }
 
+        public static ApiResponse<T> Fail(
+            string message,
+            HttpStatusCode statusCode,
+            string? errorCode,
+            bool? retryable = null,
+            List<string>? errors = null)
+        {
+            return new ApiResponse<T>
+            {
+                IsSuccess = false,
+                StatusCode = (int)statusCode,
+                ErrorMessage = message,
+                ErrorCode = errorCode,
+                Retryable = retryable,
+                Errors = errors
+            };
+        }
+
         public static ApiResponse<T> NotFound(string message = "Resource not found")
             => Fail(message, HttpStatusCode.NotFound);
+
+        public static ApiResponse<T> NotFound(string message, string? errorCode, bool? retryable = null)
+            => Fail(message, HttpStatusCode.NotFound, errorCode, retryable);
 
         public static ApiResponse<T> Unauthorized(string message = "Unauthorized access")
             => Fail(message, HttpStatusCode.Unauthorized);
@@ -66,8 +89,30 @@ namespace RikiPath.Application.Responses
                 Errors = errors
             };
         }
+
+        public static ApiResponse Fail(
+            string message,
+            HttpStatusCode statusCode,
+            string? errorCode,
+            bool? retryable = null,
+            List<string>? errors = null)
+        {
+            return new ApiResponse
+            {
+                IsSuccess = false,
+                StatusCode = (int)statusCode,
+                ErrorMessage = message,
+                ErrorCode = errorCode,
+                Retryable = retryable,
+                Errors = errors
+            };
+        }
+
         public static new ApiResponse NotFound(string message = "Resource not found")
-        => Fail(message, HttpStatusCode.NotFound);
+            => Fail(message, HttpStatusCode.NotFound);
+
+        public static new ApiResponse NotFound(string message, string? errorCode, bool? retryable = null)
+            => Fail(message, HttpStatusCode.NotFound, errorCode, retryable);
 
         public static new ApiResponse Unauthorized(string message = "Unauthorized access")
             => Fail(message, HttpStatusCode.Unauthorized);
