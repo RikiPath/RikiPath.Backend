@@ -19,6 +19,8 @@ namespace RikiPath.Application.Responses.MockTests
         public int SectionOrder { get; set; }
         public int Order { get; set; }
         public string Content { get; set; } = string.Empty;
+        public string QuestionType { get; set; } = "SingleChoice";
+        public System.Text.Json.JsonElement? InteractionData { get; set; }
         public string? AudioUrl { get; set; }
         public string? ImageUrl { get; set; }
         public List<StartAttemptOptionResponse> Options { get; set; } = [];

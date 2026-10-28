@@ -14,6 +14,8 @@ namespace RikiPath.Application.IServices
 
         Task<ApiResponse<List<TestSummaryResponse>>> GetTestsByLevelAsync(int jlptLevelId, CancellationToken cancellationToken = default);
 
+        Task<ApiResponse<List<TestSummaryResponse>>> GetPlacementTestsByCertificateLevelAsync(int certificateLevelId, CancellationToken cancellationToken = default);
+
         Task<ApiResponse<DetailedAttemptResultResponse>> GetDetailedResultAsync(int attemptId, CancellationToken cancellationToken = default);
 
         Task<ApiResponse<List<QuestionReviewCard>>> GetWrongQuestionsReviewSessionAsync(int? practiceTestId = null, CancellationToken cancellationToken = default);

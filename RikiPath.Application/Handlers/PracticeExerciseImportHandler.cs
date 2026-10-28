@@ -19,7 +19,7 @@ namespace RikiPath.Application.Handlers
     ///  - Số thứ tự câu ("Question Sort Order") không được trùng trong 1 bài tập.
     ///  - Khóa so khớp với DB: Lesson + Title.
     /// </summary>
-    public sealed class PracticeExerciseImportHandler(IUnitOfWork unitOfWork) : ISheetImportHandler
+    public sealed class PracticeExerciseImportHandler(IUnitOfWork unitOfWork) : IWorkbookLessonAwareImportHandler
     {
         private static readonly string[] OptionHeaders = ["Option 1", "Option 2", "Option 3", "Option 4"];
 
@@ -27,6 +27,12 @@ namespace RikiPath.Application.Handlers
         public string SheetName => "Practice Exercise";
 
         public async Task<SheetImportResponse> BuildDiffAsync(IReadOnlyList<ExcelRow> rows, CancellationToken cancellationToken)
+            => await BuildDiffAsync(rows, [], cancellationToken);
+
+        public async Task<SheetImportResponse> BuildDiffAsync(
+            IReadOnlyList<ExcelRow> rows,
+            IReadOnlyList<LessonImportPayloadResponse> workbookLessons,
+            CancellationToken cancellationToken)
         {
             var titles = rows.Select(r => ImportHandlerSupport.Clean(r.Get("Exercise Title")))
                 .Where(t => t is not null).Select(t => t!).Distinct().ToList();
@@ -43,19 +49,24 @@ namespace RikiPath.Application.Handlers
             var (skillsByName, ambiguousSkillNames) = ImportHandlerSupport.IndexByKey(
                 skills, s => s.Name, StringComparer.OrdinalIgnoreCase);
 
-            var lessonsByTitle = await LoadLessonCandidatesAsync(cancellationToken);
+            var lessonsByTitle = await LoadLessonCandidatesAsync(workbookLessons, cancellationToken);
             var openRowKeys = await ImportHandlerSupport.LoadOpenRowKeysAsync(unitOfWork, EntityType, cancellationToken);
 
             var ctx = new DiffContext(existingByKey, ambiguousKeys, skillsByName, ambiguousSkillNames, lessonsByTitle, openRowKeys);
 
             // Gộp dòng theo Exercise Title (giữ thứ tự xuất hiện). Dòng thiếu tên bài tập -> 1 nhóm riêng để báo lỗi.
             var groups = new List<List<ExcelRow>>();
-            var byTitle = new Dictionary<string, List<ExcelRow>>(StringComparer.Ordinal);
+            var byTitleAndLesson = new Dictionary<string, List<ExcelRow>>(StringComparer.Ordinal);
+            var lastLessonByExerciseTitle = new Dictionary<string, string>(StringComparer.Ordinal);
             foreach (var row in rows)
             {
                 var title = ImportHandlerSupport.Clean(row.Get("Exercise Title"));
                 if (title is null) { groups.Add([row]); continue; }
-                if (!byTitle.TryGetValue(title, out var list)) { byTitle[title] = list = []; groups.Add(list); }
+                var lessonTitle = ImportHandlerSupport.Clean(row.Get("Lesson Title"));
+                if (lessonTitle is not null) lastLessonByExerciseTitle[title] = lessonTitle;
+                else lessonTitle = lastLessonByExerciseTitle.GetValueOrDefault(title);
+                var groupKey = $"{title}\u001f{lessonTitle}";
+                if (!byTitleAndLesson.TryGetValue(groupKey, out var list)) { byTitleAndLesson[groupKey] = list = []; groups.Add(list); }
                 list.Add(row);
             }
 
@@ -84,7 +95,9 @@ namespace RikiPath.Application.Handlers
             HashSet<string> OpenRowKeys);
 
         /// <summary>Lesson đã duyệt (có Id) + Lesson đang có bản nháp chờ duyệt (chưa có Id), nhóm theo tên.</summary>
-        private async Task<Dictionary<string, List<LessonRef>>> LoadLessonCandidatesAsync(CancellationToken cancellationToken)
+        private async Task<Dictionary<string, List<LessonRef>>> LoadLessonCandidatesAsync(
+            IReadOnlyList<LessonImportPayloadResponse> workbookLessons,
+            CancellationToken cancellationToken)
         {
             var dbLessons = await unitOfWork.Lessons.Query()
                 .Where(l => !l.IsDeleted)
@@ -107,6 +120,14 @@ namespace RikiPath.Application.Handlers
                 if (p is null || string.IsNullOrWhiteSpace(p.Title)) continue;
                 if (candidates.Any(c => c.Title == p.Title && c.CertificateLevelId == p.CertificateLevelId)) continue;
                 candidates.Add(new LessonRef(null, p.Title, p.CertificateLevelId, p.CertificateLevelCode));
+            }
+
+            foreach (var lesson in workbookLessons)
+            {
+                if (string.IsNullOrWhiteSpace(lesson.Title) || lesson.CertificateLevelId <= 0) continue;
+                if (candidates.Any(candidate => candidate.Title == lesson.Title
+                    && candidate.CertificateLevelId == lesson.CertificateLevelId)) continue;
+                candidates.Add(new LessonRef(null, lesson.Title, lesson.CertificateLevelId, lesson.CertificateLevelCode));
             }
 
             return candidates.GroupBy(c => c.Title).ToDictionary(g => g.Key, g => g.ToList(), StringComparer.Ordinal);

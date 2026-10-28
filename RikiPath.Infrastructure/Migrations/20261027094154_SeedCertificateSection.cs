@@ -3,1373 +3,1356 @@ using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
 
+#pragma warning disable CA1814 // Prefer jagged arrays over multidimensional
+
 namespace RikiPath.Infrastructure.Migrations
 {
     /// <inheritdoc />
-    public partial class AddSomeFieldIntoMentorAvailability : Migration
+    public partial class SeedCertificateSection : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.AddColumn<string>(
-                name: "CancelReason",
-                table: "MentorAvailabilities",
-                type: "text",
-                nullable: true);
-
-            migrationBuilder.AddColumn<DateTime>(
-                name: "CancelRejectedAt",
-                table: "MentorAvailabilities",
-                type: "timestamp without time zone",
-                nullable: true);
-
-            migrationBuilder.AddColumn<string>(
-                name: "CancelRejectionReason",
-                table: "MentorAvailabilities",
-                type: "text",
-                nullable: true);
-
-            migrationBuilder.AddColumn<DateTime>(
-                name: "CancelRequestedAt",
-                table: "MentorAvailabilities",
-                type: "timestamp without time zone",
-                nullable: true);
+            migrationBuilder.InsertData(
+                table: "CertificateSections",
+                columns: new[] { "Id", "CertificationLevelId", "Code", "CreatedBy", "CreatedDate", "Description", "DurationMinutes", "IsDeleted", "MaxScore", "ModifiedBy", "ModifiedDate", "Name", "PassingScore", "SortOrder" },
+                values: new object[,]
+                {
+                    { 1, 1, "N5_VOCAB", null, new DateTime(2026, 10, 27, 9, 41, 52, 301, DateTimeKind.Utc).AddTicks(2484), "Phần thi kiểm tra chữ Hán, cách đọc và từ vựng cấp độ N5", null, false, 0, null, null, "Kiến thức ngôn ngữ (Từ vựng)", 0, 0 },
+                    { 2, 1, "N5_GRAMMAR_READING", null, new DateTime(2026, 10, 27, 9, 41, 52, 301, DateTimeKind.Utc).AddTicks(2492), "Phần thi kiểm tra cấu trúc ngữ pháp và đọc hiểu đoạn văn ngắn cấp độ N5", null, false, 0, null, null, "Kiến thức ngôn ngữ (Ngữ pháp) & Đọc hiểu", 0, 0 },
+                    { 3, 1, "N5_LISTENING", null, new DateTime(2026, 10, 27, 9, 41, 52, 301, DateTimeKind.Utc).AddTicks(2494), "Phần thi nghe hiểu tình huống giao tiếp hàng ngày cấp độ N5", null, false, 0, null, null, "Nghe hiểu", 0, 0 },
+                    { 4, 2, "N4_VOCAB", null, new DateTime(2026, 10, 27, 9, 41, 52, 301, DateTimeKind.Utc).AddTicks(2496), "Phần thi kiểm tra chữ Hán, cách đọc và từ vựng cấp độ N4", null, false, 0, null, null, "Kiến thức ngôn ngữ (Từ vựng)", 0, 0 },
+                    { 5, 2, "N4_GRAMMAR", null, new DateTime(2026, 10, 27, 9, 41, 52, 301, DateTimeKind.Utc).AddTicks(2497), "Phần thi kiểm tra cấu trúc ngữ pháp và sắp xếp câu cấp độ N4", null, false, 0, null, null, "Kiến thức ngôn ngữ (Ngữ pháp)", 0, 0 },
+                    { 6, 2, "N4_READING", null, new DateTime(2026, 10, 27, 9, 41, 52, 301, DateTimeKind.Utc).AddTicks(2499), "Phần thi đọc hiểu văn bản, thông báo và biểu mẫu cấp độ N4", null, false, 0, null, null, "Đọc hiểu", 0, 0 },
+                    { 7, 2, "N4_LISTENING", null, new DateTime(2026, 10, 27, 9, 41, 52, 301, DateTimeKind.Utc).AddTicks(2501), "Phần thi nghe hiểu hội thoại và tình huống thực tế cấp độ N4", null, false, 0, null, null, "Nghe hiểu", 0, 0 }
+                });
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 1,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9070));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9333));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 2,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9084));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9346));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 3,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9086));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9349));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 4,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9088));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9350));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 5,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9089));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9352));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 6,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9199));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9425));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 7,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9200));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9426));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 8,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9202));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9428));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 9,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9204));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9429));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 10,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9206));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9432));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 11,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9208));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9433));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 12,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9209));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9434));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 13,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9211));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9436));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 14,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9213));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9437));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 15,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9214));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9439));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 16,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9216));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9440));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 17,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9217));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9442));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 18,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9221));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9445));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 19,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9222));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9446));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 20,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9223));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9448));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 21,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9282));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9449));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 22,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9284));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9450));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 23,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9285));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9452));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 24,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9287));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9453));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 25,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9288));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9455));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 26,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9290));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9456));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 27,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9291));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9458));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 28,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9293));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9459));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 29,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9294));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9461));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 30,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9296));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9462));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 31,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9297));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9464));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 32,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9298));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9500));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 33,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9299));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9502));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 34,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9302));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9505));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 35,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9303));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9506));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 36,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9305));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9508));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 37,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9306));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9510));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 38,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9308));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9511));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 39,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9309));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9513));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 40,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9310));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9514));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 41,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9312));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9516));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 42,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9313));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9517));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 43,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9314));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9519));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 44,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9316));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9520));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 45,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9317));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9521));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 46,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9319));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9522));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 47,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9375));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9552));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 48,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9379));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9555));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 49,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9381));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9556));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 50,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9382));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9558));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 51,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9383));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9559));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 52,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9385));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9645));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 53,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9386));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9647));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 54,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9387));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9648));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 55,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9389));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9650));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 56,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9390));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9651));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 57,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9391));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9652));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 58,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9392));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9654));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 59,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9394));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9655));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 60,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9395));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9656));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 61,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9396));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9657));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 62,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9398));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9659));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 63,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9399));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9660));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 64,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9400));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9661));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 65,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9401));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9662));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 66,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9490));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9665));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 67,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9493));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9667));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 68,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9494));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9668));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 69,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9495));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9669));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 70,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9497));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9671));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 71,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9498));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9672));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 72,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9499));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9673));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 73,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9501));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9675));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 74,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9502));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9676));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 75,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9503));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9678));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 76,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9505));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9744));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 77,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9506));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9745));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 78,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9507));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9746));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 79,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9509));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9748));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 80,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9510));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9749));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 81,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9512));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9751));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 82,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9513));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9752));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 83,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9515));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9754));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 84,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9516));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9755));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 85,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9518));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9756));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 86,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9519));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9758));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 87,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9520));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9759));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 88,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9522));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9760));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 89,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9523));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9762));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 90,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9524));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9763));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 91,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9526));
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9765));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 92,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 25, 17, 16, 5, 127, DateTimeKind.Utc).AddTicks(9527));
-
-            migrationBuilder.UpdateData(
-                table: "MentorAvailabilities",
-                keyColumn: "Id",
-                keyValue: 990001,
-                columns: new[] { "CancelReason", "CancelRejectedAt", "CancelRejectionReason", "CancelRequestedAt" },
-                values: new object[] { null, null, null, null });
-
-            migrationBuilder.UpdateData(
-                table: "MentorAvailabilities",
-                keyColumn: "Id",
-                keyValue: 990002,
-                columns: new[] { "CancelReason", "CancelRejectedAt", "CancelRejectionReason", "CancelRequestedAt" },
-                values: new object[] { null, null, null, null });
-
-            migrationBuilder.UpdateData(
-                table: "MentorAvailabilities",
-                keyColumn: "Id",
-                keyValue: 990003,
-                columns: new[] { "CancelReason", "CancelRejectedAt", "CancelRejectionReason", "CancelRequestedAt" },
-                values: new object[] { null, null, null, null });
-
-            migrationBuilder.UpdateData(
-                table: "MentorAvailabilities",
-                keyColumn: "Id",
-                keyValue: 990004,
-                columns: new[] { "CancelReason", "CancelRejectedAt", "CancelRejectionReason", "CancelRequestedAt" },
-                values: new object[] { null, null, null, null });
+                value: new DateTime(2026, 10, 27, 9, 41, 52, 273, DateTimeKind.Utc).AddTicks(9766));
         }
 
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.DropColumn(
-                name: "CancelReason",
-                table: "MentorAvailabilities");
+            migrationBuilder.DeleteData(
+                table: "CertificateSections",
+                keyColumn: "Id",
+                keyValue: 1);
 
-            migrationBuilder.DropColumn(
-                name: "CancelRejectedAt",
-                table: "MentorAvailabilities");
+            migrationBuilder.DeleteData(
+                table: "CertificateSections",
+                keyColumn: "Id",
+                keyValue: 2);
 
-            migrationBuilder.DropColumn(
-                name: "CancelRejectionReason",
-                table: "MentorAvailabilities");
+            migrationBuilder.DeleteData(
+                table: "CertificateSections",
+                keyColumn: "Id",
+                keyValue: 3);
 
-            migrationBuilder.DropColumn(
-                name: "CancelRequestedAt",
-                table: "MentorAvailabilities");
+            migrationBuilder.DeleteData(
+                table: "CertificateSections",
+                keyColumn: "Id",
+                keyValue: 4);
+
+            migrationBuilder.DeleteData(
+                table: "CertificateSections",
+                keyColumn: "Id",
+                keyValue: 5);
+
+            migrationBuilder.DeleteData(
+                table: "CertificateSections",
+                keyColumn: "Id",
+                keyValue: 6);
+
+            migrationBuilder.DeleteData(
+                table: "CertificateSections",
+                keyColumn: "Id",
+                keyValue: 7);
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 1,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3635));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6493));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 2,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3649));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6507));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 3,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3651));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6509));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 4,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3653));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6510));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 5,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3654));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6512));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 6,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3658));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6516));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 7,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3660));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6517));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 8,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3662));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6519));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 9,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3663));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6520));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 10,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3666));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6522));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 11,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3668));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6523));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 12,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3669));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6525));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 13,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3671));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6526));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 14,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3672));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6528));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 15,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3674));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6529));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 16,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3675));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6574));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 17,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3677));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6576));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 18,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3680));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6578));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 19,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3681));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6580));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 20,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3714));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6581));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 21,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3716));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6582));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 22,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3718));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6584));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 23,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3719));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6585));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 24,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3720));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6587));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 25,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3721));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6589));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 26,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3723));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6590));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 27,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3724));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6591));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 28,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3725));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6593));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 29,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3726));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6594));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 30,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3728));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6596));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 31,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3729));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6597));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 32,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3731));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6599));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 33,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3732));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6600));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 34,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3736));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6602));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 35,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3737));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6604));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 36,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3739));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6605));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 37,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3740));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6607));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 38,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3741));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6608));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 39,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3743));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6610));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 40,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3744));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6695));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 41,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3745));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6697));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 42,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3747));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6698));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 43,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3748));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6700));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 44,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3749));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6701));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 45,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3830));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6702));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 46,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3832));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6704));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 47,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3863));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6739));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 48,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3866));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6742));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 49,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3868));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6744));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 50,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3869));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6745));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 51,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3870));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6746));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 52,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3871));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6748));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 53,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3872));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6749));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 54,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3874));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6750));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 55,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3875));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6752));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 56,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3876));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6753));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 57,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3877));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6755));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 58,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3879));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6756));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 59,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3880));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6757));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 60,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3881));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6759));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 61,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3882));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6760));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 62,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3884));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6831));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 63,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3885));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6833));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 64,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3886));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6835));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 65,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3887));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6836));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 66,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3948));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6839));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 67,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3949));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6840));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 68,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3951));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6842));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 69,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3952));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6843));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 70,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3953));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6845));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 71,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3954));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6846));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 72,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3955));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6847));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 73,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3957));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6848));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 74,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3958));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6850));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 75,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3959));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6851));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 76,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3960));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6852));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 77,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3961));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6854));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 78,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3963));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6855));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 79,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3964));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6857));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 80,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3965));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6858));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 81,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3966));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6860));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 82,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3967));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6861));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 83,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3969));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6863));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 84,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3970));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6864));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 85,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3971));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6865));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 86,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3972));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6914));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 87,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3974));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6916));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 88,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3975));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6917));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 89,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3976));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6919));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 90,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3977));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6920));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 91,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(3978));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6922));
 
             migrationBuilder.UpdateData(
                 table: "KanaCharacters",
                 keyColumn: "Id",
                 keyValue: 92,
                 column: "CreatedDate",
-                value: new DateTime(2026, 10, 22, 18, 9, 17, 553, DateTimeKind.Utc).AddTicks(4021));
+                value: new DateTime(2026, 10, 27, 8, 12, 15, 804, DateTimeKind.Utc).AddTicks(6923));
         }
     }
 }

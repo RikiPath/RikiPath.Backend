@@ -62,5 +62,18 @@ namespace RikiPath.Infrastructure.Repositories
                 .Where(t => !t.IsDeleted && t.CertificateLevelId == jlptLevelId)
                 .ToListAsync();
         }
+
+        public async Task<List<MockTest>> GetLearnerPlacementTestsByLevelAsync(
+            int certificateLevelId,
+            CancellationToken cancellationToken = default)
+            => await _context.MockTests
+                .AsNoTracking()
+                .Include(test => test.CertificateLevel)
+                .Where(test => test.CertificateLevelId == certificateLevelId
+                    && !test.IsDeleted
+                    && test.IsPlacementAssessment)
+                .OrderByDescending(test => test.CreatedDate)
+                .ThenBy(test => test.Id)
+                .ToListAsync(cancellationToken);
     }
 }

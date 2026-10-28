@@ -17,6 +17,7 @@ namespace RikiPath.Infrastructure.Configuration
                 .IsRequired();
 
             builder.Property(x => x.StartedAt).IsRequired();
+            builder.Property(x => x.IsPlacementAssessment).HasDefaultValue(false);
 
             builder.Property(x => x.ExpiresAt);
 

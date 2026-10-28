@@ -514,26 +514,14 @@ namespace RikiPath.Application.Services
         private async Task<(LearningPathPromptContext Context, List<CatalogLesson> Catalog)> LoadLearnerDataAsync(
             int userId, IReadOnlyList<CertificateLevel> levels, string targetCertification)
         {
-            var lessonProgresses = await unitOfWork.LessonProgresses.GetByUserAsync(userId) ?? [];
-            var notebookEntries = await unitOfWork.LearnerNoteEntries.GetByUserAsync(userId, vocabularyListId: null) ?? [];
-            var placementAttempts = await unitOfWork.MockTestAttempts.GetPlacementByUserAsync(userId) ?? [];
+            var lessonProgresses = await unitOfWork.LessonProgresses.GetByUserAsync(userId);
+            var notebookEntries = await unitOfWork.LearnerNoteEntries.GetByUserAsync(userId, vocabularyListId: null);
+            var attempts = await unitOfWork.MockTestAttempts.GetByUserAsync(userId);
 
-            var immutableResult = placementAttempts
-                .Where(a => !a.IsDeleted && a.AttemptKind == AttemptKind.Placement && a.IsCompleted && a.TotalScore.HasValue)
-                .OrderByDescending(a => a.SubmittedAt ?? a.StartedAt)
-                .ThenByDescending(a => a.Id)
-                .Select(a => PlacementTestService.TryGetCompletedResultFromSnapshot(a.QuestionSnapshotJson))
-                .FirstOrDefault(result => result is not null);
-
-            if (immutableResult is null)
-            {
-                var fallbackLatest = await unitOfWork.MockTestAttempts.GetLatestCompletedPlacementByUserAsync(userId);
-                if (fallbackLatest is { IsDeleted: false, AttemptKind: AttemptKind.Placement, IsCompleted: true, TotalScore: not null })
-                {
-                    immutableResult = PlacementTestService.TryGetCompletedResultFromSnapshot(
-                        fallbackLatest.QuestionSnapshotJson);
-                }
-            }
+            // LƯU Ý: giả định repository trả attempts mới nhất trước.
+            // Nếu phân biệt bài "đánh giá đầu vào" với mock test thường, lọc thêm tại đây.
+            var latestAttempt = attempts.FirstOrDefault(a => a.IsCompleted && a.IsPlacementAssessment)
+                ?? attempts.FirstOrDefault(a => a.IsCompleted);
 
             IReadOnlyDictionary<string, double>? skillBreakdown = null;
             if (immutableResult?.Sections is { Count: > 0 } sections)

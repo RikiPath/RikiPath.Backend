@@ -2,6 +2,9 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using RikiPath.Application.IServices;
 using RikiPath.Application.Requests.MockTests;
+using RikiPath.Application.Responses;
+using RikiPath.Application.Responses.MockTests;
+using RikiPath.Application.Services;
 using System.Security.Claims;
 
 namespace RikiPath.WebApi.Controllers
@@ -101,6 +104,32 @@ namespace RikiPath.WebApi.Controllers
         {
             var result = await practiceTestService.GetTestsByLevelAsync(jlptLevelId, cancellationToken);
             return StatusCode((int)result.StatusCode, result);
+        }
+
+        /// <summary>
+        /// Lấy danh sách bài đánh giá năng lực theo cấp độ chứng chỉ.
+        /// </summary>
+        /// <remarks>
+        /// - Màn hình sử dụng: Chọn bài đánh giá năng lực sau khi đã chọn chứng chỉ và cấp độ.
+        /// - Luồng xử lý: Nhận certificateLevelId, trả về các bài đánh giá năng lực thuộc cấp độ đó.
+        /// - Lưu ý cho FE: Gọi API chứng chỉ và API cấp độ theo chứng chỉ trước để có certificateLevelId.
+        /// </remarks>
+        /// <param name="certificateLevelId">Id của cấp độ chứng chỉ (CertificateLevel).</param>
+        /// <param name="cancellationToken">Token hủy request (Optional).</param>
+        /// <response code="200">Thành công.</response>
+        /// <response code="400">certificateLevelId không hợp lệ.</response>
+        /// <response code="404">Không tìm thấy cấp độ chứng chỉ.</response>
+        /// <response code="500">Lỗi hệ thống.</response>
+        [HttpGet("placement")]
+        [ProducesResponseType(typeof(ApiResponse<List<TestSummaryResponse>>), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ApiResponse<List<TestSummaryResponse>>), StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(typeof(ApiResponse<List<TestSummaryResponse>>), StatusCodes.Status404NotFound)]
+        [ProducesResponseType(typeof(ApiResponse<List<TestSummaryResponse>>), StatusCodes.Status500InternalServerError)]
+        public async Task<IActionResult> GetPlacementTests(
+            [FromQuery] int certificateLevelId, CancellationToken cancellationToken)
+        {
+            var result = await practiceTestService.GetPlacementTestsByCertificateLevelAsync(certificateLevelId, cancellationToken);
+            return StatusCode(result.StatusCode, result);
         }
 
         /// <summary>
