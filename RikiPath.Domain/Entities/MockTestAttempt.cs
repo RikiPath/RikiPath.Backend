@@ -17,6 +17,7 @@ namespace RikiPath.Domain.Entities
         public double? TotalScore { get; set; }
         /// <summary>Marks the learner's onboarding placement assessment attempt.</summary>
         public bool IsPlacementAssessment { get; set; }
+        public string? QuestionSnapshotJson { get; set; }
 
         public List<MockTestAnswer>? Answers { get; set; }
         public List<MockTestSectionResult>? SectionResults { get; set; }
