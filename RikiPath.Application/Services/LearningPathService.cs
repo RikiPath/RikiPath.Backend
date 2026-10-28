@@ -32,12 +32,6 @@ namespace RikiPath.Application.Services
 
         public Func<DateTime> UtcNowProvider { get; init; } = static () => DateTime.UtcNow;
 
-        private static readonly JsonSerializerOptions StoreJsonOptions = new()
-        {
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-            WriteIndented = false,
-        };
-
         /// <summary>Một bài học trong DB thuộc cấp độ mục tiêu, kèm tiến độ của người học.</summary>
         private sealed record CatalogLesson(int Id, string Title, double ProgressPercent);
 
@@ -60,19 +54,14 @@ namespace RikiPath.Application.Services
         private async Task<ApiResponse<LearningPathResponse>> GenerateInternalAsync(
             PreviewLearningPathRequest? preview, bool isPreview, CancellationToken cancellationToken)
         {
-            // ---------- 1. Lấy user + tên chứng chỉ mục tiêu ----------
+            // ---------- 1. Lấy user và mục tiêu học tập ----------
             int userId = 0;
             UserAccount? user;
-            string? certName = null;
 
             try
             {
                 userId = claimService.GetUserClaim().Id;
-                user = await unitOfWork.UserAccounts.GetByIdAsync(userId, cancellationToken);
-
-                // Không phụ thuộc Include của GetByIdAsync: tự tra level và type theo id
-                if (user?.TargetCertificateLevelId is int targetLevelId)
-                    certName = await ResolveCertificateNameAsync(targetLevelId, cancellationToken);
+                user = await unitOfWork.UserAccounts.GetWithLearningGoalAsync(userId, cancellationToken);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -84,20 +73,47 @@ namespace RikiPath.Application.Services
             if (user is null)
                 return ApiResponse<LearningPathResponse>.NotFound($"Không tìm thấy user Id = {userId}.");
 
-            // ---------- 2. Mục tiêu học tập lấy từ HỒ SƠ user ----------
-            if (string.IsNullOrWhiteSpace(certName)
-                || user.TargetExamDate is not DateTime examDate
-                || user.TargetCertificateLevelId is not int levelId)
+            var targetLevelId = preview?.TargetJlptLevelId ?? user.TargetCertificateLevelId;
+            var startLevelId = preview?.StartingJlptLevelId ??
+                user.StartingCertificateLevelId ?? user.TargetCertificateLevelId;
+            if (!startLevelId.HasValue || !targetLevelId.HasValue)
+                return ApiResponse<LearningPathResponse>.Fail(
+                    "Bạn cần chọn cấp độ bắt đầu và mục tiêu JLPT.", HttpStatusCode.BadRequest,
+                    errorCode: "LEARNING_PATH_GOAL_REQUIRED");
+
+            var visibleLevels = await unitOfWork.CertificateLevels.GetLearnerVisibleJlptLevelsAsync(cancellationToken);
+            var starting = visibleLevels.FirstOrDefault(level => level.Id == startLevelId.Value);
+            var target = visibleLevels.FirstOrDefault(level => level.Id == targetLevelId.Value);
+            if (starting is null || target is null || !JlptCurriculum.IsValidSpan(starting, target))
+                return ApiResponse<LearningPathResponse>.Fail(
+                    "Lộ trình chỉ hỗ trợ cấp độ bắt đầu đến mục tiêu theo thứ tự N5 → N4 → N3.",
+                    HttpStatusCode.BadRequest, errorCode: "LEARNING_PATH_LEVEL_UNSUPPORTED");
+
+            var spanLevels = visibleLevels
+                .Where(level => JlptCurriculum.Rank(level.Code) >= JlptCurriculum.Rank(starting.Code)
+                    && JlptCurriculum.Rank(level.Code) <= JlptCurriculum.Rank(target.Code))
+                .OrderBy(level => JlptCurriculum.Rank(level.Code))
+                .ToList();
+
+            // Standard Roadmap remains available without Placement; an existing AI path
+            // must only be replaced through preview and explicit confirmation.
+            if (!isPreview && await unitOfWork.RecommendedLearningPaths.GetActiveByUserIdAsync(
+                    userId, cancellationToken) is not null)
+                return ApiResponse<LearningPathResponse>.Fail(
+                    "Đã có lộ trình hoạt động; hãy xem trước rồi xác nhận thay đổi.",
+                    HttpStatusCode.Conflict, errorCode: "PATH_PREVIEW_REQUIRED");
+
+            var certName = $"JLPT {target.Code}";
+            var examDate = user.TargetExamDate;
+            if (examDate is null)
             {
                 return ApiResponse<LearningPathResponse>.Fail(
                     "Bạn cần chọn chứng chỉ, cấp độ và ngày dự định thi trước khi tạo lộ trình.",
                     HttpStatusCode.BadRequest);
             }
 
-            DateTime today = (DateTime.UtcNow + VietnamOffset).Date;
-            int daysUntilExam = (examDate.Date - today).Days;
-
-            if (daysUntilExam < 1)
+            var utcNow = BusinessDateHelper.EnsureUtc(UtcNowProvider());
+            if (!BusinessDateHelper.IsFutureExamDate(examDate, utcNow))
             {
                 return ApiResponse<LearningPathResponse>.Fail(
                     "Ngày dự định thi phải sau hôm nay. Vui lòng cập nhật ngày thi để tạo lộ trình.",
@@ -115,7 +131,7 @@ namespace RikiPath.Application.Services
             Dictionary<int, CatalogLesson> catalogById;
             try
             {
-                var (promptContext, catalog) = await LoadLearnerDataAsync(userId, levelId, certName);
+                var (promptContext, catalog) = await LoadLearnerDataAsync(userId, spanLevels, certName);
 
                 if (!promptContext.LatestTestScorePercent.HasValue)
                     return ApiResponse<LearningPathResponse>.Fail(
@@ -131,7 +147,7 @@ namespace RikiPath.Application.Services
 
                 catalogById = catalog.ToDictionary(c => c.Id);
 
-                promptText = BuildPrompt(promptContext, catalog, certName, examDate, today,
+                promptText = BuildPrompt(promptContext, catalog, $"JLPT {starting.Code} → {target.Code}", normalizedExamDate, today,
                     daysUntilExam, planDays, user.DailyStudyMinutes, user.StudyTimePreference);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
@@ -210,19 +226,12 @@ namespace RikiPath.Application.Services
                 var response = new LearningPathResponse
                 {
                     UserId = userId,
-                    GeneratedAt = DateTime.UtcNow,
-                    // Lưu bản ĐÃ chuẩn hóa (id bài học hợp lệ + tiêu đề), không lưu JSON thô của AI
-                    SuggestionJson = JsonSerializer.Serialize(aiResult, StoreJsonOptions),
-                    Summary = aiResult.Summary,
-                    IsViewed = false,
-                };
-                await unitOfWork.RecommendedLearningPaths.AddAsync(suggestion, cancellationToken);
-                await unitOfWork.SaveChangesAsync(cancellationToken);
-
-                return ApiResponse<LearningPathResponse>.Success(new LearningPathResponse
-                {
-                    UserId = userId,
-                    GeneratedAt = suggestion.GeneratedAt,
+                    GeneratedAt = generatedAt,
+                    Status = isPreview ? "DRAFT" : "ACTIVE",
+                    StartingJlptLevelId = starting.Id,
+                    TargetJlptLevelId = target.Id,
+                    PreviewExpiresAt = isPreview ? generatedAt.AddHours(24) : null,
+                    ConfirmedAt = isPreview ? null : generatedAt,
                     Summary = aiResult.Summary,
                     Strengths = aiResult.Strengths,
                     Weaknesses = aiResult.Weaknesses,
@@ -268,7 +277,7 @@ namespace RikiPath.Application.Services
                         Summary = aiResult.Summary,
                         IsViewed = false,
                     };
-                    await unitOfWork.RecommendedLearningPaths.AddAsync(suggestion);
+                    await unitOfWork.RecommendedLearningPaths.AddAsync(suggestion, transactionCancellationToken);
                     await unitOfWork.SaveChangesAsync(transactionCancellationToken);
                     response.PathId = suggestion.Id;
                     response.Version = suggestion.Version;
@@ -486,49 +495,40 @@ namespace RikiPath.Application.Services
         }
 
         // =====================================================================
-        // GOAL: tên chứng chỉ = "{CertificateType.Name} {CertificateLevel.Code}", vd "JLPT N3"
-        // =====================================================================
-        private async Task<string?> ResolveCertificateNameAsync(int certificateLevelId, CancellationToken cancellationToken)
-        {
-            var level = await unitOfWork.CertificateLevels.GetByIdAsync(certificateLevelId, cancellationToken);
-            if (level is null) return null;
-
-            var type = await unitOfWork.CertificateTypes.GetByIdAsync(level.CertificateTypeId, cancellationToken);
-            if (type is null) return null;
-
-            if (string.IsNullOrWhiteSpace(type.Name) || string.IsNullOrWhiteSpace(level.Code))
-                return null;
-
-            return $"{type.Name.Trim()} {level.Code.Trim()}";
-        }
-
-        // =====================================================================
         // DỮ LIỆU TỪ DB: bài đánh giá + tiến độ + notebook + DANH MỤC BÀI HỌC của cấp độ mục tiêu
         // =====================================================================
         private async Task<(LearningPathPromptContext Context, List<CatalogLesson> Catalog)> LoadLearnerDataAsync(
             int userId, IReadOnlyList<CertificateLevel> levels, string targetCertification)
         {
-            var lessonProgresses = await unitOfWork.LessonProgresses.GetByUserAsync(userId);
-            var notebookEntries = await unitOfWork.LearnerNoteEntries.GetByUserAsync(userId, vocabularyListId: null);
-            var attempts = await unitOfWork.MockTestAttempts.GetByUserAsync(userId);
+            var lessonProgresses = await unitOfWork.LessonProgresses.GetByUserAsync(userId) ?? [];
+            var notebookEntries = await unitOfWork.LearnerNoteEntries.GetByUserAsync(userId, vocabularyListId: null) ?? [];
+            var placementAttempts = await unitOfWork.MockTestAttempts.GetPlacementByUserAsync(userId) ?? [];
 
-            // Không phụ thuộc thứ tự repository: tự sắp xếp mới nhất trước,
-            // ưu tiên bài đánh giá đầu vào, nếu không có thì lấy mock test hoàn thành gần nhất.
-            var completedAttempts = attempts
-                .Where(a => a.IsCompleted)
+            // Only a completed, owned Placement attempt with an immutable result can unlock AI.
+            // Ordinary MockTest attempts are intentionally excluded by the repository and kind.
+            var immutableResult = placementAttempts
+                .Where(a => !a.IsDeleted && a.AttemptKind == AttemptKind.Placement && a.IsCompleted && a.TotalScore.HasValue)
                 .OrderByDescending(a => a.SubmittedAt ?? a.StartedAt)
-                .ToList();
+                .ThenByDescending(a => a.Id)
+                .Select(a => PlacementTestService.TryGetCompletedResultFromSnapshot(a.QuestionSnapshotJson))
+                .FirstOrDefault(result => result is not null);
 
-            var latestAttempt = completedAttempts.FirstOrDefault(a => a.IsPlacementAssessment)
-                ?? completedAttempts.FirstOrDefault();
+            if (immutableResult is null)
+            {
+                var fallbackLatest = await unitOfWork.MockTestAttempts.GetLatestCompletedPlacementByUserAsync(userId);
+                if (fallbackLatest is { IsDeleted: false, AttemptKind: AttemptKind.Placement, IsCompleted: true, TotalScore: not null })
+                    immutableResult = PlacementTestService.TryGetCompletedResultFromSnapshot(
+                        fallbackLatest.QuestionSnapshotJson);
+            }
 
             IReadOnlyDictionary<string, double>? skillBreakdown = null;
             if (immutableResult?.Sections is { Count: > 0 } sections)
             {
-                var withBreakdown = await unitOfWork.MockTestAttempts.GetWithBreakdownAsync(latestAttempt.Id);
-                skillBreakdown = withBreakdown?.SectionResults
-                    .GroupBy(r => r.MockTestSection?.Title ?? "Khác")
-                    .ToDictionary(g => g.Key, g => g.Average(r => r.ScorePercent));
+                var sectionScores = sections
+                    .Where(section => !string.IsNullOrWhiteSpace(section.SectionTitle))
+                    .GroupBy(section => section.SectionTitle)
+                    .ToDictionary(group => group.Key, group => group.Average(section => section.ScorePercent));
+                skillBreakdown = sectionScores.Count > 0 ? sectionScores : null;
             }
 
             // A completed Placement result is valid only when the immutable completed

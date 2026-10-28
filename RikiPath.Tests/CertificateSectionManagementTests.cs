@@ -39,8 +39,11 @@ public sealed class CertificateSectionManagementTests
         var all = await fixture.Service.GetAllAsync(1, true, CancellationToken.None);
 
         Assert.True(active.IsSuccess);
-        Assert.Equal(["FIRST", "SECOND"], active.Result!.Select(section => section.Code));
-        Assert.Equal(3, all.Result!.Count);
+        Assert.Equal(["FIRST", "SECOND"], active.Result!
+            .Where(section => section.Code is "FIRST" or "SECOND")
+            .Select(section => section.Code));
+        Assert.Equal(5, active.Result.Count); // three N5 seeds plus two created here
+        Assert.Equal(6, all.Result!.Count);
         Assert.True(all.Result.Single(section => section.Code == "ARCHIVED").IsArchived);
     }
 
@@ -58,7 +61,8 @@ public sealed class CertificateSectionManagementTests
         Assert.Equal(1, result.Result!.CertificateLevelId);
         Assert.Equal("N5", result.Result.CertificateLevelCode);
         Assert.Null(result.Result.Description);
-        Assert.Single(await fixture.Context.CertificateSections.ToListAsync());
+        Assert.Equal(8, await fixture.Context.CertificateSections.CountAsync());
+        Assert.Single(await fixture.Context.CertificateSections.Where(section => section.Code == "READING").ToListAsync());
     }
 
     [Theory]
@@ -84,7 +88,8 @@ public sealed class CertificateSectionManagementTests
 
         Assert.False(result.IsSuccess);
         Assert.Equal((int)HttpStatusCode.BadRequest, result.StatusCode);
-        Assert.Empty(await fixture.Context.CertificateSections.ToListAsync());
+        Assert.Equal(7, await fixture.Context.CertificateSections.CountAsync());
+        Assert.Empty(await fixture.Context.CertificateSections.Where(section => section.Code == "INVALID").ToListAsync());
     }
 
     [Fact]
@@ -129,7 +134,10 @@ public sealed class CertificateSectionManagementTests
             Assert.False(result.IsSuccess);
             Assert.Equal((int)HttpStatusCode.BadRequest, result.StatusCode);
         });
-        Assert.Empty(await fixture.Context.CertificateSections.ToListAsync());
+        Assert.Equal(7, await fixture.Context.CertificateSections.CountAsync());
+        Assert.Empty(await fixture.Context.CertificateSections
+            .Where(section => section.Code == "MISSING" || section.Code == "DELETED" || section.Code == "OTHER")
+            .ToListAsync());
     }
 
     [Fact]
@@ -246,6 +254,7 @@ public sealed class CertificateSectionManagementTests
             .Options;
         var context = new AppDbContext(options);
         await context.Database.EnsureCreatedAsync();
+        Assert.Equal(7, await context.CertificateSections.CountAsync());
         var service = new AdminCertificateSectionService(
             new UnitOfWork(context),
             NullLogger<AdminCertificateSectionService>.Instance);

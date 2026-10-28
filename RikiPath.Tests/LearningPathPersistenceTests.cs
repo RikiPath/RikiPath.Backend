@@ -124,12 +124,13 @@ public sealed class LearningPathPersistenceTests
             SortOrder = 1,
         };
 
-        // Ordinary completed MockTest attempt must NOT satisfy Placement prerequisite
+        // The legacy Mock Test flag must not bypass the immutable Placement result.
         var ordinaryAttempt = new MockTestAttempt
         {
             Id = 1,
             UserId = user.Id,
             AttemptKind = AttemptKind.MockTest,
+            IsPlacementAssessment = true,
             StartedAt = DateTime.UtcNow.AddMinutes(-20),
             SubmittedAt = DateTime.UtcNow.AddMinutes(-5),
             IsCompleted = true,
@@ -141,11 +142,29 @@ public sealed class LearningPathPersistenceTests
         context.LanguageSkills.Add(skill);
         context.Users.Add(user);
         context.Lessons.Add(lesson);
+        context.LessonProgresses.Add(new LessonProgress
+        {
+            Id = 9911,
+            UserId = user.Id,
+            UserAccount = user,
+            LessonId = lesson.Id,
+            Lesson = lesson,
+            ProgressPercent = 60,
+        });
         context.MockTestAttempts.Add(ordinaryAttempt);
         await context.SaveChangesAsync();
 
         var claims = new Mock<IClaimService>();
         claims.Setup(c => c.GetUserClaim()).Returns(new ClaimDTO { Id = user.Id, Role = Role.Learner });
+
+        // Standard Roadmap is server-backed and available before Placement or AI.
+        var standard = await new StandardRoadmapService(
+            new UnitOfWork(context), claims.Object).GetAsync(CancellationToken.None);
+        Assert.True(standard.IsSuccess);
+        Assert.Equal("STANDARD", standard.Result!.LearningMode);
+        Assert.Equal(levelN4.Id, standard.Result.CurrentStudyLevelId);
+        Assert.Equal(lesson.Id, standard.Result.NextLessonId);
+        Assert.Equal(60, Assert.Single(standard.Result.Lessons).ProgressPercent);
 
         var ai = new Mock<IAiLearningPathClient>();
         ai.Setup(client => client.GenerateLearningPathJsonAsync(
@@ -227,6 +246,33 @@ public sealed class LearningPathPersistenceTests
 
         Assert.True(generated.IsSuccess);
         Assert.Equal(5, generated.Result!.DailySchedules.Count);
+        Assert.Equal(levelN4.Id, user.TargetCertificateLevelId);
+
+        // An active AI path is never replaced by another generate call. A new
+        // version is persisted as Draft and becomes Active only on confirmation.
+        var directReplacement = await service.GenerateLearningPathAsync(
+            new GenerateLearningPathRequest(), CancellationToken.None);
+        Assert.False(directReplacement.IsSuccess);
+        Assert.Equal("PATH_PREVIEW_REQUIRED", directReplacement.ErrorCode);
+
+        var preview = await service.PreviewLearningPathAsync(
+            new PreviewLearningPathRequest { StartingJlptLevelId = levelN4.Id },
+            CancellationToken.None);
+        Assert.True(preview.IsSuccess);
+        Assert.Equal("DRAFT", preview.Result!.Status);
+        Assert.Equal(2, preview.Result.Version);
+        Assert.Equal(generated.Result.PathId, preview.Result.BaseActivePathId);
+        Assert.Equal(1, await context.RecommendedLearningPaths.CountAsync(path => path.Status == LearningPathStatus.Active));
+
+        var confirmed = await service.ConfirmPreviewAsync(preview.Result.PathId, CancellationToken.None);
+        Assert.True(confirmed.IsSuccess);
+        Assert.Equal("ACTIVE", confirmed.Result!.Status);
+        Assert.Equal(2, confirmed.Result.Version);
+
+        var history = await service.GetHistoryAsync(CancellationToken.None);
+        Assert.True(history.IsSuccess);
+        Assert.Equal([2, 1], history.Result!.Select(path => path.Version));
+        Assert.Equal(["ACTIVE", "SUPERSEDED"], history.Result.Select(path => path.Status));
         Assert.Equal(levelN4.Id, user.TargetCertificateLevelId);
     }
 

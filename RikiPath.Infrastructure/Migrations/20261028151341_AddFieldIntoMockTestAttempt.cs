@@ -11,12 +11,8 @@ namespace RikiPath.Infrastructure.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.AddColumn<string>(
-                name: "QuestionSnapshotJson",
-                table: "MockTestAttempts",
-                type: "text",
-                nullable: true);
-
+            // Flow 1 migration (20261027131637) already adds QuestionSnapshotJson.
+            // Keep this migration ID for existing histories without adding it twice.
             migrationBuilder.UpdateData(
                 table: "CertificateSections",
                 keyColumn: "Id",
@@ -714,10 +710,8 @@ namespace RikiPath.Infrastructure.Migrations
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.DropColumn(
-                name: "QuestionSnapshotJson",
-                table: "MockTestAttempts");
-
+            // Flow 1 owns this column; rolling back the later Mock Test migration
+            // must not remove a Placement Test snapshot required by Flow 1.
             migrationBuilder.UpdateData(
                 table: "CertificateSections",
                 keyColumn: "Id",
