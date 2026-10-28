@@ -8,6 +8,7 @@ using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Migrations;
+using Microsoft.EntityFrameworkCore.Migrations.Operations;
 using Moq;
 using RikiPath.Application;
 using RikiPath.Application.IRepositories;
@@ -637,6 +638,12 @@ public sealed class PlacementTestServiceTests
             migrationsAssembly.Migrations[latestMigrationId],
             "Npgsql.EntityFrameworkCore.PostgreSQL");
         Assert.NotNull(latestMigration.TargetModel);
+        // PR #49's later migration must not add/drop a column already owned by
+        // the earlier Flow 1 migration in the same ordered migration chain.
+        Assert.DoesNotContain(latestMigration.UpOperations, operation =>
+            operation is AddColumnOperation { Table: "MockTestAttempts", Name: "QuestionSnapshotJson" });
+        Assert.DoesNotContain(latestMigration.DownOperations, operation =>
+            operation is DropColumnOperation { Table: "MockTestAttempts", Name: "QuestionSnapshotJson" });
         var latestMigrationTargetModel = runtimeInitializer.Initialize(
             ((IMutableModel)latestMigration.TargetModel).FinalizeModel(),
             designTime: true);
