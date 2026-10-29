@@ -130,15 +130,16 @@ public sealed class MentorMeetingService(
                 var description = $"Mentor plan {subscription.Id}";
                 if (description.Length > 25) description = description[..25];
                 var payOs = appSettings.PayOs;
-                if (payOs is null || string.IsNullOrWhiteSpace(payOs.WebReturnUrl) || string.IsNullOrWhiteSpace(payOs.WebCancelUrl))
+                var (returnUrl, cancelUrl) = BuildPayOsReturnUrls(subscription.Id, request.FrontendOrigin);
+                if (payOs is null || string.IsNullOrWhiteSpace(returnUrl) || string.IsNullOrWhiteSpace(cancelUrl))
                     throw new InvalidOperationException("Thiếu cấu hình PayOS return/cancel URL.");
 
                 checkout = await paymentGateway.CreatePaymentLinkAsync(
                     subscription.Id,
                     decimal.ToInt32(plan.Price),
                     description,
-                    Microsoft.AspNetCore.WebUtilities.QueryHelpers.AddQueryString(payOs.WebReturnUrl, "subscriptionId", subscription.Id.ToString()),
-                    Microsoft.AspNetCore.WebUtilities.QueryHelpers.AddQueryString(payOs.WebCancelUrl, "subscriptionId", subscription.Id.ToString()),
+                    returnUrl,
+                    cancelUrl,
                     cancellationToken);
             }
             catch (Exception ex)
@@ -676,6 +677,29 @@ public sealed class MentorMeetingService(
             unitOfWork.MentorBookings.Update(booking);
         }
         await unitOfWork.SaveChangesAsync(cancellationToken);
+    }
+
+    private (string? ReturnUrl, string? CancelUrl) BuildPayOsReturnUrls(int subscriptionId, string? frontendOrigin)
+    {
+        var origin = AllowedFrontendOrigin(frontendOrigin);
+        var returnBase = origin is null ? appSettings.PayOs?.WebReturnUrl : $"{origin}/consultation-receipt/";
+        var cancelBase = origin is null ? appSettings.PayOs?.WebCancelUrl : $"{origin}/payment/cancel/";
+        if (string.IsNullOrWhiteSpace(returnBase) || string.IsNullOrWhiteSpace(cancelBase)) return (null, null);
+        var id = subscriptionId.ToString();
+        return (
+            Microsoft.AspNetCore.WebUtilities.QueryHelpers.AddQueryString(returnBase, "subscriptionId", id),
+            Microsoft.AspNetCore.WebUtilities.QueryHelpers.AddQueryString(cancelBase, "subscriptionId", id));
+    }
+
+    private string? AllowedFrontendOrigin(string? origin)
+    {
+        if (string.IsNullOrWhiteSpace(origin) || !Uri.TryCreate(origin.Trim(), UriKind.Absolute, out var uri)) return null;
+        if (uri.Scheme is not ("http" or "https")) return null;
+        var allowed = uri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase)
+            || uri.Host.EndsWith(".vercel.app", StringComparison.OrdinalIgnoreCase);
+        if (!allowed && Uri.TryCreate(appSettings.FrontendBaseUrl, UriKind.Absolute, out var configured))
+            allowed = string.Equals(configured.Host, uri.Host, StringComparison.OrdinalIgnoreCase);
+        return allowed ? uri.GetLeftPart(UriPartial.Authority) : null;
     }
 
     private MentorBooking CreateConfirmedBooking(UserSubscription subscription, MentorAvailability slot)

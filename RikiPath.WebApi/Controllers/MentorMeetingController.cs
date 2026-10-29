@@ -39,7 +39,20 @@ public sealed class MentorMeetingController(IMentorMeetingService service) : Con
     public async Task<IActionResult> Purchase(
         [FromBody] PurchaseMentorPlanRequest request,
         CancellationToken cancellationToken)
-        => ToActionResult(await service.PurchaseAsync(request, cancellationToken));
+    {
+        if (string.IsNullOrWhiteSpace(request.FrontendOrigin))
+            request.FrontendOrigin = RequestOrigin();
+        return ToActionResult(await service.PurchaseAsync(request, cancellationToken));
+    }
+
+    private string? RequestOrigin()
+    {
+        var origin = Request.Headers.Origin.ToString();
+        if (!string.IsNullOrWhiteSpace(origin)) return origin;
+        return Uri.TryCreate(Request.Headers.Referer.ToString(), UriKind.Absolute, out var referer)
+            ? referer.GetLeftPart(UriPartial.Authority)
+            : null;
+    }
 
     /// <summary>Đặt buổi hẹn 1-1 sử dụng gói tư vấn đã đăng ký (Subscription).</summary>
     [HttpPost("subscriptions/{subscriptionId:int}/book")]
