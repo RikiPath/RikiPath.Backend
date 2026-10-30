@@ -15,6 +15,7 @@ namespace RikiPath.Domain
         public AzureSpeechSettings AzureSpeechSettings { get; set; }
         public GeminiSettings Gemini { get; set; }
         public string FrontendBaseUrl { get; set; }
+        public GoogleAuthSettings Google { get; set; } = new();
         public QaPaymentSimulatorSettings QaPaymentSimulator { get; set; } = new();
     }
     public class ConnectionStrings
@@ -45,6 +46,11 @@ namespace RikiPath.Domain
         public string Password { get; set; }
         public string FromName { get; set; }
         public string FromEmail { get; set; }
+    }
+
+    public class GoogleAuthSettings
+    {
+        public string ClientId { get; set; } = string.Empty;
     }
 
     public class PayOsSettings

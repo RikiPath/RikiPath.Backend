@@ -259,6 +259,61 @@ namespace RikiPath.Application.Services
             }
         }
 
+        public async Task<ApiResponse<LoginResponse>> LoginWithGoogleAsync(GoogleLoginRequest request, CancellationToken cancellationToken)
+        {
+            try
+            {
+                var clientId = appSettings.Google?.ClientId;
+                if (string.IsNullOrWhiteSpace(clientId))
+                    return ApiResponse<LoginResponse>.Fail("Server chưa cấu hình Google Client ID.");
+
+                var identity = await VerifyGoogleIdTokenAsync(request.IdToken, clientId, cancellationToken);
+                if (identity is null)
+                    return ApiResponse<LoginResponse>.Fail("Phiên Google không hợp lệ hoặc đã hết hạn.");
+                if (!identity.EmailVerified || string.IsNullOrWhiteSpace(identity.Email))
+                    return ApiResponse<LoginResponse>.Fail("Google chưa xác thực email này.");
+
+                var email = identity.Email.Trim().ToLowerInvariant();
+                var user = await unitOfWork.UserAccounts.GetByEmailAsync(email);
+                if (user is null)
+                {
+                    var (hash, salt) = CreatePasswordHash(Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)));
+                    user = new UserAccount
+                    {
+                        Email = email,
+                        FirstName = identity.GivenName,
+                        LastName = identity.FamilyName,
+                        PasswordHash = hash,
+                        PasswordSalt = salt,
+                        Role = Role.Learner,
+                        IsEmailVerified = true,
+                    };
+                    await unitOfWork.UserAccounts.AddAsync(user, cancellationToken);
+                }
+                else if (!user.IsEmailVerified)
+                {
+                    user.IsEmailVerified = true;
+                    unitOfWork.UserAccounts.Update(user);
+                }
+
+                await unitOfWork.SaveChangesAsync(cancellationToken);
+
+                return ApiResponse<LoginResponse>.Success(new LoginResponse
+                {
+                    AccessToken = CreateToken(user),
+                    UserId = user.Id,
+                    Email = user.Email,
+                    FullName = $"{user.FirstName} {user.LastName}".Trim(),
+                    Role = user.Role.ToString(),
+                });
+            }
+            catch (Exception ex)
+            {
+                return ApiResponse<LoginResponse>.Fail(
+                    "Đăng nhập Google thất bại.", System.Net.HttpStatusCode.InternalServerError, errors: BuildDebugErrors(ex));
+            }
+        }
+
         public async Task<ApiResponse<LoginResponse>> LoginWithFirebasePhoneAsync(FirebasePhoneAuthRequest request, CancellationToken cancellationToken)
         {
             try
@@ -395,6 +450,70 @@ namespace RikiPath.Application.Services
             {
                 return ApiResponse.Unauthorized("Không xác định được tài khoản hiện tại từ JWT.");
             }
+        }
+
+        private sealed record GoogleIdentity(string Email, bool EmailVerified, string? GivenName, string? FamilyName);
+
+        private async Task<GoogleIdentity?> VerifyGoogleIdTokenAsync(string idToken, string clientId, CancellationToken cancellationToken)
+        {
+            var keys = await GetGoogleSigningKeysAsync(cancellationToken, forceRefresh: false);
+            try
+            {
+                return ReadGoogleIdentity(idToken, clientId, keys);
+            }
+            catch (SecurityTokenSignatureKeyNotFoundException)
+            {
+                keys = await GetGoogleSigningKeysAsync(cancellationToken, forceRefresh: true);
+                return ReadGoogleIdentity(idToken, clientId, keys);
+            }
+            catch (SecurityTokenException)
+            {
+                return null;
+            }
+        }
+
+        private static GoogleIdentity ReadGoogleIdentity(string idToken, string clientId, IEnumerable<SecurityKey> keys)
+        {
+            var handler = new JwtSecurityTokenHandler { MapInboundClaims = false };
+            var principal = handler.ValidateToken(idToken, new TokenValidationParameters
+            {
+                ValidateIssuer = true,
+                ValidIssuers = ["accounts.google.com", "https://accounts.google.com"],
+                ValidateAudience = true,
+                ValidAudience = clientId,
+                ValidateLifetime = true,
+                IssuerSigningKeys = keys,
+            }, out _);
+
+            var email = principal.FindFirst("email")?.Value ?? string.Empty;
+            var verified = principal.FindFirst("email_verified")?.Value;
+            var given = principal.FindFirst("given_name")?.Value;
+            var family = principal.FindFirst("family_name")?.Value;
+            if (string.IsNullOrWhiteSpace(given) && string.IsNullOrWhiteSpace(family))
+            {
+                var name = principal.FindFirst("name")?.Value?.Trim();
+                if (!string.IsNullOrWhiteSpace(name))
+                {
+                    var parts = name.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
+                    given = parts.ElementAtOrDefault(0);
+                    family = parts.ElementAtOrDefault(1);
+                }
+            }
+
+            return new GoogleIdentity(email, string.Equals(verified, "true", StringComparison.OrdinalIgnoreCase), given, family);
+        }
+
+        private async Task<IEnumerable<SecurityKey>> GetGoogleSigningKeysAsync(CancellationToken cancellationToken, bool forceRefresh)
+        {
+            const string cacheKey = "google-oauth-certs";
+            if (!forceRefresh && memoryCache.TryGetValue(cacheKey, out IEnumerable<SecurityKey>? cached) && cached is not null)
+                return cached;
+
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
+            var json = await http.GetStringAsync("https://www.googleapis.com/oauth2/v3/certs", cancellationToken);
+            var keys = new JsonWebKeySet(json).GetSigningKeys();
+            memoryCache.Set(cacheKey, keys, TimeSpan.FromHours(6));
+            return keys;
         }
 
         private string CreateToken(UserAccount user)
