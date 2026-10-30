@@ -32,6 +32,14 @@ namespace RikiPath.Api.Controllers
         /// <summary>
         /// Lấy danh sách các yêu cầu đang chờ phê duyệt kèm thông tin Diff chi tiết (Dành cho Admin).
         /// </summary>
+        [HttpGet("mine")]
+        [Authorize(Roles = "Admin,ContentAuthor")]
+        public async Task<IActionResult> GetMine(CancellationToken cancellationToken)
+        {
+            var result = await approvalService.GetMyApprovalsAsync(cancellationToken);
+            return StatusCode((int)result.StatusCode, result);
+        }
+
         [HttpGet("pending")]
         [Authorize(Roles = "Admin")]
         [ProducesResponseType(typeof(ApiResponse<List<PendingApprovalItemResponse>>), StatusCodes.Status200OK)]

@@ -213,6 +213,8 @@ public sealed class MentorMeetingService(
                 return ApiResponse<MentorBookingResponse>.Fail("Slot không còn trống hoặc không hợp lệ.", HttpStatusCode.Conflict);
             if (subscription.EndDate is DateTime expiry && slot.EndTime > expiry)
                 return ApiResponse<MentorBookingResponse>.Fail("Tiết phải kết thúc trước khi gói hết hạn.");
+            if (await HasOverlappingBookingAsync(slot.MentorId, claims.Id, null, slot.StartTime, slot.EndTime, cancellationToken))
+                return ApiResponse<MentorBookingResponse>.Fail("Buổi này trùng giờ với một lịch đã đặt hoặc đã tiếp nhận.", HttpStatusCode.Conflict);
             slot.BookedCount++;
 
             subscription.MeetingSessionsUsed++;
@@ -626,6 +628,8 @@ public sealed class MentorMeetingService(
         var slot = booking.MentorAvailability;
         if (slot.IsDeleted || !slot.IsApproved || slot.RejectedAt != null || slot.EndTime <= DateTime.UtcNow)
             return ApiResponse<MentorBookingResponse>.Fail("Lịch chưa được duyệt, đã đóng hoặc hết hạn.", HttpStatusCode.Conflict);
+        if (await HasOverlappingBookingAsync(slot.MentorId, booking.UserSubscription.UserId, booking.Id, slot.StartTime, slot.EndTime, cancellationToken))
+            return ApiResponse<MentorBookingResponse>.Fail("Không thể tiếp nhận vì đã có buổi trùng giờ.", HttpStatusCode.Conflict);
         booking.Status = MentorStatus.Accepted;
         booking.ModifiedDate = DateTime.UtcNow;
         await unitOfWork.SaveChangesAsync(cancellationToken);
@@ -633,6 +637,24 @@ public sealed class MentorMeetingService(
     }
 
     private static List<int> NormalizeIds(List<int>? ids) => ids?.Distinct().ToList() ?? [];
+
+    private Task<bool> HasOverlappingBookingAsync(
+        int mentorId, int learnerId, int? exceptBookingId, DateTime start, DateTime end, CancellationToken cancellationToken)
+    {
+        var skipId = exceptBookingId ?? 0;
+        return unitOfWork.MentorBookings.Query().AnyAsync(booking =>
+            !booking.IsDeleted
+            && booking.Id != skipId
+            && (booking.Status == MentorStatus.Assigned
+                || booking.Status == MentorStatus.Accepted
+                || booking.Status == MentorStatus.AwaitingPayment)
+            && booking.MentorAvailability != null
+            && !booking.MentorAvailability.IsDeleted
+            && booking.MentorAvailability.StartTime < end
+            && start < booking.MentorAvailability.EndTime
+            && (booking.MentorAvailability.MentorId == mentorId || booking.UserSubscription.UserId == learnerId),
+            cancellationToken);
+    }
 
     /// <summary>
     /// Trả về id các slot "đã có người đặt": BookedCount > 0 hoặc còn booking chưa hủy

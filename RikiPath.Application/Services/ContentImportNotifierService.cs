@@ -63,7 +63,7 @@ namespace RikiPath.Application.Services
                         Message = $"Tuyệt vời! Toàn bộ {totalRequested} nội dung của bạn đã được duyệt thành công và lưu vào hệ thống.",
                         Type = "CONTENT_APPROVED_ALL",
                         IsRead = false,
-                        LinkUrl = "/author/my-contents", // Link xem nội dung đã duyệt
+                        LinkUrl = "/author-dashboard",
                         CreatedDate = now
                     };
                 }
@@ -93,7 +93,7 @@ namespace RikiPath.Application.Services
                         Message = sb.ToString().TrimEnd(),
                         Type = "CONTENT_REJECTED_PARTIAL",
                         IsRead = false,
-                        LinkUrl = "/author/approval-history", // Link xem chi tiết lý do từ chối
+                        LinkUrl = "/author-dashboard",
                         CreatedDate = now
                     };
                 }
