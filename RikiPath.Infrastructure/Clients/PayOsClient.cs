@@ -12,11 +12,22 @@ namespace RikiPath.Infrastructure.Clients
     {
         private const string CreatePaymentLinkUrl = "https://api-merchant.payos.vn/v2/payment-requests";
 
+        private static PayOsSettings RequireConfigured(PayOsSettings? payOs)
+        {
+            if (payOs == null || string.IsNullOrWhiteSpace(payOs.ClientId)
+                || string.IsNullOrWhiteSpace(payOs.ApiKey)
+                || string.IsNullOrWhiteSpace(payOs.ChecksumKey))
+                throw new InvalidOperationException("PayOS is not configured; payment cannot be confirmed.");
+            return payOs;
+        }
+
         public async Task<PaymentLinkInformation> GetPaymentInformationAsync(long orderCode, CancellationToken cancellationToken)
         {
+            var payOs = RequireConfigured(appSettings.PayOs);
+
             using var request = new HttpRequestMessage(HttpMethod.Get, $"{CreatePaymentLinkUrl}/{orderCode}");
-            request.Headers.Add("x-client-id", appSettings.PayOs.ClientId);
-            request.Headers.Add("x-api-key", appSettings.PayOs.ApiKey);
+            request.Headers.Add("x-client-id", payOs.ClientId);
+            request.Headers.Add("x-api-key", payOs.ApiKey);
             using var response = await httpClient.SendAsync(request, cancellationToken);
             response.EnsureSuccessStatusCode();
             using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
@@ -32,7 +43,7 @@ namespace RikiPath.Infrastructure.Clients
             long orderCode, int amount, string description, string returnUrl, string cancelUrl,
             CancellationToken cancellationToken)
         {
-            var payOs = appSettings.PayOs;
+            var payOs = RequireConfigured(appSettings.PayOs);
 
             // Ký trên đúng 5 field này, đúng thứ tự alphabet, theo doc PayOS "Create Payment Link".
             var signatureData =
@@ -75,6 +86,9 @@ namespace RikiPath.Infrastructure.Clients
         {
             var payOs = appSettings.PayOs;
             var d = webhook.Data;
+
+            if (payOs == null || string.IsNullOrWhiteSpace(payOs.ChecksumKey))
+                return new PaymentCallbackResult(false, false, d.OrderCode, d.Amount, d.Description);
 
             // Thứ tự field PHẢI đúng alphabet theo tên field JSON gốc của PayOS — sai thứ tự
             // là chữ ký sẽ không khớp dù key/value đúng.

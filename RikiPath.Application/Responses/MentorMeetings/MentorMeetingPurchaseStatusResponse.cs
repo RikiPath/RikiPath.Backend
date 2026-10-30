@@ -16,5 +16,7 @@ namespace RikiPath.Application.Responses.MentorMeetings
         public int MeetingSessionsUsed { get; set; }
         public List<MentorBookingResponse> Bookings { get; set; } = [];
         public string? TransactionId { get; set; }
+        public bool IsQaSimulated { get; set; }
+        public string? DemoQrPayload { get; set; }
     }
 }
