@@ -13,5 +13,7 @@
         public string PaymentLinkId { get; set; } = string.Empty;
         public string QrCode { get; set; } = string.Empty;
         public DateTime? PaymentExpiresAt { get; set; }
+        public bool IsQaSimulated { get; set; }
+        public string PaymentSource { get; set; } = "PayOS";
     }
 }

@@ -24,6 +24,7 @@ public interface IMentorMeetingService
     Task<ApiResponse<List<MentorBookingResponse>>> GetMyBookingsAsync(CancellationToken cancellationToken = default);
     Task<ApiResponse<MentorMeetingPurchaseStatusResponse>> GetPurchaseStatusAsync(int subscriptionId, CancellationToken cancellationToken = default);
     Task<ApiResponse<MentorMeetingPurchaseStatusResponse>> SyncPurchaseAsync(int subscriptionId, CancellationToken cancellationToken = default);
+    Task<ApiResponse<object>> CompleteQaPaymentAsync(int subscriptionId, CancellationToken cancellationToken = default);
     #endregion
 
     #region Mentor Operations

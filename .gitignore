@@ -57,3 +57,7 @@ secrets.json
 Thumbs.db
 ehthumbs.db
 /_codex-build/
+# Local User Secrets helper scripts
+set-user-secrets.ps1
+secrets.local.json
+secrets.local.env

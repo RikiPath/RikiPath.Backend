@@ -15,6 +15,7 @@ namespace RikiPath.Domain
         public AzureSpeechSettings AzureSpeechSettings { get; set; }
         public GeminiSettings Gemini { get; set; }
         public string FrontendBaseUrl { get; set; }
+        public QaPaymentSimulatorSettings QaPaymentSimulator { get; set; } = new();
     }
     public class ConnectionStrings
     {
@@ -56,6 +57,7 @@ namespace RikiPath.Domain
 
         public string MobileLandingBaseUrl { get; set; } = string.Empty;
     }
+
 
     public class SupabaseSettings
     {
@@ -101,6 +103,13 @@ namespace RikiPath.Domain
         {
             return ApiKey?.Where(k => !string.IsNullOrWhiteSpace(k)).ToList() ?? new List<string>();
         }
+
+    }
+
+    public sealed class QaPaymentSimulatorSettings
+    {
+        public bool Enabled { get; set; }
+        public string AllowedDatabaseName { get; set; } = string.Empty;
     }
 
     public class AzureSpeechSettings

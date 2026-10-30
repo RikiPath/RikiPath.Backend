@@ -31,6 +31,13 @@ public sealed class MentorAvailabilityController(IMentorMeetingService service) 
         => ToActionResult(await service.CreateAvailabilityAsync(request, cancellationToken));
 
     /// <summary>
+    /// Xóa/Đóng khung giờ trống chưa có người đặt.
+    /// </summary>
+    [HttpDelete("{id:int}")]
+    public async Task<IActionResult> Delete(int id, CancellationToken cancellationToken)
+        => ToActionResult(await service.DeleteAvailabilityAsync(id, cancellationToken));
+
+    /// <summary>
     /// Gửi yêu cầu hủy/xóa một hoặc nhiều slot trống đã tạo.
     /// </summary>
     [HttpPost("request-cancel")]

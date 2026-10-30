@@ -31,6 +31,30 @@ namespace RikiPath.Infrastructure.Repositories
                     .ThenInclude(x => x.MentorAvailability).ThenInclude(x => x!.Mentor)
                 .FirstOrDefaultAsync(x => x.Id == subscriptionId && x.UserId == userId && !x.IsDeleted, ct);
 
+        public Task<UserSubscription?> GetQaPurchaseAsync(int userId, Guid idempotencyKey, CancellationToken ct = default)
+        {
+            var key = idempotencyKey.ToString("N");
+            return _dbSet.Include(x => x.SubscriptionPlan)
+                .FirstOrDefaultAsync(x => x.UserId == userId && !x.IsDeleted &&
+                    (x.PaymentTransactionId == $"QA_SIMULATED:PENDING:{key}" ||
+                     x.PaymentTransactionId == $"QA_SIMULATED:{key}"), ct);
+        }
+
+        public async Task AcquireQaPurchaseLockAsync(int userId, Guid idempotencyKey, CancellationToken ct = default)
+        {
+            var keyBytes = idempotencyKey.ToByteArray();
+            var lockKey = BitConverter.ToInt64(keyBytes, 0) ^ ((long)userId << 32);
+            await _context.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock({lockKey})", ct);
+        }
+
+        public Task<int> CompleteQaPaymentIfPendingAsync(
+            int subscriptionId, string pendingMarker, string paidMarker, CancellationToken ct = default)
+            => _dbSet.Where(x => x.Id == subscriptionId && !x.IsDeleted &&
+                    x.PaymentStatus == PaymentStatus.Pending && x.PaymentTransactionId == pendingMarker)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(x => x.PaymentStatus, PaymentStatus.Paid)
+                    .SetProperty(x => x.PaymentTransactionId, paidMarker), ct);
+
         public Task<UserSubscription?> GetWithPlanAsync(int id, CancellationToken ct) =>
     _context.UserSubscriptions
         .Include(s => s.SubscriptionPlan)

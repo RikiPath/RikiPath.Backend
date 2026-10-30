@@ -1,5 +1,7 @@
 using System.Net;
+using System.Data.Common;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using RikiPath.Application.IClients;
 using RikiPath.Application.IServices;
@@ -18,7 +20,8 @@ public sealed class MentorMeetingService(
     IPaymentGatewayClient paymentGateway,
     IClaimService claimService,
     AppSettings appSettings,
-    ILogger<MentorMeetingService> logger) : IMentorMeetingService
+    ILogger<MentorMeetingService> logger,
+    IHostEnvironment? hostEnvironment = null) : IMentorMeetingService
 {
     /// <summary>Mentor phải đăng ký lịch trước thời điểm bắt đầu ít nhất số tháng này (admin dựa vào tiêu chí này để duyệt).</summary>
     private const int MinAdvanceMonths = 1;
@@ -34,6 +37,12 @@ public sealed class MentorMeetingService(
 
     /// <summary>Một lần đăng ký (cả khoảng) không được dài quá mức này.</summary>
     private static readonly TimeSpan MaxSlotDuration = TimeSpan.FromHours(4);
+
+    private bool IsQaPaymentSimulatorEnabled()
+    {
+        if (hostEnvironment is null) return false;
+        return QaPaymentSimulatorGuard.IsEnabled(appSettings, hostEnvironment);
+    }
 
     public async Task<ApiResponse<List<BookableMentorResponse>>> GetMentorsAsync(CancellationToken cancellationToken)
     {
@@ -103,6 +112,69 @@ public sealed class MentorMeetingService(
                 return ApiResponse<MentorMeetingPurchaseResponse>.Fail("Chỉ hỗ trợ gói 1 hoặc 3 buổi.");
             if (plan.Price <= 0 || plan.Price != decimal.Truncate(plan.Price) || plan.Price > int.MaxValue)
                 return ApiResponse<MentorMeetingPurchaseResponse>.Fail("Giá gói phải là số tiền VND nguyên dương.");
+
+            if (IsQaPaymentSimulatorEnabled())
+            {
+                if (request.IdempotencyKey is not { } idempotencyKey || idempotencyKey == Guid.Empty)
+                    return ApiResponse<MentorMeetingPurchaseResponse>.Fail("IdempotencyKey hợp lệ là bắt buộc cho giao dịch QA.");
+
+                await ExpirePendingPaymentsAsync(cancellationToken);
+                UserSubscription? qaSubscription = null;
+                var createdQaSubscription = false;
+                await unitOfWork.ExecuteInTransactionAsync(async ct =>
+                {
+                    await unitOfWork.UserSubscriptions.AcquireQaPurchaseLockAsync(claims.Id, idempotencyKey, ct);
+                    qaSubscription = await unitOfWork.UserSubscriptions.GetQaPurchaseAsync(claims.Id, idempotencyKey, ct);
+                    if (qaSubscription is not null)
+                    {
+                        if (qaSubscription.SubscriptionPlanId != plan.Id)
+                            return;
+                        return;
+                    }
+
+                    var qaNow = DateTime.UtcNow;
+                    qaSubscription = new UserSubscription
+                    {
+                        UserId = claims.Id,
+                        SubscriptionPlanId = plan.Id,
+                        SubscriptionPlan = plan,
+                        MentorId = null,
+                        AmountPaid = plan.Price,
+                        PaymentStatus = PaymentStatus.Pending,
+                        PaymentTransactionId = $"QA_SIMULATED:PENDING:{idempotencyKey:N}",
+                        MeetingSessionsIncluded = plan.MeetingSessionCount,
+                        MeetingSessionsUsed = 0,
+                        PaymentExpiresAt = qaNow.AddMinutes(15),
+                        PurchasedAt = qaNow,
+                        AiGradingQuota = plan.AiGradingQuota
+                    };
+                    await unitOfWork.UserSubscriptions.AddAsync(qaSubscription, ct);
+                    await unitOfWork.SaveChangesAsync(ct);
+                    createdQaSubscription = true;
+                }, cancellationToken);
+
+                if (qaSubscription is null || qaSubscription.SubscriptionPlanId != plan.Id ||
+                    qaSubscription.PaymentStatus is not (PaymentStatus.Pending or PaymentStatus.Paid))
+                    return ApiResponse<MentorMeetingPurchaseResponse>.Fail("IdempotencyKey đã được dùng cho giao dịch khác hoặc không thể tiếp tục.", HttpStatusCode.Conflict);
+
+                logger.LogInformation("QA_SIMULATED pending purchase {SubscriptionId} for Learner {LearnerId}; no payment provider was contacted.", qaSubscription.Id, claims.Id);
+                return ApiResponse<MentorMeetingPurchaseResponse>.Success(new MentorMeetingPurchaseResponse
+                {
+                    SubscriptionId = qaSubscription.Id,
+                    BookingId = null,
+                    OrderCode = qaSubscription.Id,
+                    PlanName = plan.Name,
+                    MeetingSessionCount = plan.MeetingSessionCount,
+                    Features = plan.Features.Where(x => !x.IsDeleted).Select(MapFeature).ToList(),
+                    Amount = plan.Price,
+                    CheckoutUrl = "qa-simulator://no-payment",
+                    PaymentLinkId = qaSubscription.PaymentTransactionId ?? string.Empty,
+                    QrCode = $"RIKIPATH-QA-NO-TRANSFER|{qaSubscription.Id}|{idempotencyKey:N}",
+                    PaymentExpiresAt = qaSubscription.PaymentExpiresAt,
+                    IsQaSimulated = true,
+                    PaymentSource = "QA_SIMULATED"
+                }, createdQaSubscription ? HttpStatusCode.Created : HttpStatusCode.OK);
+            }
 
             var now = DateTime.UtcNow;
             await ExpirePendingPaymentsAsync(cancellationToken);
@@ -176,6 +248,40 @@ public sealed class MentorMeetingService(
             logger.LogError(ex, "Could not create a Mentor Meeting purchase.");
             return ApiResponse<MentorMeetingPurchaseResponse>.Fail("Không thể tạo giao dịch mua gói meeting.", HttpStatusCode.InternalServerError);
         }
+    }
+
+    public async Task<ApiResponse<object>> CompleteQaPaymentAsync(int subscriptionId, CancellationToken cancellationToken)
+    {
+        var claims = claimService.GetUserClaim();
+        if (claims.Role != Role.Admin)
+            return ApiResponse<object>.Fail("Chỉ Admin QA được xác nhận thanh toán mô phỏng.", HttpStatusCode.Forbidden);
+        if (!IsQaPaymentSimulatorEnabled())
+            return ApiResponse<object>.Fail("QA payment simulator is disabled.", HttpStatusCode.NotFound);
+
+        var subscription = await unitOfWork.UserSubscriptions.GetMeetingPurchaseWithBookingsAsync(subscriptionId, cancellationToken);
+        if (subscription is null)
+            return ApiResponse<object>.Fail("Không tìm thấy giao dịch.", HttpStatusCode.NotFound);
+        if (subscription.PaymentStatus == PaymentStatus.Paid &&
+            subscription.PaymentTransactionId?.StartsWith("QA_SIMULATED:", StringComparison.Ordinal) == true)
+            return ApiResponse<object>.Success(new { subscriptionId, source = "QA_SIMULATED", status = "Paid" });
+        if (subscription.PaymentStatus != PaymentStatus.Pending ||
+            subscription.PaymentExpiresAt <= DateTime.UtcNow ||
+            subscription.PaymentTransactionId is not { } pendingMarker ||
+            !pendingMarker.StartsWith("QA_SIMULATED:PENDING:", StringComparison.Ordinal))
+            return ApiResponse<object>.Fail("Giao dịch không còn ở trạng thái Pending QA hợp lệ.", HttpStatusCode.Conflict);
+
+        var paidMarker = pendingMarker.Replace("QA_SIMULATED:PENDING:", "QA_SIMULATED:", StringComparison.Ordinal);
+        var affected = await unitOfWork.UserSubscriptions.CompleteQaPaymentIfPendingAsync(
+            subscriptionId, pendingMarker, paidMarker, cancellationToken);
+        if (affected == 0)
+        {
+            var current = await unitOfWork.UserSubscriptions.GetMeetingPurchaseWithBookingsAsync(subscriptionId, cancellationToken);
+            if (current?.PaymentStatus != PaymentStatus.Paid || current.PaymentTransactionId != paidMarker)
+                return ApiResponse<object>.Fail("Giao dịch QA đã thay đổi; không thể hoàn tất.", HttpStatusCode.Conflict);
+        }
+
+        logger.LogWarning("QA_SIMULATED payment completed for subscription {SubscriptionId}; no payment provider or webhook was used.", subscriptionId);
+        return ApiResponse<object>.Success(new { subscriptionId, source = "QA_SIMULATED", status = "Paid" });
     }
 
     public async Task<ApiResponse<MentorBookingResponse>> BookIncludedSessionAsync(
@@ -320,7 +426,12 @@ public sealed class MentorMeetingService(
                 MeetingSessionsIncluded = subscription.MeetingSessionsIncluded,
                 MeetingSessionsUsed = subscription.MeetingSessionsUsed,
                 Bookings = subscription.MentorBookings.Select(x => MapBooking(x, learnerId)).ToList(),
-                TransactionId = subscription.PaymentTransactionId
+                TransactionId = subscription.PaymentTransactionId,
+                IsQaSimulated = subscription.PaymentTransactionId?.StartsWith("QA_SIMULATED:", StringComparison.Ordinal) == true ||
+                    subscription.PaymentTransactionId?.StartsWith("QA_SIMULATED:PENDING:", StringComparison.Ordinal) == true,
+                DemoQrPayload = subscription.PaymentTransactionId?.StartsWith("QA_SIMULATED:PENDING:", StringComparison.Ordinal) == true
+                    ? $"RIKIPATH-QA-NO-TRANSFER|{subscription.Id}|{subscription.PaymentTransactionId.Split(':').Last()}"
+                    : null
             });
         }
         catch (Exception ex)
@@ -338,6 +449,9 @@ public sealed class MentorMeetingService(
         var subscription = await unitOfWork.UserSubscriptions.GetMeetingSubscriptionWithBookingsAsync(subscriptionId, claims.Id, cancellationToken);
         if (subscription is null)
             return ApiResponse<MentorMeetingPurchaseStatusResponse>.Fail("Không tìm thấy giao dịch.", HttpStatusCode.NotFound);
+        if (subscription.PaymentTransactionId?.StartsWith("QA_SIMULATED:", StringComparison.Ordinal) == true ||
+            subscription.PaymentTransactionId?.StartsWith("QA_SIMULATED:PENDING:", StringComparison.Ordinal) == true)
+            return await GetPurchaseStatusAsync(subscriptionId, cancellationToken);
         if (subscription.PaymentStatus == PaymentStatus.Pending && !string.IsNullOrWhiteSpace(subscription.PaymentTransactionId))
         {
             try
@@ -392,11 +506,35 @@ public sealed class MentorMeetingService(
         }
     }
 
-    public Task<ApiResponse<List<MentorAvailabilityResponse>>> CreateAvailabilityAsync(CreateMentorAvailabilityRequest request, CancellationToken cancellationToken)
-        => Task.FromResult(ApiResponse<List<MentorAvailabilityResponse>>.Fail("Hãy đăng ký buổi rảnh tuần sau; admin sẽ xếp các tiết 50 phút."));
+    public Task<ApiResponse<List<MentorAvailabilityResponse>>> CreateAvailabilityAsync(
+        CreateMentorAvailabilityRequest request, CancellationToken cancellationToken)
+        // API tạo slot đơn lẻ cũ không được vượt qua quy tắc đăng ký tuần và phê duyệt của Admin.
+        => Task.FromResult(ApiResponse<List<MentorAvailabilityResponse>>.Fail(
+            "Vui lòng đăng ký lịch tuần qua API MentorWeeklySchedule.", HttpStatusCode.Conflict));
 
-    public Task<ApiResponse<bool>> DeleteAvailabilityAsync(int id, CancellationToken cancellationToken)
-        => Task.FromResult(ApiResponse<bool>.Fail("Tiết do admin xếp. Hãy gửi yêu cầu điều chỉnh."));
+    public async Task<ApiResponse<bool>> DeleteAvailabilityAsync(int id, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var claims = claimService.GetUserClaim();
+            var slot = await unitOfWork.MentorAvailabilities.GetByIdAsync(id, cancellationToken);
+            if (slot == null || slot.IsDeleted)
+                return ApiResponse<bool>.Fail("Không tìm thấy khung giờ.", HttpStatusCode.NotFound);
+            if (slot.MentorId != claims.Id && claims.Role != Role.Admin)
+                return ApiResponse<bool>.Fail("Bạn không có quyền xóa khung giờ này.", HttpStatusCode.Forbidden);
+            if (slot.BookedCount > 0)
+                return ApiResponse<bool>.Fail("Không thể xóa khung giờ đã có người đặt.", HttpStatusCode.BadRequest);
+
+            slot.IsDeleted = true;
+            await unitOfWork.SaveChangesAsync(cancellationToken);
+            return ApiResponse<bool>.Success(true);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Could not delete Mentor availability.");
+            return ApiResponse<bool>.Fail("Không thể xóa lịch trống.", HttpStatusCode.InternalServerError);
+        }
+    }
 
     public async Task<ApiResponse<List<MentorAvailabilityResponse>>> RequestCancelAvailabilitiesAsync(
         CancelAvailabilitiesRequest request, CancellationToken cancellationToken)
