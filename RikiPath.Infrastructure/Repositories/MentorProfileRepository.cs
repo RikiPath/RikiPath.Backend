@@ -6,7 +6,7 @@ using RikiPath.Domain.Enums;
 namespace RikiPath.Infrastructure.Repositories
 {
     // // Triển khai repository truy vấn hồ sơ và xác minh chuyên gia.
-    public class MentorProfileRepository(AppDbContext context) 
+    public class MentorProfileRepository(AppDbContext context)
         : GenericRepository<MentorProfile>(context), IMentorProfileRepository
     {
         public Task<MentorProfile?> GetByMentorIdAsync(int mentorId, CancellationToken cancellationToken = default)

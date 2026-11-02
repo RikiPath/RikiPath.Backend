@@ -109,4 +109,3 @@ INSERT INTO "__EFMigrationsHistory" ("MigrationId", "ProductVersion")
 VALUES ('20261031111326_AddMentorReviewsAndDisputesPersistence', '8.0.8');
 
 COMMIT;
-

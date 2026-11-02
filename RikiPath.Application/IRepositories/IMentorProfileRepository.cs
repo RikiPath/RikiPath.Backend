@@ -3,7 +3,7 @@ using RikiPath.Domain.Enums;
 
 namespace RikiPath.Application.IRepositories
 {
-   
+
     // Repository quản lý truy vấn và thao tác trên bảng MentorProfiles.
       public interface IMentorProfileRepository : IGenericRepository<MentorProfile>
     {

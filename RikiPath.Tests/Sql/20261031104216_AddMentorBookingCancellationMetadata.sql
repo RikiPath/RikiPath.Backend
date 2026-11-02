@@ -18,4 +18,3 @@ INSERT INTO "__EFMigrationsHistory" ("MigrationId", "ProductVersion")
 VALUES ('20261031104216_AddMentorBookingCancellationMetadata', '8.0.8');
 
 COMMIT;
-

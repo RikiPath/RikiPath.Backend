@@ -34,4 +34,3 @@ INSERT INTO "__EFMigrationsHistory" ("MigrationId", "ProductVersion")
 VALUES ('20261031093906_AddMentorAttendancePersistence', '8.0.8');
 
 COMMIT;
-

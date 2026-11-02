@@ -50,4 +50,3 @@ INSERT INTO "__EFMigrationsHistory" ("MigrationId", "ProductVersion")
 VALUES ('20261031082840_AddMentorCreditLedgerPersistence', '8.0.8');
 
 COMMIT;
-

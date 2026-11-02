@@ -4,6 +4,6 @@
 ALTER TABLE "Notifications" ADD COLUMN IF NOT EXISTS "IdempotencyKey" character varying(200);
 ALTER TABLE "Notifications" ADD COLUMN IF NOT EXISTS "DeliveredTokens" text;
 
-CREATE UNIQUE INDEX IF NOT EXISTS "IX_Notifications_IdempotencyKey" 
-ON "Notifications" ("IdempotencyKey") 
+CREATE UNIQUE INDEX IF NOT EXISTS "IX_Notifications_IdempotencyKey"
+ON "Notifications" ("IdempotencyKey")
 WHERE "IdempotencyKey" IS NOT NULL;

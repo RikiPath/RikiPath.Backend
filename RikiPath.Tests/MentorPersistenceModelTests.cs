@@ -369,7 +369,7 @@ public sealed class MentorPersistenceModelTests
         Assert.Equal(expectedColumns, addedColumns);
     }
 
-    
+
     [Fact]
     public void Mentor_reviews_and_disputes_migration_has_no_update_data_and_creates_agreed_schema()
     {
