@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using RikiPath.Application;
 using RikiPath.Application.IRepositories;
+using RikiPath.Domain.Entities;
 using RikiPath.Infrastructure.Repositories;
 using System.Data;
 
@@ -14,6 +15,7 @@ namespace RikiPath.Infrastructure
         public IUserAccountRepository UserAccounts { get; }
         public IEmailVerificationRepository EmailVerifications { get; }
         public INotificationRepository Notifications { get; }
+        public IUserDeviceTokenRepository UserDeviceTokens { get; }
 
         // 2. Master Data / CertificateTypes & LanguageSkills
         public ICertificateTypeRepository CertificateTypes { get; }
@@ -77,6 +79,10 @@ namespace RikiPath.Infrastructure
         public INoteRepository Notes { get; }
         public IMentorAvailabilityRepository MentorAvailabilities { get; }
         public IMentorWeeklyAvailabilityRepository MentorWeeklyAvailabilities { get; }
+        public IMentorProfileRepository MentorProfiles { get; }
+        public IMentorScheduleRepository MentorSchedules { get; }
+        public IMentorCreditLedgerRepository MentorCreditLedger { get; }
+        public void AddMentorOutboxEvent(MentorOutboxEvent outboxEvent) => _context.MentorOutboxEvents.Add(outboxEvent);
         public IContentApprovalRequestRepository ContentApprovalRequests { get; }
         public UnitOfWork(AppDbContext context)
         {
@@ -86,6 +92,7 @@ namespace RikiPath.Infrastructure
             UserAccounts = new UserAccountRepository(_context);
             EmailVerifications = new EmailVerificationRepository(_context);
             Notifications = new NotificationRepository(_context);
+            UserDeviceTokens = new UserDeviceTokenRepository(_context);
 
             CertificateTypes = new CertificateTypeRepository(_context);
             CertificateLevels = new CertificateLevelRepository(_context);
@@ -141,6 +148,9 @@ namespace RikiPath.Infrastructure
             Notes = new NoteRepository(_context);
             MentorAvailabilities = new MentorAvailabilityRepository(_context);
             MentorWeeklyAvailabilities = new MentorWeeklyAvailabilityRepository(_context);
+            MentorProfiles = new MentorProfileRepository(_context);
+            MentorSchedules = new MentorScheduleRepository(_context);
+            MentorCreditLedger = new MentorCreditLedgerRepository(_context);
             ContentApprovalRequests = new ContentApprovalRequestRepository(_context);
         }
 
@@ -153,6 +163,12 @@ namespace RikiPath.Infrastructure
             Func<CancellationToken, Task> operation,
             CancellationToken cancellationToken = default)
         {
+            if (_context.Database.ProviderName == "Microsoft.EntityFrameworkCore.InMemory")
+            {
+                await operation(cancellationToken);
+                return;
+            }
+
             var strategy = _context.Database.CreateExecutionStrategy();
             var isRetry = false;
             await strategy.ExecuteAsync(async () =>

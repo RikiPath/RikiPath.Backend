@@ -66,6 +66,7 @@ namespace RikiPath.Domain.Entities
         // As a Mentor
         public List<Note>? Notes { get; set; }
         public List<MentorAvailability>? MentorAvailabilities { get; set; }
+        public MentorProfile? MentorProfile { get; set; }
 
         // Shared
         public List<EmailVerification>? EmailVerifications { get; set; }

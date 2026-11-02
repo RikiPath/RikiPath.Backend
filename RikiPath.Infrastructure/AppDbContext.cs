@@ -61,10 +61,25 @@ namespace RikiPath.Infrastructure
 
         // Mentor 1-1 service
         public DbSet<MentorBooking> MentorBookings { get; set; }
+        public DbSet<MentorSchedule> MentorSchedules { get; set; }
+        public DbSet<MentorScheduleRule> MentorScheduleRules { get; set; }
+        public DbSet<MentorBookingIntent> MentorBookingIntents { get; set; }
+        public DbSet<MentorBookingTerms> MentorBookingTerms { get; set; }
+        public DbSet<MentorBookingReservation> MentorBookingReservations { get; set; }
+        public DbSet<MentorBookingDayGuard> MentorBookingDayGuards { get; set; }
+        public DbSet<MentorOutboxEvent> MentorOutboxEvents { get; set; }
         public DbSet<MentorChatMessage> MentorChatMessages { get; set; }
         public DbSet<Note> Notes { get; set; }
         public DbSet<MentorAvailability> MentorAvailabilities { get; set; }
         public DbSet<MentorWeeklyAvailability> MentorWeeklyAvailabilities { get; set; }
+        public DbSet<MentorProfile> MentorProfiles { get; set; }
+        public DbSet<MentorCreditGrant> MentorCreditGrants { get; set; }
+        public DbSet<MentorCreditEntry> MentorCreditEntries { get; set; }
+        public DbSet<MentorAttendanceRecord> MentorAttendanceRecords { get; set; }
+        public DbSet<MentorReview> MentorReviews { get; set; }
+        public DbSet<MentorDispute> MentorDisputes { get; set; }
+        public DbSet<MentorDisputeHistory> MentorDisputeHistories { get; set; }
+        public DbSet<MentorAbuseReport> MentorAbuseReports { get; set; }
 
         // Subscription / payments
         public DbSet<SubscriptionPlan> SubscriptionPlans { get; set; }
@@ -79,6 +94,7 @@ namespace RikiPath.Infrastructure
         // Notifications
         public DbSet<EmailVerification> EmailVerifications { get; set; }
         public DbSet<Notification> Notifications { get; set; }
+        public DbSet<UserDeviceToken> UserDeviceTokens { get; set; }
         public DbSet<ContentApprovalRequest> ContentApprovalRequests { get; set; }
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -127,9 +143,24 @@ namespace RikiPath.Infrastructure
             modelBuilder.ApplyConfiguration(new GradingResultConfig());
 
             modelBuilder.ApplyConfiguration(new MentorBookingConfig());
+            modelBuilder.ApplyConfiguration(new MentorScheduleConfig());
+            modelBuilder.ApplyConfiguration(new MentorScheduleRuleConfig());
+            modelBuilder.ApplyConfiguration(new MentorBookingIntentConfig());
+            modelBuilder.ApplyConfiguration(new MentorBookingTermsConfig());
+            modelBuilder.ApplyConfiguration(new MentorBookingReservationConfig());
+            modelBuilder.ApplyConfiguration(new MentorBookingDayGuardConfig());
+            modelBuilder.ApplyConfiguration(new MentorOutboxEventConfig());
             modelBuilder.ApplyConfiguration(new MentorChatMessageConfig());
             modelBuilder.ApplyConfiguration(new NoteConfig());
             modelBuilder.ApplyConfiguration(new MentorAvailabilityConfig());
+            modelBuilder.ApplyConfiguration(new MentorProfileConfig());
+            modelBuilder.ApplyConfiguration(new MentorCreditGrantConfig());
+            modelBuilder.ApplyConfiguration(new MentorCreditEntryConfig());
+            modelBuilder.ApplyConfiguration(new MentorAttendanceRecordConfig());
+            modelBuilder.ApplyConfiguration(new MentorReviewConfig());
+            modelBuilder.ApplyConfiguration(new MentorDisputeConfig());
+            modelBuilder.ApplyConfiguration(new MentorDisputeHistoryConfig());
+            modelBuilder.ApplyConfiguration(new MentorAbuseReportConfig());
 
             modelBuilder.ApplyConfiguration(new SubscriptionPlanConfig());
             modelBuilder.ApplyConfiguration(new FeatureConfig());
@@ -140,6 +171,7 @@ namespace RikiPath.Infrastructure
             modelBuilder.ApplyConfiguration(new ReviewHistoryConfig());
 
             modelBuilder.ApplyConfiguration(new NotificationConfig());
+            modelBuilder.ApplyConfiguration(new UserDeviceTokenConfig());
 
             // Additional configurations for completeness
             modelBuilder.ApplyConfiguration(new CertificateSectionConfig());

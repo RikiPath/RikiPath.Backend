@@ -1,38 +1,36 @@
+using System.Collections.Concurrent;
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
 using RikiPath.Application.IServices;
 using RikiPath.Application.Requests.MentorMeetings;
 using RikiPath.Application.Responses.MentorMeetings;
 using RikiPath.Application.Services;
-using System.Collections.Concurrent;
-using System.Security.Claims;
 
 namespace RikiPath.WebApi.Hubs;
 
-/// <summary>
-/// Phòng họp 1 mentor + nhiều learner (mesh P2P: mỗi người giữ 1 kết nối WebRTC tới từng người còn lại).
-/// Peer được định danh bằng ConnectionId; signaling (offer/answer/ice) gửi ĐÍCH DANH tới 1 peer.
-/// </summary>
 [Authorize]
-public sealed class MentorMeetingHub(IMentorMeetingAccessService meetingAccessService, IMeetingNoteService meetingNoteService) : Hub
+public sealed class MentorMeetingHub(
+    IMentorMeetingAccessService meetingAccessService,
+    IMeetingNoteService meetingNoteService,
+    IMentorAttendanceService? attendanceService = null) : Hub
 {
-    // Mesh: 6 người => mỗi máy giữ 5 kết nối và upload 5 luồng video. Lớp đông hơn cần SFU (LiveKit, mediasoup...).
     private const int MaxLearners = 5;
 
-    // Trạng thái nội bộ của hub (không phải DTO nên giữ lại ở đây)
+    // Trạng thái nội bộ của hub phục vụ WebRTC mesh
     private sealed record Joined(Guid RoomId, int UserId, bool IsMentor, string Name);
 
     private static readonly ConcurrentDictionary<string, Joined> JoinedRooms = new();
-    private static readonly Dictionary<Guid, string> Presenters = new(); // roomId -> connectionId đang chia sẻ màn hình
+    private static readonly Dictionary<Guid, string> Presenters = new();
     private static readonly object RoomLock = new();
 
     // ===================== JOIN / LEAVE =====================
 
     public async Task<JoinMeetingRoomResponse> JoinRoom(Guid roomId, string displayName, string role)
     {
-        // displayName / role từ client bị bỏ qua: tên và vai trò lấy từ DB
+        // 1. Xác thực quyền truy cập phòng tư vấn từ Backend
         var meeting = await meetingAccessService.GetMeetingAsync(roomId, Context.ConnectionAborted)
-            ?? throw new HubException("Không tìm thấy phòng meeting đã thanh toán.");
+            ?? throw new HubException("Không tìm thấy phòng meeting đã thanh toán hoặc đã hết hạn.");
 
         var userId = GetUserId();
         var isMentor = meeting.Mentor.UserId == userId;
@@ -40,17 +38,9 @@ public sealed class MentorMeetingHub(IMentorMeetingAccessService meetingAccessSe
         if (!isMentor && learner is null) throw new HubException("Bạn không có quyền vào phòng này.");
         var name = isMentor ? meeting.Mentor.Name : learner!.Name;
 
-        // Connection này đang ở phòng khác -> rời phòng đó
+        // Rời phòng trước nếu connection này đang ở phòng khác
         if (JoinedRooms.TryGetValue(Context.ConnectionId, out var prev) && prev.RoomId != roomId)
             await RemoveConnectionAsync(Context.ConnectionId);
-
-        // F5 / mở tab mới: dọn connection cũ của chính user này trước (không tính vào sức chứa)
-        var stale = JoinedRooms
-            .Where(x => x.Value.RoomId == roomId && x.Value.UserId == userId && x.Key != Context.ConnectionId)
-            .Select(x => x.Key)
-            .ToList();
-        foreach (var connId in stale)
-            await RemoveConnectionAsync(connId);
 
         var me = new Joined(roomId, userId, isMentor, name);
         bool isNewConnection;
@@ -62,14 +52,95 @@ public sealed class MentorMeetingHub(IMentorMeetingAccessService meetingAccessSe
             isNewConnection = !JoinedRooms.ContainsKey(Context.ConnectionId);
             JoinedRooms[Context.ConnectionId] = me;
         }
+
         if (isNewConnection) meetingAccessService.TrackChatParticipantJoined(roomId);
+
+        // 2. Ghi nhận điểm danh và trạng thái hiện diện qua AttendanceService
+        MentorAttendanceResponse? attendanceRecord = null;
+        if (attendanceService is not null)
+        {
+            var recordResult = await attendanceService.RecordJoinAsync(roomId, userId, Context.ConnectionId, Context.ConnectionAborted);
+            if (recordResult.IsSuccess)
+            {
+                attendanceRecord = recordResult.Result;
+            }
+        }
 
         var group = Group(roomId);
         await Groups.AddToGroupAsync(Context.ConnectionId, group);
 
         var self = ToPeer(Context.ConnectionId, me);
-        // Người đã ở trong phòng nhận UserJoined và là bên gửi offer cho người mới
+
+        // 3. Phát sự kiện tới các client khác trong nhóm phòng tư vấn
+        // Sự kiện WebRTC cũ để tương thích ngược
         await Clients.OthersInGroup(group).SendAsync("UserJoined", self);
+
+        // Sự kiện thời gian thực chuẩn hóa (Stage 09 Contracts)
+        var joinedEvent = new ParticipantJoinedEvent
+        {
+            RoomId = roomId,
+            UserId = userId,
+            Name = name,
+            Role = isMentor ? "Mentor" : "Learner",
+            Status = "Joined",
+            ConnectionId = Context.ConnectionId,
+            TimestampUtc = DateTime.UtcNow
+        };
+        await Clients.OthersInGroup(group).SendAsync("ParticipantJoined", joinedEvent);
+
+        if (attendanceRecord is not null && attendanceRecord.ReconnectionCount > 0)
+        {
+            var reconnectedEvent = new ParticipantReconnectedEvent
+            {
+                RoomId = roomId,
+                UserId = userId,
+                Role = isMentor ? "Mentor" : "Learner",
+                ReconnectionCount = attendanceRecord.ReconnectionCount,
+                ConnectionId = Context.ConnectionId,
+                TimestampUtc = DateTime.UtcNow
+            };
+            await Clients.OthersInGroup(group).SendAsync("ParticipantReconnected", reconnectedEvent);
+        }
+
+        var presenceEvent = new PresenceChangedEvent
+        {
+            RoomId = roomId,
+            UserId = userId,
+            Role = isMentor ? "Mentor" : "Learner",
+            IsOnline = true,
+            ActiveConnections = 1,
+            TimestampUtc = DateTime.UtcNow
+        };
+        await Clients.OthersInGroup(group).SendAsync("PresenceChanged", presenceEvent);
+
+        if (attendanceRecord is not null)
+        {
+            var attUpdatedEvent = new AttendanceUpdatedEvent
+            {
+                RoomId = roomId,
+                UserId = userId,
+                Role = isMentor ? "Mentor" : "Learner",
+                Status = attendanceRecord.Status,
+                ReconnectionCount = attendanceRecord.ReconnectionCount,
+                TotalDurationSeconds = attendanceRecord.TotalDurationSeconds,
+                TimestampUtc = DateTime.UtcNow
+            };
+            await Clients.OthersInGroup(group).SendAsync("AttendanceUpdated", attUpdatedEvent);
+        }
+
+        // Phát hiện phòng sẵn sàng (Cả Mentor và ít nhất 1 Learner trực tuyến)
+        if (attendanceService is not null && attendanceService.IsRoomReady(roomId))
+        {
+            var readyEvent = new RoomReadyEvent
+            {
+                RoomId = roomId,
+                IsReady = true,
+                IsMentorOnline = true,
+                OnlineLearnersCount = 1,
+                TimestampUtc = DateTime.UtcNow
+            };
+            await Clients.Group(group).SendAsync("RoomReady", readyEvent);
+        }
 
         var others = JoinedRooms
             .Where(x => x.Value.RoomId == roomId && x.Key != Context.ConnectionId)
@@ -82,16 +153,43 @@ public sealed class MentorMeetingHub(IMentorMeetingAccessService meetingAccessSe
     public async Task LeaveRoom(Guid roomId)
     {
         if (JoinedRooms.TryGetValue(Context.ConnectionId, out var joined) && joined.RoomId == roomId)
+        {
+            var userId = GetUserId();
+            if (attendanceService is not null)
+            {
+                await attendanceService.RecordLeaveAsync(roomId, userId, Context.ConnectionId, Context.ConnectionAborted);
+            }
+
             await RemoveConnectionAsync(Context.ConnectionId);
+        }
     }
 
     public override async Task OnDisconnectedAsync(Exception? exception)
     {
+        if (attendanceService is not null)
+        {
+            var discResult = await attendanceService.RecordDisconnectAsync(Context.ConnectionId);
+            if (discResult.IsSuccess && discResult.Result != null && !discResult.Result.IsOnline)
+            {
+                var group = Group(discResult.Result.RoomId);
+                var presenceEvent = new PresenceChangedEvent
+                {
+                    RoomId = discResult.Result.RoomId,
+                    UserId = discResult.Result.UserId,
+                    Role = discResult.Result.Role,
+                    IsOnline = false,
+                    ActiveConnections = 0,
+                    TimestampUtc = DateTime.UtcNow
+                };
+                await Clients.Group(group).SendAsync("PresenceChanged", presenceEvent);
+            }
+        }
+
         await RemoveConnectionAsync(Context.ConnectionId);
         await base.OnDisconnectedAsync(exception);
     }
 
-    // ===================== WEBRTC SIGNALING (đích danh) =====================
+    // ===================== WEBRTC SIGNALING =====================
 
     public Task SendOffer(Guid roomId, string targetConnectionId, string sdp)
     {
@@ -112,16 +210,14 @@ public sealed class MentorMeetingHub(IMentorMeetingAccessService meetingAccessSe
         return SendToPeerAsync(roomId, targetConnectionId, "ReceiveIceCandidate", Context.ConnectionId, candidate);
     }
 
-    // ===================== CHAT / HAND / MEDIA STATE (broadcast) =====================
+    // ===================== CHAT / HAND / MEDIA STATE =====================
 
-    // Dựng lại tin nhắn từ thông tin server biết, không chuyển tiếp nguyên object do client gửi
     public async Task<MeetingChatMessageResponse?> SendChatMessage(Guid roomId, SendMeetingChatRequest request)
     {
         var me = GetJoined(roomId);
         var message = meetingAccessService.AddChatMessage(roomId, me.UserId, me.Name, me.IsMentor ? "Mentor" : "Learner", request.Text);
 
         if (message is null) return null;
-
 
         await Clients.OthersInGroup(Group(roomId)).SendAsync("ReceiveChatMessage", message);
         return message;
@@ -145,19 +241,18 @@ public sealed class MentorMeetingHub(IMentorMeetingAccessService meetingAccessSe
         await Clients.OthersInGroup(Group(roomId)).SendAsync("ReceiveMediaState", Context.ConnectionId, state);
     }
 
-    // ===================== CHIA SẺ MÀN HÌNH: mỗi lúc chỉ 1 người =====================
+    // ===================== CHIA SẺ MÀN HÌNH =====================
 
     public async Task StartPresenting(Guid roomId)
     {
         var me = GetJoined(roomId);
         string? previous = null;
-
         lock (RoomLock)
         {
             if (Presenters.TryGetValue(roomId, out var current) && current != Context.ConnectionId)
             {
                 if (!me.IsMentor) throw new HubException("Đang có người khác chia sẻ màn hình.");
-                previous = current; // mentor được quyền giành lại sân khấu
+                previous = current;
             }
             Presenters[roomId] = Context.ConnectionId;
         }
@@ -199,8 +294,24 @@ public sealed class MentorMeetingHub(IMentorMeetingAccessService meetingAccessSe
                 Presenters.Remove(j.RoomId);
         }
 
-        await Groups.RemoveFromGroupAsync(connectionId, Group(j.RoomId));
-        await Clients.Group(Group(j.RoomId)).SendAsync("UserLeft", connectionId);
+        var group = Group(j.RoomId);
+        await Groups.RemoveFromGroupAsync(connectionId, group);
+
+        // Sự kiện WebRTC cũ
+        await Clients.Group(group).SendAsync("UserLeft", connectionId);
+
+        // Sự kiện thời gian thực chuẩn hóa
+        var leftEvent = new ParticipantLeftEvent
+        {
+            RoomId = j.RoomId,
+            UserId = j.UserId,
+            Name = j.Name,
+            Role = j.IsMentor ? "Mentor" : "Learner",
+            Status = "Left",
+            ConnectionId = connectionId,
+            TimestampUtc = DateTime.UtcNow
+        };
+        await Clients.Group(group).SendAsync("ParticipantLeft", leftEvent);
     }
 
     private Joined GetJoined(Guid roomId)
@@ -211,7 +322,6 @@ public sealed class MentorMeetingHub(IMentorMeetingAccessService meetingAccessSe
     private static bool IsPeerInRoom(Guid roomId, string connectionId)
         => JoinedRooms.TryGetValue(connectionId, out var t) && t.RoomId == roomId;
 
-    // Peer đã rời giữa chừng (ICE đến muộn...) thì bỏ qua, không ném lỗi
     private Task SendToPeerAsync(Guid roomId, string targetConnectionId, string method, params object?[] args)
         => targetConnectionId != Context.ConnectionId && IsPeerInRoom(roomId, targetConnectionId)
             ? Clients.Client(targetConnectionId).SendCoreAsync(method, args)

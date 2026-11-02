@@ -6,7 +6,6 @@ using RikiPath.Application.Responses;
 
 namespace RikiPath.WebApi.Controllers;
 
-/// <summary>HTTP endpoints for Mentor Meeting plans, availability, purchases, and bookings.</summary>
 [ApiController]
 [Route("api/mentor-meetings")]
 public sealed class MentorMeetingController(IMentorMeetingService service) : ControllerBase
@@ -16,13 +15,11 @@ public sealed class MentorMeetingController(IMentorMeetingService service) : Con
     public async Task<IActionResult> GetMentors(CancellationToken cancellationToken)
          => ToActionResult(await service.GetMentorsAsync(cancellationToken));
 
-    /// <summary>Lấy danh sách các gói tư vấn 1-1 khả dụng.</summary>
     [HttpGet("plans")]
     [AllowAnonymous]
     public async Task<IActionResult> GetPlans(CancellationToken cancellationToken)
         => ToActionResult(await service.GetPlansAsync(cancellationToken));
 
-    /// <summary>Tra cứu các khung giờ trống của Mentor theo khoảng thời gian.</summary>
     [HttpGet("available-slots")]
     [HttpGet("availability")]
     [Authorize(Roles = "Learner")]
@@ -33,7 +30,6 @@ public sealed class MentorMeetingController(IMentorMeetingService service) : Con
         CancellationToken cancellationToken)
         => ToActionResult(await service.GetAvailableSlotsAsync(from, to, mentorId, cancellationToken));
 
-    /// <summary>Creates a package checkout without reserving a mentor slot.</summary>
     [HttpPost("purchase")]
     [Authorize(Roles = "Learner")]
     public async Task<IActionResult> Purchase(
@@ -54,7 +50,6 @@ public sealed class MentorMeetingController(IMentorMeetingService service) : Con
             : null;
     }
 
-    /// <summary>Đặt buổi hẹn 1-1 sử dụng gói tư vấn đã đăng ký (Subscription).</summary>
     [HttpPost("subscriptions/{subscriptionId:int}/book")]
     [HttpPost("subscriptions/{subscriptionId:int}/bookings")]
     [Authorize(Roles = "Learner")]
@@ -64,14 +59,12 @@ public sealed class MentorMeetingController(IMentorMeetingService service) : Con
         CancellationToken cancellationToken)
         => ToActionResult(await service.BookIncludedSessionAsync(subscriptionId, request, cancellationToken));
 
-    /// <summary>Lấy danh sách các buổi hẹn tư vấn cá nhân đã đặt.</summary>
     [HttpGet("my-bookings")]
     [HttpGet("bookings")]
     [Authorize(Roles = "Learner")]
     public async Task<IActionResult> GetMyBookings(CancellationToken cancellationToken)
         => ToActionResult(await service.GetMyBookingsAsync(cancellationToken));
 
-    /// <summary>Xem trạng thái gói tư vấn đã mua theo Subscription ID.</summary>
     [HttpGet("subscriptions/{subscriptionId:int}/status")]
     [HttpGet("purchases/{subscriptionId:int}")]
     [Authorize(Roles = "Learner")]
@@ -83,6 +76,7 @@ public sealed class MentorMeetingController(IMentorMeetingService service) : Con
     public async Task<IActionResult> GetMyPurchases(CancellationToken ct)
         => ToActionResult(await service.GetMyPurchasesAsync(ct));
 
+    [HttpPost("book")]
     [HttpPost("bookings")]
     [Authorize(Roles = "Learner")]
     public async Task<IActionResult> BookFromBalance([FromBody] BookIncludedMeetingRequest request, CancellationToken ct)

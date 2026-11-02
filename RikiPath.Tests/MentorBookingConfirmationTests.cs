@@ -20,7 +20,7 @@ public sealed class MentorBookingConfirmationTests
         var claims = new Mock<IClaimService>();
         claims.Setup(x => x.GetUserClaim()).Returns(new ClaimDTO { Id = id, Role = role });
         return new MentorMeetingService(new UnitOfWork(db), Mock.Of<IPaymentGatewayClient>(), claims.Object,
-            new AppSettings(), NullLogger<MentorMeetingService>.Instance);
+            new AppSettings(), NullLogger<MentorMeetingService>.Instance, Mock.Of<IMentorCreditLedgerService>());
     }
     private static async Task<MentorBooking> Seed(AppDbContext db, PaymentStatus payment = PaymentStatus.Paid,
         MentorStatus status = MentorStatus.Assigned, bool expired = false, bool approved = true)

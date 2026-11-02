@@ -14,11 +14,8 @@ namespace RikiPath.Application.IServices
 
         Task<ApiResponse> MarkAllAsReadAsync(CancellationToken cancellationToken);
 
-        /// <summary>
-        /// Dùng NỘI BỘ bởi các service khác (ReviewService nhắc ôn SM-2, GradingService báo kết quả
-        /// chấm bài, ConsultationService nhắc lịch hẹn...) để tạo thông báo — không expose qua Controller.
-        /// EmailNotificationsEnabled/SystemNotificationsEnabled của user quyết định có thật sự gửi hay không.
-        /// </summary>
         Task CreateNotificationAsync(string title, string message, string type, CancellationToken cancellationToken);
+
+        Task<ApiResponse<NotificationResponse>> SendNotificationToUserAsync(int targetUserId, string title, string message, string type, string? linkUrl, CancellationToken cancellationToken, string? idempotencyKey = null);
     }
 }

@@ -48,12 +48,16 @@ namespace RikiPath.Infrastructure.Repositories
         }
 
         public Task<int> CompleteQaPaymentIfPendingAsync(
-            int subscriptionId, string pendingMarker, string paidMarker, CancellationToken ct = default)
+            int subscriptionId, string pendingMarker, string paidMarker,
+            DateTime paidAtUtc, DateTime? endsAtUtc, CancellationToken ct = default)
             => _dbSet.Where(x => x.Id == subscriptionId && !x.IsDeleted &&
                     x.PaymentStatus == PaymentStatus.Pending && x.PaymentTransactionId == pendingMarker)
                 .ExecuteUpdateAsync(setters => setters
                     .SetProperty(x => x.PaymentStatus, PaymentStatus.Paid)
-                    .SetProperty(x => x.PaymentTransactionId, paidMarker), ct);
+                    .SetProperty(x => x.PaymentTransactionId, paidMarker)
+                    .SetProperty(x => x.StartDate, paidAtUtc)
+                    .SetProperty(x => x.EndDate, endsAtUtc)
+                    .SetProperty(x => x.PaymentExpiresAt, (DateTime?)null), ct);
 
         public Task<UserSubscription?> GetWithPlanAsync(int id, CancellationToken ct) =>
     _context.UserSubscriptions

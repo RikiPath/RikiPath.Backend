@@ -11,7 +11,6 @@ namespace RikiPath.Domain.Entities
         public UserAccount UserAccount { get; set; }
         public int SubscriptionPlanId { get; set; }
         public SubscriptionPlan SubscriptionPlan { get; set; }
-        /// <summary>Legacy package mentor. New account-credit purchases leave this null; bookings determine their own mentor.</summary>
         public int? MentorId { get; set; }
         public UserAccount? Mentor { get; set; }
 
@@ -25,7 +24,6 @@ namespace RikiPath.Domain.Entities
         public int AiGradingQuota { get; set; }
         public int AiGradingUsedCount { get; set; } = 0;
 
-        /// <summary>Meeting sessions included at purchase time; snapshots the plan value.</summary>
         public int MeetingSessionsIncluded { get; set; }
         public int MeetingSessionsUsed { get; set; }
         public DateTime? PaymentExpiresAt { get; set; }

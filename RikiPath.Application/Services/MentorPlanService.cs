@@ -14,7 +14,7 @@ public sealed class MentorPlanService(IUnitOfWork uow, IClaimService claims) : I
         var plans = await uow.SubscriptionPlans.Query().Where(p => !p.IsDeleted && p.MeetingSessionCount > 0).OrderBy(p => p.Id).ToListAsync(ct);
         return ApiResponse<List<MentorMeetingPlanResponse>>.Success(plans.Select(p => new MentorMeetingPlanResponse {
             Id = p.Id, Name = p.Name, Description = p.Description, Price = p.Price,
-            DurationDays = p.MeetingSessionCount switch { 1 => 14, 3 => 35, _ => p.DurationDays },
+            DurationDays = p.MeetingSessionCount switch { 1 => 30, 3 => 90, _ => p.DurationDays },
             MeetingSessionCount = p.MeetingSessionCount, IsActive = p.IsActive
         }).ToList());
     }
@@ -28,7 +28,7 @@ public sealed class MentorPlanService(IUnitOfWork uow, IClaimService claims) : I
         if (plan is null || plan.IsDeleted) return ApiResponse<int>.NotFound();
         if (id.HasValue && plan.MeetingSessionCount is not (1 or 3)) return ApiResponse<int>.Fail("Không chuyển đổi gói tự học hoặc gói lịch sử sang gói tư vấn mới.");
         plan.Name = r.Name.Trim(); plan.Description = r.Description?.Trim(); plan.MeetingSessionCount = r.MeetingSessionCount;
-        plan.DurationDays = r.MeetingSessionCount == 1 ? 14 : 35; plan.Price = r.Price; plan.IsActive = r.IsActive;
+        plan.DurationDays = r.MeetingSessionCount == 1 ? 30 : 90; plan.Price = r.Price; plan.IsActive = r.IsActive;
         if (!id.HasValue) await uow.SubscriptionPlans.AddAsync(plan, ct);
         await uow.SaveChangesAsync(ct);
         return ApiResponse<int>.Success(plan.Id);
