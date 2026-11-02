@@ -4,9 +4,6 @@ using RikiPath.Application.Responses.MentorMeetings;
 
 namespace RikiPath.Application.IServices;
 
-/// <summary>
-/// Interface quản lý logic và nghiệp vụ cho tính năng Mentor Meeting.
-/// </summary>
 public interface IMentorMeetingService
 {
     Task<ApiResponse<List<MentorMeetingPurchaseStatusResponse>>> GetMyPurchasesAsync(CancellationToken ct);

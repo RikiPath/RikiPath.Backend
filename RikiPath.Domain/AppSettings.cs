@@ -70,6 +70,7 @@ namespace RikiPath.Domain
         public string Url { get; set; } = string.Empty;
         public string ServiceRoleKey { get; set; } = string.Empty;
         public string Bucket { get; set; } = string.Empty;
+        public string VerificationBucket { get; set; } = string.Empty;
     }
 
     public class AiSettings

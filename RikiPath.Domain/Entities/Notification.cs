@@ -13,5 +13,7 @@ namespace RikiPath.Domain.Entities
         public string Type { get; set; } = string.Empty;
         public bool IsRead { get; set; }
         public string? LinkUrl { get; set; }
+        public string? IdempotencyKey { get; set; }
+        public string? DeliveredTokens { get; set; }
     }
 }

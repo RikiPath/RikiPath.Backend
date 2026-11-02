@@ -2,7 +2,6 @@ using System;
 
 namespace RikiPath.Domain.Entities
 {
-    /// <summary>The mentor's meeting notes or final written answer for a request.</summary>
     public class Note : Base
     {
         public int Id { get; set; }

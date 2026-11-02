@@ -17,10 +17,18 @@ namespace RikiPath.Domain.Entities
         public string? Question { get; set; }
         public DateTime? ScheduledAt { get; set; }
 
-        /// <summary>Filled when the learner books: URL that contains the slot's RoomId.</summary>
         public string? MeetingLink { get; set; }
         public DateTime? CompletedAt { get; set; }
 
         public Note? Note { get; set; }
+
+        // Siêu dữ liệu phục vụ hủy lịch, dời lịch và xử lý ngoại lệ hoàn vé (Stage 10/13)
+        public string? CancellationReason { get; set; }
+        public DateTime? CancelledAtUtc { get; set; }
+        public int? CancelledByUserId { get; set; }
+        public string? CancelledByRole { get; set; }
+        public bool ExceptionRequested { get; set; }
+        public string? ExceptionReason { get; set; }
+        public bool? ExceptionApproved { get; set; }
     }
 }

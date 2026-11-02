@@ -12,7 +12,7 @@ internal static class MentorPurchaseFinalizer
         subscription.PaymentStatus = PaymentStatus.Paid;
         subscription.PaymentTransactionId = reference ?? subscription.PaymentTransactionId;
         subscription.StartDate = now;
-        var duration = subscription.MeetingSessionsIncluded switch { 1 => 14, 3 => 35, _ => subscription.SubscriptionPlan.DurationDays };
+        var duration = DurationDays(subscription);
         subscription.EndDate = duration > 0 ? now.AddDays(duration) : null;
         subscription.PaymentExpiresAt = null;
         foreach (var booking in subscription.MentorBookings)
@@ -23,4 +23,7 @@ internal static class MentorPurchaseFinalizer
                 booking.MeetingLink = $"{settings.FrontendBaseUrl.TrimEnd('/')}/consultation-room/{booking.MentorAvailability.RoomId:D}/";
         }
     }
+
+    internal static int DurationDays(UserSubscription subscription)
+        => subscription.MeetingSessionsIncluded switch { 1 => 30, 3 => 90, _ => subscription.SubscriptionPlan.DurationDays };
 }

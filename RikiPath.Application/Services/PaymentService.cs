@@ -12,7 +12,8 @@ namespace RikiPath.Application.Services;
 public sealed class PaymentService(
     IUnitOfWork unitOfWork,
     IPaymentGatewayClient paymentGatewayClient,
-    AppSettings appSettings) : IPaymentService
+    AppSettings appSettings,
+    IMentorCreditLedgerService creditLedgerService) : IPaymentService
 {
     public async Task<ApiResponse<bool>> HandlePayOsWebhookAsync(
     PayOsWebhookRequest webhook, CancellationToken ct)
@@ -75,12 +76,20 @@ public sealed class PaymentService(
         var subscription = await unitOfWork.UserSubscriptions
             .GetMeetingPurchaseWithBookingsAsync(orderCode, ct);
         if (subscription is null || subscription.MeetingSessionsIncluded <= 0)
-            return ApiResponse<bool>.Fail("Không tìm thấy đơn mua gói Mentor Meeting.");
+            return ApiResponse<bool>.Fail("Không tìm thấy đơn mua gói tư vấn.");
         if (callback.Amount != subscription.AmountPaid)
             return ApiResponse<bool>.Fail("Số tiền thanh toán không khớp với đơn hàng.");
 
         if (subscription.PaymentStatus == PaymentStatus.Paid)
+        {
+            if (subscription.MeetingSessionsUsed < subscription.MeetingSessionsIncluded)
+            {
+                var existingGrant = await creditLedgerService.CreateGrantFromPaidSubscriptionAsync(orderCode, cancellationToken: ct);
+                if (!existingGrant.IsSuccess)
+                    return ApiResponse<bool>.Fail("Thanh toán đã xác nhận nhưng chưa cấp được lượt tư vấn.");
+            }
             return ApiResponse<bool>.Success(true, message: "Webhook thanh toán đã được xử lý trước đó.");
+        }
         if (subscription.PaymentStatus != PaymentStatus.Pending)
             return ApiResponse<bool>.Success(true, message: "Đơn hàng không còn ở trạng thái chờ thanh toán.");
 
@@ -107,6 +116,12 @@ public sealed class PaymentService(
 
         subscription.PaymentExpiresAt = null;
         await unitOfWork.SaveChangesAsync(ct);
+        if (callback.IsSuccess)
+        {
+            var grantResult = await creditLedgerService.CreateGrantFromPaidSubscriptionAsync(orderCode, cancellationToken: ct);
+            if (!grantResult.IsSuccess)
+                return ApiResponse<bool>.Fail("Thanh toán đã xác nhận nhưng chưa cấp được lượt tư vấn.");
+        }
         return ApiResponse<bool>.Success(true);
     }
 
