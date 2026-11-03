@@ -16,7 +16,7 @@ using RikiPath.Domain.Entities;
 namespace RikiPath.WebApi.Controllers
 {
     [ApiController]
-    [Route("api/v1/devices")]
+    [Route("api/devices")]
     [Authorize]
     public class DeviceTokenController : ControllerBase
     {

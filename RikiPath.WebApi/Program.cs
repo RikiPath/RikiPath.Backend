@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
+using RikiPath.WebApi.Swagger;
 using RikiPath.Application;
 using RikiPath.Application.Handlers;
 using RikiPath.Application.Hubs;
@@ -395,14 +396,22 @@ internal class Program
             var xmlFile = $"{Assembly.GetExecutingAssembly().GetName().Name}.xml";
             var xmlPath = Path.Combine(AppContext.BaseDirectory, xmlFile);
 
-            // Truyền true vào parameter includeControllerXmlComments để hiển thị cả comment của Controller Class
+            // Include source XML comments; canonical filters normalize all published documentation to English.
             c.IncludeXmlComments(xmlPath, includeControllerXmlComments: true);
-            c.SwaggerDoc("v1", new OpenApiInfo { Title = "RikiPath API", Version = "v1" });
+            c.SwaggerDoc("v1", new OpenApiInfo
+            {
+                Title = "RikiPath API",
+                Version = "v1",
+                Description = "API RikiPath sử dụng các đường dẫn nghiệp vụ chuẩn, không gắn phiên bản."
+            });
+            c.DocumentFilter<CanonicalApiDocumentFilter>();
+            c.OperationFilter<CanonicalApiOperationFilter>();
+            c.SchemaFilter<CanonicalApiSchemaFilter>();
 
             var securityScheme = new OpenApiSecurityScheme
             {
                 Name = "Authorization",
-                Description = "Enter JWT Bearer token in format: Bearer {token}",
+                Description = "Nhập JWT Bearer theo định dạng: Bearer {token}.",
                 In = ParameterLocation.Header,
                 Type = SecuritySchemeType.Http,
                 Scheme = "bearer",

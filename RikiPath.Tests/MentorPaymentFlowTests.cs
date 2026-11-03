@@ -10,6 +10,7 @@ using RikiPath.Domain;
 using RikiPath.Domain.Entities;
 using RikiPath.Domain.Enums;
 using RikiPath.Infrastructure;
+using RikiPath.Infrastructure.Services;
 
 namespace RikiPath.Tests;
 
@@ -35,11 +36,19 @@ public sealed class MentorPaymentFlowTests
         var ledger = new MentorCreditLedgerService(uow, claims, NullLogger<MentorCreditLedgerService>.Instance);
         return new MentorMeetingService(uow, gateway.Object, claims, Settings, NullLogger<MentorMeetingService>.Instance, ledger);
     }
+    private static MentorBookingService BookingService(AppDbContext db, int id = 1, Role role = Role.Learner)
+    {
+        var uow = new UnitOfWork(db);
+        var claims = Claims(id, role);
+        var ledger = new MentorCreditLedgerService(uow, claims, NullLogger<MentorCreditLedgerService>.Instance);
+        return new MentorBookingService(db, uow, claims, ledger, Settings, NullLogger<MentorBookingService>.Instance);
+    }
     private static async Task<int> Purchase(AppDbContext db, Mock<IPaymentGatewayClient> gateway, int sessions = 3)
     {
-        var mentor = new UserAccount { Id = 2, FirstName = "Mentor", Role = Role.Mentor, PasswordHash = [], PasswordSalt = [] };
+        var mentor = new UserAccount { Id = 2, FirstName = "Mentor", Role = Role.Mentor, PasswordHash = [], PasswordSalt = [],
+            MentorProfile = new MentorProfile { VerificationStatus = MentorVerificationStatus.Approved } };
         db.Users.AddRange(mentor, new UserAccount { Id = 1, FirstName = "Learner", Role = Role.Learner, PasswordHash = [], PasswordSalt = [] });
-        var slot = new MentorAvailability { Mentor = mentor, StartTime = DateTime.UtcNow.AddDays(1), EndTime = DateTime.UtcNow.AddDays(1).AddHours(1), IsApproved = true };
+        var slot = new MentorAvailability { Mentor = mentor, StartTime = DateTime.UtcNow.AddDays(1), EndTime = DateTime.UtcNow.AddDays(1).AddMinutes(90), IsApproved = true };
         var plan = new SubscriptionPlan { Name = "Test meeting plan", Price = 1000, DurationDays = 30, MeetingSessionCount = sessions, IsActive = true };
         db.MentorAvailabilities.Add(slot); db.SubscriptionPlans.Add(plan);
         await db.SaveChangesAsync();
@@ -84,7 +93,7 @@ public sealed class MentorPaymentFlowTests
         Assert.Equal(0, pending.Result.MeetingSessionsUsed);
         Assert.Empty(db.MentorCreditGrants);
         Assert.Equal(0, (await db.MentorAvailabilities.SingleAsync()).BookedCount);
-        Assert.Empty((await Service(db, gateway, 2, Role.Mentor).GetMyMeetingsAsync(default)).Result!);
+        Assert.Empty((await BookingService(db, 2, Role.Mentor).GetMyMentorBookingsAsync(default)).Result!);
 
         gateway.Setup(x => x.GetPaymentInformationAsync(id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new PaymentLinkInformation(id, 1000, 1000, "PAID", "test-payment-link"));
@@ -97,11 +106,11 @@ public sealed class MentorPaymentFlowTests
             Assert.Single(db.MentorCreditGrants).ExpiresAtUtc);
         Assert.Empty(paid.Result.Bookings);
         Assert.Equal(3, paid.Result.MeetingSessionsIncluded - paid.Result.MeetingSessionsUsed);
-        var booked = await Service(db, gateway).BookFromBalanceAsync(new BookIncludedMeetingRequest { MentorAvailabilityId = (await db.MentorAvailabilities.SingleAsync()).Id, Question = "Câu hỏi gửi tới Mentor" }, default);
+        var booked = await BookingService(db).BookSlotAsync(new BookIncludedMeetingRequest { MentorAvailabilityId = (await db.MentorAvailabilities.SingleAsync()).Id, Question = "Câu hỏi gửi tới Mentor" }, default);
         Assert.True(booked.IsSuccess, booked.ErrorMessage);
         db.ChangeTracker.Clear();
-        var booking = Assert.Single((await Service(db, gateway, 2, Role.Mentor).GetMyMeetingsAsync(default)).Result!);
-        Assert.Equal(MentorStatus.Assigned, booking.Status);
+        var booking = Assert.Single((await BookingService(db, 2, Role.Mentor).GetMyMentorBookingsAsync(default)).Result!);
+        Assert.Equal(MentorStatus.Accepted, booking.Status);
         Assert.Equal("Câu hỏi gửi tới Mentor", booking.Question);
         Assert.Contains("/consultation-room/", booking.MeetingLink);
         Assert.True((await Service(db, gateway).SyncPurchaseAsync(id, default)).IsSuccess);
@@ -182,27 +191,31 @@ public sealed class MentorPaymentFlowTests
         var result = await Service(db, gateway).SyncPurchaseAsync(id, default);
         Assert.Equal(PaymentStatus.Failed, result.Result!.PaymentStatus);
         Assert.Empty(db.MentorBookings);
-        Assert.Empty((await Service(db, gateway, 2, Role.Mentor).GetMyMeetingsAsync(default)).Result!);
+        Assert.Empty((await BookingService(db, 2, Role.Mentor).GetMyMentorBookingsAsync(default)).Result!);
     }
 
     [Fact]
-    public async Task Account_credits_can_book_different_mentors_and_failed_booking_does_not_debit()
+    public async Task Account_credits_can_book_different_mentors_and_retry_is_idempotent()
     {
         await using var db = Context(); var gateway = new Mock<IPaymentGatewayClient>();
         var id = await Purchase(db, gateway);
         var first = await db.MentorAvailabilities.SingleAsync();
-        Assert.False((await Service(db, gateway).BookFromBalanceAsync(new() { MentorAvailabilityId = first.Id }, default)).IsSuccess);
+        Assert.False((await BookingService(db).BookSlotAsync(new() { MentorAvailabilityId = first.Id }, default)).IsSuccess);
         gateway.Setup(x => x.GetPaymentInformationAsync(id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new PaymentLinkInformation(id,1000,1000,"PAID","test-payment-link"));
         await Service(db,gateway).SyncPurchaseAsync(id,default);
-        Assert.True((await Service(db,gateway).BookFromBalanceAsync(new(){MentorAvailabilityId=first.Id},default)).IsSuccess);
+        Assert.True((await BookingService(db).BookSlotAsync(new(){MentorAvailabilityId=first.Id},default)).IsSuccess);
         db.ChangeTracker.Clear();
         var other = new UserAccount { Id=3, Role=Role.Mentor, PasswordHash=[], PasswordSalt=[] };
-        var second = new MentorAvailability { Mentor=other, IsApproved=true, StartTime=DateTime.UtcNow.AddDays(2), EndTime=DateTime.UtcNow.AddDays(2).AddMinutes(50) };
+        other.MentorProfile = new MentorProfile { VerificationStatus = MentorVerificationStatus.Approved };
+        var second = new MentorAvailability { Mentor=other, IsApproved=true, StartTime=DateTime.UtcNow.AddDays(2), EndTime=DateTime.UtcNow.AddDays(2).AddMinutes(90) };
         db.Users.Add(other); db.MentorAvailabilities.Add(second); await db.SaveChangesAsync();
-        Assert.True((await Service(db,gateway).BookFromBalanceAsync(new(){MentorAvailabilityId=second.Id},default)).IsSuccess);
+        var secondBooking = await BookingService(db).BookSlotAsync(new(){MentorAvailabilityId=second.Id},default);
+        Assert.True(secondBooking.IsSuccess);
         db.ChangeTracker.Clear();
-        Assert.False((await Service(db,gateway).BookFromBalanceAsync(new(){MentorAvailabilityId=second.Id},default)).IsSuccess);
+        var retry = await BookingService(db).BookSlotAsync(new(){MentorAvailabilityId=second.Id},default);
+        Assert.True(retry.IsSuccess);
+        Assert.Equal(secondBooking.Result!.Id, retry.Result!.Id);
         Assert.Equal(2,(await db.UserSubscriptions.FindAsync(id))!.MeetingSessionsUsed);
         Assert.Null((await db.UserSubscriptions.FindAsync(id))!.MentorId);
         Assert.Equal(2,await db.MentorBookings.CountAsync());
@@ -220,7 +233,7 @@ public sealed class MentorPaymentFlowTests
         var sooner=new UserSubscription {UserId=1,SubscriptionPlan=plan,PaymentStatus=PaymentStatus.Paid,MeetingSessionsIncluded=1,EndDate=DateTime.UtcNow.AddDays(3)};
         var expired=new UserSubscription {UserId=1,SubscriptionPlan=plan,PaymentStatus=PaymentStatus.Paid,MeetingSessionsIncluded=3,EndDate=DateTime.UtcNow.AddDays(-1)};
         db.UserSubscriptions.AddRange(sooner,expired); await db.SaveChangesAsync();
-        Assert.True((await Service(db,gateway).BookFromBalanceAsync(new(){MentorAvailabilityId=(await db.MentorAvailabilities.SingleAsync()).Id},default)).IsSuccess);
+        Assert.True((await BookingService(db).BookSlotAsync(new(){MentorAvailabilityId=(await db.MentorAvailabilities.SingleAsync()).Id},default)).IsSuccess);
         Assert.Equal(1,sooner.MeetingSessionsUsed); Assert.Equal(0,original.MeetingSessionsUsed); Assert.Equal(0,expired.MeetingSessionsUsed);
         Assert.Empty((await Service(db,gateway,99).GetMyPurchasesAsync(default)).Result!);
     }

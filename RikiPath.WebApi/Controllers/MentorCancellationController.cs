@@ -13,7 +13,6 @@ namespace RikiPath.WebApi.Controllers;
 public sealed class MentorCancellationController(IMentorCancellationService cancellationService) : ControllerBase
 {
     // Hủy lịch hẹn tư vấn có hỗ trợ phân tầng chính sách (>= 24h vs < 24h) và hoàn vé
-    [HttpPost("api/v1/mentor-bookings/{bookingId:int}/cancel")]
     [HttpPost("api/mentor-bookings/{bookingId:int}/cancel")]
     [ProducesResponseType(typeof(ApiResponse<MentorCancellationResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse<MentorCancellationResponse>), StatusCodes.Status400BadRequest)]
@@ -30,7 +29,6 @@ public sealed class MentorCancellationController(IMentorCancellationService canc
     }
 
     // Dời lịch hẹn sang một khung giờ khả dụng khác của cùng Mentor (chỉ áp dụng >= 24h)
-    [HttpPost("api/v1/mentor-bookings/{bookingId:int}/reschedule")]
     [HttpPost("api/mentor-bookings/{bookingId:int}/reschedule")]
     [Authorize(Roles = "Learner,Admin")]
     [ProducesResponseType(typeof(ApiResponse<MentorRescheduleResponse>), StatusCodes.Status200OK)]
@@ -48,7 +46,6 @@ public sealed class MentorCancellationController(IMentorCancellationService canc
     }
 
     // Kiểm tra điều kiện hoàn vé và dời lịch theo chính sách thời gian thực
-    [HttpGet("api/v1/mentor-bookings/{bookingId:int}/cancellation-eligibility")]
     [HttpGet("api/mentor-bookings/{bookingId:int}/cancellation-eligibility")]
     [ProducesResponseType(typeof(ApiResponse<CancellationPolicyEligibilityResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse<CancellationPolicyEligibilityResponse>), StatusCodes.Status403Forbidden)]
@@ -62,7 +59,6 @@ public sealed class MentorCancellationController(IMentorCancellationService canc
     }
 
     // Quản trị viên xét duyệt yêu cầu ngoại lệ hoàn vé cho các ca hủy sát giờ (< 24h)
-    [HttpPost("api/v1/admin/mentor-bookings/{bookingId:int}/review-cancellation")]
     [HttpPost("api/admin/mentor-bookings/{bookingId:int}/review-cancellation")]
     [Authorize(Roles = "Admin")]
     [ProducesResponseType(typeof(ApiResponse<MentorCancellationResponse>), StatusCodes.Status200OK)]

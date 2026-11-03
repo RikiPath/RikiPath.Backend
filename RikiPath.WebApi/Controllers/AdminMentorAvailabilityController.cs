@@ -6,7 +6,6 @@ using RikiPath.Application.Responses;
 namespace RikiPath.WebApi.Controllers;
 
 [ApiController]
-[Route("api/admin/mentor-availability")]
 [Route("api/admin/mentor-availabilities")]
 [Authorize(Roles = "Admin")]
 public sealed class AdminMentorAvailabilityController(IMentorMeetingService service, IMentorAvailabilityReviewService reviewService) : ControllerBase

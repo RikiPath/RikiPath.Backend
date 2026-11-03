@@ -58,7 +58,6 @@ namespace RikiPath.WebApi.Controllers
         // 2. Xét duyệt Hồ sơ Xác minh (Verification)
         // ==========================================
 
-        [HttpGet("profiles")]
         [HttpGet("verifications")]
         [ProducesResponseType(typeof(ApiResponse<List<AdminMentorProfileResponse>>), StatusCodes.Status200OK)]
         public async Task<IActionResult> GetMentorProfiles(

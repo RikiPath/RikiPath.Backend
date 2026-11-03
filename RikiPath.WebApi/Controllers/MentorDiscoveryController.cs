@@ -11,7 +11,6 @@ using RikiPath.Application.Responses.MentorProfile;
 namespace RikiPath.WebApi.Controllers;
 
 [ApiController]
-[Route("api/v1/mentors")]
 [Route("api/mentors")]
 [AllowAnonymous]
 public sealed class MentorDiscoveryController(IMentorDiscoveryService discoveryService) : ControllerBase

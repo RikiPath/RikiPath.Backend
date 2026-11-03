@@ -8,8 +8,7 @@ namespace RikiPath.WebApi.Controllers
 {
     // // Các API cho Chuyên gia tự quản lý mẫu lịch làm việc, quy tắc ca lặp và sinh/công bố khung giờ 90 phút.
     [ApiController]
-    [Route("api/v1/mentors/me/schedule")]
-    [Route("api/mentor/schedule")]
+    [Route("api/mentors/me/schedule")]
     public sealed class MentorScheduleManagementController(
         IMentorScheduleManagementService scheduleService) : ControllerBase
     {
@@ -44,7 +43,6 @@ namespace RikiPath.WebApi.Controllers
         // // Xem trước danh sách khung giờ 90 phút (kèm 15 phút nghỉ) sẽ được sinh ra từ mẫu lịch.
         // Yêu cầu tài khoản Chuyên gia phải có hồ sơ ĐÃ ĐƯỢC PHÊ DUYỆT (Approved).
         [HttpPost("preview-slots")]
-        [HttpPost("preview")]
         [Authorize(Roles = "Mentor")]
         public async Task<IActionResult> PreviewSlots(
             [FromBody] PreviewSlotsRequest request,
@@ -55,8 +53,6 @@ namespace RikiPath.WebApi.Controllers
         // Đảm bảo tính bất biến (idempotent), không trùng GenerationKey và không ghi đè buổi đã có học viên đặt.
         // Yêu cầu tài khoản Chuyên gia phải có hồ sơ ĐÃ ĐƯỢC PHÊ DUYỆT (Approved).
         [HttpPost("publish-slots")]
-        [HttpPost("publish")]
-        [HttpPost("generate-slots")]
         [Authorize(Roles = "Mentor")]
         public async Task<IActionResult> PublishSlots(
             [FromBody] PublishSlotsRequest request,
@@ -74,7 +70,7 @@ namespace RikiPath.WebApi.Controllers
             => ToActionResult(await scheduleService.DisableSlotAsync(slotId, request, cancellationToken));
 
         // // Dành cho Quản trị viên: Xem mẫu lịch làm việc và quy tắc ca của một Chuyên gia bất kỳ.
-        [HttpGet("/api/v1/admin/mentors/{mentorId:int}/schedule")]
+        [HttpGet("/api/admin/mentors/{mentorId:int}/schedule")]
         [Authorize(Roles = "Admin")]
         public async Task<IActionResult> GetMentorScheduleForAdmin(
             int mentorId,

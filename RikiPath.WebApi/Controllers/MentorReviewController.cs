@@ -12,7 +12,6 @@ namespace RikiPath.WebApi.Controllers;
 public sealed class MentorReviewController(IMentorReviewService reviewService) : ControllerBase
 {
     // Học viên tạo đánh giá cho buổi tư vấn đã hoàn thành
-    [HttpPost("api/v1/mentor-reviews")]
     [HttpPost("api/mentor-reviews")]
     [Authorize(Roles = "Learner,Admin")]
     [ProducesResponseType(typeof(ApiResponse<MentorReviewResponse>), StatusCodes.Status200OK)]
@@ -29,7 +28,6 @@ public sealed class MentorReviewController(IMentorReviewService reviewService) :
     }
 
     // Học viên chỉnh sửa đánh giá của chính mình
-    [HttpPut("api/v1/mentor-reviews/{reviewId:int}")]
     [HttpPut("api/mentor-reviews/{reviewId:int}")]
     [Authorize(Roles = "Learner,Admin")]
     [ProducesResponseType(typeof(ApiResponse<MentorReviewResponse>), StatusCodes.Status200OK)]
@@ -46,7 +44,6 @@ public sealed class MentorReviewController(IMentorReviewService reviewService) :
     }
 
     // Khách hoặc học viên xem danh sách đánh giá công khai của Mentor
-    [HttpGet("api/v1/mentors/{mentorId:int}/reviews")]
     [HttpGet("api/mentors/{mentorId:int}/reviews")]
     [AllowAnonymous]
     [ProducesResponseType(typeof(ApiResponse<List<MentorReviewResponse>>), StatusCodes.Status200OK)]
@@ -62,7 +59,6 @@ public sealed class MentorReviewController(IMentorReviewService reviewService) :
     }
 
     // Lấy thông tin xếp hạng tổng hợp (sao trung bình, biểu đồ sao) của Mentor
-    [HttpGet("api/v1/mentors/{mentorId:int}/rating-summary")]
     [HttpGet("api/mentors/{mentorId:int}/rating-summary")]
     [AllowAnonymous]
     [ProducesResponseType(typeof(ApiResponse<MentorRatingSummaryResponse>), StatusCodes.Status200OK)]
@@ -76,7 +72,6 @@ public sealed class MentorReviewController(IMentorReviewService reviewService) :
     }
 
     // Mentor nộp phản hồi chính thức cho đánh giá
-    [HttpPost("api/v1/mentor-reviews/{reviewId:int}/reply")]
     [HttpPost("api/mentor-reviews/{reviewId:int}/reply")]
     [Authorize(Roles = "Mentor,Admin")]
     [ProducesResponseType(typeof(ApiResponse<MentorReviewResponse>), StatusCodes.Status200OK)]
@@ -93,7 +88,6 @@ public sealed class MentorReviewController(IMentorReviewService reviewService) :
     }
 
     // Quản trị viên kiểm duyệt đánh giá (ẩn/hiện, phê duyệt)
-    [HttpPost("api/v1/admin/mentor-reviews/{reviewId:int}/moderate")]
     [HttpPost("api/admin/mentor-reviews/{reviewId:int}/moderate")]
     [Authorize(Roles = "Admin")]
     [ProducesResponseType(typeof(ApiResponse<MentorReviewResponse>), StatusCodes.Status200OK)]

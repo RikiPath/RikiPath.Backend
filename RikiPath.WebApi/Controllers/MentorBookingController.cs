@@ -12,8 +12,35 @@ namespace RikiPath.WebApi.Controllers;
 [Authorize]
 public sealed class MentorBookingController(IMentorBookingService bookingService) : ControllerBase
 {
+    [HttpGet("api/learner/mentor-bookings")]
+    [Authorize(Roles = "Learner")]
+    [ProducesResponseType(typeof(ApiResponse<List<MentorBookingResponse>>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetMyBookings(CancellationToken cancellationToken)
+    {
+        var result = await bookingService.GetMyBookingsAsync(cancellationToken);
+        return StatusCode(result.StatusCode, result);
+    }
+
+    [HttpGet("api/mentor-bookings")]
+    [Authorize(Roles = "Mentor")]
+    [ProducesResponseType(typeof(ApiResponse<List<MentorBookingResponse>>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetMyMentorBookings(CancellationToken cancellationToken)
+    {
+        var result = await bookingService.GetMyMentorBookingsAsync(cancellationToken);
+        return StatusCode(result.StatusCode, result);
+    }
+
+    [HttpGet("api/mentor-bookings/{bookingId:int}")]
+    [Authorize(Roles = "Mentor")]
+    [ProducesResponseType(typeof(ApiResponse<MentorBookingResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<MentorBookingResponse>), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetMentorBooking(int bookingId, CancellationToken cancellationToken)
+    {
+        var result = await bookingService.GetMentorBookingAsync(bookingId, cancellationToken);
+        return StatusCode(result.StatusCode, result);
+    }
+
     // Học viên đặt lịch giữ chỗ nguyên tử từ số dư tín dụng khả dụng kèm trừ vé FIFO và bảo vệ chống trùng lịch
-    [HttpPost("api/v1/learner/mentor-bookings")]
     [HttpPost("api/learner/mentor-bookings")]
     [Authorize(Roles = "Learner")]
     [ProducesResponseType(typeof(ApiResponse<MentorBookingResponse>), StatusCodes.Status200OK)]
@@ -29,7 +56,6 @@ public sealed class MentorBookingController(IMentorBookingService bookingService
     }
 
     // Học viên hoặc Quản trị viên giải phóng giữ chỗ / hủy lịch hẹn, phục hồi lượt tín dụng và slot khả dụng
-    [HttpPost("api/v1/learner/mentor-bookings/{bookingId:int}/release")]
     [HttpPost("api/learner/mentor-bookings/{bookingId:int}/release")]
     [Authorize(Roles = "Learner,Admin")]
     [ProducesResponseType(typeof(ApiResponse<MentorBookingResponse>), StatusCodes.Status200OK)]
