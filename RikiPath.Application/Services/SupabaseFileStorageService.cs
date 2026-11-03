@@ -12,9 +12,14 @@ namespace RikiPath.Application.Services
 {
     public class SupabaseFileStorageService(HttpClient httpClient, AppSettings appSettings) : IFileStorageService
     {
-        private readonly string _supabaseUrl = ConfigureHttpClient(httpClient, appSettings);
-        private readonly string _bucket = appSettings.Supabase?.Bucket
-            ?? throw new InvalidOperationException("Supabase:Bucket chưa được cấu hình trong appsettings.");
+        private readonly string? _supabaseUrl = TryConfigure(httpClient, appSettings);
+        private readonly string? _bucket = appSettings.Supabase?.Bucket;
+
+        private void EnsureConfigured()
+        {
+            if (string.IsNullOrWhiteSpace(_supabaseUrl) || string.IsNullOrWhiteSpace(_bucket))
+                throw new InvalidOperationException("Supabase chưa được cấu hình trong appsettings.");
+        }
 
         private string VerificationBucket => !string.IsNullOrWhiteSpace(appSettings.Supabase?.VerificationBucket)
             ? appSettings.Supabase.VerificationBucket
@@ -38,6 +43,7 @@ namespace RikiPath.Application.Services
         public async Task<UploadedFileResult> UploadPrivateVerificationAsync(
             Stream fileStream, string contentType, int ownerId, CancellationToken cancellationToken)
         {
+            EnsureConfigured();
             if (ownerId <= 0) throw new ArgumentOutOfRangeException(nameof(ownerId));
             var extension = contentType switch
             {
@@ -58,18 +64,13 @@ namespace RikiPath.Application.Services
             return new UploadedFileResult(reference, objectPath, fileStream.CanSeek ? fileStream.Length : 0);
         }
 
-        private static string ConfigureHttpClient(HttpClient httpClient, AppSettings appSettings)
+        private static string? TryConfigure(HttpClient httpClient, AppSettings appSettings)
         {
-            var supabase = appSettings.Supabase
-                ?? throw new InvalidOperationException("Supabase chưa được cấu hình trong appsettings.");
-
-            var url = supabase.Url?.TrimEnd('/');
-            if (string.IsNullOrWhiteSpace(url))
-                throw new InvalidOperationException("Supabase:Url chưa được cấu hình trong appsettings.");
-
-            var storageKey = supabase.ServiceRoleKey?.Trim().Trim('<', '>');
-            if (string.IsNullOrWhiteSpace(storageKey))
-                throw new InvalidOperationException("Supabase:ServiceRoleKey chưa được cấu hình trong appsettings.");
+            var supabase = appSettings.Supabase;
+            var url = supabase?.Url?.TrimEnd('/');
+            var storageKey = supabase?.ServiceRoleKey?.Trim().Trim('<', '>');
+            if (string.IsNullOrWhiteSpace(url) || string.IsNullOrWhiteSpace(storageKey))
+                return null;
 
             httpClient.BaseAddress ??= new Uri(url);
             httpClient.DefaultRequestHeaders.Remove("apikey");
@@ -93,6 +94,7 @@ namespace RikiPath.Application.Services
             string folder,
             CancellationToken cancellationToken)
         {
+            EnsureConfigured();
             var extension = Path.GetExtension(fileName);
             var storedFileName = $"{Guid.NewGuid():N}{extension}";
             var objectPath = string.IsNullOrWhiteSpace(folder)
@@ -129,6 +131,7 @@ namespace RikiPath.Application.Services
 
         public async Task DeleteAsync(string storedFileName, string folder, CancellationToken cancellationToken)
         {
+            EnsureConfigured();
             // storedFileName chính là objectPath đã trả về lúc Upload (UploadedFileResult.StoredFileName),
             // thường đã bao gồm folder bên trong.
             var objectPath = storedFileName.Contains('/')
@@ -157,6 +160,7 @@ namespace RikiPath.Application.Services
         // Chỉ ký URL trỏ tới object của chính bucket đã cấu hình; không gửi yêu cầu tới host do client cung cấp.
         public async Task<string> CreateSignedReadUrlAsync(string storedUrl, CancellationToken cancellationToken)
         {
+            EnsureConfigured();
             if (!Uri.TryCreate(storedUrl, UriKind.Absolute, out var uri) ||
                 !Uri.TryCreate(_supabaseUrl, UriKind.Absolute, out var configuredUri) ||
                 uri.Scheme != Uri.UriSchemeHttps || uri.GetLeftPart(UriPartial.Authority) != configuredUri.GetLeftPart(UriPartial.Authority) ||
@@ -194,6 +198,7 @@ namespace RikiPath.Application.Services
         public async Task<PrivateVerificationReadResult> OpenPrivateVerificationAsync(
             string storedUrl, CancellationToken cancellationToken)
         {
+            EnsureConfigured();
             await VerifyPrivateVerificationAsync(storedUrl, cancellationToken);
             var uri = new Uri(storedUrl);
             using var response = await httpClient.GetAsync(uri.AbsolutePath, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
