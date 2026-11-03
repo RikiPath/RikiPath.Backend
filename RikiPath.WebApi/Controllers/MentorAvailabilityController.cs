@@ -31,18 +31,6 @@ public sealed class MentorAvailabilityController(IMentorMeetingService service) 
         CancellationToken cancellationToken)
         => ToActionResult(await service.RequestCancelAvailabilitiesAsync(request, cancellationToken));
 
-    [HttpGet("/api/mentor/meetings")]
-    public async Task<IActionResult> GetMyMeetings(CancellationToken cancellationToken)
-        => ToActionResult(await service.GetMyMeetingsAsync(cancellationToken));
-
-    [HttpGet("/api/mentor/meetings/{bookingId:int}")]
-    public async Task<IActionResult> GetBooking(int bookingId, CancellationToken cancellationToken)
-        => ToActionResult(await service.GetMentorBookingAsync(bookingId, cancellationToken));
-
-    [HttpPost("/api/mentor/meetings/{bookingId:int}/accept")]
-    public async Task<IActionResult> AcceptBooking(int bookingId, CancellationToken cancellationToken)
-        => ToActionResult(await service.AcceptMentorBookingAsync(bookingId, cancellationToken));
-
     private IActionResult ToActionResult<T>(ApiResponse<T> response)
         => StatusCode((int)response.StatusCode, response);
 }

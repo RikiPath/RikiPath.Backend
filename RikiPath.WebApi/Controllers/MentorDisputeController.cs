@@ -14,7 +14,6 @@ namespace RikiPath.WebApi.Controllers;
 public sealed class MentorDisputeController(IMentorDisputeService disputeService) : ControllerBase
 {
     // Học viên khởi tạo đơn khiếu nại cho lịch hẹn tư vấn
-    [HttpPost("api/v1/mentor-disputes")]
     [HttpPost("api/mentor-disputes")]
     [Authorize(Roles = "Learner,Admin")]
     [ProducesResponseType(typeof(ApiResponse<MentorDisputeResponse>), StatusCodes.Status200OK)]
@@ -31,7 +30,6 @@ public sealed class MentorDisputeController(IMentorDisputeService disputeService
     }
 
     // Học viên xem danh sách các đơn khiếu nại của mình
-    [HttpGet("api/v1/learner/mentor-disputes")]
     [HttpGet("api/learner/mentor-disputes")]
     [Authorize(Roles = "Learner,Admin")]
     [ProducesResponseType(typeof(ApiResponse<List<MentorDisputeResponse>>), StatusCodes.Status200OK)]
@@ -45,7 +43,6 @@ public sealed class MentorDisputeController(IMentorDisputeService disputeService
     }
 
     // Mentor xem danh sách các khiếu nại liên quan đến mình
-    [HttpGet("api/v1/mentor/mentor-disputes")]
     [HttpGet("api/mentor/mentor-disputes")]
     [Authorize(Roles = "Mentor,Admin")]
     [ProducesResponseType(typeof(ApiResponse<List<MentorDisputeResponse>>), StatusCodes.Status200OK)]
@@ -59,7 +56,6 @@ public sealed class MentorDisputeController(IMentorDisputeService disputeService
     }
 
     // Xem chi tiết hồ sơ khiếu nại kèm bằng chứng điểm danh (Stage 09) và trạng thái hủy (Stage 10)
-    [HttpGet("api/v1/mentor-disputes/{disputeId:int}")]
     [HttpGet("api/mentor-disputes/{disputeId:int}")]
     [ProducesResponseType(typeof(ApiResponse<MentorDisputeDetailResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse<MentorDisputeDetailResponse>), StatusCodes.Status403Forbidden)]
@@ -73,7 +69,6 @@ public sealed class MentorDisputeController(IMentorDisputeService disputeService
     }
 
     // Mentor nộp bản giải trình phản hồi khiếu nại
-    [HttpPost("api/v1/mentor-disputes/{disputeId:int}/respond")]
     [HttpPost("api/mentor-disputes/{disputeId:int}/respond")]
     [Authorize(Roles = "Mentor,Admin")]
     [ProducesResponseType(typeof(ApiResponse<MentorDisputeResponse>), StatusCodes.Status200OK)]
@@ -91,7 +86,6 @@ public sealed class MentorDisputeController(IMentorDisputeService disputeService
     }
 
     // Quản trị viên xem hàng đợi các đơn khiếu nại cần xử lý
-    [HttpGet("api/v1/admin/mentor-disputes/queue")]
     [HttpGet("api/admin/mentor-disputes/queue")]
     [Authorize(Roles = "Admin")]
     [ProducesResponseType(typeof(ApiResponse<List<MentorDisputeResponse>>), StatusCodes.Status200OK)]
@@ -107,7 +101,6 @@ public sealed class MentorDisputeController(IMentorDisputeService disputeService
     }
 
     // Quản trị viên ra phán quyết giải quyết tranh chấp (hoàn tín dụng hoặc từ chối)
-    [HttpPost("api/v1/admin/mentor-disputes/{disputeId:int}/resolve")]
     [HttpPost("api/admin/mentor-disputes/{disputeId:int}/resolve")]
     [Authorize(Roles = "Admin")]
     [ProducesResponseType(typeof(ApiResponse<MentorDisputeResponse>), StatusCodes.Status200OK)]
@@ -125,7 +118,6 @@ public sealed class MentorDisputeController(IMentorDisputeService disputeService
     }
 
     // Quản trị viên chuyển đổi trạng thái vòng đời của đơn khiếu nại
-    [HttpPost("api/v1/admin/mentor-disputes/{disputeId:int}/status")]
     [HttpPost("api/admin/mentor-disputes/{disputeId:int}/status")]
     [Authorize(Roles = "Admin")]
     [ProducesResponseType(typeof(ApiResponse<MentorDisputeResponse>), StatusCodes.Status200OK)]
@@ -142,7 +134,6 @@ public sealed class MentorDisputeController(IMentorDisputeService disputeService
     }
 
     // Quản trị viên xem báo cáo các chỉ số chất lượng hoạt động của các Chuyên gia
-    [HttpGet("api/v1/admin/mentor-quality/metrics")]
     [HttpGet("api/admin/mentor-quality/metrics")]
     [Authorize(Roles = "Admin")]
     [ProducesResponseType(typeof(ApiResponse<List<MentorQualityMetricResponse>>), StatusCodes.Status200OK)]

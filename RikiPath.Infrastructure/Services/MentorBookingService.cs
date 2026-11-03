@@ -48,13 +48,38 @@ public sealed class MentorBookingService : IMentorBookingService
         return ExecuteAtomicBookingAsync(request, null, cancellationToken);
     }
 
-    public Task<ApiResponse<MentorBookingResponse>> BookSlotWithSubscriptionAsync(
-        int subscriptionId, BookIncludedMeetingRequest request, CancellationToken cancellationToken = default)
+    public async Task<ApiResponse<List<MentorBookingResponse>>> GetMyBookingsAsync(CancellationToken cancellationToken = default)
     {
-        if (subscriptionId <= 0)
-            return Task.FromResult(ApiResponse<MentorBookingResponse>.Fail("Mã gói học phải lớn hơn 0."));
+        var claim = _claimService.GetUserClaim();
+        if (claim.Role != Role.Learner)
+            return ApiResponse<List<MentorBookingResponse>>.Fail("Chỉ học viên mới được xem lịch tư vấn của mình.", HttpStatusCode.Forbidden);
 
-        return ExecuteAtomicBookingAsync(request, subscriptionId, cancellationToken);
+        var bookings = await _unitOfWork.MentorBookings.GetByLearnerAsync(claim.Id, cancellationToken);
+        return ApiResponse<List<MentorBookingResponse>>.Success(bookings.Select(x => MapBooking(x, claim.Id)).ToList());
+    }
+
+    public async Task<ApiResponse<List<MentorBookingResponse>>> GetMyMentorBookingsAsync(CancellationToken cancellationToken = default)
+    {
+        var claim = _claimService.GetUserClaim();
+        if (claim.Role != Role.Mentor)
+            return ApiResponse<List<MentorBookingResponse>>.Fail("Chỉ cố vấn mới được xem lịch tư vấn của mình.", HttpStatusCode.Forbidden);
+
+        var bookings = await _unitOfWork.MentorBookings.GetPaidBookingsForMentorAsync(claim.Id, cancellationToken);
+        return ApiResponse<List<MentorBookingResponse>>.Success(bookings.Select(x => MapBooking(x, claim.Id)).ToList());
+    }
+
+    public async Task<ApiResponse<MentorBookingResponse>> GetMentorBookingAsync(int bookingId, CancellationToken cancellationToken = default)
+    {
+        var claim = _claimService.GetUserClaim();
+        if (claim.Role != Role.Mentor)
+            return ApiResponse<MentorBookingResponse>.Fail("Chỉ cố vấn mới được xem lịch tư vấn này.", HttpStatusCode.Forbidden);
+
+        var booking = await _unitOfWork.MentorBookings.GetForChatAsync(bookingId, cancellationToken);
+        if (booking is null || booking.MentorAvailability?.MentorId != claim.Id ||
+            booking.UserSubscription?.PaymentStatus != PaymentStatus.Paid)
+            return ApiResponse<MentorBookingResponse>.Fail("Không tìm thấy lịch tư vấn.", HttpStatusCode.NotFound);
+
+        return ApiResponse<MentorBookingResponse>.Success(MapBooking(booking, claim.Id));
     }
 
     public async Task<ApiResponse<MentorBookingResponse>> ReleaseBookingHoldAsync(
@@ -614,7 +639,7 @@ public sealed class MentorBookingService : IMentorBookingService
             MentorName = booking.MentorAvailability?.Mentor != null
                 ? $"{booking.MentorAvailability.Mentor.FirstName} {booking.MentorAvailability.Mentor.LastName}".Trim()
                 : null,
-            LearnerId = learnerId,
+            LearnerId = booking.UserSubscription?.UserId ?? learnerId,
             LearnerName = booking.UserSubscription?.UserAccount != null
                 ? $"{booking.UserSubscription.UserAccount.FirstName} {booking.UserSubscription.UserAccount.LastName}".Trim()
                 : null,

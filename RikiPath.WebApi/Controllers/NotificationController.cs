@@ -24,7 +24,6 @@ namespace RikiPath.WebApi.Controllers
         }
 
         [HttpPatch("{notificationId:int}/read")]
-        [HttpPut("{notificationId:int}/read")]
         public async Task<IActionResult> MarkAsRead(int notificationId, CancellationToken cancellationToken)
         {
             var result = await notificationService.MarkAsReadAsync(notificationId, cancellationToken);
@@ -32,9 +31,6 @@ namespace RikiPath.WebApi.Controllers
         }
 
         [HttpPatch("mark-all-read")]
-        [HttpPut("mark-all-read")]
-        [HttpPatch("read-all")]
-        [HttpPut("read-all")]
         public async Task<IActionResult> MarkAllAsRead(CancellationToken cancellationToken)
         {
             var result = await notificationService.MarkAllAsReadAsync(cancellationToken);

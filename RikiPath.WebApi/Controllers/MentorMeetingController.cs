@@ -20,7 +20,6 @@ public sealed class MentorMeetingController(IMentorMeetingService service) : Con
     public async Task<IActionResult> GetPlans(CancellationToken cancellationToken)
         => ToActionResult(await service.GetPlansAsync(cancellationToken));
 
-    [HttpGet("available-slots")]
     [HttpGet("availability")]
     [Authorize(Roles = "Learner")]
     public async Task<IActionResult> GetAvailableSlots(
@@ -50,22 +49,6 @@ public sealed class MentorMeetingController(IMentorMeetingService service) : Con
             : null;
     }
 
-    [HttpPost("subscriptions/{subscriptionId:int}/book")]
-    [HttpPost("subscriptions/{subscriptionId:int}/bookings")]
-    [Authorize(Roles = "Learner")]
-    public async Task<IActionResult> BookIncludedSession(
-        int subscriptionId,
-        [FromBody] BookIncludedMeetingRequest request,
-        CancellationToken cancellationToken)
-        => ToActionResult(await service.BookIncludedSessionAsync(subscriptionId, request, cancellationToken));
-
-    [HttpGet("my-bookings")]
-    [HttpGet("bookings")]
-    [Authorize(Roles = "Learner")]
-    public async Task<IActionResult> GetMyBookings(CancellationToken cancellationToken)
-        => ToActionResult(await service.GetMyBookingsAsync(cancellationToken));
-
-    [HttpGet("subscriptions/{subscriptionId:int}/status")]
     [HttpGet("purchases/{subscriptionId:int}")]
     [Authorize(Roles = "Learner")]
     public async Task<IActionResult> GetPurchaseStatus(int subscriptionId, CancellationToken cancellationToken)
@@ -76,15 +59,7 @@ public sealed class MentorMeetingController(IMentorMeetingService service) : Con
     public async Task<IActionResult> GetMyPurchases(CancellationToken ct)
         => ToActionResult(await service.GetMyPurchasesAsync(ct));
 
-    [HttpPost("book")]
-    [HttpPost("bookings")]
-    [Authorize(Roles = "Learner")]
-    public async Task<IActionResult> BookFromBalance([FromBody] BookIncludedMeetingRequest request, CancellationToken ct)
-        => ToActionResult(await service.BookFromBalanceAsync(request, ct));
-
-
     [HttpPost("purchases/{subscriptionId:int}/sync")]
-    [HttpPost("subscriptions/{subscriptionId:int}/sync")]
     [Authorize(Roles = "Learner")]
     public async Task<IActionResult> SyncPurchase(int subscriptionId, CancellationToken cancellationToken)
         => ToActionResult(await service.SyncPurchaseAsync(subscriptionId, cancellationToken));

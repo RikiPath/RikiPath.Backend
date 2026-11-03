@@ -18,7 +18,7 @@ internal static class MentorPurchaseFinalizer
         foreach (var booking in subscription.MentorBookings)
         {
             if (booking.Status != MentorStatus.AwaitingPayment) continue;
-            booking.Status = MentorStatus.Assigned;
+            booking.Status = MentorStatus.Accepted;
             if (booking.MentorAvailability is not null)
                 booking.MeetingLink = $"{settings.FrontendBaseUrl.TrimEnd('/')}/consultation-room/{booking.MentorAvailability.RoomId:D}/";
         }
