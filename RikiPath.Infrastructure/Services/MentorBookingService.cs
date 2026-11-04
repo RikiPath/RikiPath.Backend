@@ -13,6 +13,7 @@ using RikiPath.Application.Services;
 using RikiPath.Domain;
 using RikiPath.Domain.Entities;
 using RikiPath.Domain.Enums;
+using RikiPath.Domain.MentorCompensation;
 using RikiPath.Domain.MentorScheduling;
 
 namespace RikiPath.Infrastructure.Services;
@@ -122,7 +123,9 @@ public sealed class MentorBookingService : IMentorBookingService
         var isInMemory = _context.Database.ProviderName == "Microsoft.EntityFrameworkCore.InMemory";
 
         var booking = await _context.MentorBookings
+            .Include(b => b.CompensationLevel)
             .Include(b => b.UserSubscription)
+                .ThenInclude(s => s.CertificateLevel)
             .Include(b => b.MentorAvailability)
                 .ThenInclude(a => a!.Mentor)
             .FirstOrDefaultAsync(b => b.Id == bookingId && !b.IsDeleted, cancellationToken);
@@ -130,7 +133,6 @@ public sealed class MentorBookingService : IMentorBookingService
         if (booking is null)
             return ApiResponse<MentorBookingResponse>.Fail("Không tìm thấy thông tin lịch hẹn.", HttpStatusCode.NotFound);
 
-        // Kiểm tra quyền: chỉ chính học viên đặt hoặc Quản trị viên mới được hủy/giải phóng
         if (claim.Role != Role.Admin && booking.UserSubscription.UserId != claim.Id)
             return ApiResponse<MentorBookingResponse>.Fail("Bạn không có quyền thao tác trên lịch hẹn này.", HttpStatusCode.Forbidden);
 
@@ -143,17 +145,14 @@ public sealed class MentorBookingService : IMentorBookingService
         var nowUtc = DateTime.UtcNow;
         var slot = booking.MentorAvailability;
 
-        // Chặn learner giải phóng giữ chỗ sau khi buổi học đã bắt đầu
         if (slot is not null && nowUtc >= slot.StartTime && claim.Role != Role.Admin)
         {
             return ApiResponse<MentorBookingResponse>.Fail(
                 "Buổi tư vấn đã bắt đầu hoặc quá giờ hẹn, không thể giải phóng giữ chỗ.", HttpStatusCode.Conflict);
         }
 
-        // Kiểm tra điều kiện hoàn vé: chỉ hoàn 1 Ticket khi hủy trước >= 24h hoặc Admin can thiệp
         var isRefundEligible = claim.Role == Role.Admin || slot is null || (slot.StartTime - nowUtc).TotalHours >= 24;
 
-        // 1. Cập nhật trạng thái booking sang Cancelled và metadata
         booking.Status = MentorStatus.Cancelled;
         booking.CancellationReason = reason ?? (isRefundEligible ? "Hủy lịch hẹn và giải phóng giữ chỗ" : "Học viên hủy muộn (< 24h)");
         booking.CancelledAtUtc = nowUtc;
@@ -161,7 +160,6 @@ public sealed class MentorBookingService : IMentorBookingService
         booking.CancelledByRole = claim.Role.ToString();
         _context.MentorBookings.Update(booking);
 
-        // 2. Nhả bản ghi reservation (cập nhật ReleasedAtUtc để không còn chiếm slot và không chặn GiST)
         var reservation = await _context.MentorBookingReservations
             .FirstOrDefaultAsync(r => r.MentorBookingId == booking.Id && r.ReleasedAtUtc == null, cancellationToken);
 
@@ -171,7 +169,6 @@ public sealed class MentorBookingService : IMentorBookingService
             _context.MentorBookingReservations.Update(reservation);
         }
 
-        // 3. Giảm BookedCount của slot để slot có thể được đặt lại nếu vẫn hợp lệ
         if (booking.MentorAvailabilityId.HasValue)
         {
             if (isInMemory)
@@ -188,7 +185,6 @@ public sealed class MentorBookingService : IMentorBookingService
             }
         }
 
-        // 4. Giảm ActiveBookingCount của Day Guard
         if (reservation is not null)
         {
             if (isInMemory)
@@ -205,7 +201,6 @@ public sealed class MentorBookingService : IMentorBookingService
             }
         }
 
-        // 5. Hoàn trả tín dụng về nguồn cấp ban đầu thông qua Credit Ledger nếu đủ điều kiện (>= 24h)
         if (isRefundEligible && booking.UserSubscription != null)
         {
             var refundResult = await _creditLedgerService.RefundCreditAsync(
@@ -222,7 +217,6 @@ public sealed class MentorBookingService : IMentorBookingService
             }
         }
 
-        // 6. Ghi nhận sự kiện Outbox (BookingReleased)
         var outboxEvent = new MentorOutboxEvent
         {
             EventKey = $"booking:released:{booking.Id}:{nowUtc.Ticks}",
@@ -254,7 +248,6 @@ public sealed class MentorBookingService : IMentorBookingService
         int? subscriptionId,
         CancellationToken cancellationToken)
     {
-        // 1. Xác thực cơ bản & Vai trò
         var claim = _claimService.GetUserClaim();
         if (claim.Role != Role.Learner)
             return ApiResponse<MentorBookingResponse>.Fail("Chỉ học viên mới có thể đặt lịch tư vấn 1-1.", HttpStatusCode.Forbidden);
@@ -266,14 +259,24 @@ public sealed class MentorBookingService : IMentorBookingService
         if (request.Question?.Length > 2000)
             return ApiResponse<MentorBookingResponse>.Fail("Câu hỏi tối đa 2000 ký tự.");
 
+        if (!string.IsNullOrWhiteSpace(request.JlptLevel) &&
+            !MentorCompensationPolicy.TryNormalizeSupportedLevel(request.JlptLevel, out _))
+        {
+            return ApiResponse<MentorBookingResponse>.Fail(
+                "Chỉ hỗ trợ đặt lịch tư vấn cho trình độ JLPT N5, N4, N3 hoặc N2 (không hỗ trợ N1).",
+                HttpStatusCode.BadRequest);
+        }
+
         var opKey = string.IsNullOrWhiteSpace(request.OperationKey)
             ? $"booking:learner:{learnerId}:slot:{request.MentorAvailabilityId}"
             : request.OperationKey.Trim();
 
-        // 2. Kiểm tra Idempotency trước khi lock
         var existingEntry = await _context.MentorCreditEntries
             .Include(e => e.MentorBooking)
+                .ThenInclude(b => b!.CompensationLevel)
+            .Include(e => e.MentorBooking)
                 .ThenInclude(b => b!.UserSubscription)
+                    .ThenInclude(s => s.CertificateLevel)
             .Include(e => e.MentorBooking)
                 .ThenInclude(b => b!.MentorAvailability)
                     .ThenInclude(a => a!.Mentor)
@@ -285,10 +288,8 @@ public sealed class MentorBookingService : IMentorBookingService
             return ApiResponse<MentorBookingResponse>.Success(mapped, message: "Lịch hẹn đã được đặt trước đó (idempotent).");
         }
 
-        // Tự động đảm bảo các gói học đã thanh toán hợp lệ có nguồn cấp tín dụng trong Credit Ledger
         await EnsureGrantsForPaidSubscriptionsAsync(learnerId, cancellationToken);
 
-        // 3. Thực thi transaction nguyên tử (Atomic Transaction)
         var isInMemory = _context.Database.ProviderName == "Microsoft.EntityFrameworkCore.InMemory";
 
         if (isInMemory)
@@ -318,7 +319,6 @@ public sealed class MentorBookingService : IMentorBookingService
         {
             var nowUtc = DateTime.UtcNow;
 
-            // A. Kiểm tra tính hợp lệ và điều kiện của Slot
             var slot = await _context.MentorAvailabilities
                 .Include(x => x.Mentor)
                     .ThenInclude(m => m!.MentorProfile)
@@ -336,31 +336,25 @@ public sealed class MentorBookingService : IMentorBookingService
             if (slot.StartTime <= nowUtc)
                 return ApiResponse<MentorBookingResponse>.Fail("Không thể đặt khung giờ trong quá khứ.", HttpStatusCode.Conflict);
 
-            // Bắt buộc Mentor phải có hồ sơ và trạng thái xác minh Approved
             var mentorProfile = slot.Mentor?.MentorProfile;
             if (mentorProfile is null || mentorProfile.VerificationStatus != MentorVerificationStatus.Approved)
                 return ApiResponse<MentorBookingResponse>.Fail("Chuyên gia chưa được phê duyệt hồ sơ chính thức.", HttpStatusCode.Conflict);
 
-            // Lead-time tối thiểu 2 giờ
             if (slot.StartTime < nowUtc.AddHours(MentorSlotPolicy.MinimumBookingLeadHours))
                 return ApiResponse<MentorBookingResponse>.Fail($"Cần đặt lịch trước tối thiểu {MentorSlotPolicy.MinimumBookingLeadHours} giờ.", HttpStatusCode.Conflict);
 
-            // Horizon tối đa 30 ngày
             if (slot.StartTime > nowUtc.AddDays(MentorSlotPolicy.MaximumScheduleHorizonDays))
                 return ApiResponse<MentorBookingResponse>.Fail($"Không thể đặt lịch trước quá {MentorSlotPolicy.MaximumScheduleHorizonDays} ngày.", HttpStatusCode.Conflict);
 
-            // Thời lượng chuẩn 90 phút (bác bỏ khung giờ legacy 50/60 phút)
             var durationMinutes = (int)Math.Round((slot.EndTime - slot.StartTime).TotalMinutes);
             if (durationMinutes != MentorSlotPolicy.AppointmentDurationMinutes)
                 return ApiResponse<MentorBookingResponse>.Fail($"Chỉ hỗ trợ đặt khung giờ chuẩn {MentorSlotPolicy.AppointmentDurationMinutes} phút.", HttpStatusCode.Conflict);
 
-            // Kiểm tra active reservation trùng slot
             var hasActiveReservation = await _context.MentorBookingReservations
                 .AnyAsync(r => r.MentorAvailabilityId == slot.Id && r.ReleasedAtUtc == null, cancellationToken);
             if (hasActiveReservation)
                 return ApiResponse<MentorBookingResponse>.Fail("Khung giờ đã có người giữ chỗ.", HttpStatusCode.Conflict);
 
-            // Kiểm tra bảo vệ nghỉ 15 phút (15-min Rest Protection)
             var restProtectedUntilUtc = slot.EndTime.AddMinutes(MentorSlotPolicy.MinimumRestMinutes);
             var hasRestOverlap = await _context.MentorBookingReservations
                 .AnyAsync(r => r.MentorId == slot.MentorId && r.ReleasedAtUtc == null
@@ -369,7 +363,6 @@ public sealed class MentorBookingService : IMentorBookingService
             if (hasRestOverlap)
                 return ApiResponse<MentorBookingResponse>.Fail("Khung giờ xung đột với khoảng thời gian nghỉ 15 phút bắt buộc của chuyên gia.", HttpStatusCode.Conflict);
 
-            // Kiểm tra giới hạn số buổi tối đa trong ngày (Day Guard)
             var tz = TimeZoneInfo.FindSystemTimeZoneById(MentorSlotPolicy.BusinessTimeZoneId);
             var localDate = DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(slot.StartTime, tz));
 
@@ -378,7 +371,6 @@ public sealed class MentorBookingService : IMentorBookingService
             if (guard is not null && guard.ActiveBookingCount >= MentorSlotPolicy.DefaultDailyBookingCap)
                 return ApiResponse<MentorBookingResponse>.Fail($"Chuyên gia đã đạt giới hạn tối đa {MentorSlotPolicy.DefaultDailyBookingCap} buổi tư vấn trong ngày.", HttpStatusCode.Conflict);
 
-            // Kiểm tra trùng giờ phía học viên (Learner Overlapping Booking Check)
             var hasLearnerOverlap = await _context.MentorBookings
                 .Include(b => b.MentorAvailability)
                 .AnyAsync(b => !b.IsDeleted && b.UserSubscription.UserId == learnerId
@@ -389,13 +381,103 @@ public sealed class MentorBookingService : IMentorBookingService
             if (hasLearnerOverlap)
                 return ApiResponse<MentorBookingResponse>.Fail("Bạn đã có lịch tư vấn khác trùng với khung giờ này.", HttpStatusCode.Conflict);
 
-            // B. Tìm nguồn cấp tín dụng đủ điều kiện theo thứ tự FIFO
+            // Kiểm tra chế độ JLPT Level-Bound Ticket & Compensation Snapshot
+            var hasCompensationContext = !string.IsNullOrWhiteSpace(request.JlptLevel)
+                || await _context.MentorTeachingQualifications.AnyAsync(cancellationToken)
+                || await _context.MentorHourlyRates.AnyAsync(cancellationToken)
+                || await _context.JlptLevelPayCoefficients.AnyAsync(cancellationToken)
+                || await _context.MentorCreditGrants.AnyAsync(g => g.LearnerId == learnerId && g.CertificateLevelId != null, cancellationToken);
+
+            int? requiredLevelId = null;
+            string? normalizedJlptLevel = null;
+            MentorCompensationSnapshot? frozenSnapshot = null;
+
+            if (hasCompensationContext)
+            {
+                if (string.IsNullOrWhiteSpace(request.JlptLevel) ||
+                    !MentorCompensationPolicy.TryNormalizeSupportedLevel(request.JlptLevel, out var normLevel))
+                {
+                    return ApiResponse<MentorBookingResponse>.Fail(
+                        "Vui lòng chọn trình độ JLPT hợp lệ (N5, N4, N3 hoặc N2; không hỗ trợ N1).",
+                        HttpStatusCode.BadRequest);
+                }
+
+                normalizedJlptLevel = normLevel;
+                var certLevel = await _context.CertificateLevels
+                    .FirstOrDefaultAsync(x => !x.IsDeleted && x.Code.ToUpper() == normLevel, cancellationToken);
+                requiredLevelId = certLevel?.Id ?? MentorCompensationPolicy.ResolveDefaultCertificateLevelId(normLevel);
+
+                // 1. Xác minh Mentor được cấp quyền giảng dạy trình độ JLPT này
+                var isMentorQualified = await _context.MentorTeachingQualifications
+                    .AnyAsync(q => q.MentorUserId == slot.MentorId
+                        && q.CertificateLevelId == requiredLevelId.Value
+                        && q.IsActive
+                        && q.RevokedAtUtc == null, cancellationToken);
+
+                if (!isMentorQualified)
+                {
+                    return ApiResponse<MentorBookingResponse>.Fail(
+                        $"Chuyên gia chưa được cấp quyền giảng dạy trình độ JLPT {normLevel}.",
+                        HttpStatusCode.Conflict);
+                }
+
+                // 2. Xác minh đơn giá giờ hiệu lực của Mentor và hệ số trình độ JLPT tại thời điểm xác nhận đặt lịch
+                var activeHourlyRate = await _context.MentorHourlyRates
+                    .Where(r => r.MentorUserId == slot.MentorId
+                        && r.EffectiveFromUtc <= nowUtc
+                        && (r.EffectiveUntilUtc == null || r.EffectiveUntilUtc > nowUtc))
+                    .OrderByDescending(r => r.EffectiveFromUtc)
+                    .FirstOrDefaultAsync(cancellationToken)
+                    ?? await _context.MentorHourlyRates
+                        .Where(r => r.MentorUserId == slot.MentorId
+                            && r.EffectiveFromUtc <= slot.StartTime
+                            && (r.EffectiveUntilUtc == null || r.EffectiveUntilUtc > slot.StartTime))
+                        .OrderByDescending(r => r.EffectiveFromUtc)
+                        .FirstOrDefaultAsync(cancellationToken);
+
+                if (activeHourlyRate is null)
+                {
+                    return ApiResponse<MentorBookingResponse>.Fail(
+                        "Chuyên gia chưa có cấu hình đơn giá thù lao giờ hiệu lực để đặt lịch.",
+                        HttpStatusCode.Conflict);
+                }
+
+                var activeCoefficient = await _context.JlptLevelPayCoefficients
+                    .Where(c => c.CertificateLevelId == requiredLevelId.Value
+                        && c.EffectiveFromUtc <= nowUtc
+                        && (c.EffectiveUntilUtc == null || c.EffectiveUntilUtc > nowUtc))
+                    .OrderByDescending(c => c.EffectiveFromUtc)
+                    .FirstOrDefaultAsync(cancellationToken)
+                    ?? await _context.JlptLevelPayCoefficients
+                        .Where(c => c.CertificateLevelId == requiredLevelId.Value
+                            && c.EffectiveFromUtc <= slot.StartTime
+                            && (c.EffectiveUntilUtc == null || c.EffectiveUntilUtc > slot.StartTime))
+                        .OrderByDescending(c => c.EffectiveFromUtc)
+                        .FirstOrDefaultAsync(cancellationToken);
+
+                if (activeCoefficient is null)
+                {
+                    return ApiResponse<MentorBookingResponse>.Fail(
+                        $"Chưa cấu hình hệ số thù lao hiệu lực cho trình độ JLPT {normLevel}.",
+                        HttpStatusCode.Conflict);
+                }
+
+                frozenSnapshot = MentorCompensationPolicy.CreateSnapshot(
+                    normLevel,
+                    activeHourlyRate.AmountPerHour,
+                    activeCoefficient.Coefficient);
+            }
+
+            // B. Tìm nguồn cấp tín dụng đủ điều kiện theo thứ tự FIFO (và đúng trình độ JLPT nếu có)
             var query = _context.MentorCreditGrants
                 .Include(g => g.UserSubscription)
                 .Where(g => g.LearnerId == learnerId && g.AvailableQuantity > 0 && g.ExpiresAtUtc > slot.EndTime);
 
             if (subscriptionId.HasValue)
                 query = query.Where(g => g.UserSubscriptionId == subscriptionId.Value);
+
+            if (requiredLevelId.HasValue)
+                query = query.Where(g => g.CertificateLevelId == requiredLevelId.Value);
 
             var eligibleGrant = await query
                 .OrderBy(g => g.ExpiresAtUtc)
@@ -404,7 +486,12 @@ public sealed class MentorBookingService : IMentorBookingService
                 .FirstOrDefaultAsync(cancellationToken);
 
             if (eligibleGrant is null)
-                return ApiResponse<MentorBookingResponse>.Fail("Bạn không còn đủ số lượt tư vấn hợp lệ hoặc lượt đã hết hạn.", HttpStatusCode.Conflict);
+            {
+                var noTicketMsg = normalizedJlptLevel is not null
+                    ? $"Bạn không còn vé tư vấn hợp lệ cho trình độ JLPT {normalizedJlptLevel} hoặc vé đã hết hạn."
+                    : "Bạn không còn đủ số lượt tư vấn hợp lệ hoặc lượt đã hết hạn.";
+                return ApiResponse<MentorBookingResponse>.Fail(noTicketMsg, HttpStatusCode.Conflict);
+            }
 
             // C. Khóa và tăng BookedCount trên slot bằng lệnh UPDATE điều kiện (Atomic Database Update)
             int slotUpdated;
@@ -478,9 +565,7 @@ public sealed class MentorBookingService : IMentorBookingService
                 _context.MentorBookingDayGuards.Update(guard);
             }
 
-            // F. Tạo bản ghi MentorBooking
-            // Lịch theo chính sách hiện tại được xác nhận ngay sau khi giữ chỗ và trừ lượt thành công.
-            // Trạng thái Assigned của lịch cũ vẫn được xử lý bởi luồng tiếp nhận hiện có.
+            // F. Tạo bản ghi MentorBooking kèm snapshot thù lao bất biến trong cùng giao dịch
             var booking = new MentorBooking
             {
                 UserSubscriptionId = eligibleGrant.UserSubscriptionId,
@@ -489,6 +574,13 @@ public sealed class MentorBookingService : IMentorBookingService
                 ScheduledAt = slot.StartTime,
                 MeetingLink = $"{_appSettings.FrontendBaseUrl.TrimEnd('/')}/consultation-room/{slot.RoomId:D}/",
                 Question = request.Question?.Trim(),
+                CompensationLevelId = frozenSnapshot is not null ? requiredLevelId : null,
+                FrozenHourlyRate = frozenSnapshot?.HourlyRate,
+                FrozenLevelCoefficient = frozenSnapshot?.LevelCoefficient,
+                ScheduledCompensationAmount = frozenSnapshot?.ScheduledAmount,
+                CompensationCurrency = frozenSnapshot?.Currency,
+                CompensationFormulaVersion = frozenSnapshot?.FormulaVersion,
+                CreditGrantId = eligibleGrant.Id,
                 CreatedDate = nowUtc
             };
             _context.MentorBookings.Add(booking);
@@ -558,6 +650,7 @@ public sealed class MentorBookingService : IMentorBookingService
                     MentorId = slot.MentorId,
                     LearnerId = learnerId,
                     SlotId = slot.Id,
+                    JlptLevel = normalizedJlptLevel,
                     ScheduledAtUtc = slot.StartTime,
                     EndTimeUtc = slot.EndTime,
                     MeetingLink = booking.MeetingLink,
@@ -572,7 +665,7 @@ public sealed class MentorBookingService : IMentorBookingService
             await _context.SaveChangesAsync(cancellationToken);
             if (tx is not null) await tx.CommitAsync(cancellationToken);
 
-            var response = MapBooking(booking, learnerId);
+            var response = MapBooking(booking, learnerId, normalizedJlptLevel);
             return ApiResponse<MentorBookingResponse>.Success(response, HttpStatusCode.Created, "Đặt lịch tư vấn thành công.");
         }
         catch (DbUpdateException ex)
@@ -588,7 +681,10 @@ public sealed class MentorBookingService : IMentorBookingService
             {
                 var reloaded = await _context.MentorCreditEntries
                     .Include(e => e.MentorBooking)
+                        .ThenInclude(b => b!.CompensationLevel)
+                    .Include(e => e.MentorBooking)
                         .ThenInclude(b => b!.UserSubscription)
+                            .ThenInclude(s => s.CertificateLevel)
                     .Include(e => e.MentorBooking)
                         .ThenInclude(b => b!.MentorAvailability)
                             .ThenInclude(a => a!.Mentor)
@@ -628,8 +724,14 @@ public sealed class MentorBookingService : IMentorBookingService
         }
     }
 
-    private static MentorBookingResponse MapBooking(MentorBooking booking, int learnerId)
+    private static MentorBookingResponse MapBooking(MentorBooking booking, int learnerId, string? fallbackJlptLevel = null)
     {
+        var levelId = booking.CompensationLevelId ?? booking.UserSubscription?.CertificateLevelId;
+        var levelCode = booking.CompensationLevel?.Code
+            ?? booking.UserSubscription?.CertificateLevel?.Code
+            ?? fallbackJlptLevel
+            ?? MentorPlanService.ResolveLevelCode(levelId);
+
         return new MentorBookingResponse
         {
             Id = booking.Id,
@@ -650,7 +752,10 @@ public sealed class MentorBookingService : IMentorBookingService
             RoomId = booking.MentorAvailability?.RoomId,
             Question = booking.Question,
             EndsAt = booking.MentorAvailability?.EndTime,
-            CreatedAt = booking.CreatedDate
+            CreatedAt = booking.CreatedDate,
+            CompensationLevelId = levelId,
+            JlptLevel = levelCode,
+            CreditGrantId = booking.CreditGrantId
         };
     }
 }

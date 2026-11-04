@@ -1,4 +1,4 @@
-﻿using RikiPath.Domain.Enums;
+using RikiPath.Domain.Enums;
 
 namespace RikiPath.Application.Responses.MentorMeetings
 {
@@ -6,6 +6,8 @@ namespace RikiPath.Application.Responses.MentorMeetings
     {
         public int SubscriptionId { get; set; }
         public string PlanName { get; set; } = string.Empty;
+        public int? CertificateLevelId { get; set; }
+        public string? JlptLevel { get; set; }
         public PaymentStatus PaymentStatus { get; set; }
         public bool IsCheckoutExpired { get; set; }
         public decimal AmountPaid { get; set; }

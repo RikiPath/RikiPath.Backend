@@ -27,7 +27,6 @@ public sealed class MentorCreditLedgerService : IMentorCreditLedgerService
         _logger = logger;
     }
 
-    // Học viên xem số dư lượt tư vấn khả dụng, thời hạn gói và lịch sử biến động.
     public async Task<ApiResponse<LearnerCreditBalanceResponse>> GetMyCreditBalanceAsync(
         CancellationToken cancellationToken = default)
     {
@@ -48,17 +47,7 @@ public sealed class MentorCreditLedgerService : IMentorCreditLedgerService
             {
                 TotalAvailableCredits = totalAvailable,
                 ExpiringSoonestAtUtc = earliestExpiry,
-                ActiveGrants = activeGrants.Select(g => new CreditGrantItemResponse
-                {
-                    GrantId = g.Id,
-                    UserSubscriptionId = g.UserSubscriptionId,
-                    PolicyVersion = g.PolicyVersion,
-                    InitialQuantity = g.InitialQuantity,
-                    AvailableQuantity = g.AvailableQuantity,
-                    EffectiveFromUtc = g.EffectiveFromUtc,
-                    ExpiresAtUtc = g.ExpiresAtUtc,
-                    CreatedAtUtc = g.CreatedAtUtc
-                }).ToList(),
+                ActiveGrants = activeGrants.Select(MapGrantItem).ToList(),
                 RecentEntries = recentEntries.Select(e => new CreditEntryItemResponse
                 {
                     EntryId = e.Id,
@@ -81,7 +70,6 @@ public sealed class MentorCreditLedgerService : IMentorCreditLedgerService
         }
     }
 
-    // Học viên xem chi tiết lịch sử bút toán sổ cái có phân trang.
     public async Task<ApiResponse<List<CreditEntryItemResponse>>> GetMyCreditHistoryAsync(
         int page = 1, int pageSize = 20, CancellationToken cancellationToken = default)
     {
@@ -117,16 +105,12 @@ public sealed class MentorCreditLedgerService : IMentorCreditLedgerService
         }
     }
 
-    // Cấp lượt tư vấn mới từ gói học đã thanh toán thành công (Paid) theo nguyên tắc bất biến và idempotent.
     public async Task<ApiResponse<CreditGrantItemResponse>> CreateGrantFromPaidSubscriptionAsync(
         int subscriptionId, string? idempotencyKey = null, CancellationToken cancellationToken = default)
     {
         try
         {
-            // 1. Kiểm tra đơn hàng UserSubscription
-            var subscription = await _unitOfWork.UserSubscriptions.Query()
-                .AsNoTracking()
-                .FirstOrDefaultAsync(x => x.Id == subscriptionId, cancellationToken);
+            var subscription = await _unitOfWork.UserSubscriptions.GetByIdAsync(subscriptionId, cancellationToken);
 
             if (subscription is null)
                 return ApiResponse<CreditGrantItemResponse>.Fail("Không tìm thấy đơn hàng gói học.", HttpStatusCode.NotFound);
@@ -137,21 +121,12 @@ public sealed class MentorCreditLedgerService : IMentorCreditLedgerService
             if (subscription.MeetingSessionsIncluded <= 0)
                 return ApiResponse<CreditGrantItemResponse>.Fail("Gói này không có vé tư vấn 1-1.", HttpStatusCode.BadRequest);
 
-            // 2. Chống cấp trùng (Idempotent replay): Kiểm tra xem subscription này đã được cấp grant chưa
             var existingGrant = await _unitOfWork.MentorCreditLedger.GetGrantBySubscriptionIdAsync(subscriptionId, cancellationToken);
             if (existingGrant is not null)
             {
-                return ApiResponse<CreditGrantItemResponse>.Success(new CreditGrantItemResponse
-                {
-                    GrantId = existingGrant.Id,
-                    UserSubscriptionId = existingGrant.UserSubscriptionId,
-                    PolicyVersion = existingGrant.PolicyVersion,
-                    InitialQuantity = existingGrant.InitialQuantity,
-                    AvailableQuantity = existingGrant.AvailableQuantity,
-                    EffectiveFromUtc = existingGrant.EffectiveFromUtc,
-                    ExpiresAtUtc = existingGrant.ExpiresAtUtc,
-                    CreatedAtUtc = existingGrant.CreatedAtUtc
-                }, message: "Nguồn cấp tín dụng cho đơn hàng này đã tồn tại (idempotent).");
+                return ApiResponse<CreditGrantItemResponse>.Success(
+                    MapGrantItem(existingGrant),
+                    message: "Nguồn cấp tín dụng cho đơn hàng này đã tồn tại (idempotent).");
             }
 
             var opKey = !string.IsNullOrWhiteSpace(idempotencyKey)
@@ -164,37 +139,33 @@ public sealed class MentorCreditLedgerService : IMentorCreditLedgerService
                 var linkedGrant = await _unitOfWork.MentorCreditLedger.GetGrantByIdAsync(existingEntry.CreditGrantId, cancellationToken);
                 if (linkedGrant is not null)
                 {
-                    return ApiResponse<CreditGrantItemResponse>.Success(new CreditGrantItemResponse
-                    {
-                        GrantId = linkedGrant.Id,
-                        UserSubscriptionId = linkedGrant.UserSubscriptionId,
-                        PolicyVersion = linkedGrant.PolicyVersion,
-                        InitialQuantity = linkedGrant.InitialQuantity,
-                        AvailableQuantity = linkedGrant.AvailableQuantity,
-                        EffectiveFromUtc = linkedGrant.EffectiveFromUtc,
-                        ExpiresAtUtc = linkedGrant.ExpiresAtUtc,
-                        CreatedAtUtc = linkedGrant.CreatedAtUtc
-                    }, message: "Thao tác cấp tín dụng đã được ghi nhận trước đó.");
+                    return ApiResponse<CreditGrantItemResponse>.Success(
+                        MapGrantItem(linkedGrant),
+                        message: "Thao tác cấp tín dụng đã được ghi nhận trước đó.");
                 }
             }
 
-            // Gói cũ có thể đã sử dụng lượt trước khi sổ cái được tạo. Chỉ chuyển phần quyền lợi còn lại.
             var usedSessions = Math.Clamp(subscription.MeetingSessionsUsed, 0, subscription.MeetingSessionsIncluded);
             var remainingSessions = subscription.MeetingSessionsIncluded - usedSessions;
             if (remainingSessions == 0)
                 return ApiResponse<CreditGrantItemResponse>.Fail("Gói tư vấn đã sử dụng hết vé.", HttpStatusCode.BadRequest);
 
-            // 3. Tính toán thời hạn hiệu lực theo quy tắc Product Baseline V3:
-            // Gói 1 buổi: có giá trị trong 30 ngày.
-            // Gói 3 buổi: có giá trị trong 90 ngày.
             var effectiveFrom = subscription.StartDate ?? subscription.PurchasedAt;
             var validityDays = subscription.MeetingSessionsIncluded >= 3 ? 90 : 30;
             var expiresAt = subscription.EndDate ?? effectiveFrom.AddDays(validityDays);
+
+            var certificateLevelId = subscription.CertificateLevelId;
+            if (!certificateLevelId.HasValue && subscription.SubscriptionPlanId > 0)
+            {
+                var plan = await _unitOfWork.SubscriptionPlans.GetByIdAsync(subscription.SubscriptionPlanId, cancellationToken);
+                certificateLevelId = plan?.CertificateLevelId;
+            }
 
             var grant = new MentorCreditGrant
             {
                 LearnerId = subscription.UserId,
                 UserSubscriptionId = subscription.Id,
+                CertificateLevelId = certificateLevelId,
                 PolicyVersion = 3,
                 InitialQuantity = remainingSessions,
                 AvailableQuantity = remainingSessions,
@@ -221,17 +192,9 @@ public sealed class MentorCreditLedgerService : IMentorCreditLedgerService
             await _unitOfWork.MentorCreditLedger.AddEntryAsync(entry, cancellationToken);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-            return ApiResponse<CreditGrantItemResponse>.Success(new CreditGrantItemResponse
-            {
-                GrantId = grant.Id,
-                UserSubscriptionId = grant.UserSubscriptionId,
-                PolicyVersion = grant.PolicyVersion,
-                InitialQuantity = grant.InitialQuantity,
-                AvailableQuantity = grant.AvailableQuantity,
-                EffectiveFromUtc = grant.EffectiveFromUtc,
-                ExpiresAtUtc = grant.ExpiresAtUtc,
-                CreatedAtUtc = grant.CreatedAtUtc
-            }, message: "Cấp lượt tư vấn vào sổ cái tín dụng thành công.");
+            return ApiResponse<CreditGrantItemResponse>.Success(
+                MapGrantItem(grant),
+                message: "Cấp lượt tư vấn vào sổ cái tín dụng thành công.");
         }
         catch (DbUpdateException ex)
         {
@@ -239,17 +202,9 @@ public sealed class MentorCreditLedgerService : IMentorCreditLedgerService
             var reloaded = await _unitOfWork.MentorCreditLedger.GetGrantBySubscriptionIdAsync(subscriptionId, cancellationToken);
             if (reloaded is not null)
             {
-                return ApiResponse<CreditGrantItemResponse>.Success(new CreditGrantItemResponse
-                {
-                    GrantId = reloaded.Id,
-                    UserSubscriptionId = reloaded.UserSubscriptionId,
-                    PolicyVersion = reloaded.PolicyVersion,
-                    InitialQuantity = reloaded.InitialQuantity,
-                    AvailableQuantity = reloaded.AvailableQuantity,
-                    EffectiveFromUtc = reloaded.EffectiveFromUtc,
-                    ExpiresAtUtc = reloaded.ExpiresAtUtc,
-                    CreatedAtUtc = reloaded.CreatedAtUtc
-                }, message: "Nguồn cấp tín dụng đã được ghi nhận trước đó.");
+                return ApiResponse<CreditGrantItemResponse>.Success(
+                    MapGrantItem(reloaded),
+                    message: "Nguồn cấp tín dụng đã được ghi nhận trước đó.");
             }
             return ApiResponse<CreditGrantItemResponse>.Fail("Xảy ra xung đột khi ghi nhận nguồn cấp tín dụng.", HttpStatusCode.Conflict);
         }
@@ -260,11 +215,9 @@ public sealed class MentorCreditLedgerService : IMentorCreditLedgerService
         }
     }
 
-    // Trừ 1 lượt tư vấn theo nguyên tắc FIFO khi đặt lịch thành công (tham gia vào atomic booking transaction).
     public async Task<CreditSpendResult> SpendCreditAsync(
         int learnerId, int bookingId, string operationKey, DateTime appointmentTimeUtc, CancellationToken cancellationToken = default)
     {
-        // 1. Chống trừ trùng (Idempotent replay): Nếu OperationKey đã ghi nhận thì trả về thành công ngay
         var existingEntry = await _unitOfWork.MentorCreditLedger.GetEntryByOperationKeyAsync(operationKey, cancellationToken);
         if (existingEntry is not null)
         {
@@ -279,7 +232,6 @@ public sealed class MentorCreditLedgerService : IMentorCreditLedgerService
             };
         }
 
-        // Kiểm tra xem bookingId này đã bị trừ lượt trước đó chưa
         var bookingEntries = await _unitOfWork.MentorCreditLedger.GetEntriesByBookingIdAsync(bookingId, cancellationToken);
         var existingSpend = bookingEntries.FirstOrDefault(e => e.EntryType == CreditEntryType.Spend);
         if (existingSpend is not null)
@@ -295,11 +247,9 @@ public sealed class MentorCreditLedgerService : IMentorCreditLedgerService
             };
         }
 
-        // 2. Tìm nguồn cấp khả dụng theo FIFO (hạn sớm dùng trước)
         var nowUtc = DateTime.UtcNow;
         var activeGrants = await _unitOfWork.MentorCreditLedger.GetActiveGrantsForLearnerAsync(learnerId, nowUtc, cancellationToken);
 
-        // Buổi hẹn phải nằm trong thời hạn hiệu lực của nguồn cấp
         var eligibleGrant = activeGrants.FirstOrDefault(g =>
             g.AvailableQuantity > 0 &&
             g.EffectiveFromUtc <= appointmentTimeUtc &&
@@ -315,11 +265,9 @@ public sealed class MentorCreditLedgerService : IMentorCreditLedgerService
             };
         }
 
-        // 3. Trừ 1 lượt khỏi số dư của nguồn cấp
         eligibleGrant.AvailableQuantity--;
         _unitOfWork.MentorCreditLedger.UpdateGrant(eligibleGrant);
 
-        // 4. Ghi bút toán append-only vào sổ cái
         var spendEntry = new MentorCreditEntry
         {
             CreditGrantId = eligibleGrant.Id,
@@ -333,7 +281,6 @@ public sealed class MentorCreditLedgerService : IMentorCreditLedgerService
         };
         await _unitOfWork.MentorCreditLedger.AddEntryAsync(spendEntry, cancellationToken);
 
-        // 5. Đồng bộ counter gói học lịch sử UserSubscription
         var subscription = await _unitOfWork.UserSubscriptions.Query()
             .FirstOrDefaultAsync(x => x.Id == eligibleGrant.UserSubscriptionId, cancellationToken);
         if (subscription is not null)
@@ -354,11 +301,9 @@ public sealed class MentorCreditLedgerService : IMentorCreditLedgerService
         };
     }
 
-    // Hoàn lại 1 lượt tư vấn về đúng nguồn cấp ban đầu khi buổi hẹn bị hủy hợp lệ.
     public async Task<CreditRefundResult> RefundCreditAsync(
         int learnerId, int bookingId, string operationKey, string reason, CancellationToken cancellationToken = default)
     {
-        // 1. Chống hoàn trùng (Idempotent replay)
         var existingEntry = await _unitOfWork.MentorCreditLedger.GetEntryByOperationKeyAsync(operationKey, cancellationToken);
         if (existingEntry is not null)
         {
@@ -373,7 +318,6 @@ public sealed class MentorCreditLedgerService : IMentorCreditLedgerService
             };
         }
 
-        // Kiểm tra xem bookingId đã được hoàn trước đó chưa
         var bookingEntries = await _unitOfWork.MentorCreditLedger.GetEntriesByBookingIdAsync(bookingId, cancellationToken);
         var existingRefund = bookingEntries.FirstOrDefault(e => e.EntryType == CreditEntryType.Refund);
         if (existingRefund is not null)
@@ -389,7 +333,6 @@ public sealed class MentorCreditLedgerService : IMentorCreditLedgerService
             };
         }
 
-        // Tìm bút toán trừ Spend ban đầu của booking này để hoàn về đúng nguồn cấp
         var originalSpend = bookingEntries.FirstOrDefault(e => e.EntryType == CreditEntryType.Spend);
         if (originalSpend is null)
         {
@@ -412,11 +355,9 @@ public sealed class MentorCreditLedgerService : IMentorCreditLedgerService
             };
         }
 
-        // 2. Hoàn lại 1 lượt vào nguồn cấp ban đầu (không được vượt quá InitialQuantity)
         grant.AvailableQuantity = Math.Min(grant.InitialQuantity, grant.AvailableQuantity + 1);
         _unitOfWork.MentorCreditLedger.UpdateGrant(grant);
 
-        // 3. Ghi bút toán Refund vào sổ cái
         var refundEntry = new MentorCreditEntry
         {
             CreditGrantId = grant.Id,
@@ -430,7 +371,6 @@ public sealed class MentorCreditLedgerService : IMentorCreditLedgerService
         };
         await _unitOfWork.MentorCreditLedger.AddEntryAsync(refundEntry, cancellationToken);
 
-        // 4. Đồng bộ counter gói học lịch sử UserSubscription
         var subscription = await _unitOfWork.UserSubscriptions.Query()
             .FirstOrDefaultAsync(x => x.Id == grant.UserSubscriptionId, cancellationToken);
         if (subscription is not null)
@@ -451,7 +391,6 @@ public sealed class MentorCreditLedgerService : IMentorCreditLedgerService
         };
     }
 
-    // Quản trị viên đối soát tính toàn vẹn và khớp đúng giữa sổ cái bút toán và số dư nguồn cấp của học viên.
     public async Task<ApiResponse<CreditReconciliationResponse>> ReconcileLearnerCreditsForAdminAsync(
         int learnerId, CancellationToken cancellationToken = default)
     {
@@ -466,12 +405,8 @@ public sealed class MentorCreditLedgerService : IMentorCreditLedgerService
 
             var totalIssued = grants.Sum(x => x.InitialQuantity);
             var totalAvailable = grants.Sum(x => x.AvailableQuantity);
-
-            // Bút toán Spend có Amount = -1, Grant có Amount = +N, Refund có Amount = +1
             var totalEntriesNet = entries.Sum(x => x.Amount);
 
-            // Số dư còn lại phải đúng bằng tổng InitialQuantity + tổng các bút toán trừ/hoàn
-            // Hoặc: tổng available phải bằng totalEntriesNet
             var isConsistent = totalAvailable == totalEntriesNet;
             var discrepancy = totalAvailable - totalEntriesNet;
 
@@ -493,4 +428,18 @@ public sealed class MentorCreditLedgerService : IMentorCreditLedgerService
             return ApiResponse<CreditReconciliationResponse>.Fail($"Không thể đối soát: {ex.Message}", HttpStatusCode.InternalServerError);
         }
     }
+
+    private static CreditGrantItemResponse MapGrantItem(MentorCreditGrant g) => new()
+    {
+        GrantId = g.Id,
+        UserSubscriptionId = g.UserSubscriptionId,
+        CertificateLevelId = g.CertificateLevelId,
+        JlptLevel = g.CertificateLevel?.Code ?? MentorPlanService.ResolveLevelCode(g.CertificateLevelId),
+        PolicyVersion = g.PolicyVersion,
+        InitialQuantity = g.InitialQuantity,
+        AvailableQuantity = g.AvailableQuantity,
+        EffectiveFromUtc = g.EffectiveFromUtc,
+        ExpiresAtUtc = g.ExpiresAtUtc,
+        CreatedAtUtc = g.CreatedAtUtc
+    };
 }

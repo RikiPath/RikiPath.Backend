@@ -11,6 +11,12 @@ namespace RikiPath.Infrastructure.Configuration
         {
             builder.HasKey(x => x.Id);
             builder.Property(x => x.Version).IsRowVersion();
+            builder.Property(x => x.FrozenHourlyRate).HasPrecision(18, 2);
+            builder.Property(x => x.FrozenLevelCoefficient).HasPrecision(10, 4);
+            builder.Property(x => x.ScheduledCompensationAmount).HasPrecision(18, 2);
+            builder.Property(x => x.CompensationCurrency).HasMaxLength(10);
+            builder.HasOne(x => x.CompensationLevel).WithMany().HasForeignKey(x => x.CompensationLevelId).OnDelete(DeleteBehavior.Restrict);
+            builder.HasOne(x => x.CreditGrant).WithMany().HasForeignKey(x => x.CreditGrantId).OnDelete(DeleteBehavior.Restrict);
             builder.Property(x => x.Status).HasConversion<string>().HasMaxLength(20);
             builder.Property(x => x.MeetingLink).HasMaxLength(500);
             builder.Property(x => x.CancellationReason).HasMaxLength(500);

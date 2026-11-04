@@ -76,6 +76,7 @@ namespace RikiPath.Application
         IMentorProfileRepository MentorProfiles { get; }
         IMentorScheduleRepository MentorSchedules { get; }
         IMentorCreditLedgerRepository MentorCreditLedger { get; }
+        IGenericRepository<MentorTeachingQualification> MentorTeachingQualifications { get; }
         void AddMentorOutboxEvent(MentorOutboxEvent outboxEvent);
 
         IContentApprovalRequestRepository ContentApprovalRequests { get; }

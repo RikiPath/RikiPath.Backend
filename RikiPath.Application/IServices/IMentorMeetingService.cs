@@ -10,8 +10,11 @@ public interface IMentorMeetingService
     Task<ApiResponse<bool>> DeleteAvailabilityAsync(int id, CancellationToken ct);
     #region Shared / General
     Task<ApiResponse<List<BookableMentorResponse>>> GetMentorsAsync(CancellationToken cancellationToken = default);
+    Task<ApiResponse<List<BookableMentorResponse>>> GetMentorsAsync(string? jlptLevel, CancellationToken cancellationToken = default);
     Task<ApiResponse<List<MentorMeetingPlanResponse>>> GetPlansAsync(CancellationToken cancellationToken = default);
+    Task<ApiResponse<List<MentorMeetingPlanResponse>>> GetPlansAsync(string? jlptLevel, CancellationToken cancellationToken = default);
     Task<ApiResponse<List<MentorAvailabilityResponse>>> GetAvailableSlotsAsync(DateTime from, DateTime to, int? mentorId, CancellationToken cancellationToken = default);
+    Task<ApiResponse<List<MentorAvailabilityResponse>>> GetAvailableSlotsAsync(DateTime from, DateTime to, int? mentorId, string? jlptLevel, CancellationToken cancellationToken = default);
     #endregion
 
     #region Learner Operations

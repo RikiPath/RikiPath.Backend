@@ -1,5 +1,4 @@
 using System.Net;
-using System.Data.Common;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -11,6 +10,7 @@ using RikiPath.Application.Responses.MentorMeetings;
 using RikiPath.Domain;
 using RikiPath.Domain.Entities;
 using RikiPath.Domain.Enums;
+using RikiPath.Domain.MentorCompensation;
 
 namespace RikiPath.Application.Services;
 
@@ -39,27 +39,98 @@ public sealed class MentorMeetingService(
         return QaPaymentSimulatorGuard.IsEnabled(appSettings, hostEnvironment);
     }
 
-    public async Task<ApiResponse<List<BookableMentorResponse>>> GetMentorsAsync(CancellationToken cancellationToken)
+    public Task<ApiResponse<List<BookableMentorResponse>>> GetMentorsAsync(CancellationToken cancellationToken = default)
+        => GetMentorsAsync(null, cancellationToken);
+
+    public async Task<ApiResponse<List<BookableMentorResponse>>> GetMentorsAsync(
+        string? jlptLevel, CancellationToken cancellationToken = default)
     {
+        int? requiredLevelId = null;
+        if (!string.IsNullOrWhiteSpace(jlptLevel))
+        {
+            if (!MentorCompensationPolicy.TryNormalizeSupportedLevel(jlptLevel, out var normalizedLevel))
+            {
+                return ApiResponse<List<BookableMentorResponse>>.Fail(
+                    "Chỉ hỗ trợ lọc cố vấn dạy trình độ JLPT N5, N4, N3 hoặc N2 (không hỗ trợ N1).",
+                    HttpStatusCode.BadRequest);
+            }
+
+            requiredLevelId = await ResolveCertificateLevelIdAsync(normalizedLevel, cancellationToken);
+        }
+
         var mentors = await unitOfWork.UserAccounts.Query()
             .Include(x => x.MentorProfile)
             .Where(x => x.Role == Role.Mentor && !x.IsDeleted && (x.MentorProfile == null || x.MentorProfile.VerificationStatus == MentorVerificationStatus.Approved))
             .ToListAsync(cancellationToken);
+
+        var mentorIds = mentors.Select(x => x.Id).ToList();
+        var teachingLevelsByMentor = new Dictionary<int, List<string>>();
+        if (mentorIds.Count > 0 && unitOfWork.MentorTeachingQualifications != null)
+        {
+            var qualifications = await unitOfWork.MentorTeachingQualifications.Query()
+                .Include(q => q.CertificateLevel)
+                .Where(q => q.IsActive && q.RevokedAtUtc == null && mentorIds.Contains(q.MentorUserId))
+                .ToListAsync(cancellationToken);
+
+            foreach (var group in qualifications.GroupBy(x => x.MentorUserId))
+            {
+                teachingLevelsByMentor[group.Key] = group
+                    .Select(x => x.CertificateLevel?.Code ?? MentorPlanService.ResolveLevelCode(x.CertificateLevelId))
+                    .Where(x => !string.IsNullOrWhiteSpace(x))
+                    .Select(x => x!.Trim().ToUpperInvariant())
+                    .Distinct()
+                    .OrderBy(x => x)
+                    .ToList();
+            }
+
+            if (requiredLevelId.HasValue)
+            {
+                var qualifiedMentorIds = qualifications
+                    .Where(q => q.CertificateLevelId == requiredLevelId.Value)
+                    .Select(q => q.MentorUserId)
+                    .ToHashSet();
+                mentors = mentors.Where(m => qualifiedMentorIds.Contains(m.Id)).ToList();
+            }
+        }
+
         return ApiResponse<List<BookableMentorResponse>>.Success(mentors
             .OrderBy(x => x.FirstName).ThenBy(x => x.LastName).ThenBy(x => x.Id)
             .Select(x => new BookableMentorResponse
             {
                 Id = x.Id,
                 Name = $"{x.FirstName} {x.LastName}".Trim(),
-                AvatarUrl = x.AvatarUrl
+                AvatarUrl = x.AvatarUrl,
+                TeachingJlptLevels = teachingLevelsByMentor.TryGetValue(x.Id, out var levels) ? levels : []
             }).ToList());
     }
 
-    public async Task<ApiResponse<List<MentorMeetingPlanResponse>>> GetPlansAsync(CancellationToken cancellationToken)
+    public Task<ApiResponse<List<MentorMeetingPlanResponse>>> GetPlansAsync(CancellationToken cancellationToken = default)
+        => GetPlansAsync(null, cancellationToken);
+
+    public async Task<ApiResponse<List<MentorMeetingPlanResponse>>> GetPlansAsync(
+        string? jlptLevel, CancellationToken cancellationToken = default)
     {
         try
         {
+            int? filterLevelId = null;
+            if (!string.IsNullOrWhiteSpace(jlptLevel))
+            {
+                if (!MentorCompensationPolicy.TryNormalizeSupportedLevel(jlptLevel, out var normalizedLevel))
+                {
+                    return ApiResponse<List<MentorMeetingPlanResponse>>.Fail(
+                        "Chỉ hỗ trợ gói tư vấn cho trình độ JLPT N5, N4, N3 hoặc N2 (không hỗ trợ N1).",
+                        HttpStatusCode.BadRequest);
+                }
+
+                filterLevelId = await ResolveCertificateLevelIdAsync(normalizedLevel, cancellationToken);
+            }
+
             var plans = await unitOfWork.SubscriptionPlans.GetMeetingPlansAsync(cancellationToken);
+            if (filterLevelId.HasValue)
+            {
+                plans = plans.Where(p => p.CertificateLevelId == filterLevelId.Value).ToList();
+            }
+
             return ApiResponse<List<MentorMeetingPlanResponse>>.Success(plans.Select(MapPlan).ToList());
         }
         catch (Exception ex)
@@ -69,18 +140,57 @@ public sealed class MentorMeetingService(
         }
     }
 
+    public Task<ApiResponse<List<MentorAvailabilityResponse>>> GetAvailableSlotsAsync(
+        DateTime from, DateTime to, int? mentorId, CancellationToken cancellationToken = default)
+        => GetAvailableSlotsAsync(from, to, mentorId, null, cancellationToken);
+
     public async Task<ApiResponse<List<MentorAvailabilityResponse>>> GetAvailableSlotsAsync(
-        DateTime from, DateTime to, int? mentorId, CancellationToken cancellationToken)
+        DateTime from, DateTime to, int? mentorId, string? jlptLevel, CancellationToken cancellationToken = default)
     {
         if (to <= from || to - from > TimeSpan.FromDays(90))
             return ApiResponse<List<MentorAvailabilityResponse>>.Fail("Khoảng thời gian không hợp lệ (tối đa 90 ngày).");
         if (mentorId is <= 0)
             return ApiResponse<List<MentorAvailabilityResponse>>.Fail("Cố vấn được chọn không hợp lệ.");
 
+        int? requiredLevelId = null;
+        string? normalizedLevel = null;
+        if (!string.IsNullOrWhiteSpace(jlptLevel))
+        {
+            if (!MentorCompensationPolicy.TryNormalizeSupportedLevel(jlptLevel, out var norm))
+            {
+                return ApiResponse<List<MentorAvailabilityResponse>>.Fail(
+                    "Chỉ hỗ trợ đặt lịch tư vấn cho trình độ JLPT N5, N4, N3 hoặc N2 (không hỗ trợ N1).",
+                    HttpStatusCode.BadRequest);
+            }
+
+            normalizedLevel = norm;
+            requiredLevelId = await ResolveCertificateLevelIdAsync(norm, cancellationToken);
+        }
+
         try
         {
             await ExpirePendingPaymentsAsync(cancellationToken);
             var slots = await unitOfWork.MentorAvailabilities.GetAvailableSlotsAsync(mentorId, from, to, cancellationToken);
+
+            if (requiredLevelId.HasValue && unitOfWork.MentorTeachingQualifications != null)
+            {
+                var qualifiedMentorIds = await unitOfWork.MentorTeachingQualifications.Query()
+                    .Where(q => q.IsActive && q.RevokedAtUtc == null && q.CertificateLevelId == requiredLevelId.Value)
+                    .Select(q => q.MentorUserId)
+                    .Distinct()
+                    .ToListAsync(cancellationToken);
+
+                var qualifiedSet = qualifiedMentorIds.ToHashSet();
+                if (mentorId.HasValue && !qualifiedSet.Contains(mentorId.Value))
+                {
+                    return ApiResponse<List<MentorAvailabilityResponse>>.Fail(
+                        $"Chuyên gia chưa được cấp quyền giảng dạy trình độ JLPT {normalizedLevel}.",
+                        HttpStatusCode.Conflict);
+                }
+
+                slots = slots.Where(s => qualifiedSet.Contains(s.MentorId)).ToList();
+            }
+
             return ApiResponse<List<MentorAvailabilityResponse>>.Success(slots.Select(MapAvailability).ToList());
         }
         catch (Exception ex)
@@ -91,7 +201,7 @@ public sealed class MentorMeetingService(
     }
 
     public async Task<ApiResponse<MentorMeetingPurchaseResponse>> PurchaseAsync(
-        PurchaseMentorPlanRequest request, CancellationToken cancellationToken)
+        PurchaseMentorPlanRequest request, CancellationToken cancellationToken = default)
     {
         if (request.SubscriptionPlanId <= 0)
             return ApiResponse<MentorMeetingPurchaseResponse>.Fail("Mã gói hỗ trợ phải lớn hơn 0.");
@@ -102,6 +212,21 @@ public sealed class MentorMeetingService(
             if (claims.Role != Role.Learner)
                 return ApiResponse<MentorMeetingPurchaseResponse>.Fail("Chỉ học viên mới có thể mua gói tư vấn.", HttpStatusCode.Forbidden);
 
+            int? requestedLevelId = null;
+            string? requestedLevelCode = null;
+            if (!string.IsNullOrWhiteSpace(request.JlptLevel))
+            {
+                if (!MentorCompensationPolicy.TryNormalizeSupportedLevel(request.JlptLevel, out var norm))
+                {
+                    return ApiResponse<MentorMeetingPurchaseResponse>.Fail(
+                        "Chỉ hỗ trợ mua gói tư vấn cho trình độ JLPT N5, N4, N3 hoặc N2 (không hỗ trợ N1).",
+                        HttpStatusCode.BadRequest);
+                }
+
+                requestedLevelCode = norm;
+                requestedLevelId = await ResolveCertificateLevelIdAsync(norm, cancellationToken);
+            }
+
             var plan = await unitOfWork.SubscriptionPlans.GetMeetingPlanAsync(request.SubscriptionPlanId, cancellationToken);
             if (plan is null)
                 return ApiResponse<MentorMeetingPurchaseResponse>.Fail("Không tìm thấy gói tư vấn đang mở bán.", HttpStatusCode.NotFound);
@@ -109,6 +234,28 @@ public sealed class MentorMeetingService(
                 return ApiResponse<MentorMeetingPurchaseResponse>.Fail("Chỉ hỗ trợ gói 1 hoặc 3 buổi.");
             if (plan.Price <= 0 || plan.Price != decimal.Truncate(plan.Price) || plan.Price > int.MaxValue)
                 return ApiResponse<MentorMeetingPurchaseResponse>.Fail("Giá gói phải là số tiền VND nguyên dương.");
+
+            var planLevelCode = plan.CertificateLevel?.Code ?? MentorPlanService.ResolveLevelCode(plan.CertificateLevelId);
+            if (plan.CertificateLevelId.HasValue)
+            {
+                if (!MentorCompensationPolicy.TryNormalizeSupportedLevel(planLevelCode, out var normalizedPlanLevel))
+                {
+                    return ApiResponse<MentorMeetingPurchaseResponse>.Fail(
+                        "Gói tư vấn có trình độ JLPT không được hỗ trợ (chỉ hỗ trợ N5–N2, không hỗ trợ N1).",
+                        HttpStatusCode.BadRequest);
+                }
+                planLevelCode = normalizedPlanLevel;
+
+                if (requestedLevelId.HasValue && plan.CertificateLevelId.Value != requestedLevelId.Value)
+                {
+                    return ApiResponse<MentorMeetingPurchaseResponse>.Fail(
+                        "Trình độ JLPT yêu cầu không khớp với trình độ của gói tư vấn đã chọn.",
+                        HttpStatusCode.BadRequest);
+                }
+            }
+
+            var effectiveCertificateLevelId = plan.CertificateLevelId ?? requestedLevelId;
+            var effectiveJlptLevel = planLevelCode ?? requestedLevelCode;
 
             if (IsQaPaymentSimulatorEnabled())
             {
@@ -135,6 +282,7 @@ public sealed class MentorMeetingService(
                         UserId = claims.Id,
                         SubscriptionPlanId = plan.Id,
                         SubscriptionPlan = plan,
+                        CertificateLevelId = effectiveCertificateLevelId,
                         MentorId = null,
                         AmountPaid = plan.Price,
                         PaymentStatus = PaymentStatus.Pending,
@@ -162,6 +310,8 @@ public sealed class MentorMeetingService(
                     OrderCode = qaSubscription.Id,
                     PlanName = plan.Name,
                     MeetingSessionCount = plan.MeetingSessionCount,
+                    CertificateLevelId = qaSubscription.CertificateLevelId ?? effectiveCertificateLevelId,
+                    JlptLevel = effectiveJlptLevel,
                     Features = plan.Features.Where(x => !x.IsDeleted).Select(MapFeature).ToList(),
                     Amount = plan.Price,
                     CheckoutUrl = "qa-simulator://no-payment",
@@ -181,6 +331,7 @@ public sealed class MentorMeetingService(
                 UserId = claims.Id,
                 SubscriptionPlanId = plan.Id,
                 SubscriptionPlan = plan,
+                CertificateLevelId = effectiveCertificateLevelId,
                 MentorId = null,
                 AmountPaid = plan.Price,
                 PaymentStatus = PaymentStatus.Pending,
@@ -232,6 +383,8 @@ public sealed class MentorMeetingService(
                 OrderCode = subscription.Id,
                 PlanName = plan.Name,
                 MeetingSessionCount = plan.MeetingSessionCount,
+                CertificateLevelId = subscription.CertificateLevelId,
+                JlptLevel = effectiveJlptLevel,
                 Features = plan.Features.Where(x => !x.IsDeleted).Select(MapFeature).ToList(),
                 Amount = plan.Price,
                 CheckoutUrl = checkout.CheckoutUrl,
@@ -247,7 +400,7 @@ public sealed class MentorMeetingService(
         }
     }
 
-    public async Task<ApiResponse<object>> CompleteQaPaymentAsync(int subscriptionId, CancellationToken cancellationToken)
+    public async Task<ApiResponse<object>> CompleteQaPaymentAsync(int subscriptionId, CancellationToken cancellationToken = default)
     {
         var claims = claimService.GetUserClaim();
         if (claims.Role != Role.Admin)
@@ -288,8 +441,6 @@ public sealed class MentorMeetingService(
             if (current?.PaymentStatus != PaymentStatus.Paid || current.PaymentTransactionId != paidMarker)
                 return ApiResponse<object>.Fail("Giao dịch QA đã thay đổi; không thể hoàn tất.", HttpStatusCode.Conflict);
         }
-        // ExecuteUpdate ghi nguyên tử trạng thái và hạn dùng; ledger đọc lại AsNoTracking
-        // để không dùng bản Pending còn được EF tracking trong request này.
         var grantResult = await creditLedgerService.CreateGrantFromPaidSubscriptionAsync(subscriptionId, cancellationToken: cancellationToken);
         if (!grantResult.IsSuccess)
             return ApiResponse<object>.Fail("Thanh toán QA đã xác nhận nhưng chưa cấp được lượt tư vấn.", HttpStatusCode.InternalServerError);
@@ -317,7 +468,7 @@ public sealed class MentorMeetingService(
     }
 
     public async Task<ApiResponse<MentorMeetingPurchaseStatusResponse>> GetPurchaseStatusAsync(
-        int subscriptionId, CancellationToken cancellationToken)
+        int subscriptionId, CancellationToken cancellationToken = default)
     {
         if (subscriptionId <= 0)
             return ApiResponse<MentorMeetingPurchaseStatusResponse>.Fail("Mã gói đã mua phải lớn hơn 0.");
@@ -329,10 +480,17 @@ public sealed class MentorMeetingService(
             if (subscription is null)
                 return ApiResponse<MentorMeetingPurchaseStatusResponse>.Fail("Không tìm thấy giao dịch.", HttpStatusCode.NotFound);
 
+            var levelId = subscription.CertificateLevelId ?? subscription.SubscriptionPlan?.CertificateLevelId;
+            var levelCode = subscription.CertificateLevel?.Code
+                ?? subscription.SubscriptionPlan?.CertificateLevel?.Code
+                ?? MentorPlanService.ResolveLevelCode(levelId);
+
             return ApiResponse<MentorMeetingPurchaseStatusResponse>.Success(new MentorMeetingPurchaseStatusResponse
             {
                 SubscriptionId = subscription.Id,
                 PlanName = subscription.SubscriptionPlan.Name,
+                CertificateLevelId = levelId,
+                JlptLevel = levelCode,
                 PaymentStatus = subscription.PaymentStatus,
                 IsCheckoutExpired = subscription.PaymentStatus == PaymentStatus.Pending
                     && subscription.PaymentExpiresAt is DateTime expiresAt && expiresAt <= DateTime.UtcNow,
@@ -358,7 +516,7 @@ public sealed class MentorMeetingService(
         }
     }
 
-    public async Task<ApiResponse<MentorMeetingPurchaseStatusResponse>> SyncPurchaseAsync(int subscriptionId, CancellationToken cancellationToken)
+    public async Task<ApiResponse<MentorMeetingPurchaseStatusResponse>> SyncPurchaseAsync(int subscriptionId, CancellationToken cancellationToken = default)
     {
         var claims = claimService.GetUserClaim();
         if (claims.Role != Role.Learner)
@@ -389,7 +547,7 @@ public sealed class MentorMeetingService(
                     foreach (var booking in subscription.MentorBookings.Where(b => b.Status == MentorStatus.AwaitingPayment))
                     {
                         booking.Status = MentorStatus.Cancelled;
-                        if (booking.MentorAvailability is {} heldSlot) heldSlot.BookedCount = Math.Max(0, heldSlot.BookedCount - 1);
+                        if (booking.MentorAvailability is { } heldSlot) heldSlot.BookedCount = Math.Max(0, heldSlot.BookedCount - 1);
                         subscription.MeetingSessionsUsed = Math.Max(0, subscription.MeetingSessionsUsed - 1);
                         booking.MentorAvailability = null;
                         booking.MentorAvailabilityId = null;
@@ -412,7 +570,7 @@ public sealed class MentorMeetingService(
         return await GetPurchaseStatusAsync(subscriptionId, cancellationToken);
     }
 
-    public async Task<ApiResponse<List<MentorAvailabilityResponse>>> GetMyAvailabilityAsync(CancellationToken cancellationToken)
+    public async Task<ApiResponse<List<MentorAvailabilityResponse>>> GetMyAvailabilityAsync(CancellationToken cancellationToken = default)
     {
         try
         {
@@ -430,8 +588,7 @@ public sealed class MentorMeetingService(
     }
 
     public Task<ApiResponse<List<MentorAvailabilityResponse>>> CreateAvailabilityAsync(
-        CreateMentorAvailabilityRequest request, CancellationToken cancellationToken)
-        // API tạo khung giờ đơn lẻ không được vượt qua quy tắc đăng ký tuần và phê duyệt của quản trị viên.
+        CreateMentorAvailabilityRequest request, CancellationToken cancellationToken = default)
         => Task.FromResult(ApiResponse<List<MentorAvailabilityResponse>>.Fail(
             "Vui lòng đăng ký lịch tư vấn hằng tuần trước khi tạo khung giờ.", HttpStatusCode.Conflict));
 
@@ -460,7 +617,7 @@ public sealed class MentorMeetingService(
     }
 
     public async Task<ApiResponse<List<MentorAvailabilityResponse>>> RequestCancelAvailabilitiesAsync(
-        CancelAvailabilitiesRequest request, CancellationToken cancellationToken)
+        CancelAvailabilitiesRequest request, CancellationToken cancellationToken = default)
     {
         var ids = NormalizeIds(request.Ids);
         if (ids.Count == 0 || ids.Count > MaxBulkSlots || ids.Any(x => x <= 0))
@@ -511,7 +668,7 @@ public sealed class MentorMeetingService(
     }
 
     public async Task<ApiResponse<bool>> ReviewCancelAvailabilitiesAsync(
-        List<int> ids, bool approve, string? rejectionReason, CancellationToken cancellationToken)
+        List<int> ids, bool approve, string? rejectionReason, CancellationToken cancellationToken = default)
     {
         var distinctIds = NormalizeIds(ids);
         if (distinctIds.Count == 0 || distinctIds.Count > MaxBulkSlots || distinctIds.Any(x => x <= 0))
@@ -537,7 +694,6 @@ public sealed class MentorMeetingService(
             var now = DateTime.UtcNow;
             if (approve)
             {
-                // Kiểm tra lại vì có thể đã có người đặt trong lúc chờ duyệt.
                 if ((await GetSlotIdsWithActiveBookingsAsync(slots, cancellationToken)).Count > 0)
                     return ApiResponse<bool>.Fail("Có khung giờ đã được đặt nên không thể duyệt hủy.", HttpStatusCode.Conflict);
             }
@@ -567,7 +723,7 @@ public sealed class MentorMeetingService(
         }
     }
 
-    public async Task<ApiResponse<List<MentorAvailabilityResponse>>> GetPendingAvailabilitiesAsync(CancellationToken cancellationToken)
+    public async Task<ApiResponse<List<MentorAvailabilityResponse>>> GetPendingAvailabilitiesAsync(CancellationToken cancellationToken = default)
     {
         try
         {
@@ -590,7 +746,7 @@ public sealed class MentorMeetingService(
     }
 
     public async Task<ApiResponse<bool>> ReviewAvailabilitiesAsync(
-        List<int> ids, bool approve, string? rejectionReason, CancellationToken cancellationToken)
+        List<int> ids, bool approve, string? rejectionReason, CancellationToken cancellationToken = default)
     {
         var distinctIds = NormalizeIds(ids);
         if (distinctIds.Count == 0 || distinctIds.Count > MaxBulkSlots || distinctIds.Any(x => x <= 0))
@@ -637,6 +793,18 @@ public sealed class MentorMeetingService(
             logger.LogError(ex, "Could not review Mentor availabilities.");
             return ApiResponse<bool>.Fail("Không thể xử lý duyệt lịch.", HttpStatusCode.InternalServerError);
         }
+    }
+
+    private async Task<int> ResolveCertificateLevelIdAsync(string normalizedLevel, CancellationToken ct)
+    {
+        if (unitOfWork.CertificateLevels != null)
+        {
+            var certLevel = await unitOfWork.CertificateLevels.Query()
+                .FirstOrDefaultAsync(x => !x.IsDeleted && x.Code.ToUpper() == normalizedLevel, ct);
+            if (certLevel != null)
+                return certLevel.Id;
+        }
+        return MentorCompensationPolicy.ResolveDefaultCertificateLevelId(normalizedLevel);
     }
 
     private static List<int> NormalizeIds(List<int>? ids) => ids?.Distinct().ToList() ?? [];
@@ -714,6 +882,8 @@ public sealed class MentorMeetingService(
         DurationDays = plan.MeetingSessionCount switch { 1 => 30, 3 => 90, _ => plan.DurationDays },
         Price = plan.Price,
         MeetingSessionCount = plan.MeetingSessionCount,
+        CertificateLevelId = plan.CertificateLevelId,
+        JlptLevel = plan.CertificateLevel?.Code ?? MentorPlanService.ResolveLevelCode(plan.CertificateLevelId),
         Features = plan.Features.Where(x => !x.IsDeleted).Select(MapFeature).ToList()
     };
 
@@ -738,18 +908,16 @@ public sealed class MentorMeetingService(
         BookedCount = slot.BookedCount,
         MaxLearners = slot.MaxLearners,
         AdminName = slot.AdminName,
-
-        // Tiêu chí để admin duyệt lịch mới: đăng ký trước giờ bắt đầu bao lâu.
         AdvanceDaysAtCreation = slot.CreatedDate is DateTime createdAt ? (int)(slot.StartTime - createdAt).TotalDays : 0,
         MeetsAdvanceRule = slot.CreatedDate is DateTime created && slot.StartTime >= created.AddMonths(MinAdvanceMonths),
-
-        // Luồng yêu cầu hủy.
         CancelRequestedAt = slot.CancelRequestedAt,
         CancelReason = slot.CancelReason,
         CancelRejectedAt = slot.CancelRejectedAt,
         CancelRejectionReason = slot.CancelRejectionReason,
-        MentorWeeklyAvailabilityId = slot.MentorWeeklyAvailabilityId, PublishedAt = slot.PublishedAt,
-        ChangeRequestReason = slot.ChangeRequestReason, ChangeRequestedAt = slot.ChangeRequestedAt,
+        MentorWeeklyAvailabilityId = slot.MentorWeeklyAvailabilityId,
+        PublishedAt = slot.PublishedAt,
+        ChangeRequestReason = slot.ChangeRequestReason,
+        ChangeRequestedAt = slot.ChangeRequestedAt,
         ChangeResolution = slot.ChangeResolution,
     };
 
@@ -758,6 +926,11 @@ public sealed class MentorMeetingService(
         var isMentor = booking.MentorAvailability?.MentorId == currentUserId;
         var learner = booking.UserSubscription?.UserAccount;
         var mentor = booking.MentorAvailability?.Mentor;
+        var levelId = booking.CompensationLevelId ?? booking.UserSubscription?.CertificateLevelId;
+        var levelCode = booking.CompensationLevel?.Code
+            ?? booking.UserSubscription?.CertificateLevel?.Code
+            ?? MentorPlanService.ResolveLevelCode(levelId);
+
         return new MentorBookingResponse
         {
             Id = booking.Id,
@@ -775,6 +948,9 @@ public sealed class MentorMeetingService(
             Question = booking.Question,
             EndsAt = booking.MentorAvailability?.EndTime,
             CreatedAt = booking.CreatedDate,
+            CompensationLevelId = levelId,
+            JlptLevel = levelCode,
+            CreditGrantId = booking.CreditGrantId
         };
     }
 }

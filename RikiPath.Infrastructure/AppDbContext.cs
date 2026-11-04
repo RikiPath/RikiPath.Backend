@@ -76,6 +76,18 @@ namespace RikiPath.Infrastructure
         public DbSet<MentorCreditGrant> MentorCreditGrants { get; set; }
         public DbSet<MentorCreditEntry> MentorCreditEntries { get; set; }
         public DbSet<MentorAttendanceRecord> MentorAttendanceRecords { get; set; }
+        public DbSet<MentorHourlyRate> MentorHourlyRates { get; set; }
+        public DbSet<JlptLevelPayCoefficient> JlptLevelPayCoefficients { get; set; }
+        public DbSet<MentorTeachingQualification> MentorTeachingQualifications { get; set; }
+        public DbSet<MentorAttendanceApproval> MentorAttendanceApprovals { get; set; }
+        public DbSet<MentorEarningEntry> MentorEarningEntries { get; set; }
+        public DbSet<MentorPayrollPeriod> MentorPayrollPeriods { get; set; }
+        public DbSet<MentorPayrollLine> MentorPayrollLines { get; set; }
+        public DbSet<MentorPayrollAdjustment> MentorPayrollAdjustments { get; set; }
+        public DbSet<MentorBankAccount> MentorBankAccounts { get; set; }
+        public DbSet<OrganizationPayoutAccount> OrganizationPayoutAccounts { get; set; }
+        public DbSet<MentorPayoutObligation> MentorPayoutObligations { get; set; }
+        public DbSet<MentorPayoutAttempt> MentorPayoutAttempts { get; set; }
         public DbSet<MentorReview> MentorReviews { get; set; }
         public DbSet<MentorDispute> MentorDisputes { get; set; }
         public DbSet<MentorDisputeHistory> MentorDisputeHistories { get; set; }
@@ -157,6 +169,18 @@ namespace RikiPath.Infrastructure
             modelBuilder.ApplyConfiguration(new MentorCreditGrantConfig());
             modelBuilder.ApplyConfiguration(new MentorCreditEntryConfig());
             modelBuilder.ApplyConfiguration(new MentorAttendanceRecordConfig());
+            modelBuilder.ApplyConfiguration(new MentorHourlyRateConfig());
+            modelBuilder.ApplyConfiguration(new JlptLevelPayCoefficientConfig());
+            modelBuilder.ApplyConfiguration(new MentorTeachingQualificationConfig());
+            modelBuilder.ApplyConfiguration(new MentorAttendanceApprovalConfig());
+            modelBuilder.ApplyConfiguration(new MentorEarningEntryConfig());
+            modelBuilder.ApplyConfiguration(new MentorPayrollPeriodConfig());
+            modelBuilder.ApplyConfiguration(new MentorPayrollLineConfig());
+            modelBuilder.ApplyConfiguration(new MentorPayrollAdjustmentConfig());
+            modelBuilder.ApplyConfiguration(new MentorBankAccountConfig());
+            modelBuilder.ApplyConfiguration(new OrganizationPayoutAccountConfig());
+            modelBuilder.ApplyConfiguration(new MentorPayoutObligationConfig());
+            modelBuilder.ApplyConfiguration(new MentorPayoutAttemptConfig());
             modelBuilder.ApplyConfiguration(new MentorReviewConfig());
             modelBuilder.ApplyConfiguration(new MentorDisputeConfig());
             modelBuilder.ApplyConfiguration(new MentorDisputeHistoryConfig());

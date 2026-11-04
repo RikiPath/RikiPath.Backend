@@ -26,6 +26,8 @@ public sealed class CreditGrantItemResponse
 {
     public long GrantId { get; set; }
     public int UserSubscriptionId { get; set; }
+    public int? CertificateLevelId { get; set; }
+    public string? JlptLevel { get; set; }
     public int PolicyVersion { get; set; }
     public int InitialQuantity { get; set; }
     public int AvailableQuantity { get; set; }

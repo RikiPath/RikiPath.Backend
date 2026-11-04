@@ -9,6 +9,7 @@ using RikiPath.Application.Responses.MentorDiscovery;
 using RikiPath.Application.Responses.MentorProfile;
 using RikiPath.Domain.Entities;
 using RikiPath.Domain.Enums;
+using RikiPath.Domain.MentorCompensation;
 using RikiPath.Domain.MentorScheduling;
 
 namespace RikiPath.Application.Services;
@@ -25,6 +26,19 @@ public sealed class MentorDiscoveryService(
     {
         try
         {
+            int? requiredTeachingLevelId = null;
+            if (!string.IsNullOrWhiteSpace(request.TeachingJlptLevel))
+            {
+                if (!MentorCompensationPolicy.TryNormalizeSupportedLevel(request.TeachingJlptLevel, out var normalizedTeachingLevel))
+                {
+                    return ApiResponse<PagedResult<PublicMentorCardResponse>>.Fail(
+                        "Chỉ hỗ trợ lọc cố vấn dạy trình độ JLPT N5, N4, N3 hoặc N2 (không hỗ trợ N1).",
+                        HttpStatusCode.BadRequest);
+                }
+
+                requiredTeachingLevelId = await ResolveCertificateLevelIdAsync(normalizedTeachingLevel, cancellationToken);
+            }
+
             var page = Math.Max(1, request.Page);
             var pageSize = Math.Clamp(request.PageSize, 1, 50);
 
@@ -37,7 +51,24 @@ public sealed class MentorDiscoveryService(
                 request.SortBy,
                 cancellationToken);
 
-            var items = mentors.Select(u => new PublicMentorCardResponse
+            var mentorList = mentors.ToList();
+            var mentorIds = mentorList.Select(m => m.Id).ToList();
+            var teachingLevelsByMentor = await LoadActiveTeachingLevelsAsync(mentorIds, cancellationToken);
+
+            if (requiredTeachingLevelId.HasValue && unitOfWork.MentorTeachingQualifications != null)
+            {
+                var qualifiedMentorIds = await unitOfWork.MentorTeachingQualifications.Query()
+                    .Where(q => q.IsActive && q.RevokedAtUtc == null && q.CertificateLevelId == requiredTeachingLevelId.Value)
+                    .Select(q => q.MentorUserId)
+                    .Distinct()
+                    .ToListAsync(cancellationToken);
+
+                var qualifiedSet = qualifiedMentorIds.ToHashSet();
+                mentorList = mentorList.Where(m => qualifiedSet.Contains(m.Id)).ToList();
+                totalCount = mentorList.Count;
+            }
+
+            var items = mentorList.Select(u => new PublicMentorCardResponse
             {
                 MentorId = u.Id,
                 Name = $"{u.FirstName} {u.LastName}".Trim(),
@@ -45,6 +76,7 @@ public sealed class MentorDiscoveryService(
                 Bio = u.MentorProfile?.Bio,
                 Expertise = u.MentorProfile?.Expertise,
                 JlptLevel = u.MentorProfile?.JlptLevel,
+                TeachingJlptLevels = teachingLevelsByMentor.TryGetValue(u.Id, out var levels) ? levels : [],
                 YearsOfExperience = u.MentorProfile?.YearsOfExperience,
                 Workplace = u.MentorProfile?.Workplace,
                 IntroductionVideoUrl = u.MentorProfile?.IntroductionVideoUrl,
@@ -85,6 +117,7 @@ public sealed class MentorDiscoveryService(
                 return ApiResponse<PublicMentorProfileResponse>.Fail(
                     "Không tìm thấy thông tin chuyên gia được phê duyệt công khai.", HttpStatusCode.NotFound);
 
+            var teachingLevelsByMentor = await LoadActiveTeachingLevelsAsync([mentor.Id], cancellationToken);
             var profile = mentor.MentorProfile;
             var response = new PublicMentorProfileResponse
             {
@@ -94,6 +127,7 @@ public sealed class MentorDiscoveryService(
                 Bio = profile.Bio,
                 Expertise = profile.Expertise,
                 JlptLevel = profile.JlptLevel,
+                TeachingJlptLevels = teachingLevelsByMentor.TryGetValue(mentor.Id, out var levels) ? levels : [],
                 YearsOfExperience = profile.YearsOfExperience,
                 Workplace = profile.Workplace,
                 IntroductionVideoUrl = profile.IntroductionVideoUrl,
@@ -118,6 +152,25 @@ public sealed class MentorDiscoveryService(
 
         try
         {
+            if (!string.IsNullOrWhiteSpace(request.JlptLevel))
+            {
+                if (!MentorCompensationPolicy.TryNormalizeSupportedLevel(request.JlptLevel, out var normalizedLevel))
+                {
+                    return ApiResponse<PublicMentorSlotsGroupedResponse>.Fail(
+                        "Chỉ hỗ trợ đặt lịch tư vấn cho trình độ JLPT N5, N4, N3 hoặc N2 (không hỗ trợ N1).",
+                        HttpStatusCode.BadRequest);
+                }
+
+                var levelId = await ResolveCertificateLevelIdAsync(normalizedLevel, cancellationToken);
+                var isQualified = await IsMentorQualifiedForLevelAsync(mentorId, levelId, cancellationToken);
+                if (!isQualified)
+                {
+                    return ApiResponse<PublicMentorSlotsGroupedResponse>.Fail(
+                        $"Chuyên gia chưa được cấp quyền giảng dạy trình độ JLPT {normalizedLevel}.",
+                        HttpStatusCode.Conflict);
+                }
+            }
+
             var mentor = await unitOfWork.UserAccounts.Query()
                 .Include(u => u.MentorProfile)
                 .FirstOrDefaultAsync(u => u.Id == mentorId && u.Role == Role.Mentor && !u.IsDeleted, cancellationToken);
@@ -178,6 +231,25 @@ public sealed class MentorDiscoveryService(
 
         try
         {
+            if (!string.IsNullOrWhiteSpace(request.JlptLevel))
+            {
+                if (!MentorCompensationPolicy.TryNormalizeSupportedLevel(request.JlptLevel, out var normalizedLevel))
+                {
+                    return ApiResponse<List<DateOnly>>.Fail(
+                        "Chỉ hỗ trợ đặt lịch tư vấn cho trình độ JLPT N5, N4, N3 hoặc N2 (không hỗ trợ N1).",
+                        HttpStatusCode.BadRequest);
+                }
+
+                var levelId = await ResolveCertificateLevelIdAsync(normalizedLevel, cancellationToken);
+                var isQualified = await IsMentorQualifiedForLevelAsync(mentorId, levelId, cancellationToken);
+                if (!isQualified)
+                {
+                    return ApiResponse<List<DateOnly>>.Fail(
+                        $"Chuyên gia chưa được cấp quyền giảng dạy trình độ JLPT {normalizedLevel}.",
+                        HttpStatusCode.Conflict);
+                }
+            }
+
             var mentor = await unitOfWork.UserAccounts.Query()
                 .Include(u => u.MentorProfile)
                 .FirstOrDefaultAsync(u => u.Id == mentorId && u.Role == Role.Mentor && !u.IsDeleted, cancellationToken);
@@ -236,6 +308,57 @@ public sealed class MentorDiscoveryService(
         }
     }
 
+    private async Task<int> ResolveCertificateLevelIdAsync(string normalizedLevel, CancellationToken ct)
+    {
+        if (unitOfWork.CertificateLevels != null)
+        {
+            var certLevel = await unitOfWork.CertificateLevels.Query()
+                .FirstOrDefaultAsync(x => !x.IsDeleted && x.Code.ToUpper() == normalizedLevel, ct);
+            if (certLevel != null)
+                return certLevel.Id;
+        }
+        return MentorCompensationPolicy.ResolveDefaultCertificateLevelId(normalizedLevel);
+    }
+
+    private async Task<bool> IsMentorQualifiedForLevelAsync(int mentorId, int certificateLevelId, CancellationToken ct)
+    {
+        if (unitOfWork.MentorTeachingQualifications == null)
+            return false;
+
+        return await unitOfWork.MentorTeachingQualifications.Query()
+            .AnyAsync(q => q.MentorUserId == mentorId
+                && q.CertificateLevelId == certificateLevelId
+                && q.IsActive
+                && q.RevokedAtUtc == null, ct);
+    }
+
+    private async Task<Dictionary<int, List<string>>> LoadActiveTeachingLevelsAsync(
+        IReadOnlyCollection<int> mentorIds, CancellationToken ct)
+    {
+        var result = new Dictionary<int, List<string>>();
+        if (mentorIds.Count == 0 || unitOfWork.MentorTeachingQualifications == null)
+            return result;
+
+        var rows = await unitOfWork.MentorTeachingQualifications.Query()
+            .Include(q => q.CertificateLevel)
+            .Where(q => q.IsActive && q.RevokedAtUtc == null && mentorIds.Contains(q.MentorUserId))
+            .ToListAsync(ct);
+
+        foreach (var group in rows.GroupBy(x => x.MentorUserId))
+        {
+            var levels = group
+                .Select(x => x.CertificateLevel?.Code ?? MentorPlanService.ResolveLevelCode(x.CertificateLevelId))
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .Select(x => x!.Trim().ToUpperInvariant())
+                .Distinct()
+                .OrderBy(x => x)
+                .ToList();
+            result[group.Key] = levels;
+        }
+
+        return result;
+    }
+
     private static (DateTime fromUtc, DateTime toUtc, string? error) ResolveTimeRange(
         MentorSlotBrowsingRequest request, TimeZoneInfo tz)
     {
@@ -267,7 +390,6 @@ public sealed class MentorDiscoveryService(
         }
         else
         {
-            // Mặc định duyệt 14 ngày tới
             var todayLocal = DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(nowUtc, tz));
             var endLocal = todayLocal.AddDays(14);
             var startLocal = DateTime.SpecifyKind(todayLocal.ToDateTime(TimeOnly.MinValue), DateTimeKind.Unspecified);
@@ -277,11 +399,9 @@ public sealed class MentorDiscoveryService(
             toUtc = TimeZoneInfo.ConvertTimeToUtc(endLocalDt, tz);
         }
 
-        // Chặn khoảng tìm kiếm vượt quá 30 ngày
         if (toUtc - fromUtc > TimeSpan.FromDays(MentorSlotPolicy.MaximumScheduleHorizonDays))
             return (default, default, $"Khoảng thời gian duyệt lịch tối đa là {MentorSlotPolicy.MaximumScheduleHorizonDays} ngày.");
 
-        // Áp dụng ranh giới lead-time và horizon
         if (fromUtc < minLeadUtc) fromUtc = minLeadUtc;
         if (toUtc > maxHorizonUtc) toUtc = maxHorizonUtc;
 

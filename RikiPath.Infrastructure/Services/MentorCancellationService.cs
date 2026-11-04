@@ -87,7 +87,6 @@ public sealed class MentorCancellationService : IMentorCancellationService
         if (booking is null)
             return ApiResponse<MentorCancellationResponse>.Fail("Không tìm thấy thông tin lịch hẹn tư vấn.", HttpStatusCode.NotFound);
 
-        // Kiểm tra quyền: Learner chủ booking, Mentor được giao, hoặc Admin
         var isOwnerLearner = booking.UserSubscription != null && booking.UserSubscription.UserId == claim.Id;
         var isAssignedMentor = booking.MentorAvailability != null && booking.MentorAvailability.MentorId == claim.Id;
         var isAdmin = claim.Role == Role.Admin;
@@ -95,7 +94,6 @@ public sealed class MentorCancellationService : IMentorCancellationService
         if (!isOwnerLearner && !isAssignedMentor && !isAdmin)
             return ApiResponse<MentorCancellationResponse>.Fail("Bạn không có quyền hủy lịch hẹn tư vấn này.", HttpStatusCode.Forbidden);
 
-        // Idempotency: Nếu lịch hẹn đã ở trạng thái Cancelled trước đó
         if (booking.Status == MentorStatus.Cancelled)
         {
             return ApiResponse<MentorCancellationResponse>.Success(new MentorCancellationResponse
@@ -111,14 +109,12 @@ public sealed class MentorCancellationService : IMentorCancellationService
             });
         }
 
-        // Không cho phép hủy buổi đã hoàn thành
         if (booking.Status == MentorStatus.Completed)
             return ApiResponse<MentorCancellationResponse>.Fail("Buổi tư vấn đã hoàn thành, không thể hủy.", HttpStatusCode.Conflict);
 
         var nowUtc = DateTime.UtcNow;
         var slot = booking.MentorAvailability;
 
-        // Kiểm tra phòng họp đang diễn ra hoặc đang trong phiên tham gia
         if (slot is not null)
         {
             var isRoomActiveWindow = nowUtc >= slot.StartTime.AddMinutes(-15) && nowUtc <= slot.EndTime.AddMinutes(30);
@@ -135,7 +131,6 @@ public sealed class MentorCancellationService : IMentorCancellationService
         var isRefundEligible = false;
         string? refundOpKey = null;
 
-        // Phân tầng chính sách hủy theo vai trò người yêu cầu
         if (isOwnerLearner)
         {
             if (slot is null)
@@ -147,12 +142,10 @@ public sealed class MentorCancellationService : IMentorCancellationService
                 var hoursUntilStart = (slot.StartTime - nowUtc).TotalHours;
                 if (hoursUntilStart >= 24)
                 {
-                    // Hủy đúng hạn (>= 24 tiếng trước giờ hẹn): Hoàn vé 100%
                     isRefundEligible = true;
                 }
                 else
                 {
-                    // Hủy muộn (< 24 tiếng trước giờ hẹn): Không tự động hoàn vé
                     isLateCancellation = true;
                     isRefundEligible = false;
                 }
@@ -160,14 +153,12 @@ public sealed class MentorCancellationService : IMentorCancellationService
         }
         else if (isAssignedMentor)
         {
-            // Mentor hủy: Phải hủy trước giờ bắt đầu
             if (slot is not null && nowUtc >= slot.StartTime)
             {
                 return ApiResponse<MentorCancellationResponse>.Fail(
                     "Không thể hủy buổi tư vấn sau khi đã đến giờ bắt đầu.", HttpStatusCode.Conflict);
             }
 
-            // Mentor hủy luôn bồi hoàn 100% lượt cho học viên và gia hạn thời hạn vé
             isRefundEligible = true;
             if (booking.UserSubscription != null && booking.UserSubscription.EndDate < nowUtc.AddDays(7))
             {
@@ -177,7 +168,6 @@ public sealed class MentorCancellationService : IMentorCancellationService
         }
         else if (isAdmin)
         {
-            // Quản trị viên hủy can thiệp hệ thống: Hoàn vé và gia hạn
             isRefundEligible = true;
             if (booking.UserSubscription != null && booking.UserSubscription.EndDate < nowUtc.AddDays(7))
             {
@@ -186,7 +176,6 @@ public sealed class MentorCancellationService : IMentorCancellationService
             }
         }
 
-        // 1. Cập nhật trạng thái booking và metadata hủy
         booking.Status = MentorStatus.Cancelled;
         booking.CancellationReason = request.Reason ?? (isLateCancellation ? "Học viên hủy muộn (< 24h)" : "Hủy lịch hẹn tư vấn");
         booking.CancelledAtUtc = nowUtc;
@@ -202,7 +191,6 @@ public sealed class MentorCancellationService : IMentorCancellationService
 
         _context.MentorBookings.Update(booking);
 
-        // 2. Giải phóng bản ghi reservation (cập nhật ReleasedAtUtc để nhả slot và không chặn GiST)
         var reservation = await _context.MentorBookingReservations
             .FirstOrDefaultAsync(r => r.MentorBookingId == booking.Id && r.ReleasedAtUtc == null, cancellationToken);
 
@@ -212,7 +200,6 @@ public sealed class MentorCancellationService : IMentorCancellationService
             _context.MentorBookingReservations.Update(reservation);
         }
 
-        // 3. Hoàn trả slot khả dụng (giảm BookedCount)
         if (slot is not null)
         {
             if (isInMemory)
@@ -236,7 +223,6 @@ public sealed class MentorCancellationService : IMentorCancellationService
             }
         }
 
-        // 4. Giảm số lượng đặt chỗ trong ngày (DayGuard ActiveBookingCount)
         if (reservation is not null)
         {
             if (isInMemory)
@@ -253,7 +239,6 @@ public sealed class MentorCancellationService : IMentorCancellationService
             }
         }
 
-        // 5. Hoàn trả tín dụng thông qua Credit Ledger nếu đủ điều kiện
         if (isRefundEligible && booking.UserSubscription != null)
         {
             refundOpKey = $"refund:booking:{booking.Id}";
@@ -272,7 +257,6 @@ public sealed class MentorCancellationService : IMentorCancellationService
             }
         }
 
-        // 6. Ghi nhận sự kiện Outbox phục vụ thông báo bất đồng bộ
         var outboxPayload = JsonSerializer.Serialize(new
         {
             BookingId = booking.Id,
@@ -373,11 +357,9 @@ public sealed class MentorCancellationService : IMentorCancellationService
         if (booking is null)
             return ApiResponse<MentorRescheduleResponse>.Fail("Không tìm thấy thông tin lịch hẹn tư vấn.", HttpStatusCode.NotFound);
 
-        // Kiểm tra quyền sở hữu
         if (claim.Role != Role.Admin && booking.UserSubscription.UserId != claim.Id)
             return ApiResponse<MentorRescheduleResponse>.Fail("Bạn không có quyền dời lịch hẹn này.", HttpStatusCode.Forbidden);
 
-        // Kiểm tra trạng thái booking cũ
         if (booking.Status == MentorStatus.Cancelled)
             return ApiResponse<MentorRescheduleResponse>.Fail("Lịch hẹn đã bị hủy, không thể dời lịch.", HttpStatusCode.Conflict);
 
@@ -388,14 +370,12 @@ public sealed class MentorCancellationService : IMentorCancellationService
         if (oldSlot is null)
             return ApiResponse<MentorRescheduleResponse>.Fail("Lịch hẹn không có thông tin khung giờ hợp lệ.", HttpStatusCode.BadRequest);
 
-        // Kiểm tra thời hạn dời lịch (chỉ cho phép dời trước ít nhất 24h)
         if (claim.Role != Role.Admin && (oldSlot.StartTime - nowUtc).TotalHours < 24)
         {
             return ApiResponse<MentorRescheduleResponse>.Fail(
                 "Chỉ được dời lịch trước giờ bắt đầu ít nhất 24 tiếng.", HttpStatusCode.Conflict);
         }
 
-        // Tải thông tin khung giờ mới
         var newSlot = await _context.MentorAvailabilities
             .Include(a => a.Mentor)
             .FirstOrDefaultAsync(a => a.Id == request.NewSlotId && !a.IsDeleted, cancellationToken);
@@ -403,22 +383,39 @@ public sealed class MentorCancellationService : IMentorCancellationService
         if (newSlot is null)
             return ApiResponse<MentorRescheduleResponse>.Fail("Không tìm thấy khung giờ mới muốn dời tới.", HttpStatusCode.NotFound);
 
-        // Khung giờ mới phải thuộc cùng Mentor
         if (newSlot.MentorId != oldSlot.MentorId)
             return ApiResponse<MentorRescheduleResponse>.Fail("Khung giờ mới phải thuộc về cùng một cố vấn.", HttpStatusCode.BadRequest);
 
-        // Khung giờ mới phải được phê duyệt và chưa hết hạn
         if (!newSlot.IsApproved || newSlot.RejectedAt != null || newSlot.CancelRequestedAt != null)
             return ApiResponse<MentorRescheduleResponse>.Fail("Khung giờ mới chưa được kích hoạt hoặc đã bị thu hồi.", HttpStatusCode.Conflict);
 
         if (newSlot.StartTime <= nowUtc.AddHours(2))
             return ApiResponse<MentorRescheduleResponse>.Fail("Khung giờ mới phải cách hiện tại ít nhất 2 tiếng.", HttpStatusCode.Conflict);
 
-        // Khung giờ mới phải chưa có người đặt
         if (newSlot.BookedCount >= newSlot.MaxLearners)
             return ApiResponse<MentorRescheduleResponse>.Fail("Khung giờ mới đã được học viên khác đặt kín.", HttpStatusCode.Conflict);
 
-        // 1. Nhả reservation cũ
+        // Nếu lịch hẹn có gắn trình độ JLPT, xác minh cố vấn vẫn còn quyền giảng dạy trình độ đó
+        if (booking.CompensationLevelId.HasValue)
+        {
+            var hasAnyQualifications = await _context.MentorTeachingQualifications
+                .AnyAsync(q => q.MentorUserId == newSlot.MentorId, cancellationToken);
+            if (hasAnyQualifications)
+            {
+                var stillQualified = await _context.MentorTeachingQualifications
+                    .AnyAsync(q => q.MentorUserId == newSlot.MentorId
+                        && q.CertificateLevelId == booking.CompensationLevelId.Value
+                        && q.IsActive
+                        && q.RevokedAtUtc == null, cancellationToken);
+                if (!stillQualified)
+                {
+                    return ApiResponse<MentorRescheduleResponse>.Fail(
+                        "Chuyên gia không còn quyền giảng dạy trình độ JLPT của lịch hẹn này, không thể dời lịch.",
+                        HttpStatusCode.Conflict);
+                }
+            }
+        }
+
         var oldReservation = await _context.MentorBookingReservations
             .FirstOrDefaultAsync(r => r.MentorBookingId == booking.Id && r.ReleasedAtUtc == null, cancellationToken);
 
@@ -428,7 +425,6 @@ public sealed class MentorCancellationService : IMentorCancellationService
             _context.MentorBookingReservations.Update(oldReservation);
         }
 
-        // 2. Giảm BookedCount slot cũ
         var isInMemory = _context.Database.ProviderName == "Microsoft.EntityFrameworkCore.InMemory";
         if (isInMemory)
         {
@@ -441,7 +437,6 @@ public sealed class MentorCancellationService : IMentorCancellationService
                 .ExecuteUpdateAsync(s => s.SetProperty(x => x.BookedCount, x => x.BookedCount - 1), cancellationToken);
         }
 
-        // 3. Tạo reservation mới cho slot mới
         var localStartTz = TimeZoneInfo.FindSystemTimeZoneById("SE Asia Standard Time");
         var localStart = TimeZoneInfo.ConvertTimeFromUtc(newSlot.StartTime, localStartTz);
         var localDate = DateOnly.FromDateTime(localStart);
@@ -449,6 +444,7 @@ public sealed class MentorCancellationService : IMentorCancellationService
         var newReservation = new MentorBookingReservation
         {
             MentorBookingId = booking.Id,
+            MentorAvailabilityId = newSlot.Id,
             MentorId = newSlot.MentorId,
             StartUtc = newSlot.StartTime,
             EndUtc = newSlot.EndTime,
@@ -459,7 +455,6 @@ public sealed class MentorCancellationService : IMentorCancellationService
         };
         _context.MentorBookingReservations.Add(newReservation);
 
-        // 4. Tăng BookedCount slot mới
         if (isInMemory)
         {
             newSlot.BookedCount++;
@@ -471,14 +466,12 @@ public sealed class MentorCancellationService : IMentorCancellationService
                 .ExecuteUpdateAsync(s => s.SetProperty(x => x.BookedCount, x => x.BookedCount + 1), cancellationToken);
         }
 
-        // 5. Cập nhật booking sang slot mới
         var prevStart = oldSlot.StartTime;
         booking.MentorAvailabilityId = newSlot.Id;
         booking.ScheduledAt = newSlot.StartTime;
         booking.Status = MentorStatus.Assigned;
         _context.MentorBookings.Update(booking);
 
-        // 6. Ghi nhận sự kiện Outbox
         var outboxEvent = new MentorOutboxEvent
         {
             EventKey = $"booking:rescheduled:{booking.Id}:{nowUtc.Ticks}",
@@ -675,7 +668,6 @@ public sealed class MentorCancellationService : IMentorCancellationService
                         refundRes.ErrorMessage ?? "Không thể hoàn trả lượt tín dụng.", HttpStatusCode.Conflict);
                 }
 
-                // Gia hạn vé cho học viên
                 var extensionDays = request.ExtendDays > 0 ? request.ExtendDays : 7;
                 if (booking.UserSubscription.EndDate < nowUtc.AddDays(extensionDays))
                 {
