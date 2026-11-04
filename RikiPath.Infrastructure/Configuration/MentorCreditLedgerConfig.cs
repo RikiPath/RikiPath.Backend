@@ -27,6 +27,11 @@ public sealed class MentorCreditGrantConfig : IEntityTypeConfiguration<MentorCre
             .HasForeignKey(x => x.UserSubscriptionId)
             .OnDelete(DeleteBehavior.Restrict);
 
+        b.HasOne(x => x.CertificateLevel)
+            .WithMany()
+            .HasForeignKey(x => x.CertificateLevelId)
+            .OnDelete(DeleteBehavior.Restrict);
+
         b.Property(x => x.EffectiveFromUtc).HasColumnType("timestamp with time zone");
         b.Property(x => x.ExpiresAtUtc).HasColumnType("timestamp with time zone");
         b.Property(x => x.CreatedAtUtc).HasColumnType("timestamp with time zone");
@@ -36,8 +41,9 @@ public sealed class MentorCreditGrantConfig : IEntityTypeConfiguration<MentorCre
         // Một gói thanh toán chỉ được cấp một nguồn tín dụng duy nhất.
         b.HasIndex(x => x.UserSubscriptionId).IsUnique();
 
-        // Chỉ mục phục vụ truy vấn các nguồn cấp còn hạn và còn số dư theo FIFO.
+        // Chỉ mục phục vụ truy vấn các nguồn cấp còn hạn và còn số dư theo FIFO và cấp độ JLPT.
         b.HasIndex(x => new { x.LearnerId, x.ExpiresAtUtc });
+        b.HasIndex(x => new { x.LearnerId, x.CertificateLevelId, x.ExpiresAtUtc });
     }
 }
 

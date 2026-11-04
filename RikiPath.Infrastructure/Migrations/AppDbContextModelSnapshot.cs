@@ -1169,6 +1169,48 @@ namespace RikiPath.Infrastructure.Migrations
                     b.ToTable("HomeworkSubmissions");
                 });
 
+            modelBuilder.Entity("RikiPath.Domain.Entities.JlptLevelPayCoefficient", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("CertificateLevelId")
+                        .HasColumnType("integer");
+
+                    b.Property<decimal>("Coefficient")
+                        .HasPrecision(10, 4)
+                        .HasColumnType("numeric(10,4)");
+
+                    b.Property<int>("ConfiguredByAdminId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("EffectiveFromUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("EffectiveUntilUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ConfiguredByAdminId");
+
+                    b.HasIndex("CertificateLevelId", "EffectiveFromUtc")
+                        .IsUnique();
+
+                    b.ToTable("JlptLevelPayCoefficients", t =>
+                        {
+                            t.HasCheckConstraint("CK_JlptLevelPayCoefficient_Positive", "\"Coefficient\" > 0");
+
+                            t.HasCheckConstraint("CK_JlptLevelPayCoefficient_Range", "\"EffectiveUntilUtc\" IS NULL OR \"EffectiveUntilUtc\" > \"EffectiveFromUtc\"");
+                        });
+                });
+
             modelBuilder.Entity("RikiPath.Domain.Entities.KanaCharacter", b =>
                 {
                     b.Property<int>("Id")
@@ -3037,6 +3079,74 @@ namespace RikiPath.Infrastructure.Migrations
                     b.ToTable("MentorAbuseReports", (string)null);
                 });
 
+            modelBuilder.Entity("RikiPath.Domain.Entities.MentorAttendanceApproval", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<int?>("ApprovedEligibleMinutes")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("DecisionReason")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<string>("EvidenceSummary")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<int>("MentorBookingId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("RawLearnerDurationSeconds")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("RawMentorDurationSeconds")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("ReviewedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("ReviewedByAdminId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<uint>("Version")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MentorBookingId")
+                        .IsUnique();
+
+                    b.HasIndex("ReviewedByAdminId");
+
+                    b.ToTable("MentorAttendanceApprovals", t =>
+                        {
+                            t.HasCheckConstraint("CK_MentorAttendanceApproval_Minutes", "\"ApprovedEligibleMinutes\" IS NULL OR (\"ApprovedEligibleMinutes\" > 0 AND \"ApprovedEligibleMinutes\" <= 90)");
+
+                            t.HasCheckConstraint("CK_MentorAttendanceApproval_RawDuration", "\"RawMentorDurationSeconds\" >= 0 AND \"RawLearnerDurationSeconds\" >= 0");
+                        });
+                });
+
             modelBuilder.Entity("RikiPath.Domain.Entities.MentorAttendanceRecord", b =>
                 {
                     b.Property<int>("Id")
@@ -3302,6 +3412,101 @@ namespace RikiPath.Infrastructure.Migrations
                         });
                 });
 
+            modelBuilder.Entity("RikiPath.Domain.Entities.MentorBankAccount", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("AccountHolderName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("AccountNumberHash")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<int>("AccountVersion")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("BankCode")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<string>("BankName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("EffectiveFromUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("EffectiveUntilUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("EncryptedAccountNumber")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<bool>("IsCurrent")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("MaskedAccountNumber")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<int>("MentorUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("VerificationNotes")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<string>("VerificationStatus")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)");
+
+                    b.Property<DateTime?>("VerifiedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("VerifiedByAdminId")
+                        .HasColumnType("integer");
+
+                    b.Property<uint>("Version")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MentorUserId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_MentorBankAccounts_MentorUserId_Current")
+                        .HasFilter("\"IsCurrent\" = TRUE");
+
+                    b.HasIndex("VerifiedByAdminId");
+
+                    b.HasIndex("MentorUserId", "AccountVersion")
+                        .IsUnique();
+
+                    b.ToTable("MentorBankAccounts", t =>
+                        {
+                            t.HasCheckConstraint("CK_MentorBankAccount_Version", "\"AccountVersion\" >= 1");
+                        });
+                });
+
             modelBuilder.Entity("RikiPath.Domain.Entities.MentorBooking", b =>
                 {
                     b.Property<int>("Id")
@@ -3324,6 +3529,16 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Property<int?>("CancelledByUserId")
                         .HasColumnType("integer");
 
+                    b.Property<string>("CompensationCurrency")
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)");
+
+                    b.Property<int?>("CompensationFormulaVersion")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("CompensationLevelId")
+                        .HasColumnType("integer");
+
                     b.Property<DateTime?>("CompletedAt")
                         .HasColumnType("timestamp without time zone");
 
@@ -3332,6 +3547,9 @@ namespace RikiPath.Infrastructure.Migrations
 
                     b.Property<DateTime?>("CreatedDate")
                         .HasColumnType("timestamp without time zone");
+
+                    b.Property<long?>("CreditGrantId")
+                        .HasColumnType("bigint");
 
                     b.Property<bool?>("ExceptionApproved")
                         .HasColumnType("boolean");
@@ -3344,6 +3562,14 @@ namespace RikiPath.Infrastructure.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("boolean")
                         .HasDefaultValue(false);
+
+                    b.Property<decimal?>("FrozenHourlyRate")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<decimal?>("FrozenLevelCoefficient")
+                        .HasPrecision(10, 4)
+                        .HasColumnType("numeric(10,4)");
 
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
@@ -3367,6 +3593,10 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Property<DateTime?>("ScheduledAt")
                         .HasColumnType("timestamp without time zone");
 
+                    b.Property<decimal?>("ScheduledCompensationAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasMaxLength(20)
@@ -3382,6 +3612,10 @@ namespace RikiPath.Infrastructure.Migrations
                         .HasColumnName("xmin");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("CompensationLevelId");
+
+                    b.HasIndex("CreditGrantId");
 
                     b.HasIndex("MentorAvailabilityId", "UserSubscriptionId")
                         .IsUnique()
@@ -3713,6 +3947,9 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Property<int>("AvailableQuantity")
                         .HasColumnType("integer");
 
+                    b.Property<int?>("CertificateLevelId")
+                        .HasColumnType("integer");
+
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -3742,10 +3979,14 @@ namespace RikiPath.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("CertificateLevelId");
+
                     b.HasIndex("UserSubscriptionId")
                         .IsUnique();
 
                     b.HasIndex("LearnerId", "ExpiresAtUtc");
+
+                    b.HasIndex("LearnerId", "CertificateLevelId", "ExpiresAtUtc");
 
                     b.ToTable("MentorCreditGrants", null, t =>
                         {
@@ -3888,6 +4129,140 @@ namespace RikiPath.Infrastructure.Migrations
                     b.ToTable("MentorDisputeHistories", (string)null);
                 });
 
+            modelBuilder.Entity("RikiPath.Domain.Entities.MentorEarningEntry", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<int>("ApprovedEligibleMinutes")
+                        .HasColumnType("integer");
+
+                    b.Property<long>("AttendanceApprovalId")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("CertificateLevelId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("CreatedByAdminId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)");
+
+                    b.Property<int>("FormulaVersion")
+                        .HasColumnType("integer");
+
+                    b.Property<decimal>("FrozenHourlyRate")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<decimal>("FrozenLevelCoefficient")
+                        .HasPrecision(10, 4)
+                        .HasColumnType("numeric(10,4)");
+
+                    b.Property<decimal>("GrossAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<string>("JlptLevelCode")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)");
+
+                    b.Property<int>("MentorBookingId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("MentorUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("OperationKey")
+                        .IsRequired()
+                        .HasMaxLength(150)
+                        .HasColumnType("character varying(150)");
+
+                    b.Property<long?>("PayrollPeriodId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AttendanceApprovalId")
+                        .IsUnique();
+
+                    b.HasIndex("CertificateLevelId");
+
+                    b.HasIndex("CreatedByAdminId");
+
+                    b.HasIndex("MentorBookingId")
+                        .IsUnique();
+
+                    b.HasIndex("OperationKey")
+                        .IsUnique();
+
+                    b.HasIndex("PayrollPeriodId");
+
+                    b.HasIndex("MentorUserId", "Status");
+
+                    b.ToTable("MentorEarningEntries", t =>
+                        {
+                            t.HasCheckConstraint("CK_MentorEarningEntry_Positive", "\"FrozenHourlyRate\" > 0 AND \"FrozenLevelCoefficient\" > 0 AND \"ApprovedEligibleMinutes\" > 0 AND \"ApprovedEligibleMinutes\" <= 90 AND \"GrossAmount\" > 0");
+                        });
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.MentorHourlyRate", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<decimal>("AmountPerHour")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<int>("ConfiguredByAdminId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("EffectiveFromUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("EffectiveUntilUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("MentorUserId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ConfiguredByAdminId");
+
+                    b.HasIndex("MentorUserId", "EffectiveFromUtc")
+                        .IsUnique();
+
+                    b.ToTable("MentorHourlyRates", t =>
+                        {
+                            t.HasCheckConstraint("CK_MentorHourlyRate_Positive", "\"AmountPerHour\" > 0");
+
+                            t.HasCheckConstraint("CK_MentorHourlyRate_Range", "\"EffectiveUntilUtc\" IS NULL OR \"EffectiveUntilUtc\" > \"EffectiveFromUtc\"");
+                        });
+                });
+
             modelBuilder.Entity("RikiPath.Domain.Entities.MentorOutboxEvent", b =>
                 {
                     b.Property<long>("Id")
@@ -3950,6 +4325,404 @@ namespace RikiPath.Infrastructure.Migrations
                         });
                 });
 
+            modelBuilder.Entity("RikiPath.Domain.Entities.MentorPayoutAttempt", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<int>("AttemptNumber")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("BatchId")
+                        .HasMaxLength(150)
+                        .HasColumnType("character varying(150)");
+
+                    b.Property<DateTime?>("CompletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("ConfirmedByAdminId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)");
+
+                    b.Property<string>("ErrorCode")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("ErrorMessage")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<string>("EvidenceNotes")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<string>("EvidenceStorageKey")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("ExecutionMethod")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)");
+
+                    b.Property<string>("IdempotencyKey")
+                        .IsRequired()
+                        .HasMaxLength(150)
+                        .HasColumnType("character varying(150)");
+
+                    b.Property<int>("InitiatedByAdminId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("InternalStatus")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<long?>("LockedBankAccountId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("PayoutObligationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("ProviderPayoutId")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("ProviderStatus")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("TransferReference")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ConfirmedByAdminId");
+
+                    b.HasIndex("IdempotencyKey")
+                        .IsUnique();
+
+                    b.HasIndex("InitiatedByAdminId");
+
+                    b.HasIndex("LockedBankAccountId");
+
+                    b.HasIndex("PayoutObligationId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_MentorPayoutAttempts_OneSucceededPerObligation")
+                        .HasFilter("\"InternalStatus\" = 'Succeeded'");
+
+                    b.HasIndex("TransferReference")
+                        .IsUnique()
+                        .HasDatabaseName("IX_MentorPayoutAttempts_SucceededTransferReference")
+                        .HasFilter("\"TransferReference\" IS NOT NULL AND \"InternalStatus\" = 'Succeeded'");
+
+                    b.HasIndex("PayoutObligationId", "AttemptNumber")
+                        .IsUnique();
+
+                    b.ToTable("MentorPayoutAttempts", t =>
+                        {
+                            t.HasCheckConstraint("CK_MentorPayoutAttempt_ManualEvidence", "(\"ExecutionMethod\" <> 'ManualBankTransfer' OR \"InternalStatus\" <> 'Succeeded') OR (\"TransferReference\" IS NOT NULL AND \"EvidenceStorageKey\" IS NOT NULL)");
+
+                            t.HasCheckConstraint("CK_MentorPayoutAttempt_Positive", "\"Amount\" > 0 AND \"AttemptNumber\" >= 1");
+                        });
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.MentorPayoutObligation", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<long?>("ActiveAttemptId")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("ApprovedByAdminId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)");
+
+                    b.Property<long?>("LockedBankAccountId")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("MentorUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<long?>("OrganizationPayoutAccountId")
+                        .HasColumnType("bigint");
+
+                    b.Property<decimal>("PayableAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<long>("PayrollPeriodId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("SelectedMethod")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)");
+
+                    b.Property<DateTime?>("SettledAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long?>("SettledAttemptId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("SettledReference")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<uint>("Version")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ApprovedByAdminId");
+
+                    b.HasIndex("LockedBankAccountId");
+
+                    b.HasIndex("MentorUserId");
+
+                    b.HasIndex("OrganizationPayoutAccountId");
+
+                    b.HasIndex("PayrollPeriodId")
+                        .IsUnique();
+
+                    b.ToTable("MentorPayoutObligations", t =>
+                        {
+                            t.HasCheckConstraint("CK_MentorPayoutObligation_Positive", "\"PayableAmount\" > 0");
+
+                            t.HasCheckConstraint("CK_MentorPayoutObligation_Settlement", "(\"Status\" <> 'Paid') OR (\"SettledAttemptId\" IS NOT NULL AND \"SettledReference\" IS NOT NULL AND \"SettledAtUtc\" IS NOT NULL)");
+                        });
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.MentorPayrollAdjustment", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<int>("ApprovedByAdminId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("OperationKey")
+                        .IsRequired()
+                        .HasMaxLength(150)
+                        .HasColumnType("character varying(150)");
+
+                    b.Property<long>("PayrollPeriodId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<int?>("RelatedBookingId")
+                        .HasColumnType("integer");
+
+                    b.Property<long?>("RelatedEarningEntryId")
+                        .HasColumnType("bigint");
+
+                    b.Property<decimal>("SignedAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ApprovedByAdminId");
+
+                    b.HasIndex("OperationKey")
+                        .IsUnique();
+
+                    b.HasIndex("PayrollPeriodId");
+
+                    b.ToTable("MentorPayrollAdjustments", t =>
+                        {
+                            t.HasCheckConstraint("CK_MentorPayrollAdjustment_NonZero", "\"SignedAmount\" <> 0");
+                        });
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.MentorPayrollLine", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<int>("ApprovedEligibleMinutes")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long>("EarningEntryId")
+                        .HasColumnType("bigint");
+
+                    b.Property<decimal>("FrozenHourlyRate")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<decimal>("FrozenLevelCoefficient")
+                        .HasPrecision(10, 4)
+                        .HasColumnType("numeric(10,4)");
+
+                    b.Property<decimal>("LineAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<int>("MentorBookingId")
+                        .HasColumnType("integer");
+
+                    b.Property<long>("PayrollPeriodId")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EarningEntryId")
+                        .IsUnique();
+
+                    b.HasIndex("MentorBookingId")
+                        .IsUnique();
+
+                    b.HasIndex("PayrollPeriodId");
+
+                    b.ToTable("MentorPayrollLines", t =>
+                        {
+                            t.HasCheckConstraint("CK_MentorPayrollLine_Positive", "\"LineAmount\" > 0 AND \"ApprovedEligibleMinutes\" > 0");
+                        });
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.MentorPayrollPeriod", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("ApprovalNotes")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<DateTime?>("ApprovedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("ApprovedByAdminId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("ClosedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)");
+
+                    b.Property<decimal>("GrossPayableAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<int>("MentorUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Month")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("PreparedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("PreparedByAdminId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("SequenceNumber")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)");
+
+                    b.Property<string>("SupplementalReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<decimal>("TotalAdjustmentsAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<decimal>("TotalEarningsAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<uint>("Version")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
+                    b.Property<int>("Year")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ApprovedByAdminId");
+
+                    b.HasIndex("PreparedByAdminId");
+
+                    b.HasIndex("MentorUserId", "Year", "Month", "SequenceNumber", "Currency")
+                        .IsUnique();
+
+                    b.ToTable("MentorPayrollPeriods", t =>
+                        {
+                            t.HasCheckConstraint("CK_MentorPayrollPeriod_Payable", "\"TotalEarningsAmount\" >= 0 AND \"GrossPayableAmount\" >= 0");
+
+                            t.HasCheckConstraint("CK_MentorPayrollPeriod_Period", "\"Year\" >= 2020 AND \"Year\" <= 2100 AND \"Month\" >= 1 AND \"Month\" <= 12 AND \"SequenceNumber\" >= 1");
+
+                            t.HasCheckConstraint("CK_MentorPayrollPeriod_Supplemental", "\"SequenceNumber\" = 1 OR (\"SupplementalReason\" IS NOT NULL AND length(trim(\"SupplementalReason\")) > 0)");
+                        });
+                });
+
             modelBuilder.Entity("RikiPath.Domain.Entities.MentorProfile", b =>
                 {
                     b.Property<int>("MentorId")
@@ -4009,6 +4782,7 @@ namespace RikiPath.Infrastructure.Migrations
                         .HasColumnType("character varying(1000)");
 
                     b.Property<string>("VerificationStatus")
+                        .IsConcurrencyToken()
                         .IsRequired()
                         .HasMaxLength(30)
                         .HasColumnType("character varying(30)");
@@ -4203,6 +4977,48 @@ namespace RikiPath.Infrastructure.Migrations
                             t.HasCheckConstraint("CK_MentorScheduleRule_Time", "\"LocalEnd\" > \"LocalStart\"");
 
                             t.HasCheckConstraint("CK_MentorScheduleRule_Weekday", "\"Weekday\" BETWEEN 0 AND 6");
+                        });
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.MentorTeachingQualification", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("CertificateLevelId")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("MentorUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("RevokedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("VerifiedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("VerifiedByAdminId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CertificateLevelId");
+
+                    b.HasIndex("VerifiedByAdminId");
+
+                    b.HasIndex("MentorUserId", "CertificateLevelId")
+                        .IsUnique()
+                        .HasFilter("\"IsActive\" = TRUE");
+
+                    b.ToTable("MentorTeachingQualifications", t =>
+                        {
+                            t.HasCheckConstraint("CK_MentorTeachingQualification_Revoked", "\"RevokedAtUtc\" IS NULL OR \"RevokedAtUtc\" >= \"VerifiedAtUtc\"");
                         });
                 });
 
@@ -4762,6 +5578,73 @@ namespace RikiPath.Infrastructure.Migrations
                     b.ToTable("Notifications");
                 });
 
+            modelBuilder.Entity("RikiPath.Domain.Entities.OrganizationPayoutAccount", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("AccountHolderName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("BankCode")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<string>("BankName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("ChannelCode")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<int>("ConfiguredByAdminId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("IsVerified")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("MaskedAccountNumber")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<string>("ProviderAccountReference")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("ProviderType")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)");
+
+                    b.Property<DateTime?>("VerifiedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ChannelCode")
+                        .IsUnique();
+
+                    b.HasIndex("ConfiguredByAdminId");
+
+                    b.ToTable("OrganizationPayoutAccounts");
+                });
+
             modelBuilder.Entity("RikiPath.Domain.Entities.PracticeExercise", b =>
                 {
                     b.Property<int>("Id")
@@ -5224,6 +6107,9 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Property<int>("AiGradingQuota")
                         .HasColumnType("integer");
 
+                    b.Property<int?>("CertificateLevelId")
+                        .HasColumnType("integer");
+
                     b.Property<Guid?>("CreatedBy")
                         .HasColumnType("uuid");
 
@@ -5271,6 +6157,8 @@ namespace RikiPath.Infrastructure.Migrations
                         .HasColumnType("integer");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("CertificateLevelId");
 
                     b.ToTable("SubscriptionPlans");
 
@@ -5789,6 +6677,9 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Property<decimal>("AmountPaid")
                         .HasColumnType("decimal(18,2)");
 
+                    b.Property<int?>("CertificateLevelId")
+                        .HasColumnType("integer");
+
                     b.Property<Guid?>("CreatedBy")
                         .HasColumnType("uuid");
 
@@ -5851,6 +6742,8 @@ namespace RikiPath.Infrastructure.Migrations
                         .HasColumnName("xmin");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("CertificateLevelId");
 
                     b.HasIndex("MentorId");
 
@@ -6177,6 +7070,25 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Navigation("Lesson");
                 });
 
+            modelBuilder.Entity("RikiPath.Domain.Entities.JlptLevelPayCoefficient", b =>
+                {
+                    b.HasOne("RikiPath.Domain.Entities.CertificateLevel", "CertificateLevel")
+                        .WithMany()
+                        .HasForeignKey("CertificateLevelId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "ConfiguredByAdmin")
+                        .WithMany()
+                        .HasForeignKey("ConfiguredByAdminId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("CertificateLevel");
+
+                    b.Navigation("ConfiguredByAdmin");
+                });
+
             modelBuilder.Entity("RikiPath.Domain.Entities.KanaWritingPracticeCard", b =>
                 {
                     b.HasOne("RikiPath.Domain.Entities.KanaCharacter", "KanaCharacter")
@@ -6412,6 +7324,24 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Navigation("TargetUser");
                 });
 
+            modelBuilder.Entity("RikiPath.Domain.Entities.MentorAttendanceApproval", b =>
+                {
+                    b.HasOne("RikiPath.Domain.Entities.MentorBooking", "MentorBooking")
+                        .WithMany()
+                        .HasForeignKey("MentorBookingId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "ReviewedByAdmin")
+                        .WithMany()
+                        .HasForeignKey("ReviewedByAdminId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("MentorBooking");
+
+                    b.Navigation("ReviewedByAdmin");
+                });
+
             modelBuilder.Entity("RikiPath.Domain.Entities.MentorAttendanceRecord", b =>
                 {
                     b.HasOne("RikiPath.Domain.Entities.MentorBooking", "MentorBooking")
@@ -6456,8 +7386,36 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Navigation("WeeklyAvailability");
                 });
 
+            modelBuilder.Entity("RikiPath.Domain.Entities.MentorBankAccount", b =>
+                {
+                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "MentorUser")
+                        .WithMany()
+                        .HasForeignKey("MentorUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "VerifiedByAdmin")
+                        .WithMany()
+                        .HasForeignKey("VerifiedByAdminId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("MentorUser");
+
+                    b.Navigation("VerifiedByAdmin");
+                });
+
             modelBuilder.Entity("RikiPath.Domain.Entities.MentorBooking", b =>
                 {
+                    b.HasOne("RikiPath.Domain.Entities.CertificateLevel", "CompensationLevel")
+                        .WithMany()
+                        .HasForeignKey("CompensationLevelId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("RikiPath.Domain.Entities.MentorCreditGrant", "CreditGrant")
+                        .WithMany()
+                        .HasForeignKey("CreditGrantId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("RikiPath.Domain.Entities.MentorAvailability", "MentorAvailability")
                         .WithMany("MentorBookings")
                         .HasForeignKey("MentorAvailabilityId")
@@ -6468,6 +7426,10 @@ namespace RikiPath.Infrastructure.Migrations
                         .HasForeignKey("UserSubscriptionId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.Navigation("CompensationLevel");
+
+                    b.Navigation("CreditGrant");
 
                     b.Navigation("MentorAvailability");
 
@@ -6597,6 +7559,11 @@ namespace RikiPath.Infrastructure.Migrations
 
             modelBuilder.Entity("RikiPath.Domain.Entities.MentorCreditGrant", b =>
                 {
+                    b.HasOne("RikiPath.Domain.Entities.CertificateLevel", "CertificateLevel")
+                        .WithMany()
+                        .HasForeignKey("CertificateLevelId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("RikiPath.Domain.Entities.UserAccount", "Learner")
                         .WithMany()
                         .HasForeignKey("LearnerId")
@@ -6608,6 +7575,8 @@ namespace RikiPath.Infrastructure.Migrations
                         .HasForeignKey("UserSubscriptionId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.Navigation("CertificateLevel");
 
                     b.Navigation("Learner");
 
@@ -6657,6 +7626,221 @@ namespace RikiPath.Infrastructure.Migrations
                         .IsRequired();
 
                     b.Navigation("Dispute");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.MentorEarningEntry", b =>
+                {
+                    b.HasOne("RikiPath.Domain.Entities.MentorAttendanceApproval", "AttendanceApproval")
+                        .WithMany()
+                        .HasForeignKey("AttendanceApprovalId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("RikiPath.Domain.Entities.CertificateLevel", "CertificateLevel")
+                        .WithMany()
+                        .HasForeignKey("CertificateLevelId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "CreatedByAdmin")
+                        .WithMany()
+                        .HasForeignKey("CreatedByAdminId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("RikiPath.Domain.Entities.MentorBooking", "MentorBooking")
+                        .WithMany()
+                        .HasForeignKey("MentorBookingId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "MentorUser")
+                        .WithMany()
+                        .HasForeignKey("MentorUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("RikiPath.Domain.Entities.MentorPayrollPeriod", "PayrollPeriod")
+                        .WithMany()
+                        .HasForeignKey("PayrollPeriodId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("AttendanceApproval");
+
+                    b.Navigation("CertificateLevel");
+
+                    b.Navigation("CreatedByAdmin");
+
+                    b.Navigation("MentorBooking");
+
+                    b.Navigation("MentorUser");
+
+                    b.Navigation("PayrollPeriod");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.MentorHourlyRate", b =>
+                {
+                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "ConfiguredByAdmin")
+                        .WithMany()
+                        .HasForeignKey("ConfiguredByAdminId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "MentorUser")
+                        .WithMany()
+                        .HasForeignKey("MentorUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("ConfiguredByAdmin");
+
+                    b.Navigation("MentorUser");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.MentorPayoutAttempt", b =>
+                {
+                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "ConfirmedByAdmin")
+                        .WithMany()
+                        .HasForeignKey("ConfirmedByAdminId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "InitiatedByAdmin")
+                        .WithMany()
+                        .HasForeignKey("InitiatedByAdminId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("RikiPath.Domain.Entities.MentorBankAccount", "LockedBankAccount")
+                        .WithMany()
+                        .HasForeignKey("LockedBankAccountId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("RikiPath.Domain.Entities.MentorPayoutObligation", "PayoutObligation")
+                        .WithMany("Attempts")
+                        .HasForeignKey("PayoutObligationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("ConfirmedByAdmin");
+
+                    b.Navigation("InitiatedByAdmin");
+
+                    b.Navigation("LockedBankAccount");
+
+                    b.Navigation("PayoutObligation");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.MentorPayoutObligation", b =>
+                {
+                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "ApprovedByAdmin")
+                        .WithMany()
+                        .HasForeignKey("ApprovedByAdminId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("RikiPath.Domain.Entities.MentorBankAccount", "LockedBankAccount")
+                        .WithMany()
+                        .HasForeignKey("LockedBankAccountId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "MentorUser")
+                        .WithMany()
+                        .HasForeignKey("MentorUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("RikiPath.Domain.Entities.OrganizationPayoutAccount", "OrganizationPayoutAccount")
+                        .WithMany()
+                        .HasForeignKey("OrganizationPayoutAccountId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("RikiPath.Domain.Entities.MentorPayrollPeriod", "PayrollPeriod")
+                        .WithMany()
+                        .HasForeignKey("PayrollPeriodId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("ApprovedByAdmin");
+
+                    b.Navigation("LockedBankAccount");
+
+                    b.Navigation("MentorUser");
+
+                    b.Navigation("OrganizationPayoutAccount");
+
+                    b.Navigation("PayrollPeriod");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.MentorPayrollAdjustment", b =>
+                {
+                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "ApprovedByAdmin")
+                        .WithMany()
+                        .HasForeignKey("ApprovedByAdminId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("RikiPath.Domain.Entities.MentorPayrollPeriod", "PayrollPeriod")
+                        .WithMany("Adjustments")
+                        .HasForeignKey("PayrollPeriodId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("ApprovedByAdmin");
+
+                    b.Navigation("PayrollPeriod");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.MentorPayrollLine", b =>
+                {
+                    b.HasOne("RikiPath.Domain.Entities.MentorEarningEntry", "EarningEntry")
+                        .WithMany()
+                        .HasForeignKey("EarningEntryId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("RikiPath.Domain.Entities.MentorBooking", "MentorBooking")
+                        .WithMany()
+                        .HasForeignKey("MentorBookingId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("RikiPath.Domain.Entities.MentorPayrollPeriod", "PayrollPeriod")
+                        .WithMany("Lines")
+                        .HasForeignKey("PayrollPeriodId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("EarningEntry");
+
+                    b.Navigation("MentorBooking");
+
+                    b.Navigation("PayrollPeriod");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.MentorPayrollPeriod", b =>
+                {
+                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "ApprovedByAdmin")
+                        .WithMany()
+                        .HasForeignKey("ApprovedByAdminId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "MentorUser")
+                        .WithMany()
+                        .HasForeignKey("MentorUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "PreparedByAdmin")
+                        .WithMany()
+                        .HasForeignKey("PreparedByAdminId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("ApprovedByAdmin");
+
+                    b.Navigation("MentorUser");
+
+                    b.Navigation("PreparedByAdmin");
                 });
 
             modelBuilder.Entity("RikiPath.Domain.Entities.MentorProfile", b =>
@@ -6717,6 +7901,33 @@ namespace RikiPath.Infrastructure.Migrations
                         .IsRequired();
 
                     b.Navigation("Schedule");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.MentorTeachingQualification", b =>
+                {
+                    b.HasOne("RikiPath.Domain.Entities.CertificateLevel", "CertificateLevel")
+                        .WithMany()
+                        .HasForeignKey("CertificateLevelId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "MentorUser")
+                        .WithMany()
+                        .HasForeignKey("MentorUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "VerifiedByAdmin")
+                        .WithMany()
+                        .HasForeignKey("VerifiedByAdminId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("CertificateLevel");
+
+                    b.Navigation("MentorUser");
+
+                    b.Navigation("VerifiedByAdmin");
                 });
 
             modelBuilder.Entity("RikiPath.Domain.Entities.MentorWeeklyAvailability", b =>
@@ -6884,6 +8095,17 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Navigation("UserAccount");
                 });
 
+            modelBuilder.Entity("RikiPath.Domain.Entities.OrganizationPayoutAccount", b =>
+                {
+                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "ConfiguredByAdmin")
+                        .WithMany()
+                        .HasForeignKey("ConfiguredByAdminId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("ConfiguredByAdmin");
+                });
+
             modelBuilder.Entity("RikiPath.Domain.Entities.PracticeExercise", b =>
                 {
                     b.HasOne("RikiPath.Domain.Entities.LanguageSkill", "LanguageSkill")
@@ -7017,6 +8239,16 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Navigation("ReviewCard");
                 });
 
+            modelBuilder.Entity("RikiPath.Domain.Entities.SubscriptionPlan", b =>
+                {
+                    b.HasOne("RikiPath.Domain.Entities.CertificateLevel", "CertificateLevel")
+                        .WithMany()
+                        .HasForeignKey("CertificateLevelId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("CertificateLevel");
+                });
+
             modelBuilder.Entity("RikiPath.Domain.Entities.UserAccount", b =>
                 {
                     b.HasOne("RikiPath.Domain.Entities.CertificateLevel", "AssessedCertificateLevel")
@@ -7054,6 +8286,11 @@ namespace RikiPath.Infrastructure.Migrations
 
             modelBuilder.Entity("RikiPath.Domain.Entities.UserSubscription", b =>
                 {
+                    b.HasOne("RikiPath.Domain.Entities.CertificateLevel", "CertificateLevel")
+                        .WithMany()
+                        .HasForeignKey("CertificateLevelId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("RikiPath.Domain.Entities.UserAccount", "Mentor")
                         .WithMany()
                         .HasForeignKey("MentorId")
@@ -7070,6 +8307,8 @@ namespace RikiPath.Infrastructure.Migrations
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.Navigation("CertificateLevel");
 
                     b.Navigation("Mentor");
 
@@ -7194,6 +8433,18 @@ namespace RikiPath.Infrastructure.Migrations
             modelBuilder.Entity("RikiPath.Domain.Entities.MentorDispute", b =>
                 {
                     b.Navigation("Histories");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.MentorPayoutObligation", b =>
+                {
+                    b.Navigation("Attempts");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.MentorPayrollPeriod", b =>
+                {
+                    b.Navigation("Adjustments");
+
+                    b.Navigation("Lines");
                 });
 
             modelBuilder.Entity("RikiPath.Domain.Entities.MentorSchedule", b =>

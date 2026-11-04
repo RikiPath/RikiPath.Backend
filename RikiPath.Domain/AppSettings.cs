@@ -10,6 +10,8 @@ namespace RikiPath.Domain
         public SecretToken SecretToken { get; set; }
         public SmtpSettings SmtpSettings { get; set; }
         public PayOsSettings PayOs { get; set; }
+        public PayOsPayoutSettings PayOsPayout { get; set; } = new();
+        public MentorBankSecuritySettings MentorBankSecurity { get; set; } = new();
         public SupabaseSettings Supabase { get; set; }
         public AiSettings Ai { get; set; }
         public AzureSpeechSettings AzureSpeechSettings { get; set; }
@@ -64,6 +66,21 @@ namespace RikiPath.Domain
         public string MobileLandingBaseUrl { get; set; } = string.Empty;
     }
 
+    public sealed class PayOsPayoutSettings
+    {
+        /// <summary>Live payout mặc định DISABLED để ngăn gửi tiền thật khi chưa được phê duyệt vận hành.</summary>
+        public bool LivePayoutEnabled { get; set; } = false;
+        public bool QaSimulatorEnabled { get; set; } = true;
+        public string BaseUrl { get; set; } = "https://api-merchant.payos.vn";
+        public string ClientId { get; set; } = string.Empty;
+        public string ApiKey { get; set; } = string.Empty;
+        public string ChecksumKey { get; set; } = string.Empty;
+    }
+
+    public sealed class MentorBankSecuritySettings
+    {
+        public string EncryptionKey { get; set; } = "RikiPath-Mentor-Bank-AES256-Key-2026";
+    }
 
     public class SupabaseSettings
     {

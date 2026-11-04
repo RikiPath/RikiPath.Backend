@@ -19,6 +19,7 @@ public sealed class MentorCreditLedgerRepository : IMentorCreditLedgerRepository
         int learnerId, DateTime asOfUtc, CancellationToken cancellationToken = default)
     {
         return await _context.MentorCreditGrants
+            .Include(x => x.CertificateLevel)
             .Where(x => x.LearnerId == learnerId
                      && x.AvailableQuantity > 0
                      && x.EffectiveFromUtc <= asOfUtc
@@ -31,6 +32,7 @@ public sealed class MentorCreditLedgerRepository : IMentorCreditLedgerRepository
     public async Task<MentorCreditGrant?> GetGrantByIdAsync(long grantId, CancellationToken cancellationToken = default)
     {
         return await _context.MentorCreditGrants
+            .Include(x => x.CertificateLevel)
             .Include(x => x.Entries)
             .FirstOrDefaultAsync(x => x.Id == grantId, cancellationToken);
     }
@@ -39,6 +41,7 @@ public sealed class MentorCreditLedgerRepository : IMentorCreditLedgerRepository
         int subscriptionId, CancellationToken cancellationToken = default)
     {
         return await _context.MentorCreditGrants
+            .Include(x => x.CertificateLevel)
             .Include(x => x.Entries)
             .FirstOrDefaultAsync(x => x.UserSubscriptionId == subscriptionId, cancellationToken);
     }
@@ -74,6 +77,7 @@ public sealed class MentorCreditLedgerRepository : IMentorCreditLedgerRepository
         int learnerId, CancellationToken cancellationToken = default)
     {
         return await _context.MentorCreditGrants
+            .Include(x => x.CertificateLevel)
             .Include(x => x.Entries)
             .Where(x => x.LearnerId == learnerId)
             .OrderBy(x => x.CreatedAtUtc)

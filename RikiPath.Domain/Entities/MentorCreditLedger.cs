@@ -15,6 +15,10 @@ public sealed class MentorCreditGrant
     public int UserSubscriptionId { get; set; }
     public UserSubscription UserSubscription { get; set; } = null!;
 
+    // Cấp độ JLPT (N5-N2) gắn với vé tư vấn; vé chỉ được dùng đặt lịch đúng cấp độ này.
+    public int? CertificateLevelId { get; set; }
+    public CertificateLevel? CertificateLevel { get; set; }
+
     // Phiên bản chính sách đặt lịch áp dụng.
     public int PolicyVersion { get; set; } = 3;
 

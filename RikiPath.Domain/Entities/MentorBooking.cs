@@ -20,6 +20,17 @@ namespace RikiPath.Domain.Entities
         public string? MeetingLink { get; set; }
         public DateTime? CompletedAt { get; set; }
 
+        // Bản chụp thù lao nullable để giữ nguyên mọi booking lịch sử.
+        public int? CompensationLevelId { get; set; }
+        public CertificateLevel? CompensationLevel { get; set; }
+        public decimal? FrozenHourlyRate { get; set; }
+        public decimal? FrozenLevelCoefficient { get; set; }
+        public decimal? ScheduledCompensationAmount { get; set; }
+        public string? CompensationCurrency { get; set; }
+        public int? CompensationFormulaVersion { get; set; }
+        public long? CreditGrantId { get; set; }
+        public MentorCreditGrant? CreditGrant { get; set; }
+
         public Note? Note { get; set; }
 
         // Siêu dữ liệu phục vụ hủy lịch, dời lịch và xử lý ngoại lệ hoàn vé (Stage 10/13)

@@ -14,6 +14,10 @@ namespace RikiPath.Domain.Entities
         public int? MentorId { get; set; }
         public UserAccount? Mentor { get; set; }
 
+        /// <summary>Cấp độ JLPT (N5-N2) được chốt tại thời điểm mua gói tư vấn; null đối với gói tự học hoặc gói lịch sử.</summary>
+        public int? CertificateLevelId { get; set; }
+        public CertificateLevel? CertificateLevel { get; set; }
+
         public decimal AmountPaid { get; set; }
         public PaymentStatus PaymentStatus { get; set; } = PaymentStatus.Pending;
         public string? PaymentTransactionId { get; set; }

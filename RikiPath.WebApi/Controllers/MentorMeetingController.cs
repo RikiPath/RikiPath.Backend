@@ -12,13 +12,17 @@ public sealed class MentorMeetingController(IMentorMeetingService service) : Con
 {
     [HttpGet("mentors")]
     [AllowAnonymous]
-    public async Task<IActionResult> GetMentors(CancellationToken cancellationToken)
-         => ToActionResult(await service.GetMentorsAsync(cancellationToken));
+    public async Task<IActionResult> GetMentors(
+        [FromQuery] string? jlptLevel,
+        CancellationToken cancellationToken)
+         => ToActionResult(await service.GetMentorsAsync(jlptLevel, cancellationToken));
 
     [HttpGet("plans")]
     [AllowAnonymous]
-    public async Task<IActionResult> GetPlans(CancellationToken cancellationToken)
-        => ToActionResult(await service.GetPlansAsync(cancellationToken));
+    public async Task<IActionResult> GetPlans(
+        [FromQuery] string? jlptLevel,
+        CancellationToken cancellationToken)
+        => ToActionResult(await service.GetPlansAsync(jlptLevel, cancellationToken));
 
     [HttpGet("availability")]
     [Authorize(Roles = "Learner")]
@@ -26,8 +30,9 @@ public sealed class MentorMeetingController(IMentorMeetingService service) : Con
         [FromQuery] DateTime from,
         [FromQuery] DateTime to,
         [FromQuery] int? mentorId,
+        [FromQuery] string? jlptLevel,
         CancellationToken cancellationToken)
-        => ToActionResult(await service.GetAvailableSlotsAsync(from, to, mentorId, cancellationToken));
+        => ToActionResult(await service.GetAvailableSlotsAsync(from, to, mentorId, jlptLevel, cancellationToken));
 
     [HttpPost("purchase")]
     [Authorize(Roles = "Learner")]

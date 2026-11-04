@@ -5,6 +5,8 @@ using RikiPath.Application.IServices;
 using RikiPath.Application.Requests.MentorMeetings;
 using RikiPath.Application.Responses;
 using RikiPath.Application.Responses.MentorMeetings;
+using RikiPath.Domain.MentorCompensation;
+using System.Net;
 
 namespace RikiPath.WebApi.Controllers;
 
@@ -40,7 +42,7 @@ public sealed class MentorBookingController(IMentorBookingService bookingService
         return StatusCode(result.StatusCode, result);
     }
 
-    // Học viên đặt lịch giữ chỗ nguyên tử từ số dư tín dụng khả dụng kèm trừ vé FIFO và bảo vệ chống trùng lịch
+    // Học viên đặt lịch giữ chỗ nguyên tử từ số dư tín dụng khả dụng kèm trừ vé FIFO theo đúng trình độ JLPT và bảo vệ chống trùng lịch
     [HttpPost("api/learner/mentor-bookings")]
     [Authorize(Roles = "Learner")]
     [ProducesResponseType(typeof(ApiResponse<MentorBookingResponse>), StatusCodes.Status200OK)]
@@ -51,6 +53,15 @@ public sealed class MentorBookingController(IMentorBookingService bookingService
         [FromBody] BookIncludedMeetingRequest request,
         CancellationToken cancellationToken)
     {
+        if (string.IsNullOrWhiteSpace(request.JlptLevel) ||
+            !MentorCompensationPolicy.TryNormalizeSupportedLevel(request.JlptLevel, out _))
+        {
+            var bad = ApiResponse<MentorBookingResponse>.Fail(
+                "Vui lòng chọn trình độ JLPT hợp lệ (N5, N4, N3 hoặc N2; không hỗ trợ N1).",
+                HttpStatusCode.BadRequest);
+            return StatusCode(bad.StatusCode, bad);
+        }
+
         var result = await bookingService.BookSlotAsync(request, cancellationToken);
         return StatusCode(result.StatusCode, result);
     }

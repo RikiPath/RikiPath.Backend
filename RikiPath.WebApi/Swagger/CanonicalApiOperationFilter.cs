@@ -185,6 +185,20 @@ public sealed class CanonicalApiOperationFilter : IOperationFilter
         "learningpath" or "standardroadmap" or "lessonprogress" => "tiến độ học tập",
         "schedule" or "rules" => "lịch làm việc",
         "availability" or "slots" => "khung giờ tư vấn",
+        "mentor-compensation" or "compensation" or "overview" => "thù lao và đối soát Cố vấn",
+        "hourly-rates" => "đơn giá thù lao theo giờ của Cố vấn",
+        "jlpt-coefficients" => "hệ số thù lao theo trình độ JLPT",
+        "qualifications" or "grant" or "revoke" => "quyền giảng dạy trình độ JLPT của Cố vấn",
+        "attendance-approval" or "attendance" or "evaluate" => "xác nhận thời lượng buổi tư vấn",
+        "earnings" => "sổ cái thù lao buổi tư vấn",
+        "payrolls" or "generate" or "approve" => "kỳ bảng lương tháng của Cố vấn",
+        "adjustments" => "bút toán điều chỉnh bảng lương",
+        "bank-accounts" or "bank-account" or "verify" => "tài khoản ngân hàng nhận thù lao",
+        "organization-payout-accounts" => "tài khoản nguồn chi trả của tổ chức",
+        "payout-obligations" or "payouts" or "select-method" or "method" => "nghĩa vụ chi trả thù lao",
+        "manual-initiate" or "manual-confirm" or "initiate" => "chi trả chuyển khoản ngân hàng thủ công",
+        "payos-execute" or "batch-payout" or "batch" or "balance" or "estimate-credit" or "payos" or "execute" => "chi trả qua cổng payOS Payout",
+        "reconcile" => "đối soát trạng thái chi trả",
         _ => "dữ liệu liên quan"
     };
 
@@ -202,7 +216,7 @@ public sealed class CanonicalApiOperationFilter : IOperationFilter
         return segment?.ToLowerInvariant() switch
         {
             "admin" => "Administration",
-            "mentor" or "mentors" or "mentor-bookings" or "mentor-meetings" or "mentor-credits" or "mentor-reviews" or "mentor-disputes" or "mentor-schedule" => "Mentor Support",
+            "mentor" or "mentors" or "mentor-bookings" or "mentor-meetings" or "mentor-credits" or "mentor-reviews" or "mentor-disputes" or "mentor-schedule" or "mentor-compensation" => "Mentor Support",
             "learner" or "credits" => "Learner",
             "auth" => "Authentication",
             "userprofile" => "User Profile",

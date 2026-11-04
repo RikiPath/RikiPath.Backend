@@ -1,4 +1,4 @@
-﻿namespace RikiPath.Application.Responses.MentorMeetings
+namespace RikiPath.Application.Responses.MentorMeetings
 {
     public sealed class MentorMeetingPurchaseResponse
     {
@@ -7,6 +7,8 @@
         public long OrderCode { get; set; }
         public string PlanName { get; set; } = string.Empty;
         public int MeetingSessionCount { get; set; }
+        public int? CertificateLevelId { get; set; }
+        public string? JlptLevel { get; set; }
         public List<MentorMeetingFeatureResponse> Features { get; set; } = [];
         public decimal Amount { get; set; }
         public string CheckoutUrl { get; set; } = string.Empty;

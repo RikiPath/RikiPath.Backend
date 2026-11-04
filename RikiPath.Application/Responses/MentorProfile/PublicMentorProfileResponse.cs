@@ -8,6 +8,7 @@ namespace RikiPath.Application.Responses.MentorProfile
         public string? Bio { get; set; }
         public string? Expertise { get; set; }
         public string? JlptLevel { get; set; }
+        public List<string> TeachingJlptLevels { get; set; } = [];
         public int? YearsOfExperience { get; set; }
         public string? Workplace { get; set; }
         public string? IntroductionVideoUrl { get; set; }

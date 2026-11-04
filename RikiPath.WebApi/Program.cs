@@ -447,20 +447,6 @@ internal class Program
         });
         var app = builder.Build();
 
-        using (var scope = app.Services.CreateScope())
-        {
-            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            try
-            {
-                db.Database.ExecuteSqlRaw("CREATE EXTENSION IF NOT EXISTS btree_gist;");
-            }
-            catch (Exception)
-            {
-                // The app user may not be allowed to create extensions. Migrate still checks btree_gist.
-            }
-            db.Database.Migrate();
-        }
-
         // 10. Middleware Pipeline
         if (app.Environment.IsDevelopment())
         {

@@ -5,6 +5,7 @@ public sealed class BookIncludedMeetingRequest
     private string? _question;
 
     public int MentorAvailabilityId { get; set; }
+    public string? JlptLevel { get; set; }
     public string? Question
     {
         get => _question ?? Notes;
