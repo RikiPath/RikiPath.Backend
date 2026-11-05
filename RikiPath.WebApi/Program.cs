@@ -41,6 +41,7 @@ internal class Program
 
         builder.Services.Configure<PayOsSettings>(payOsSection);
         builder.Services.Configure<AiSettings>(configuration.GetSection("Ai"));
+        builder.Services.Configure<AwsSettings>(configuration.GetSection("AWS"));
 
         // 2. Database Context - Npgsql using ConnectionStrings:DefaultConnection
         builder.Services.AddDbContext<AppDbContext>(options =>
@@ -204,7 +205,10 @@ internal class Program
                 // M4E2E must never fall through to an external AI provider.
                 builder.Services.AddSingleton<IAiLearningPathClient, M4E2eAiLearningPathClient>();
             }
-            else
+            else if (string.Equals(
+                         configuration["Ai:LearningPathProvider"] ?? appSettings?.Ai?.LearningPathProvider,
+                         "Gemini",
+                         StringComparison.OrdinalIgnoreCase))
             {
                 builder.Services.AddHttpClient<IAiLearningPathClient, AiLearningPathClient>(client =>
                 {
@@ -216,6 +220,11 @@ internal class Program
                     if (!string.IsNullOrWhiteSpace(apiKey))
                         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
                 });
+            }
+            else
+            {
+                builder.Services.AddHttpClient<IAiLearningPathClient, BedrockAiLearningPathClient>(client =>
+                    client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json")));
             }
         }
 

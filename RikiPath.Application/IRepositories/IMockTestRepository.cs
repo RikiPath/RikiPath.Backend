@@ -1,7 +1,5 @@
 using RikiPath.Domain.Entities;
 using RikiPath.Domain.Enums;
-using System.Collections.Generic;
-using System.Threading.Tasks;
 
 namespace RikiPath.Application.IRepositories
 {
@@ -16,5 +14,7 @@ namespace RikiPath.Application.IRepositories
             CancellationToken cancellationToken = default);
         Task<List<MockTest>> GetByLevelAsync(int jlptLevelId);
         Task<List<MockTest>> GetLearnerPlacementTestsByLevelAsync(int certificateLevelId, CancellationToken cancellationToken = default);
+        Task<MockTest?> GetPlacementTestDetailByLevelAsync(int certificateLevelId, CancellationToken cancellationToken = default);
+
     }
 }

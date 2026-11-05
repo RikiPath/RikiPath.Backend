@@ -11,7 +11,6 @@ namespace RikiPath.Infrastructure.Configuration
             builder.HasKey(x => x.Id);
             builder.Property(x => x.CertificateLevelId).HasColumnName("CertificationLevelId");
             builder.Property(x => x.Title).IsRequired().HasMaxLength(300);
-            builder.Property(x => x.IsPlacementAssessment).HasDefaultValue(false);
 
             builder.HasOne(x => x.CertificateLevel)
                 .WithMany(x => x.MockTests)

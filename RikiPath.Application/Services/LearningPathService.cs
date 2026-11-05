@@ -6,6 +6,8 @@ using RikiPath.Application.Models;
 using RikiPath.Application.Requests.LearningPath;
 using RikiPath.Application.Responses;
 using RikiPath.Application.Responses.LearningPaths;
+using RikiPath.Application.Responses.MockTests;
+using RikiPath.Application.Responses.PlacementTests;
 using RikiPath.Domain.Entities;
 using RikiPath.Domain.Enums;
 using System.Net;
@@ -21,7 +23,8 @@ namespace RikiPath.Application.Services
         ILogger<LearningPathService> logger) : ILearningPathService
     {
         // ===== Constants =====
-        private const int MaxPlanDays = 90;           // Số ngày chi tiết tối đa AI sinh trong 1 lần
+        private const int MaxPlanDays = 180;          // Kế hoạch dài hạn ít nhất 6 tháng
+        private const int ShortPlanDays = 30;
         private const int MaxAiAttempts = 2;          // Retry khi AI trả JSON sai / thiếu ngày / chọn bài không hợp lệ
         private const int MaxNotebookWords = 50;
         private const int MaxLessonProgressItems = 30;
@@ -33,7 +36,7 @@ namespace RikiPath.Application.Services
         public Func<DateTime> UtcNowProvider { get; init; } = static () => DateTime.UtcNow;
 
         /// <summary>Một bài học trong DB thuộc cấp độ mục tiêu, kèm tiến độ của người học.</summary>
-        private sealed record CatalogLesson(int Id, string Title, double ProgressPercent);
+        private sealed record CatalogLesson(int Id, string Title, string LevelCode, double ProgressPercent);
 
         // =====================================================================
         // MAIN FLOW
@@ -45,14 +48,18 @@ namespace RikiPath.Application.Services
         public async Task<ApiResponse<LearningPathResponse>> GenerateLearningPathAsync(
             GenerateLearningPathRequest request,
             CancellationToken cancellationToken)
-            => await GenerateInternalAsync(null, isPreview: false, cancellationToken);
+            => await GenerateInternalAsync(request?.Horizon, request?.TargetExamDate, null, isPreview: false, cancellationToken);
 
         public async Task<ApiResponse<LearningPathResponse>> PreviewLearningPathAsync(
             PreviewLearningPathRequest request, CancellationToken cancellationToken)
-            => await GenerateInternalAsync(request, isPreview: true, cancellationToken);
+            => await GenerateInternalAsync(request?.Horizon, request?.TargetExamDate, request, isPreview: true, cancellationToken);
 
         private async Task<ApiResponse<LearningPathResponse>> GenerateInternalAsync(
-            PreviewLearningPathRequest? preview, bool isPreview, CancellationToken cancellationToken)
+            string? requestedHorizon,
+            DateTime? requestedExamDate,
+            PreviewLearningPathRequest? preview,
+            bool isPreview,
+            CancellationToken cancellationToken)
         {
             // ---------- 1. Lấy user và mục tiêu học tập ----------
             int userId = 0;
@@ -89,8 +96,11 @@ namespace RikiPath.Application.Services
                     "Lộ trình chỉ hỗ trợ cấp độ bắt đầu đến mục tiêu theo thứ tự N5 → N4 → N3.",
                     HttpStatusCode.BadRequest, errorCode: "LEARNING_PATH_LEVEL_UNSUPPORTED");
 
+            // Include the full foundation below the target. Placement level decides
+            // whether the learner can skip earlier levels, but the AI can only select
+            // from this real DB catalog, ordered N5 -> N4 -> N3.
             var spanLevels = visibleLevels
-                .Where(level => JlptCurriculum.Rank(level.Code) >= JlptCurriculum.Rank(starting.Code)
+                .Where(level => JlptCurriculum.Rank(level.Code) > 0
                     && JlptCurriculum.Rank(level.Code) <= JlptCurriculum.Rank(target.Code))
                 .OrderBy(level => JlptCurriculum.Rank(level.Code))
                 .ToList();
@@ -104,16 +114,9 @@ namespace RikiPath.Application.Services
                     HttpStatusCode.Conflict, errorCode: "PATH_PREVIEW_REQUIRED");
 
             var certName = $"JLPT {target.Code}";
-            var examDate = user.TargetExamDate;
-            if (examDate is null)
-            {
-                return ApiResponse<LearningPathResponse>.Fail(
-                    "Bạn cần chọn chứng chỉ, cấp độ và ngày dự định thi trước khi tạo lộ trình.",
-                    HttpStatusCode.BadRequest);
-            }
-
+            var examDate = requestedExamDate ?? user.TargetExamDate;
             var utcNow = BusinessDateHelper.EnsureUtc(UtcNowProvider());
-            if (!BusinessDateHelper.IsFutureExamDate(examDate, utcNow))
+            if (examDate.HasValue && !BusinessDateHelper.IsFutureExamDate(examDate.Value, utcNow))
             {
                 return ApiResponse<LearningPathResponse>.Fail(
                     "Ngày dự định thi phải sau hôm nay. Vui lòng cập nhật ngày thi để tạo lộ trình.",
@@ -121,17 +124,65 @@ namespace RikiPath.Application.Services
             }
 
             DateTime today = BusinessDateHelper.GetVietnamToday(utcNow);
-            DateTime normalizedExamDate = BusinessDateHelper.NormalizeExamDate(examDate.Value);
-            int daysUntilExam = BusinessDateHelper.GetDaysUntilExam(normalizedExamDate, utcNow);
-
-            int planDays = Math.Min(daysUntilExam, MaxPlanDays);
+            DateTime? normalizedExamDate = examDate.HasValue
+                ? BusinessDateHelper.NormalizeExamDate(examDate.Value)
+                : null;
+            int daysUntilExam = normalizedExamDate.HasValue
+                ? BusinessDateHelper.GetDaysUntilExam(normalizedExamDate.Value, utcNow)
+                : 0;
+            // A real Placement result and the target gap determine whether foundations are needed.
+            // The selected AI model evaluates date feasibility; the server applies hard safety rules.
+            PlacementTestResultResponse? placementForPlan;
+            try
+            {
+                placementForPlan = await LoadLatestPlacementResultAsync(userId);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                logger.LogError(ex, "Failed to load latest Placement result. UserId={UserId}", userId);
+                return ApiResponse<LearningPathResponse>.Fail(
+                    "Không thể tải kết quả đánh giá năng lực gần nhất.",
+                    HttpStatusCode.InternalServerError,
+                    errors: BuildDebugErrors(ex));
+            }
+            var skillScores = placementForPlan?.Sections
+                .Select(section => new
+                {
+                    Name = string.IsNullOrWhiteSpace(section.LanguageSkillName) ? section.SectionTitle : section.LanguageSkillName,
+                    section.ScorePercent,
+                })
+                .Where(section => !string.IsNullOrWhiteSpace(section.Name))
+                .GroupBy(section => section.Name)
+                .ToDictionary(group => group.Key, group => group.Average(section => section.ScorePercent));
+            var targetLevelGap = placementForPlan is null ? 0 : Math.Max(0,
+                JlptCurriculum.Rank(target.Code) - JlptCurriculum.Rank(placementForPlan.AssessedJlptLevelName));
+            var catalogStartRank = JlptCurriculum.Rank(starting.Code);
+            var assessedRank = JlptCurriculum.Rank(placementForPlan?.AssessedJlptLevelName);
+            if (assessedRank > 0)
+                catalogStartRank = Math.Min(catalogStartRank, assessedRank);
+            spanLevels = spanLevels
+                .Where(level => JlptCurriculum.Rank(level.Code) >= catalogStartRank)
+                .ToList();
+            var needsFoundation = placementForPlan is null ||
+                placementForPlan.TotalScore < 50 ||
+                (skillScores?.Values.Any(score => score < 30) ?? true) ||
+                targetLevelGap > 0;
+            var horizon = normalizedExamDate.HasValue
+                ? "long_term"
+                : needsFoundation ? "long_term" : NormalizeHorizon(requestedHorizon, daysUntilExam);
+            int planDays = normalizedExamDate.HasValue
+                ? MaxPlanDays
+                : horizon == "short_term" ? ShortPlanDays : MaxPlanDays;
 
             // ---------- 3. Valid owned Placement is mandatory for AI generation/preview ----------
             string promptText;
             Dictionary<int, CatalogLesson> catalogById;
+            LearningPathPromptContext promptContext;
             try
             {
-                var (promptContext, catalog) = await LoadLearnerDataAsync(userId, spanLevels, certName);
+                var learnerData = await LoadLearnerDataAsync(userId, spanLevels, certName, placementForPlan);
+                promptContext = learnerData.Context;
+                var catalog = learnerData.Catalog;
 
                 if (!promptContext.LatestTestScorePercent.HasValue)
                     return ApiResponse<LearningPathResponse>.Fail(
@@ -148,7 +199,7 @@ namespace RikiPath.Application.Services
                 catalogById = catalog.ToDictionary(c => c.Id);
 
                 promptText = BuildPrompt(promptContext, catalog, $"JLPT {starting.Code} → {target.Code}", normalizedExamDate, today,
-                    daysUntilExam, planDays, user.DailyStudyMinutes, user.StudyTimePreference);
+                    daysUntilExam, planDays, horizon, user.DailyStudyMinutes, user.StudyTimePreference);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -179,10 +230,26 @@ namespace RikiPath.Application.Services
                     {
                         var parsed = ParseAiResponse(rawJson);
 
+                        var isExamDateRealistic = AssessExamDateFeasibility(
+                            parsed, promptContext, daysUntilExam, normalizedExamDate.HasValue);
+                        var minRecommendedDays = GetMinimumRecommendedStudyDays(promptContext);
+                        parsed = parsed with
+                        {
+                            RecommendedStudyDays = Math.Max(parsed.RecommendedStudyDays, minRecommendedDays),
+                        };
+
                         // Chỉ giữ bài học có thật trong DB (chống AI bịa id), rồi mới validate
                         int dropped = NormalizeLessons(parsed, catalogById);
                         if (dropped > 0)
                             logger.LogWarning("AI referenced {Dropped} unknown lesson ids. UserId={UserId}", dropped, userId);
+
+                        horizon = normalizedExamDate.HasValue
+                            ? isExamDateRealistic == true && daysUntilExam <= 60 ? "short_term" : "long_term"
+                            : horizon;
+                        planDays = normalizedExamDate.HasValue && isExamDateRealistic == true
+                            ? Math.Min(daysUntilExam, MaxPlanDays)
+                            : normalizedExamDate.HasValue ? MaxPlanDays : horizon == "short_term" ? ShortPlanDays : MaxPlanDays;
+                        parsed = parsed with { IsExamDateRealistic = isExamDateRealistic, Horizon = horizon };
 
                         lastError = ValidateAiResult(parsed, planDays);
                         if (lastError is null)
@@ -228,6 +295,11 @@ namespace RikiPath.Application.Services
                     UserId = userId,
                     GeneratedAt = generatedAt,
                     Status = isPreview ? "DRAFT" : "ACTIVE",
+                    Horizon = horizon,
+                    PlanDurationDays = planDays,
+                    TargetExamDate = normalizedExamDate,
+                    DaysUntilExam = normalizedExamDate.HasValue ? daysUntilExam : null,
+                    HasTargetExamDate = normalizedExamDate.HasValue,
                     StartingJlptLevelId = starting.Id,
                     TargetJlptLevelId = target.Id,
                     PreviewExpiresAt = isPreview ? generatedAt.AddHours(24) : null,
@@ -236,6 +308,11 @@ namespace RikiPath.Application.Services
                     Strengths = aiResult.Strengths,
                     Weaknesses = aiResult.Weaknesses,
                     Feasibility = aiResult.Feasibility,
+                    IsExamDateRealistic = aiResult.IsExamDateRealistic,
+                    RecommendedStudyDays = aiResult.RecommendedStudyDays,
+                    SuggestedExamDate = normalizedExamDate.HasValue && aiResult.IsExamDateRealistic == false
+                        ? today.AddDays(Math.Max(Math.Max(aiResult.RecommendedStudyDays, MaxPlanDays), daysUntilExam + 1))
+                        : null,
                     FocusTopics = aiResult.FocusTopics,
                     DailySchedules = aiResult.DailySchedules,
                 };
@@ -468,7 +545,7 @@ namespace RikiPath.Application.Services
                 var lessons = await unitOfWork.Lessons.GetByCertificateLevelAsync(
                     user.TargetCertificateLevelId.Value, cancellationToken);
                 var catalog = lessons.ToDictionary(lesson => lesson.Id,
-                    lesson => new CatalogLesson(lesson.Id, lesson.Title, 0));
+                    lesson => new CatalogLesson(lesson.Id, lesson.Title, string.Empty, 0));
                 var legacy = ParseAiResponse(stored.SuggestionJson);
                 NormalizeLessons(legacy, catalog);
                 response = new LearningPathResponse
@@ -498,59 +575,58 @@ namespace RikiPath.Application.Services
         // DỮ LIỆU TỪ DB: bài đánh giá + tiến độ + notebook + DANH MỤC BÀI HỌC của cấp độ mục tiêu
         // =====================================================================
         private async Task<(LearningPathPromptContext Context, List<CatalogLesson> Catalog)> LoadLearnerDataAsync(
-            int userId, IReadOnlyList<CertificateLevel> levels, string targetCertification)
+            int userId, IReadOnlyList<CertificateLevel> levels, string targetCertification,
+            PlacementTestResultResponse? immutableResult)
         {
             var lessonProgresses = await unitOfWork.LessonProgresses.GetByUserAsync(userId) ?? [];
             var notebookEntries = await unitOfWork.LearnerNoteEntries.GetByUserAsync(userId, vocabularyListId: null) ?? [];
-            var placementAttempts = await unitOfWork.MockTestAttempts.GetPlacementByUserAsync(userId) ?? [];
-
-            // Only a completed, owned Placement attempt with an immutable result can unlock AI.
-            // Ordinary MockTest attempts are intentionally excluded by the repository and kind.
-            var immutableResult = placementAttempts
-                .Where(a => !a.IsDeleted && a.AttemptKind == AttemptKind.Placement && a.IsCompleted && a.TotalScore.HasValue)
-                .OrderByDescending(a => a.SubmittedAt ?? a.StartedAt)
-                .ThenByDescending(a => a.Id)
-                .Select(a => PlacementTestService.TryGetCompletedResultFromSnapshot(a.QuestionSnapshotJson))
-                .FirstOrDefault(result => result is not null);
-
-            if (immutableResult is null)
-            {
-                var fallbackLatest = await unitOfWork.MockTestAttempts.GetLatestCompletedPlacementByUserAsync(userId);
-                if (fallbackLatest is { IsDeleted: false, AttemptKind: AttemptKind.Placement, IsCompleted: true, TotalScore: not null })
-                    immutableResult = PlacementTestService.TryGetCompletedResultFromSnapshot(
-                        fallbackLatest.QuestionSnapshotJson);
-            }
 
             IReadOnlyDictionary<string, double>? skillBreakdown = null;
             if (immutableResult?.Sections is { Count: > 0 } sections)
             {
                 var sectionScores = sections
-                    .Where(section => !string.IsNullOrWhiteSpace(section.SectionTitle))
-                    .GroupBy(section => section.SectionTitle)
+                    .Select(section => new
+                    {
+                        Name = string.IsNullOrWhiteSpace(section.LanguageSkillName)
+                            ? section.SectionTitle
+                            : section.LanguageSkillName,
+                        section.ScorePercent,
+                    })
+                    .Where(section => !string.IsNullOrWhiteSpace(section.Name))
+                    .GroupBy(section => section.Name)
                     .ToDictionary(group => group.Key, group => group.Average(section => section.ScorePercent));
                 skillBreakdown = sectionScores.Count > 0 ? sectionScores : null;
             }
 
-            // A completed Placement result is valid only when the immutable completed
-            // snapshot is intact. Never rebuild placement scoring from mutable banks.
+            // Accept the immutable result snapshot, or the persisted section score rows
+            // written by the legacy submit flow. Never rebuild scores from mutable banks.
             // ---- Danh mục bài học của cấp độ mục tiêu (nguồn duy nhất AI được phép chọn) ----
-            var lessons = new List<Lesson>();
+            var catalogWithLevels = new List<CatalogLesson>();
             foreach (var level in levels)
-                lessons.AddRange(await unitOfWork.Lessons.GetByCertificateLevelAsync(level.Id));
+            {
+                var levelLessons = await unitOfWork.Lessons.GetByCertificateLevelAsync(level.Id);
+                catalogWithLevels.AddRange(levelLessons.Select(lesson => new CatalogLesson(
+                    lesson.Id, lesson.Title, level.Code, 0)));
+            }
 
             var progressByLesson = lessonProgresses
                 .GroupBy(p => p.LessonId)
                 .ToDictionary(g => g.Key, g => g.Max(p => Convert.ToDouble(p.ProgressPercent)));
 
             // Bài đã hoàn thành 100% không đưa vào danh mục (tiết kiệm token, tránh học lại)
-            var catalog = lessons
-                .Select(l => new CatalogLesson(l.Id, l.Title, progressByLesson.GetValueOrDefault(l.Id)))
+            var catalog = catalogWithLevels
+                .Select(lesson => lesson with
+                {
+                    ProgressPercent = progressByLesson.GetValueOrDefault(lesson.Id),
+                })
                 .Where(c => c.ProgressPercent < CompletedPercent)
+                .DistinctBy(c => c.Id)
                 .Take(MaxCatalogLessons)
                 .ToList();
 
             var context = new LearningPathPromptContext(
-                targetJlptLevel: targetCertification,
+                targetJlptLevel: targetCertification.Replace("JLPT ", string.Empty, StringComparison.OrdinalIgnoreCase),
+                assessedJlptLevel: immutableResult?.AssessedJlptLevelName ?? "chưa xác định",
                 lessonProgress: lessonProgresses
                     .Take(MaxLessonProgressItems)
                     .Select(p => (p.Lesson?.Title ?? string.Empty, p.ProgressPercent))
@@ -567,6 +643,99 @@ namespace RikiPath.Application.Services
             return (context, catalog);
         }
 
+        private async Task<PlacementTestResultResponse?> LoadLatestPlacementResultAsync(int userId)
+        {
+            var attempts = await unitOfWork.MockTestAttempts.GetPlacementByUserAsync(userId) ?? [];
+            foreach (var candidate in attempts
+                .Where(attempt => !attempt.IsDeleted && attempt.UserId == userId &&
+                                  attempt.AttemptKind == AttemptKind.Placement &&
+                                  attempt.IsCompleted && attempt.TotalScore.HasValue)
+                .OrderByDescending(attempt => attempt.SubmittedAt ?? attempt.StartedAt)
+                .ThenByDescending(attempt => attempt.Id))
+            {
+                var result = await TryGetStoredPlacementResultAsync(candidate, userId);
+                if (result is not null)
+                    return result;
+            }
+
+            var latestCompleted = await unitOfWork.MockTestAttempts.GetLatestCompletedPlacementByUserAsync(userId);
+            return latestCompleted is { IsDeleted: false, AttemptKind: AttemptKind.Placement,
+                IsCompleted: true, TotalScore: not null }
+                ? await TryGetStoredPlacementResultAsync(latestCompleted, userId)
+                : null;
+        }
+
+        private async Task<PlacementTestResultResponse?> TryGetStoredPlacementResultAsync(
+            MockTestAttempt attempt, int userId)
+        {
+            // Use the stored section rows as the source of truth for AI analysis. The
+            // snapshot fallback supports completed Placement attempts created by older flows.
+            if (!attempt.SubmittedAt.HasValue || attempt.TotalScore is not double totalScore ||
+                totalScore is < 0 or > 100)
+                return PracticeTestService.TryGetCompletedResultFromSnapshot(attempt.QuestionSnapshotJson);
+
+            var sections = await unitOfWork.MockTestSectionResults.GetByAttemptIdAsync(attempt.Id);
+            if (sections.Count == 0)
+                return PracticeTestService.TryGetCompletedResultFromSnapshot(attempt.QuestionSnapshotJson);
+            if (sections.Any(section => section.TotalCount <= 0 ||
+                    section.CorrectCount < 0 || section.CorrectCount > section.TotalCount ||
+                    section.ScorePercent is < 0 or > 100))
+                return null;
+
+            var learner = await unitOfWork.UserAccounts.GetByIdAsync(userId);
+            var assessedLevelId = learner?.AssessedCertificateLevelId;
+            var level = assessedLevelId.HasValue
+                ? await unitOfWork.CertificateLevels.GetActiveJlptLevelByIdAsync(assessedLevelId.Value)
+                : null;
+            if (level is null || !IsSupportedJlptCode(level.Code))
+                return null;
+
+            var totalQuestions = sections.Sum(section => section.TotalCount);
+            var correctCount = sections.Sum(section => section.CorrectCount);
+            if (totalQuestions == 0)
+                return null;
+
+            return new PlacementTestResultResponse
+            {
+                AttemptId = attempt.Id,
+                AttemptType = "placement",
+                Status = "completed",
+                StartedAt = attempt.StartedAt,
+                SubmittedAt = attempt.SubmittedAt,
+                DurationSeconds = Math.Max(0, (int)(attempt.SubmittedAt.Value - attempt.StartedAt).TotalSeconds),
+                TotalScore = totalScore,
+                CorrectCount = correctCount,
+                TotalQuestions = totalQuestions,
+                AssessedJlptLevelId = level.Id,
+                AssessedJlptLevelName = level.Code,
+                RecommendedTargetJlptLevelId = level.Id,
+                RecommendedTargetJlptLevelName = level.Code,
+                LevelBreakdowns =
+                [
+                    new PlacementLevelBreakdownItem
+                    {
+                        JlptLevelId = level.Id,
+                        JlptLevelName = level.Code,
+                        CorrectCount = correctCount,
+                        TotalCount = totalQuestions,
+                        ScorePercent = Math.Round(correctCount * 100d / totalQuestions, 2),
+                    }
+                ],
+                Sections = sections.Select(section => new SectionResultItem
+                {
+                    MockTestSectionId = section.MockTestSectionId,
+                    SectionTitle = section.MockTestSection?.Title ?? string.Empty,
+                    LanguageSkillName = section.MockTestSection?.LanguageSkill?.Name ?? string.Empty,
+                    CorrectCount = section.CorrectCount,
+                    TotalCount = section.TotalCount,
+                    Score = section.ScorePercent,
+                }).ToList(),
+            };
+        }
+
+        private static bool IsSupportedJlptCode(string? code)
+            => code?.Trim().ToUpperInvariant() is "N5" or "N4" or "N3";
+
         // =====================================================================
         // PROMPT
         // =====================================================================
@@ -574,26 +743,33 @@ namespace RikiPath.Application.Services
             LearningPathPromptContext promptContext,
             List<CatalogLesson> catalog,
             string certName,
-            DateTime examDate,
+            DateTime? examDate,
             DateTime today,
             int daysUntilExam,
             int planDays,
+            string horizon,
             int dailyStudyMinutes,
             string? studyTimePreference)
         {
-            string strategy = daysUntilExam switch
-            {
-                <= 30 => "CẤP TỐC (≤ 30 ngày): tập trung nội dung cốt lõi, dạng bài hay ra; luyện đề sớm và nhiều.",
-                <= 90 => "CÂN BẰNG (31–90 ngày): vừa lấp lỗ hổng kỹ năng yếu, vừa luyện đề tăng dần về cuối.",
-                _ => "NỀN TẢNG DÀI HẠN (> 90 ngày): xây nền vững từng kỹ năng, tăng cường độ dần, luyện đề ở giai đoạn cuối."
-            };
+            string strategy = examDate.HasValue
+                ? "Đánh giá khả năng đạt mục tiêu theo dữ liệu Placement trước, sau đó tự chọn ngắn hạn đến ngày thi hoặc dài hạn nếu cần dời lịch."
+                : horizon == "short_term"
+                    ? "NGẮN HẠN: củng cố nhanh các kỹ năng yếu nhất, ưu tiên bài cốt lõi và luyện đề có chọn lọc."
+                    : "DÀI HẠN: xây nền theo thứ tự, phân bổ đều kiến thức và kỹ năng, tăng dần luyện đề ở giai đoạn cuối.";
 
             var sb = new StringBuilder();
             sb.AppendLine("[THÔNG TIN NGƯỜI HỌC VÀ KẾT QUẢ ĐÁNH GIÁ NĂNG LỰC (DỮ LIỆU THẬT TRONG HỆ THỐNG)]");
             sb.AppendLine(promptContext.ToPromptText());
             sb.AppendLine($"- Chứng chỉ mục tiêu: {certName}");
+            sb.AppendLine($"- Năng lực hiện tại theo Placement gần nhất: JLPT {promptContext.AssessedJlptLevel}");
             sb.AppendLine($"- Hôm nay: {today:yyyy-MM-dd}");
-            sb.AppendLine($"- Ngày dự định thi: {examDate:yyyy-MM-dd} (còn {daysUntilExam} ngày)");
+            sb.AppendLine(examDate.HasValue
+                ? $"- Ngày dự định thi: {examDate.Value:yyyy-MM-dd} (còn {daysUntilExam} ngày)"
+                : "- Người học chưa đặt ngày thi cụ thể.");
+            sb.AppendLine(examDate.HasValue
+                ? $"- Hãy tự quyết định kế hoạch NGẮN HẠN đến ngày thi ({daysUntilExam} ngày) nếu thật sự khả thi; nếu không, lập kế hoạch DÀI HẠN đúng {MaxPlanDays} ngày và khuyên ngày thi phù hợp hơn."
+                : $"- Chưa có ngày thi cụ thể; lập kế hoạch {horizon} trong đúng {planDays} ngày.");
+            sb.AppendLine("- Nếu năng lực hiện tại thấp hơn mục tiêu 2 cấp JLPT (ví dụ N5 lên N3), tối thiểu khuyến nghị 180 ngày; nếu thấp hơn 1 cấp, tối thiểu 90 ngày. Không được đánh giá khả thi cho thời hạn ngắn hơn các mức này.");
             sb.AppendLine($"- Chiến lược ôn luyện: {strategy}");
             sb.AppendLine($"- Thời gian học mỗi ngày: {dailyStudyMinutes} phút (số bài mỗi ngày PHẢI vừa khung thời gian này).");
             if (!string.IsNullOrWhiteSpace(studyTimePreference))
@@ -601,16 +777,25 @@ namespace RikiPath.Application.Services
 
             sb.AppendLine("\n[DANH SÁCH BÀI HỌC CÓ SẴN TRONG HỆ THỐNG - CHỈ ĐƯỢC CHỌN BÀI TRONG DANH SÁCH NÀY]");
             foreach (var l in catalog)
-                sb.AppendLine($"- id={l.Id} | {l.Title} | tiến độ hiện tại {l.ProgressPercent:0}%");
+                sb.AppendLine($"- id={l.Id} | JLPT {l.LevelCode} | {l.Title} | tiến độ hiện tại {l.ProgressPercent:0}%");
 
             sb.AppendLine("\n[YÊU CẦU 1 - NHẬN XÉT NĂNG LỰC]");
             sb.AppendLine("- Dựa trên điểm Placement và điểm từng kỹ năng, nêu điểm mạnh và điểm yếu cụ thể.");
-            sb.AppendLine($"- Đánh giá mức độ khả thi đạt {certName} trong {daysUntilExam} ngày còn lại (thực tế, không phóng đại), kèm điều kiện cần để đạt.");
+            sb.AppendLine(examDate.HasValue
+                ? $"- Đánh giá trung thực khả năng đạt {certName} trong {daysUntilExam} ngày. Nếu tổng Placement dưới 50% hoặc có kỹ năng dưới 30%, mặc định KHÔNG khả thi trong thời hạn này."
+                : $"- Đánh giá tiến độ hiện tại và điều kiện cần để tiến tới {certName} sau kế hoạch {planDays} ngày.");
+            sb.AppendLine("- Trả về isExamDateRealistic (boolean hoặc null nếu chưa đặt ngày thi) và recommendedStudyDays (số ngày học thực tế cần có).");
 
             sb.AppendLine("\n[YÊU CẦU 2 - LỘ TRÌNH ÔN LUYỆN THEO NGÀY]");
-            sb.AppendLine($"- Chia lộ trình thành ĐÚNG {planDays} NGÀY liên tục (day = 1 đến day = {planDays}), không bỏ sót, không trùng.");
-            if (planDays < daysUntilExam)
-                sb.AppendLine($"- Đây là GIAI ĐOẠN 1 ({planDays}/{daysUntilExam} ngày). Trong summary nêu định hướng cho {daysUntilExam - planDays} ngày còn lại.");
+            if (examDate.HasValue)
+            {
+                sb.AppendLine($"- Nếu isExamDateRealistic=true: dailySchedules phải có đúng {Math.Min(daysUntilExam, MaxPlanDays)} ngày (một ngày cho mỗi ngày đến kỳ thi, tối đa {MaxPlanDays}).");
+                sb.AppendLine($"- Nếu isExamDateRealistic=false: dailySchedules phải có đúng {MaxPlanDays} ngày và summary/feasibility phải khuyên dời lịch thi, đề xuất số ngày cần chuẩn bị.");
+            }
+            else
+            {
+                sb.AppendLine($"- Chia lộ trình thành ĐÚNG {planDays} NGÀY liên tục (day = 1 đến day = {planDays}), không bỏ sót, không trùng.");
+            }
             sb.AppendLine("- Mỗi ngày chọn các bài học từ DANH SÁCH ở trên bằng id. TUYỆT ĐỐI không tự bịa bài học hay id không có trong danh sách.");
             sb.AppendLine("- Ưu tiên kỹ năng yếu theo Placement; bài đang học dở nên hoàn thành trước.");
             sb.AppendLine("- Nếu người học có từ trong sổ tay (notebook), có thể dành một số ngày/phần ôn lại các từ đó trong 'focus'.");
@@ -618,10 +803,57 @@ namespace RikiPath.Application.Services
 
             sb.AppendLine("\n[ĐỊNH DẠNG ĐẦU RA]");
             sb.AppendLine("- Chỉ trả về JSON hợp lệ, KHÔNG kèm giải thích hay markdown, với các khóa:");
-            sb.AppendLine("  summary (string - nhận xét tổng quan), strengths (string[]), weaknesses (string[]), feasibility (string),");
-            sb.AppendLine("  focusTopics (string[]), dailySchedules (mảng: day:int, title:string, focus:string, lessonIds:int[] - id lấy từ danh sách bài học).");
+            sb.AppendLine("  summary (string - nhận xét năng lực hiện tại), strengths (string[]), weaknesses (string[]), feasibility (string),");
+            sb.AppendLine("  isExamDateRealistic (boolean/null), recommendedStudyDays (int), focusTopics (string[]),");
+            sb.AppendLine("  dailySchedules (mảng: day:int, title:string, focus:string, lessonIds:int[] - id lấy từ danh sách bài học).");
 
             return sb.ToString();
+        }
+
+        private static string NormalizeHorizon(string? requestedHorizon, int daysUntilExam)
+        {
+            if (string.Equals(requestedHorizon, "short_term", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(requestedHorizon, "short", StringComparison.OrdinalIgnoreCase))
+                return "short_term";
+            if (string.Equals(requestedHorizon, "long_term", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(requestedHorizon, "long", StringComparison.OrdinalIgnoreCase))
+                return "long_term";
+            return daysUntilExam is > 0 and <= 30 ? "short_term" : "long_term";
+        }
+
+        private static bool? AssessExamDateFeasibility(
+            AiLearningPathResult assessment,
+            LearningPathPromptContext context,
+            int daysUntilExam,
+            bool hasExamDate)
+        {
+            if (!hasExamDate)
+                return null;
+
+            var requiredMinimumDays = GetMinimumRecommendedStudyDays(context);
+
+            if (assessment.IsExamDateRealistic != true ||
+                assessment.RecommendedStudyDays <= 0 ||
+                assessment.RecommendedStudyDays > daysUntilExam ||
+                daysUntilExam < requiredMinimumDays ||
+                (context.LatestTestScorePercent ?? 0) < 50)
+                return false;
+
+            if (context.LatestTestLanguageSkillBreakdown is { Count: > 0 } skills &&
+                skills.Values.Any(score => score < 30))
+                return false;
+
+            return true;
+        }
+
+        private static int GetMinimumRecommendedStudyDays(LearningPathPromptContext context)
+        {
+            var levelGap = Math.Max(0, JlptCurriculum.Rank(context.TargetJlptLevel) -
+                                       JlptCurriculum.Rank(context.AssessedJlptLevel));
+            if (levelGap >= 2 || (context.LatestTestScorePercent ?? 0) < 50 ||
+                context.LatestTestLanguageSkillBreakdown is { Count: > 0 } skills && skills.Values.Any(score => score < 30))
+                return MaxPlanDays;
+            return levelGap == 1 ? 90 : 1;
         }
 
         // =====================================================================
@@ -633,7 +865,10 @@ namespace RikiPath.Application.Services
             List<string> Weaknesses,
             string Feasibility,
             List<string> FocusTopics,
-            List<DailyScheduleResponse> DailySchedules);
+            List<DailyScheduleResponse> DailySchedules,
+            bool? IsExamDateRealistic,
+            int RecommendedStudyDays,
+            string Horizon);
 
         private static AiLearningPathResult ParseAiResponse(string rawJson)
         {
@@ -670,7 +905,10 @@ namespace RikiPath.Application.Services
                     Weaknesses: ReadStringList(root, "weaknesses") ?? new List<string>(),
                     Feasibility: ReadString(root, "feasibility"),
                     FocusTopics: ReadStringList(root, "focusTopics") ?? new List<string>(),
-                    DailySchedules: dailySchedules);
+                    DailySchedules: dailySchedules,
+                    IsExamDateRealistic: ReadNullableBool(root, "isExamDateRealistic"),
+                    RecommendedStudyDays: ReadInt(root, "recommendedStudyDays"),
+                    Horizon: string.Empty);
             }
             catch (Exception ex) when (ex is InvalidOperationException or FormatException)
             {
@@ -717,6 +955,9 @@ namespace RikiPath.Application.Services
             if (string.IsNullOrWhiteSpace(result.Summary))
                 return "thiếu nhận xét tổng quan";
 
+            if (result.RecommendedStudyDays <= 0)
+                return "thiếu recommendedStudyDays hợp lệ";
+
             if (result.DailySchedules.Count != expectedDays)
                 return $"số ngày ({result.DailySchedules.Count}) khác yêu cầu ({expectedDays})";
 
@@ -743,6 +984,18 @@ namespace RikiPath.Application.Services
             el.TryGetProperty(name, out var p) && p.ValueKind == JsonValueKind.Number && p.TryGetInt32(out var v)
                 ? v
                 : 0;
+
+        private static bool? ReadNullableBool(JsonElement el, string name)
+        {
+            if (!el.TryGetProperty(name, out var value) || value.ValueKind == JsonValueKind.Null)
+                return null;
+            return value.ValueKind switch
+            {
+                JsonValueKind.True => true,
+                JsonValueKind.False => false,
+                _ => null,
+            };
+        }
 
         private static List<string>? ReadStringList(JsonElement el, string name)
         {

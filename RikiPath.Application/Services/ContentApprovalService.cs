@@ -942,7 +942,6 @@ namespace RikiPath.Application.Services
                     Title = p.Title,
                     Description = p.Description,
                     TimeLimitMinutes = p.TimeLimitMinutes,
-                    IsPlacementAssessment = p.IsPlacementAssessment,
                     CertificateLevelId = p.CertificateLevelId,
                     Sections = p.Sections!.Select(s => new MockTestSection
                     {
@@ -980,7 +979,6 @@ namespace RikiPath.Application.Services
                 test.Title = p.Title;
                 test.Description = p.Description;
                 test.TimeLimitMinutes = p.TimeLimitMinutes;
-                test.IsPlacementAssessment = p.IsPlacementAssessment;
                 test.CertificateLevelId = p.CertificateLevelId;
 
                 if (p.Sections is { Count: > 0 })

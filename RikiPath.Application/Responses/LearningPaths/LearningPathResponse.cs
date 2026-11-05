@@ -5,6 +5,11 @@ namespace RikiPath.Application.Responses.LearningPaths
         public int PathId { get; set; }
         public int Version { get; set; }
         public string Status { get; set; } = "ACTIVE";
+        public string Horizon { get; set; } = "long_term";
+        public int PlanDurationDays { get; set; }
+        public DateTime? TargetExamDate { get; set; }
+        public int? DaysUntilExam { get; set; }
+        public bool? HasTargetExamDate { get; set; }
         public int? StartingJlptLevelId { get; set; }
         public int? TargetJlptLevelId { get; set; }
         public int? BaseActivePathId { get; set; }
@@ -17,8 +22,8 @@ namespace RikiPath.Application.Responses.LearningPaths
         public List<string> Weaknesses { get; set; } = new();
         public string Feasibility { get; set; } = string.Empty;
 
-        /// <summary>true = lộ trình bám ngày thi; false = năng lực chưa đủ, đã chuyển sang lộ trình dài hạn.</summary>
-        public bool IsExamDateRealistic { get; set; }
+        /// <summary>true = ngày thi có vẻ khả thi; false = khuyến nghị dời lịch; null = chưa đặt ngày thi.</summary>
+        public bool? IsExamDateRealistic { get; set; }
 
         /// <summary>Số ngày ôn tối thiểu hệ thống ước tính theo năng lực hiện tại.</summary>
         public int RecommendedStudyDays { get; set; }

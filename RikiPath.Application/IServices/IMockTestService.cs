@@ -1,10 +1,12 @@
+using RikiPath.Application.Requests.MockTests;
 using RikiPath.Application.Requests.PlacementTests;
 using RikiPath.Application.Responses;
+using RikiPath.Application.Responses.MockTests;
 using RikiPath.Application.Responses.PlacementTests;
 
 namespace RikiPath.Application.IServices
 {
-    public interface IPlacementTestService
+    public interface IMockTestService
     {
         Task<ApiResponse<PlacementTestStatusResponse>> GetStatusAsync(
             CancellationToken cancellationToken = default);
@@ -13,6 +15,11 @@ namespace RikiPath.Application.IServices
             CancellationToken cancellationToken = default);
 
         Task<ApiResponse<PlacementAttemptSnapshotResponse?>> GetActiveAttemptAsync(
+            CancellationToken cancellationToken = default);
+
+        Task<ApiResponse<PlacementAnswersSavedResponse>> SavePlacementAnswersAsync(
+            int attemptId,
+            SubmitPlacementTestRequest request,
             CancellationToken cancellationToken = default);
 
         Task<ApiResponse<PlacementAttemptSnapshotResponse>> StartPlacementTestAsync(
@@ -30,5 +37,16 @@ namespace RikiPath.Application.IServices
         Task<ApiResponse<PlacementTestResultResponse>> GetPlacementTestResultAsync(
             int attemptId,
             CancellationToken cancellationToken = default);
+        /// <summary>
+        /// Autosave 1 câu trả lời cho bài đánh giá năng lực (placement) ngay khi học viên chọn đáp án,
+        /// để nếu mất điện/tắt web giữa chừng thì quay lại vẫn còn tiến độ đã làm.
+        /// </summary>
+        Task<ApiResponse<PlacementAnswerAckResponse>> SavePlacementAnswerAsync(
+            int attemptId,
+            SavePlacementAnswerRequest request,
+            CancellationToken cancellationToken = default);
+        Task<ApiResponse<MockTestDetailResponse>> GetPlacementTestsByCertificateLevelAsync(
+             int certificateLevelId,
+             CancellationToken cancellationToken = default);
     }
 }

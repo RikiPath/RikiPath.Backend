@@ -2,12 +2,14 @@ namespace RikiPath.Application.Models
 {
     public readonly struct LearningPathPromptContext(
     string targetJlptLevel,
+    string assessedJlptLevel,
     IReadOnlyList<(string LessonTitle, int ProgressPercent)> lessonProgress,
     IReadOnlyList<string> notebookWords,
     double? latestTestScorePercent,
     IReadOnlyDictionary<string, double>? latestTestLanguageSkillBreakdown)
     {
         public string TargetJlptLevel { get; } = targetJlptLevel;
+        public string AssessedJlptLevel { get; } = assessedJlptLevel;
         public IReadOnlyList<(string LessonTitle, int ProgressPercent)> LessonProgress { get; } = lessonProgress;
         public IReadOnlyList<string> NotebookWords { get; } = notebookWords;
         public double? LatestTestScorePercent { get; } = latestTestScorePercent;
@@ -28,17 +30,11 @@ namespace RikiPath.Application.Models
                 : "Chưa có dữ liệu bài thi thử.";
 
             return $$"""
-            Bạn là cố vấn học tiếng Nhật cho một học viên đang luyện thi JLPT {TargetJlptLevel}.
+            Trình độ mục tiêu của người học: JLPT {TargetJlptLevel}.
+            Trình độ hiện tại theo Placement gần nhất: JLPT {AssessedJlptLevel}.
             Tiến độ bài học: {lessonSummary}
             Một số từ trong sổ tay cá nhân: {wordSummary}
             Điểm bài thi thử gần nhất: {(LatestTestScorePercent is { } s ? $"{s:F0}%" : "chưa có")}; phân tích theo kỹ năng: {skillSummary}
-
-            Hãy trả về DUY NHẤT một JSON object theo đúng schema sau, không thêm giải thích ngoài JSON:
-            {
-              "summary": "1-2 câu tóm tắt tình trạng học tập",
-              "focusTopics": ["chủ đề 1", "chủ đề 2"],
-              "suggestedLessons": [{ "title": "...", "reason": "..." }]
-            }
             """;
         }
     }

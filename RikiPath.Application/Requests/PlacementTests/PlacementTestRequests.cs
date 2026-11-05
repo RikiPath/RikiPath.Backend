@@ -4,7 +4,7 @@ namespace RikiPath.Application.Requests.PlacementTests
 {
     public class StartPlacementTestRequest
     {
-        public int? MaxQuestionsPerLevel { get; set; }
+        public int MockTestId { get; set; }
     }
 
     public class SubmitPlacementTestRequest

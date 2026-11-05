@@ -57,3 +57,4 @@ secrets.json
 Thumbs.db
 ehthumbs.db
 /_codex-build/
+_codex-build-*/
