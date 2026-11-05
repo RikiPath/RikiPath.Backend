@@ -9,6 +9,12 @@ namespace RikiPath.Domain.Entities
 
         public int? MentorWeeklyAvailabilityId { get; set; }
         public MentorWeeklyAvailability? WeeklyAvailability { get; set; }
+        // Các trường nullable chỉ áp dụng cho khung giờ sinh từ lịch Mentor; dữ liệu lịch sử giữ nguyên.
+        public long? MentorScheduleRuleId { get; set; }
+        public MentorScheduleRule? ScheduleRule { get; set; }
+        public string? GenerationKey { get; set; }
+        public int? PolicyVersion { get; set; }
+        public DateOnly? LocalBusinessDate { get; set; }
         public DateTime? PublishedAt { get; set; }
         public string? ChangeRequestReason { get; set; }
         public DateTime? ChangeRequestedAt { get; set; }
@@ -43,7 +49,6 @@ namespace RikiPath.Domain.Entities
         public DateTime? RejectedAt { get; set; }
         public string? RejectionReason { get; set; }
 
-        /// <summary>New scheduled slots allow one learner; historical group slots are preserved.</summary>
         public ICollection<MentorBooking> MentorBookings { get; set; } = new List<MentorBooking>();
     }
 }

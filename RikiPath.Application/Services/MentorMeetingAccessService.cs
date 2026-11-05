@@ -94,7 +94,6 @@ namespace RikiPath.Application.Services
             };
         }
 
-        /// <summary>Hub gọi khi có 1 connection mới vào phòng (đếm người để biết khi nào phòng trống).</summary>
         public void TrackChatParticipantJoined(Guid roomId)
         {
             var room = ChatRooms.GetOrAdd(roomId, _ => new RoomChat());

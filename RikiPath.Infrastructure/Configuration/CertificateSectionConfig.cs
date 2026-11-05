@@ -6,6 +6,9 @@ namespace RikiPath.Infrastructure.Configuration
 {
     public class CertificateSectionConfig : IEntityTypeConfiguration<CertificateSection>
     {
+        // Giữ ngày tạo của dữ liệu mẫu khớp snapshot hiện tại để EF không sinh UpdateData ở mỗi lần build.
+        private static readonly DateTime SeedCreatedDate = new(2026, 10, 31, 11, 13, 24, 991, DateTimeKind.Utc);
+
         public void Configure(EntityTypeBuilder<CertificateSection> builder)
         {
             builder.HasKey(x => x.Id);
@@ -40,6 +43,7 @@ namespace RikiPath.Infrastructure.Configuration
                 new CertificateSection
                 {
                     Id = 1,
+                    CreatedDate = SeedCreatedDate.AddTicks(5285),
                     CertificateLevelId = 1, // Khớp với Id của N5 trong bảng CertificateLevel
                     Name = "Kiến thức ngôn ngữ (Từ vựng)",
                     Code = "N5_VOCAB",
@@ -48,6 +52,7 @@ namespace RikiPath.Infrastructure.Configuration
                 new CertificateSection
                 {
                     Id = 2,
+                    CreatedDate = SeedCreatedDate.AddTicks(5292),
                     CertificateLevelId = 1,
                     Name = "Kiến thức ngôn ngữ (Ngữ pháp) & Đọc hiểu",
                     Code = "N5_GRAMMAR_READING",
@@ -56,6 +61,7 @@ namespace RikiPath.Infrastructure.Configuration
                 new CertificateSection
                 {
                     Id = 3,
+                    CreatedDate = SeedCreatedDate.AddTicks(5294),
                     CertificateLevelId = 1,
                     Name = "Nghe hiểu",
                     Code = "N5_LISTENING",
@@ -66,6 +72,7 @@ namespace RikiPath.Infrastructure.Configuration
                 new CertificateSection
                 {
                     Id = 4,
+                    CreatedDate = SeedCreatedDate.AddTicks(5295),
                     CertificateLevelId = 2, // Khớp với Id của N4 trong bảng CertificateLevel
                     Name = "Kiến thức ngôn ngữ (Từ vựng)",
                     Code = "N4_VOCAB",
@@ -74,6 +81,7 @@ namespace RikiPath.Infrastructure.Configuration
                 new CertificateSection
                 {
                     Id = 5,
+                    CreatedDate = SeedCreatedDate.AddTicks(5296),
                     CertificateLevelId = 2,
                     Name = "Kiến thức ngôn ngữ (Ngữ pháp)",
                     Code = "N4_GRAMMAR",
@@ -82,6 +90,7 @@ namespace RikiPath.Infrastructure.Configuration
                 new CertificateSection
                 {
                     Id = 6,
+                    CreatedDate = SeedCreatedDate.AddTicks(5297),
                     CertificateLevelId = 2,
                     Name = "Đọc hiểu",
                     Code = "N4_READING",
@@ -90,6 +99,7 @@ namespace RikiPath.Infrastructure.Configuration
                 new CertificateSection
                 {
                     Id = 7,
+                    CreatedDate = SeedCreatedDate.AddTicks(5298),
                     CertificateLevelId = 2,
                     Name = "Nghe hiểu",
                     Code = "N4_LISTENING",

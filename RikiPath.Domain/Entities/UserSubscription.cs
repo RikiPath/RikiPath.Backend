@@ -11,9 +11,12 @@ namespace RikiPath.Domain.Entities
         public UserAccount UserAccount { get; set; }
         public int SubscriptionPlanId { get; set; }
         public SubscriptionPlan SubscriptionPlan { get; set; }
-        /// <summary>Legacy package mentor. New account-credit purchases leave this null; bookings determine their own mentor.</summary>
         public int? MentorId { get; set; }
         public UserAccount? Mentor { get; set; }
+
+        /// <summary>Cấp độ JLPT (N5-N2) được chốt tại thời điểm mua gói tư vấn; null đối với gói tự học hoặc gói lịch sử.</summary>
+        public int? CertificateLevelId { get; set; }
+        public CertificateLevel? CertificateLevel { get; set; }
 
         public decimal AmountPaid { get; set; }
         public PaymentStatus PaymentStatus { get; set; } = PaymentStatus.Pending;
@@ -25,7 +28,6 @@ namespace RikiPath.Domain.Entities
         public int AiGradingQuota { get; set; }
         public int AiGradingUsedCount { get; set; } = 0;
 
-        /// <summary>Meeting sessions included at purchase time; snapshots the plan value.</summary>
         public int MeetingSessionsIncluded { get; set; }
         public int MeetingSessionsUsed { get; set; }
         public DateTime? PaymentExpiresAt { get; set; }

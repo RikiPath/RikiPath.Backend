@@ -1,9 +1,9 @@
-using RikiPath.Application.IRepositories;
-using RikiPath.Domain.Entities;
-using Microsoft.EntityFrameworkCore;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using Microsoft.EntityFrameworkCore;
+using RikiPath.Application.IRepositories;
+using RikiPath.Domain.Entities;
 
 namespace RikiPath.Infrastructure.Repositories
 {
@@ -14,7 +14,7 @@ namespace RikiPath.Infrastructure.Repositories
         }
 
         public async Task<(List<Notification> Items, int TotalCount)> GetByUserAsync(
-     int userId, bool unreadOnly, int page, int pageSize)
+            int userId, bool unreadOnly, int page, int pageSize)
         {
             var query = _context.Notifications
                 .AsNoTracking()
@@ -41,9 +41,23 @@ namespace RikiPath.Infrastructure.Repositories
 
         public async Task MarkAllAsReadAsync(int userId)
         {
-            await _context.Notifications
-                .Where(n => n.UserId == userId && !n.IsRead)
-                .ExecuteUpdateAsync(s => s.SetProperty(n => n.IsRead, true));
+            if (_context.Database.ProviderName == "Microsoft.EntityFrameworkCore.InMemory")
+            {
+                var unreadList = await _context.Notifications
+                    .Where(n => n.UserId == userId && !n.IsRead)
+                    .ToListAsync();
+                foreach (var n in unreadList)
+                {
+                    n.IsRead = true;
+                }
+                await _context.SaveChangesAsync();
+            }
+            else
+            {
+                await _context.Notifications
+                    .Where(n => n.UserId == userId && !n.IsRead)
+                    .ExecuteUpdateAsync(s => s.SetProperty(n => n.IsRead, true));
+            }
         }
     }
 }

@@ -15,7 +15,18 @@ namespace RikiPath.Infrastructure.Configuration
         public void Configure(EntityTypeBuilder<MentorAvailability> builder)
         {
             builder.HasKey(x => x.Id);
+            // Khóa ghép cho reservation: Mentor của lượt giữ chỗ phải đúng Mentor sở hữu khung giờ.
+            builder.HasAlternateKey(x => new { x.Id, x.MentorId });
             builder.HasIndex(x => new { x.MentorId, x.StartTime, x.EndTime });
+            // Giữ đúng kiểu cột lịch sử; không tự chuyển giờ đã lưu sang timestamptz.
+            builder.Property(x => x.StartTime).HasColumnType("timestamp without time zone");
+            builder.Property(x => x.EndTime).HasColumnType("timestamp without time zone");
+            // MentorAvailability là nguồn khung giờ có thể đặt; khóa sinh lịch chỉ áp dụng cho bản ghi mới.
+            builder.HasOne(x => x.ScheduleRule).WithMany().HasForeignKey(x => x.MentorScheduleRuleId)
+                   .OnDelete(DeleteBehavior.Restrict);
+            builder.Property(x => x.GenerationKey).HasMaxLength(160);
+            builder.Property(x => x.LocalBusinessDate).HasColumnType("date");
+            builder.HasIndex(x => x.GenerationKey).IsUnique().HasFilter("\"GenerationKey\" IS NOT NULL");
 
             builder.Property(x => x.RoomId).IsRequired();
             builder.HasIndex(x => x.RoomId).IsUnique();
@@ -25,9 +36,16 @@ namespace RikiPath.Infrastructure.Configuration
             builder.Property(x => x.Version).IsRowVersion();
             builder.Property(x => x.ChangeRequestReason).HasMaxLength(1000);
             builder.Property(x => x.ChangeResolution).HasMaxLength(1000);
-            builder.ToTable(t => t.HasCheckConstraint(
-                "CK_MentorAvailability_BookedCount",
-                "\"BookedCount\" >= 0 AND \"BookedCount\" <= \"MaxLearners\""));
+            builder.ToTable(t =>
+            {
+                t.HasCheckConstraint("CK_MentorAvailability_BookedCount",
+                    "\"BookedCount\" >= 0 AND \"BookedCount\" <= \"MaxLearners\"");
+                // Khung giờ lịch sử không có metadata sinh lịch; khung giờ mới phải đủ dữ liệu và dài 90 phút.
+                t.HasCheckConstraint("CK_MentorAvailability_GeneratedSlot",
+                    "(\"GenerationKey\" IS NULL AND \"PolicyVersion\" IS NULL AND \"MentorScheduleRuleId\" IS NULL AND \"LocalBusinessDate\" IS NULL) OR " +
+                    "(\"GenerationKey\" IS NOT NULL AND \"PolicyVersion\" IS NOT NULL AND \"PolicyVersion\" > 0 AND \"MentorScheduleRuleId\" IS NOT NULL AND " +
+                    "\"LocalBusinessDate\" IS NOT NULL AND \"MaxLearners\" = 1 AND \"EndTime\" = \"StartTime\" + INTERVAL '90 minutes')");
+            });
 
             builder.HasMany(x => x.MentorBookings)
                    .WithOne(b => b.MentorAvailability)

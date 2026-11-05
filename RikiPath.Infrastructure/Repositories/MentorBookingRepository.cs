@@ -12,6 +12,7 @@ namespace RikiPath.Infrastructure.Repositories
     {
         public async Task<List<MentorBooking>> GetQueueForMentorAsync(int mentorId)
             => await _context.MentorBookings
+                .Include(x => x.CompensationLevel)
                 .Include(x => x.MentorAvailability)
                 .Include(x => x.UserSubscription).ThenInclude(x => x.UserAccount)
                 .Where(x => x.MentorAvailability != null && x.MentorAvailability.MentorId == mentorId)
@@ -20,6 +21,7 @@ namespace RikiPath.Infrastructure.Repositories
 
         public async Task<List<MentorBooking>> GetPendingAssignmentAsync()
             => await _context.MentorBookings
+                .Include(x => x.CompensationLevel)
                 .Where(x => x.Status == MentorStatus.PendingAssignment)
                 .OrderBy(x => x.CreatedDate)
                 .ToListAsync();
@@ -35,6 +37,8 @@ namespace RikiPath.Infrastructure.Repositories
 
         public Task<List<MentorBooking>> GetByLearnerAsync(int learnerId, CancellationToken cancellationToken = default)
             => _context.MentorBookings.AsNoTracking()
+                .Include(x => x.CompensationLevel)
+                .Include(x => x.UserSubscription).ThenInclude(x => x.CertificateLevel)
                 .Include(x => x.UserSubscription).ThenInclude(x => x.Mentor)
                 .Include(x => x.UserSubscription).ThenInclude(x => x.UserAccount)
                 .Include(x => x.MentorAvailability).ThenInclude(x => x!.Mentor)
@@ -44,6 +48,8 @@ namespace RikiPath.Infrastructure.Repositories
 
         public Task<List<MentorBooking>> GetPaidBookingsForMentorAsync(int mentorId, CancellationToken cancellationToken = default)
             => _context.MentorBookings.AsNoTracking()
+                .Include(x => x.CompensationLevel)
+                .Include(x => x.UserSubscription).ThenInclude(x => x.CertificateLevel)
                 .Include(x => x.UserSubscription).ThenInclude(x => x.UserAccount)
                 .Include(x => x.UserSubscription).ThenInclude(x => x.Mentor)
                 .Include(x => x.MentorAvailability).ThenInclude(x => x!.Mentor)
@@ -55,6 +61,7 @@ namespace RikiPath.Infrastructure.Repositories
 
         public Task<MentorBooking?> GetActiveMeetingByRoomIdAsync(Guid roomId, CancellationToken cancellationToken = default)
             => _context.MentorBookings.AsNoTracking()
+                .Include(x => x.CompensationLevel)
                 .Include(x => x.UserSubscription).ThenInclude(x => x.UserAccount)
                 .Include(x => x.MentorAvailability).ThenInclude(x => x.Mentor)
                 .Where(x => x.MentorAvailability != null && x.MentorAvailability.RoomId == roomId && !x.IsDeleted && x.Status == MentorStatus.Assigned)
@@ -62,6 +69,8 @@ namespace RikiPath.Infrastructure.Repositories
 
         public Task<MentorBooking?> GetForChatAsync(int bookingId, CancellationToken cancellationToken = default)
             => _context.MentorBookings.AsNoTracking()
+                .Include(x => x.CompensationLevel)
+                .Include(x => x.UserSubscription).ThenInclude(x => x.CertificateLevel)
                 .Include(x => x.UserSubscription).ThenInclude(x => x.UserAccount)
                 .Include(x => x.UserSubscription).ThenInclude(x => x.Mentor)
                 .Include(x => x.MentorAvailability).ThenInclude(x => x!.Mentor)
@@ -69,6 +78,7 @@ namespace RikiPath.Infrastructure.Repositories
 
         public Task<List<MentorBooking>> GetChatThreadsForMentorAsync(int mentorId, CancellationToken cancellationToken = default)
             => _context.MentorBookings.AsNoTracking()
+                .Include(x => x.CompensationLevel)
                 .Include(x => x.UserSubscription).ThenInclude(x => x.UserAccount)
                 .Include(x => x.UserSubscription).ThenInclude(x => x.Mentor)
                 .Include(x => x.MentorAvailability).ThenInclude(x => x!.Mentor)

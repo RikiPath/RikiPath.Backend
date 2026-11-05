@@ -4,17 +4,22 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
+using RikiPath.WebApi.Swagger;
 using RikiPath.Application;
 using RikiPath.Application.Handlers;
 using RikiPath.Application.Hubs;
 using RikiPath.Application.IClients;
 using RikiPath.Application.IRepositories;
 using RikiPath.Application.IServices;
+using RikiPath.Application.Options;
 using RikiPath.Domain;
 using RikiPath.Infrastructure;
 using RikiPath.Infrastructure.Clients;
+using RikiPath.Infrastructure.Services;
 using RikiPath.WebApi.Hubs;
+using RikiPath.WebApi.Services;
 using System.Net.Http.Headers;
+using System.Security.Claims;
 using System.Reflection;
 using System.Text;
 using System.Text.Json.Serialization;
@@ -42,6 +47,25 @@ internal class Program
         builder.Services.Configure<PayOsSettings>(payOsSection);
         builder.Services.Configure<AiSettings>(configuration.GetSection("Ai"));
         builder.Services.Configure<AwsSettings>(configuration.GetSection("AWS"));
+        builder.Services.AddOptions<MentorSlotGenerationOptions>()
+            .Bind(configuration.GetSection(MentorSlotGenerationOptions.SectionName))
+            .Validate(options =>
+            {
+                try
+                {
+                    _ = options.ToPolicy();
+                    return true;
+                }
+                catch (ArgumentException)
+                {
+                    return false;
+                }
+                catch (TimeZoneNotFoundException)
+                {
+                    return false;
+                }
+            }, "Cấu hình tạo khung giờ hỗ trợ Mentor không hợp lệ.")
+            .ValidateOnStart();
 
         // 2. Database Context - Npgsql using ConnectionStrings:DefaultConnection
         builder.Services.AddDbContext<AppDbContext>(options =>
@@ -186,6 +210,14 @@ internal class Program
             builder.Services.AddScoped(iface, impl);
         }
 
+        // Chỉ môi trường QA cô lập được thay private document storage; Production luôn dùng cấu hình Supabase.
+        if (configuration.GetValue<bool>("LocalQaVerificationStorage:Enabled"))
+        {
+            if (!builder.Environment.IsEnvironment("MentorQA"))
+                throw new InvalidOperationException("Local QA verification storage chỉ được bật trong MentorQA.");
+            builder.Services.AddScoped<IFileStorageService, LocalQaFileStorageService>();
+        }
+
         var manuallyRegisteredClientInterfaces = new[] { typeof(IPaymentGatewayClient), typeof(IAiLearningPathClient), typeof(IAiGradingClient), typeof(IGeminiOcrClient) };
 
         if (Type.GetType("RikiPath.Infrastructure.Clients.PayOsClient, RikiPath.Infrastructure") != null)
@@ -287,6 +319,11 @@ internal class Program
         builder.Services.AddScoped<ISheetImportHandler, LessonImportHandler>();
         builder.Services.AddScoped<ISheetImportHandler, MockTestImportHandler>();
         builder.Services.AddScoped<ISheetImportHandler, PracticeExerciseImportHandler>();
+        builder.Services.AddHostedService<MentorOutboxDispatcherService>();
+        builder.Services.AddScoped<MentorOutboxDispatcherService>();
+        builder.Services.Configure<FcmOptions>(builder.Configuration.GetSection("Fcm"));
+        builder.Services.AddHttpClient<IFcmTransport, DefaultFcmTransport>();
+        builder.Services.AddScoped<IFcmPushService, FcmPushService>();
         // 7. JWT Authentication & Authorization
         var secret = appSettings?.SecretToken?.Value ?? builder.Configuration["SecretToken:Value"];
         if (string.IsNullOrWhiteSpace(secret))
@@ -316,13 +353,32 @@ internal class Program
 
                 options.Events = new JwtBearerEvents
                 {
+                    OnTokenValidated = async context =>
+                    {
+                        var rawId = context.Principal?.FindFirstValue(ClaimTypes.NameIdentifier);
+                        var jwtRole = context.Principal?.FindFirstValue(ClaimTypes.Role);
+                        if (!int.TryParse(rawId, out var userId) || string.IsNullOrWhiteSpace(jwtRole))
+                        {
+                            context.Fail("Phiên đăng nhập không hợp lệ.");
+                            return;
+                        }
+
+                        var db = context.HttpContext.RequestServices.GetRequiredService<AppDbContext>();
+                        var user = await db.Users.AsNoTracking()
+                            .Where(account => account.Id == userId)
+                            .Select(account => new { account.Role, account.IsDeleted })
+                            .SingleOrDefaultAsync(context.HttpContext.RequestAborted);
+                        if (user is null || user.IsDeleted || !string.Equals(user.Role.ToString(), jwtRole, StringComparison.Ordinal))
+                            context.Fail("Quyền tài khoản đã thay đổi. Vui lòng đăng nhập lại.");
+                    },
                     OnMessageReceived = context =>
                     {
                         var accessToken = context.Request.Query["access_token"].FirstOrDefault();
                         if (!string.IsNullOrEmpty(accessToken) &&
                             (context.HttpContext.Request.Path.StartsWithSegments("/hubs/consultation-call")
                              || context.HttpContext.Request.Path.StartsWithSegments("/hubs/mentor-meeting")
-                             || context.HttpContext.Request.Path.StartsWithSegments("/hubs/mentor-chat")))
+                             || context.HttpContext.Request.Path.StartsWithSegments("/hubs/mentor-chat")
+                             || context.HttpContext.Request.Path.StartsWithSegments("/hubs/notification")))
                         {
                             context.Token = accessToken;
                         }
@@ -349,14 +405,22 @@ internal class Program
             var xmlFile = $"{Assembly.GetExecutingAssembly().GetName().Name}.xml";
             var xmlPath = Path.Combine(AppContext.BaseDirectory, xmlFile);
 
-            // Truyền true vào parameter includeControllerXmlComments để hiển thị cả comment của Controller Class
+            // Include source XML comments; canonical filters normalize all published documentation to English.
             c.IncludeXmlComments(xmlPath, includeControllerXmlComments: true);
-            c.SwaggerDoc("v1", new OpenApiInfo { Title = "RikiPath API", Version = "v1" });
+            c.SwaggerDoc("v1", new OpenApiInfo
+            {
+                Title = "RikiPath API",
+                Version = "v1",
+                Description = "API RikiPath sử dụng các đường dẫn nghiệp vụ chuẩn, không gắn phiên bản."
+            });
+            c.DocumentFilter<CanonicalApiDocumentFilter>();
+            c.OperationFilter<CanonicalApiOperationFilter>();
+            c.SchemaFilter<CanonicalApiSchemaFilter>();
 
             var securityScheme = new OpenApiSecurityScheme
             {
                 Name = "Authorization",
-                Description = "Enter JWT Bearer token in format: Bearer {token}",
+                Description = "Nhập JWT Bearer theo định dạng: Bearer {token}.",
                 In = ParameterLocation.Header,
                 Type = SecuritySchemeType.Http,
                 Scheme = "bearer",

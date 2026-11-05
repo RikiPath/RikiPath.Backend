@@ -61,10 +61,37 @@ namespace RikiPath.Infrastructure
 
         // Mentor 1-1 service
         public DbSet<MentorBooking> MentorBookings { get; set; }
+        public DbSet<MentorSchedule> MentorSchedules { get; set; }
+        public DbSet<MentorScheduleRule> MentorScheduleRules { get; set; }
+        public DbSet<MentorBookingIntent> MentorBookingIntents { get; set; }
+        public DbSet<MentorBookingTerms> MentorBookingTerms { get; set; }
+        public DbSet<MentorBookingReservation> MentorBookingReservations { get; set; }
+        public DbSet<MentorBookingDayGuard> MentorBookingDayGuards { get; set; }
+        public DbSet<MentorOutboxEvent> MentorOutboxEvents { get; set; }
         public DbSet<MentorChatMessage> MentorChatMessages { get; set; }
         public DbSet<Note> Notes { get; set; }
         public DbSet<MentorAvailability> MentorAvailabilities { get; set; }
         public DbSet<MentorWeeklyAvailability> MentorWeeklyAvailabilities { get; set; }
+        public DbSet<MentorProfile> MentorProfiles { get; set; }
+        public DbSet<MentorCreditGrant> MentorCreditGrants { get; set; }
+        public DbSet<MentorCreditEntry> MentorCreditEntries { get; set; }
+        public DbSet<MentorAttendanceRecord> MentorAttendanceRecords { get; set; }
+        public DbSet<MentorHourlyRate> MentorHourlyRates { get; set; }
+        public DbSet<JlptLevelPayCoefficient> JlptLevelPayCoefficients { get; set; }
+        public DbSet<MentorTeachingQualification> MentorTeachingQualifications { get; set; }
+        public DbSet<MentorAttendanceApproval> MentorAttendanceApprovals { get; set; }
+        public DbSet<MentorEarningEntry> MentorEarningEntries { get; set; }
+        public DbSet<MentorPayrollPeriod> MentorPayrollPeriods { get; set; }
+        public DbSet<MentorPayrollLine> MentorPayrollLines { get; set; }
+        public DbSet<MentorPayrollAdjustment> MentorPayrollAdjustments { get; set; }
+        public DbSet<MentorBankAccount> MentorBankAccounts { get; set; }
+        public DbSet<OrganizationPayoutAccount> OrganizationPayoutAccounts { get; set; }
+        public DbSet<MentorPayoutObligation> MentorPayoutObligations { get; set; }
+        public DbSet<MentorPayoutAttempt> MentorPayoutAttempts { get; set; }
+        public DbSet<MentorReview> MentorReviews { get; set; }
+        public DbSet<MentorDispute> MentorDisputes { get; set; }
+        public DbSet<MentorDisputeHistory> MentorDisputeHistories { get; set; }
+        public DbSet<MentorAbuseReport> MentorAbuseReports { get; set; }
 
         // Subscription / payments
         public DbSet<SubscriptionPlan> SubscriptionPlans { get; set; }
@@ -79,6 +106,7 @@ namespace RikiPath.Infrastructure
         // Notifications
         public DbSet<EmailVerification> EmailVerifications { get; set; }
         public DbSet<Notification> Notifications { get; set; }
+        public DbSet<UserDeviceToken> UserDeviceTokens { get; set; }
         public DbSet<ContentApprovalRequest> ContentApprovalRequests { get; set; }
 
         public DbSet<ContentAiReview> ContentAiReviews { get; set; }
@@ -129,9 +157,36 @@ namespace RikiPath.Infrastructure
             modelBuilder.ApplyConfiguration(new GradingResultConfig());
 
             modelBuilder.ApplyConfiguration(new MentorBookingConfig());
+            modelBuilder.ApplyConfiguration(new MentorScheduleConfig());
+            modelBuilder.ApplyConfiguration(new MentorScheduleRuleConfig());
+            modelBuilder.ApplyConfiguration(new MentorBookingIntentConfig());
+            modelBuilder.ApplyConfiguration(new MentorBookingTermsConfig());
+            modelBuilder.ApplyConfiguration(new MentorBookingReservationConfig());
+            modelBuilder.ApplyConfiguration(new MentorBookingDayGuardConfig());
+            modelBuilder.ApplyConfiguration(new MentorOutboxEventConfig());
             modelBuilder.ApplyConfiguration(new MentorChatMessageConfig());
             modelBuilder.ApplyConfiguration(new NoteConfig());
             modelBuilder.ApplyConfiguration(new MentorAvailabilityConfig());
+            modelBuilder.ApplyConfiguration(new MentorProfileConfig());
+            modelBuilder.ApplyConfiguration(new MentorCreditGrantConfig());
+            modelBuilder.ApplyConfiguration(new MentorCreditEntryConfig());
+            modelBuilder.ApplyConfiguration(new MentorAttendanceRecordConfig());
+            modelBuilder.ApplyConfiguration(new MentorHourlyRateConfig());
+            modelBuilder.ApplyConfiguration(new JlptLevelPayCoefficientConfig());
+            modelBuilder.ApplyConfiguration(new MentorTeachingQualificationConfig());
+            modelBuilder.ApplyConfiguration(new MentorAttendanceApprovalConfig());
+            modelBuilder.ApplyConfiguration(new MentorEarningEntryConfig());
+            modelBuilder.ApplyConfiguration(new MentorPayrollPeriodConfig());
+            modelBuilder.ApplyConfiguration(new MentorPayrollLineConfig());
+            modelBuilder.ApplyConfiguration(new MentorPayrollAdjustmentConfig());
+            modelBuilder.ApplyConfiguration(new MentorBankAccountConfig());
+            modelBuilder.ApplyConfiguration(new OrganizationPayoutAccountConfig());
+            modelBuilder.ApplyConfiguration(new MentorPayoutObligationConfig());
+            modelBuilder.ApplyConfiguration(new MentorPayoutAttemptConfig());
+            modelBuilder.ApplyConfiguration(new MentorReviewConfig());
+            modelBuilder.ApplyConfiguration(new MentorDisputeConfig());
+            modelBuilder.ApplyConfiguration(new MentorDisputeHistoryConfig());
+            modelBuilder.ApplyConfiguration(new MentorAbuseReportConfig());
 
             modelBuilder.ApplyConfiguration(new SubscriptionPlanConfig());
             modelBuilder.ApplyConfiguration(new FeatureConfig());
@@ -142,6 +197,7 @@ namespace RikiPath.Infrastructure
             modelBuilder.ApplyConfiguration(new ReviewHistoryConfig());
 
             modelBuilder.ApplyConfiguration(new NotificationConfig());
+            modelBuilder.ApplyConfiguration(new UserDeviceTokenConfig());
 
             // Additional configurations for completeness
             modelBuilder.ApplyConfiguration(new CertificateSectionConfig());
