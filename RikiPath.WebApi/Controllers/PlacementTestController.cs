@@ -8,7 +8,7 @@ namespace RikiPath.WebApi.Controllers
     [Route("api/[controller]")]
     [ApiController]
     [Authorize(Roles = "Learner")]
-    public class PlacementTestController(IPlacementTestService placementTestService) : ControllerBase
+    public class PlacementTestController(IMockTestService placementTestService) : ControllerBase
     {
         /// <summary>
         /// Kiểm tra trạng thái hoàn thành bài kiểm tra đánh giá năng lực đầu vào (Placement Test) và mức độ sẵn sàng tạo lộ trình.
@@ -36,6 +36,17 @@ namespace RikiPath.WebApi.Controllers
         public async Task<IActionResult> GetActiveAttempt(CancellationToken cancellationToken)
         {
             var result = await placementTestService.GetActiveAttemptAsync(cancellationToken);
+            return StatusCode((int)result.StatusCode, result);
+        }
+
+        /// <summary>Lưu tự động các lựa chọn mới nhất trong lượt Placement đang làm.</summary>
+        [HttpPut("attempts/{attemptId:int}/answers")]
+        public async Task<IActionResult> SavePlacementAnswers(
+            int attemptId,
+            [FromBody] SubmitPlacementTestRequest request,
+            CancellationToken cancellationToken)
+        {
+            var result = await placementTestService.SavePlacementAnswersAsync(attemptId, request, cancellationToken);
             return StatusCode((int)result.StatusCode, result);
         }
 

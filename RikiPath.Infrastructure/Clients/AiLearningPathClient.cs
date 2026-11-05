@@ -29,28 +29,21 @@ namespace RikiPath.Infrastructure.Clients
         private static readonly string[] SectionPaths = { "Gemini", "GeminiSettings", "AppSettings:Gemini", "AppSettings:GeminiSettings" };
         private static readonly string[] KeyNames = { "ApiKey", "ApiKeys" };
 
-        // ✅ SystemPrompt mới có cấu trúc dailySchedules kèm từ vựng / kanji / ngữ pháp
-        // ✅ SystemPrompt mới tối ưu cho chức năng ÔN LUYỆN tiếng Nhật
+        // Keep the system schema aligned with LearningPathService's parser.
         private const string SystemPrompt =
-            "Bạn là trợ lý cố vấn ôn luyện tiếng Nhật chuyên nghiệp. " +
-            "Nhiệm vụ của bạn là xây dựng kế hoạch ôn tập, tổng hợp kiến thức trọng tâm và các bài tập thực chiến dựa trên yêu cầu ôn luyện của người dùng. " +
-            "BẮT BUỘC chỉ trả về duy nhất 1 JSON object chuẩn theo đúng cấu trúc mẫu dưới đây, " +
-            "không kèm markdown code fence (```json), không kèm giải thích ngoài JSON:\n" +
+            "Bạn là cố vấn ôn luyện JLPT. Dựa trên điểm Placement theo từng kỹ năng, tiến độ học và danh mục bài học thật, " +
+            "ưu tiên các kỹ năng thấp điểm; không bịa nội dung hoặc ID bài học. Chỉ trả JSON hợp lệ, không markdown:\n" +
             "{\n" +
-            "  \"summary\": \"Tóm tắt tổng quan về mục tiêu và chiến lược ôn luyện...\",\n" +
-            "  \"focusTopics\": [\n" +
-            "    \"Chủ đề/Điểm ngữ pháp/Kanji cần ôn trọng tâm 1\",\n" +
-            "    \"Chủ đề/Điểm ngữ pháp/Kanji cần ôn trọng tâm 2\"\n" +
-            "  ],\n" +
+            "  \"summary\": \"nhận xét tổng quan\",\n" +
+            "  \"strengths\": [\"điểm mạnh dựa trên dữ liệu\"],\n" +
+            "  \"weaknesses\": [\"kỹ năng yếu dựa trên dữ liệu\"],\n" +
+            "  \"feasibility\": \"đánh giá thực tế và điều kiện cần\",\n" +
+            "  \"isExamDateRealistic\": null,\n" +
+            "  \"recommendedStudyDays\": 90,\n" +
+            "  \"focusTopics\": [\"chủ đề cần ôn\"],\n" +
             "  \"dailySchedules\": [\n" +
             "    {\n" +
-            "      \"day\": 1,\n" +
-            "      \"title\": \"Tiêu đề buổi ôn tập Ngày 1\",\n" +
-            "      \"focus\": \"Mục tiêu ôn tập chính trong ngày\",\n" +
-            "      \"lessons\": [\"Nội dung ôn tập hoặc dạng bài tập thực hành\"],\n" +
-            "      \"vocabularies\": [\"Từ vựng cần ôn lại 1 (Nghĩa)\", \"Từ vựng cần ôn lại 2 (Nghĩa)\"],\n" +
-            "      \"kanjis\": [\"Chữ Hán cần ôn lại 1 (Cách đọc/Ý nghĩa)\"],\n" +
-            "      \"grammars\": [\"Cấu trúc ngữ pháp cần luyện tập 1\"]\n" +
+            "      \"day\": 1, \"title\": \"buổi học\", \"focus\": \"mục tiêu cụ thể\", \"lessonIds\": [1]\n" +
             "    }\n" +
             "  ]\n" +
             "}";

@@ -13,7 +13,6 @@ namespace RikiPath.Domain.Entities
         public string? Description { get; set; }
         public int TimeLimitMinutes { get; set; }
         /// <summary>Indicates this published mock test is used for onboarding placement.</summary>
-        public bool IsPlacementAssessment { get; set; }
 
         public int CertificateLevelId { get; set; }
         public CertificateLevel CertificateLevel { get; set; }

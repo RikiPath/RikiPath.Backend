@@ -311,7 +311,6 @@ namespace RikiPath.Application.Handlers
 
             ImportHandlerSupport.CompareField(changed, "description", existing.Description, payload.Description);
             ImportHandlerSupport.CompareField(changed, "timeLimitMinutes", existing.TimeLimitMinutes.ToString(), payload.TimeLimitMinutes.ToString());
-            ImportHandlerSupport.CompareField(changed, "isPlacementAssessment", existing.IsPlacementAssessment.ToString(), payload.IsPlacementAssessment.ToString());
 
             var oldSections = existing.Sections?.Where(s => !s.IsDeleted).OrderBy(s => s.SortOrder).ToList()
                               ?? new List<Domain.Entities.MockTestSection>();

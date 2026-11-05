@@ -4,7 +4,7 @@ using RikiPath.Application.Responses.MockTests;
 
 namespace RikiPath.Application.IServices
 {
-    public interface IMockTestService
+    public interface IPracticeTestService
     {
         Task<ApiResponse<StartAttemptResponse>> StartAttemptAsync(int practiceTestId, CancellationToken cancellationToken = default);
 
@@ -14,10 +14,12 @@ namespace RikiPath.Application.IServices
 
         Task<ApiResponse<List<TestSummaryResponse>>> GetTestsByLevelAsync(int jlptLevelId, CancellationToken cancellationToken = default);
 
-        Task<ApiResponse<List<TestSummaryResponse>>> GetPlacementTestsByCertificateLevelAsync(int certificateLevelId, CancellationToken cancellationToken = default);
+        Task<ApiResponse<MockTestDetailResponse>> GetPlacementTestDetailAsync(int certificateLevelId, CancellationToken cancellationToken = default);
 
         Task<ApiResponse<DetailedAttemptResultResponse>> GetDetailedResultAsync(int attemptId, CancellationToken cancellationToken = default);
 
         Task<ApiResponse<List<QuestionReviewCard>>> GetWrongQuestionsReviewSessionAsync(int? practiceTestId = null, CancellationToken cancellationToken = default);
+
+
     }
 }

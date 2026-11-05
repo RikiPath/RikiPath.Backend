@@ -10,5 +10,9 @@ namespace RikiPath.Application.IRepositories
             int practiceTestAttemptId,
             CancellationToken cancellationToken = default);
         Task<List<MockTestSectionResult>> GetLanguageSkillBreakdownAsync(int userId);
+        Task<List<MockTestSectionResult>> GetSkillHistoryByUserSinceAsync(
+            int userId,
+            DateTime fromUtc,
+            CancellationToken cancellationToken = default);
     }
 }

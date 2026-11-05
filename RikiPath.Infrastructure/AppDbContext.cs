@@ -108,6 +108,8 @@ namespace RikiPath.Infrastructure
         public DbSet<Notification> Notifications { get; set; }
         public DbSet<UserDeviceToken> UserDeviceTokens { get; set; }
         public DbSet<ContentApprovalRequest> ContentApprovalRequests { get; set; }
+
+        public DbSet<ContentAiReview> ContentAiReviews { get; set; }
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             modelBuilder.ApplyConfiguration(new MentorWeeklyAvailabilityConfig());
@@ -200,6 +202,8 @@ namespace RikiPath.Infrastructure
             // Additional configurations for completeness
             modelBuilder.ApplyConfiguration(new CertificateSectionConfig());
             modelBuilder.ApplyConfiguration(new EmailVerificationsConfig());
+
+            modelBuilder.ApplyConfiguration(new ContentAiReviewConfig());
         }
     }
 }

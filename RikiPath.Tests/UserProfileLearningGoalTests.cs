@@ -188,7 +188,7 @@ public sealed class UserProfileLearningGoalTests
         {
             UtcNowProvider = () => currentClock,
         };
-        var placementService = new PlacementTestService(new UnitOfWork(context), claims.Object)
+        var placementService = new PracticeTestService(new UnitOfWork(context), claims.Object)
         {
             UtcNowProvider = () => currentClock,
         };

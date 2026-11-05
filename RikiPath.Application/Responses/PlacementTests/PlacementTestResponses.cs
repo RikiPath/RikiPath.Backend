@@ -85,6 +85,9 @@ namespace RikiPath.Application.Responses.PlacementTests
         public int Order { get; set; }
         public string Content { get; set; } = string.Empty;
 
+        /// <summary>Last saved learner choice; null if unanswered.</summary>
+        public int? SelectedOptionId { get; set; }
+
         [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
         public string? AudioUrl { get; set; }
 
@@ -92,6 +95,13 @@ namespace RikiPath.Application.Responses.PlacementTests
         public string? ImageUrl { get; set; }
 
         public List<PlacementTestOptionResponse> Options { get; set; } = [];
+    }
+
+    public sealed class PlacementAnswersSavedResponse
+    {
+        public int AttemptId { get; set; }
+        public DateTime SavedAt { get; set; }
+        public int SavedQuestionCount { get; set; }
     }
 
     public class PlacementTestOptionResponse
@@ -116,6 +126,9 @@ namespace RikiPath.Application.Responses.PlacementTests
         public string AttemptType { get; set; } = "placement";
         public string Status { get; set; } = "completed";
         public DateTime StartedAt { get; set; }
+
+        /// <summary>Elapsed time from server start until submission, in seconds.</summary>
+        public int DurationSeconds { get; set; }
 
         [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
         public DateTime? SubmittedAt { get; set; }
