@@ -6,6 +6,7 @@ namespace RikiPath.WebApi.Controllers;
 
 [ApiController]
 [Route("api/learner-essays")]
+[Authorize(Roles = "Learner")]
 public class LearnerEssayController(ILearnerEssayService essayService) : ControllerBase
 {
     [HttpPost("scan")]

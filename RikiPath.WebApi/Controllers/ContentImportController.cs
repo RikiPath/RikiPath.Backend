@@ -12,7 +12,7 @@ namespace RikiPath.Api.Controllers
 {
     [ApiController]
     [Route("api/content-import")]
-    [Authorize] // Bắt buộc đăng nhập (Có thể thêm role nếu cần, vd: [Authorize(Roles = "ContentAuthor,Admin")])
+    [Authorize(Roles = "ContentAuthor,Admin")]
     public class ContentImportController(IExcelContentImportService importService) : ControllerBase
     {
         /// <summary>
