@@ -69,6 +69,80 @@ STRICT INSTRUCTIONS:
         }
     }
 
+    public Task<ApiResponse<EssayDetailResponse>> CreateAsync(
+        IFormFile? image, string contentText, string? originalOcrText,
+        CancellationToken cancellationToken = default)
+        => PersistDraftAsync(null, image, contentText, originalOcrText, cancellationToken);
+
+    public Task<ApiResponse<EssayDetailResponse>> SaveDraftAsync(
+        int id, IFormFile? image, string contentText, string? originalOcrText,
+        CancellationToken cancellationToken = default)
+        => PersistDraftAsync(id, image, contentText, originalOcrText, cancellationToken);
+
+    private async Task<ApiResponse<EssayDetailResponse>> PersistDraftAsync(
+        int? id, IFormFile? image, string contentText, string? originalOcrText,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(contentText))
+            return ApiResponse<EssayDetailResponse>.Fail("Nội dung bài viết không được để trống.");
+        if (image is not null && ValidateImage(image) is { } validation)
+            return ApiResponse<EssayDetailResponse>.Fail(validation);
+
+        var essay = id.HasValue ? await GetOwnedEssayAsync(id.Value, cancellationToken) : null;
+        if (id.HasValue && essay is null)
+            return ApiResponse<EssayDetailResponse>.NotFound("Không tìm thấy bài viết.");
+
+        essay ??= new LearnerEssay { UserId = claimService.GetUserClaim().Id };
+        var oldPath = essay.ImageStoragePath;
+        UploadedFileResult? uploaded = null;
+        try
+        {
+            if (image is not null)
+            {
+                await using var stream = image.OpenReadStream();
+                uploaded = await fileStorage.UploadAsync(
+                    stream, image.FileName, image.ContentType, "essays", cancellationToken);
+                essay.ImageUrl = uploaded.Url;
+                essay.ImageStoragePath = uploaded.StoredFileName;
+                essay.OriginalOcrText = originalOcrText ?? string.Empty;
+            }
+
+            essay.ContentText = contentText.Trim();
+            essay.Title = BuildTitle(essay.ContentText);
+            essay.ModifiedDate = DateTime.UtcNow;
+            if (id.HasValue)
+                unitOfWork.LearnerEssays.Update(essay);
+            else
+                await unitOfWork.LearnerEssays.AddAsync(essay, cancellationToken);
+            await unitOfWork.SaveChangesAsync(cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            if (uploaded is not null) await TryDeleteImageAsync(uploaded.StoredFileName);
+            throw;
+        }
+        catch
+        {
+            if (uploaded is not null) await TryDeleteImageAsync(uploaded.StoredFileName);
+            return ApiResponse<EssayDetailResponse>.Fail(
+                "Không thể lưu bài viết. Vui lòng thử lại.", HttpStatusCode.InternalServerError);
+        }
+
+        // Delete the old image only after the new draft was successfully saved.
+        if (uploaded is not null && oldPath != uploaded.StoredFileName)
+            await TryDeleteImageAsync(oldPath);
+        return id.HasValue
+            ? ApiResponse<EssayDetailResponse>.Success(MapDetail(essay))
+            : ApiResponse<EssayDetailResponse>.Created(MapDetail(essay));
+    }
+
+    private async Task TryDeleteImageAsync(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return;
+        try { await fileStorage.DeleteAsync(path, "essays", CancellationToken.None); }
+        catch { /* An orphaned object can be cleaned up later; the saved draft stays valid. */ }
+    }
+
     public async Task<ApiResponse<List<EssayListItemResponse>>> GetAllAsync(
         CancellationToken cancellationToken = default)
     {
@@ -122,7 +196,8 @@ STRICT INSTRUCTIONS:
         if (essay is null)
             return ApiResponse.NotFound("Không tìm thấy bài viết.");
 
-        await fileStorage.DeleteAsync(essay.ImageStoragePath, "essays", cancellationToken);
+        if (!string.IsNullOrWhiteSpace(essay.ImageStoragePath))
+            await fileStorage.DeleteAsync(essay.ImageStoragePath, "essays", cancellationToken);
         essay.IsDeleted = true;
         essay.ModifiedDate = DateTime.UtcNow;
         unitOfWork.LearnerEssays.Update(essay);
@@ -135,58 +210,11 @@ STRICT INSTRUCTIONS:
         IFormFile image,
         CancellationToken cancellationToken = default)
     {
-        var validation = ValidateImage(image);
-        if (validation is not null)
-            return ApiResponse<EssayScanResponse>.Fail(validation);
-
         var essay = await GetOwnedEssayAsync(id, cancellationToken);
         if (essay is null)
             return ApiResponse<EssayScanResponse>.NotFound("Không tìm thấy bài viết.");
-
-        try
-        {
-            // 1. Chuyển đổi file ảnh sang Base64
-            var (base64Image, mimeType) = await ConvertFormFileToBase64Async(image, cancellationToken);
-
-            // 2. Scan lại bằng Gemini AI OCR Client
-            var text = await geminiOcrClient.ScanHandwritingAsync(
-                JapaneseOcrPrompt, base64Image, mimeType, cancellationToken);
-
-            if (string.IsNullOrWhiteSpace(text))
-                return ApiResponse<EssayScanResponse>.Fail(
-                    "Không nhận diện được chữ tiếng Nhật trong ảnh. Hãy dùng ảnh rõ hơn và chụp đủ sáng.");
-
-            // 3. Upload ảnh mới
-            await using var uploadStream = image.OpenReadStream();
-            var uploaded = await fileStorage.UploadAsync(
-                uploadStream, image.FileName, image.ContentType, "essays", cancellationToken);
-            var oldPath = essay.ImageStoragePath;
-
-            essay.ImageUrl = uploaded.Url;
-            essay.ImageStoragePath = uploaded.StoredFileName;
-            essay.OriginalOcrText = text;
-            essay.ContentText = text;
-            essay.Title = BuildTitle(text);
-            essay.ModifiedDate = DateTime.UtcNow;
-            unitOfWork.LearnerEssays.Update(essay);
-            await unitOfWork.SaveChangesAsync(cancellationToken);
-
-            try
-            {
-                await fileStorage.DeleteAsync(oldPath, "essays", cancellationToken);
-            }
-            catch
-            {
-                // File cũ xóa thất bại có thể dọn dẹp sau
-            }
-
-            return ApiResponse<EssayScanResponse>.Success(MapScan(essay));
-        }
-        catch (Exception ex)
-        {
-            return ApiResponse<EssayScanResponse>.Fail(
-                $"Quét lại văn bản thất bại: {ex.Message}", HttpStatusCode.InternalServerError);
-        }
+        // Preview only: neither the stored text nor its image changes until explicit save.
+        return await ScanAsync(image, cancellationToken);
     }
 
     private async Task<LearnerEssay?> GetOwnedEssayAsync(
@@ -228,17 +256,15 @@ STRICT INSTRUCTIONS:
         return normalized.Length <= 80 ? normalized : normalized[..80].TrimEnd() + "…";
     }
 
-    private static EssayScanResponse MapScan(LearnerEssay essay) => new()
-    {
-        Text = essay.OriginalOcrText,
-        ScannedAt = essay.CreatedDate,
-    };
-
     private static EssayDetailResponse MapDetail(LearnerEssay essay) => new()
     {
+        Id = essay.Id,
+        Title = essay.Title,
+        ImageUrl = essay.ImageUrl,
         OriginalOcrText = essay.OriginalOcrText,
         ContentText = essay.ContentText,
         ScannedAt = essay.CreatedDate,
+        ModifiedAt = essay.ModifiedDate,
     };
 
     private static EssayListItemResponse MapList(LearnerEssay essay) => new()
