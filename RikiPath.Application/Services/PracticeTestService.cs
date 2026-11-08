@@ -1,34 +1,1466 @@
-using RikiPath.Domain.Entities;
-using RikiPath.Domain.Enums;
+using Microsoft.EntityFrameworkCore;
 using RikiPath.Application.IServices;
 using RikiPath.Application.Requests.MockTests;
+using RikiPath.Application.Requests.PlacementTests;
 using RikiPath.Application.Responses;
 using RikiPath.Application.Responses.MockTests;
+using RikiPath.Application.Responses.PlacementTests;
+using RikiPath.Domain.Entities;
+using RikiPath.Domain.Enums;
+using System.Collections.Concurrent;
 using System.Net;
 using System.Text.Json;
-using System.Text.Json.Nodes;
 
 namespace RikiPath.Application.Services
 {
-    public class MockTestService(IUnitOfWork unitOfWork, IClaimService claimService) : IMockTestService
+    public static class BusinessDateHelper
     {
-        private const string StatusInProgress = "in_progress";
-        private const string StatusCompleted = "completed";
+        public static readonly TimeSpan VietnamOffset = TimeSpan.FromHours(7);
 
-        private static JsonElement? ParseJsonElement(string? json)
+        public static DateTime EnsureUtc(DateTime value)
+            => value.Kind switch
+            {
+                DateTimeKind.Utc => value,
+                DateTimeKind.Local => value.ToUniversalTime(),
+                _ => DateTime.SpecifyKind(value, DateTimeKind.Utc),
+            };
+
+        public static DateTime GetVietnamToday(DateTime utcNow)
+            => DateTime.SpecifyKind((EnsureUtc(utcNow) + VietnamOffset).Date, DateTimeKind.Unspecified);
+
+        public static DateTime NormalizeExamDate(DateTime value)
         {
-            if (string.IsNullOrWhiteSpace(json)) return null;
-            using var document = JsonDocument.Parse(json);
-            return document.RootElement.Clone();
+            if (value.TimeOfDay == TimeSpan.Zero)
+            {
+                return DateTime.SpecifyKind(value.Date, DateTimeKind.Unspecified);
+            }
+
+            return value.Kind switch
+            {
+                DateTimeKind.Utc => DateTime.SpecifyKind((value + VietnamOffset).Date, DateTimeKind.Unspecified),
+                DateTimeKind.Local => DateTime.SpecifyKind((value.ToUniversalTime() + VietnamOffset).Date, DateTimeKind.Unspecified),
+                _ => DateTime.SpecifyKind(value.Date, DateTimeKind.Unspecified),
+            };
         }
 
-        private static bool IsStructuredResponseCorrect(MockQuestion question, JsonElement? response)
+        public static int GetDaysUntilExam(DateTime targetExamDate, DateTime utcNow)
+            => (NormalizeExamDate(targetExamDate) - GetVietnamToday(utcNow)).Days;
+
+        public static bool IsFutureExamDate(DateTime? targetExamDate, DateTime utcNow)
+            => targetExamDate.HasValue && GetDaysUntilExam(targetExamDate.Value, utcNow) >= 1;
+    }
+
+    public class PracticeTestService(IUnitOfWork unitOfWork, IClaimService claimService) : IPracticeTestService
+    {
+        public const string AttemptTypePlacement = "placement";
+        public const string StatusInProgress = "inProgress";
+        public const string StatusCompleted = "completed";
+
+        public const string ErrorBankNotReady = "PLACEMENT_BANK_NOT_READY";
+        public const string ErrorAttemptNotFound = "PLACEMENT_ATTEMPT_NOT_FOUND";
+        public const string ErrorAttemptExpired = "PLACEMENT_ATTEMPT_EXPIRED";
+        public const string ErrorAnswerInvalid = "PLACEMENT_ANSWER_INVALID";
+        public const string ErrorAttemptNotReady = "PLACEMENT_ATTEMPT_NOT_READY";
+        public const string ErrorAttemptNotCompleted = "PLACEMENT_ATTEMPT_NOT_COMPLETED";
+
+        private const int MinimumEligibleQuestionsPerLevel = 2;
+        private const int DefaultQuestionsPerLevel = 5;
+        private const string NotFoundAttemptMessage = "Không tìm thấy lượt làm bài đánh giá năng lực.";
+
+        private static readonly string[] SupportedLevels = ["N5", "N4", "N3"];
+        private static readonly JsonSerializerOptions SnapshotJsonOptions = new(JsonSerializerDefaults.Web);
+        private static readonly ConcurrentDictionary<int, SemaphoreSlim> UserStartLocks = new();
+        private static readonly ConcurrentDictionary<int, SemaphoreSlim> AttemptSubmitLocks = new();
+
+        public Func<DateTime> UtcNowProvider { get; init; } = static () => DateTime.UtcNow;
+
+        public async Task<ApiResponse<PlacementTestStatusResponse>> GetStatusAsync(
+            CancellationToken cancellationToken = default)
         {
-            if (response is null || string.IsNullOrWhiteSpace(question.AnswerKeyJson)) return false;
             try
             {
-                using var expectedDocument = JsonDocument.Parse(question.AnswerKeyJson);
-                return JsonNode.DeepEquals(JsonNode.Parse(question.AnswerKeyJson), JsonNode.Parse(response.Value.GetRawText()));
+                var userId = claimService.GetUserClaim().Id;
+                var user = await unitOfWork.UserAccounts.GetWithLearningGoalAsync(userId, cancellationToken);
+                if (user is null)
+                {
+                    return ApiResponse<PlacementTestStatusResponse>.NotFound("Không tìm thấy người dùng.");
+                }
+
+                var serverNow = EnsureUtc(UtcNowProvider());
+                var placementAttempts = await LoadUserPlacementAttemptsAsync(userId, cancellationToken);
+
+                var activeAttempt = placementAttempts
+                    .Where(a => !a.IsCompleted &&
+                                a.ExpiresAt.HasValue &&
+                                EnsureUtc(a.ExpiresAt.Value) > serverNow &&
+                                TryDeserializeSnapshot(a.QuestionSnapshotJson, out var doc) &&
+                                doc.Questions.Count > 0)
+                    .OrderByDescending(a => a.StartedAt)
+                    .ThenByDescending(a => a.Id)
+                    .FirstOrDefault();
+
+                var completedWithSnapshot = placementAttempts
+                    .Where(a => a.IsCompleted && a.TotalScore.HasValue)
+                    .OrderByDescending(a => a.SubmittedAt ?? a.StartedAt)
+                    .ThenByDescending(a => a.Id)
+                    .Select(a => (Attempt: a, Recovered: RecoverResultFromCompletedAttempt(a)))
+                    .FirstOrDefault(x => x.Recovered is not null);
+
+                var latestCompleted = completedWithSnapshot.Attempt;
+                var recovered = completedWithSnapshot.Recovered;
+
+                int? assessedLevelId = recovered?.AssessedJlptLevelId;
+                string? assessedLevelName = recovered?.AssessedJlptLevelName;
+                int? recommendedLevelId = recovered?.RecommendedTargetJlptLevelId;
+                string? recommendedLevelName = recovered?.RecommendedTargetJlptLevelName;
+
+                string? targetLevelName = user.TargetCertificateLevel?.Code;
+                if (user.TargetCertificateLevelId.HasValue && string.IsNullOrWhiteSpace(targetLevelName))
+                {
+                    var targetLevel = await unitOfWork.CertificateLevels.GetByIdAsync(
+                        user.TargetCertificateLevelId.Value,
+                        cancellationToken);
+                    targetLevelName = targetLevel?.Code;
+                }
+
+                var hasValidExamDate = BusinessDateHelper.IsFutureExamDate(user.TargetExamDate, serverNow);
+                var isReadyForLearningPath =
+                    (user.StartingCertificateLevelId ?? user.TargetCertificateLevelId).HasValue &&
+                    user.TargetCertificateLevelId.HasValue &&
+                    hasValidExamDate &&
+                    user.DailyStudyMinutes > 0;
+
+                return ApiResponse<PlacementTestStatusResponse>.Success(new PlacementTestStatusResponse
+                {
+                    AttemptType = AttemptTypePlacement,
+                    PlacementDecision = latestCompleted is not null || user.PlacementDecision == PlacementDecision.Completed
+                        ? "COMPLETED"
+                        : user.PlacementDecision == PlacementDecision.Skipped ? "SKIPPED" : "NOT_TAKEN",
+                    HasActiveAttempt = activeAttempt is not null,
+                    ActiveAttemptId = activeAttempt?.Id,
+                    ActiveAttemptExpiresAt = activeAttempt?.ExpiresAt is { } exp ? EnsureUtc(exp) : null,
+                    HasCompletedPlacementTest = latestCompleted is not null,
+                    LatestCompletedAttemptId = latestCompleted?.Id,
+                    LatestAttemptId = latestCompleted?.Id,
+                    LatestSubmittedAt = latestCompleted?.SubmittedAt is { } sub ? EnsureUtc(sub) : null,
+                    LatestScorePercent = latestCompleted?.TotalScore,
+                    AssessedJlptLevelId = assessedLevelId,
+                    AssessedJlptLevelName = assessedLevelName,
+                    RecommendedTargetJlptLevelId = recommendedLevelId,
+                    RecommendedTargetJlptLevelName = recommendedLevelName,
+                    TargetJlptLevelId = user.TargetCertificateLevelId,
+                    TargetJlptLevelName = targetLevelName,
+                    DailyStudyMinutes = user.DailyStudyMinutes,
+                    TargetExamDate = user.TargetExamDate,
+                    IsReadyForLearningPath = isReadyForLearningPath,
+                });
+            }
+            catch (Exception)
+            {
+                return ApiResponse<PlacementTestStatusResponse>.Fail(
+                    "Không thể tải trạng thái bài kiểm tra đánh giá năng lực.",
+                    HttpStatusCode.InternalServerError);
+            }
+        }
+
+        public async Task<ApiResponse<PlacementTestStatusResponse>> SkipPlacementAsync(
+            CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                var userId = claimService.GetUserClaim().Id;
+                var user = await unitOfWork.UserAccounts.GetByIdAsync(userId, cancellationToken);
+                if (user is null)
+                    return ApiResponse<PlacementTestStatusResponse>.NotFound("Không tìm thấy người dùng.");
+
+                // Không ghi đè quyết định COMPLETED đã được xác nhận từ kết quả thật.
+                if (user.PlacementDecision != PlacementDecision.Completed)
+                {
+                    user.PlacementDecision = PlacementDecision.Skipped;
+                    unitOfWork.UserAccounts.Update(user);
+                    await unitOfWork.SaveChangesAsync(cancellationToken);
+                }
+                return await GetStatusAsync(cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception)
+            {
+                return ApiResponse<PlacementTestStatusResponse>.Fail(
+                    "Không thể lưu lựa chọn bỏ qua bài đánh giá.", HttpStatusCode.InternalServerError);
+            }
+        }
+
+        public async Task<ApiResponse<PlacementAttemptSnapshotResponse?>> GetActiveAttemptAsync(
+            CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                var userId = claimService.GetUserClaim().Id;
+                var serverNow = EnsureUtc(UtcNowProvider());
+                var active = await TryFindCanonicalActiveAttemptAsync(userId, serverNow, cancellationToken);
+                if (active is null)
+                {
+                    return ApiResponse<PlacementAttemptSnapshotResponse?>.Success(null);
+                }
+
+                var snapshotResponse = BuildSnapshotResponse(
+                    active.Value.Attempt,
+                    active.Value.Snapshot,
+                    serverNow,
+                    isResumed: true);
+                return ApiResponse<PlacementAttemptSnapshotResponse?>.Success(snapshotResponse);
+            }
+            catch (Exception)
+            {
+                return ApiResponse<PlacementAttemptSnapshotResponse?>.Fail(
+                    "Không thể tải lượt làm bài đánh giá năng lực đang diễn ra.",
+                    HttpStatusCode.InternalServerError);
+            }
+        }
+
+        public async Task<ApiResponse<PlacementAnswersSavedResponse>> SavePlacementAnswersAsync(
+            int attemptId,
+            SubmitPlacementTestRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            var userId = 0;
+            SemaphoreSlim? attemptLock = null;
+            try
+            {
+                userId = claimService.GetUserClaim().Id;
+                attemptLock = AttemptSubmitLocks.GetOrAdd(attemptId, _ => new SemaphoreSlim(1, 1));
+                await attemptLock.WaitAsync(cancellationToken);
+
+                ApiResponse<PlacementAnswersSavedResponse>? response = null;
+                await unitOfWork.ExecuteInTransactionAsync(async transactionCancellationToken =>
+                {
+                    var attempt = await LoadPlacementAttemptForSubmissionAsync(attemptId, transactionCancellationToken);
+                    if (attempt is null || attempt.UserId != userId || attempt.IsDeleted)
+                    {
+                        response = ApiResponse<PlacementAnswersSavedResponse>.NotFound(
+                            NotFoundAttemptMessage, errorCode: ErrorAttemptNotFound, retryable: false);
+                        return;
+                    }
+                    if (attempt.IsCompleted)
+                    {
+                        response = ApiResponse<PlacementAnswersSavedResponse>.Fail(
+                            "Lượt làm bài đã được nộp.", HttpStatusCode.Conflict,
+                            errorCode: ErrorAttemptNotReady, retryable: false);
+                        return;
+                    }
+                    if (request?.Answers is null || request.Answers.Count == 0 || request.Answers.Any(a => a is null))
+                    {
+                        response = ApiResponse<PlacementAnswersSavedResponse>.Fail(
+                            "Chưa có lựa chọn hợp lệ để lưu.", HttpStatusCode.BadRequest,
+                            errorCode: ErrorAnswerInvalid, retryable: false);
+                        return;
+                    }
+                    if (!TryDeserializeSnapshot(attempt.QuestionSnapshotJson, out var snapshotDoc) ||
+                        !HasValidSnapshotQuestions(snapshotDoc.Questions))
+                    {
+                        response = ApiResponse<PlacementAnswersSavedResponse>.Fail(
+                            "Lượt làm bài không có snapshot câu hỏi hợp lệ.", HttpStatusCode.Conflict,
+                            errorCode: ErrorAttemptNotReady, retryable: false);
+                        return;
+                    }
+
+                    var now = EnsureUtc(UtcNowProvider());
+                    var expiresAt = EnsureUtc(attempt.ExpiresAt ?? snapshotDoc.ExpiresAt);
+                    if (now >= expiresAt)
+                    {
+                        response = ApiResponse<PlacementAnswersSavedResponse>.Fail(
+                            "Lượt làm bài đã hết thời gian.", HttpStatusCode.Conflict,
+                            errorCode: ErrorAttemptExpired, retryable: false);
+                        return;
+                    }
+
+                    var duplicates = request.Answers.GroupBy(a => a.QuestionId).Where(g => g.Count() > 1).Select(g => g.Key).ToList();
+                    if (duplicates.Count > 0)
+                    {
+                        response = ApiResponse<PlacementAnswersSavedResponse>.Fail(
+                            $"Không được gửi lặp câu hỏi: {string.Join(", ", duplicates)}.", HttpStatusCode.BadRequest,
+                            errorCode: ErrorAnswerInvalid, retryable: false);
+                        return;
+                    }
+
+                    var questionsById = snapshotDoc.Questions.ToDictionary(q => q.QuestionId);
+                    foreach (var answer in request.Answers)
+                    {
+                        if (!questionsById.TryGetValue(answer.QuestionId, out var question) ||
+                            (answer.SelectedOptionId.HasValue && !question.Options.Any(o => o.OptionId == answer.SelectedOptionId.Value)))
+                        {
+                            response = ApiResponse<PlacementAnswersSavedResponse>.Fail(
+                                $"Câu hỏi hoặc lựa chọn không thuộc lượt làm bài (QuestionId: {answer.QuestionId}).",
+                                HttpStatusCode.BadRequest, errorCode: ErrorAnswerInvalid, retryable: false);
+                            return;
+                        }
+                    }
+
+                    foreach (var answer in request.Answers)
+                        questionsById[answer.QuestionId].SelectedOptionId = answer.SelectedOptionId;
+
+                    var answerRows = await unitOfWork.MockTestAnswers.GetByAttemptIdAsync(attemptId, transactionCancellationToken);
+                    var answersByQuestionId = answerRows.ToDictionary(a => a.MockQuestionId);
+                    foreach (var answer in request.Answers)
+                    {
+                        if (answersByQuestionId.TryGetValue(answer.QuestionId, out var row))
+                            row.SelectedOptionId = answer.SelectedOptionId;
+                    }
+
+                    attempt.QuestionSnapshotJson = JsonSerializer.Serialize(snapshotDoc, SnapshotJsonOptions);
+                    attempt.ModifiedDate = now;
+                    unitOfWork.MockTestAttempts.Update(attempt);
+                    await unitOfWork.SaveChangesAsync(transactionCancellationToken);
+                    response = ApiResponse<PlacementAnswersSavedResponse>.Success(new PlacementAnswersSavedResponse
+                    {
+                        AttemptId = attempt.Id,
+                        SavedAt = now,
+                        SavedQuestionCount = request.Answers.Count,
+                    });
+                }, cancellationToken);
+                return response!;
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception)
+            {
+                return ApiResponse<PlacementAnswersSavedResponse>.Fail(
+                    "Không thể lưu lựa chọn bài đánh giá năng lực.", HttpStatusCode.InternalServerError);
+            }
+            finally
+            {
+                attemptLock?.Release();
+            }
+        }
+
+        public Task<ApiResponse<PlacementAttemptSnapshotResponse>> StartPlacementTestAsync(
+            CancellationToken cancellationToken = default)
+            => StartPlacementTestInternalAsync(DefaultQuestionsPerLevel, cancellationToken);
+
+        public Task<ApiResponse<PlacementAttemptSnapshotResponse>> StartPlacementTestAsync(
+            StartPlacementTestRequest? request,
+            CancellationToken cancellationToken = default)
+        {
+            var requestedQuestionsPerLevel = Math.Clamp(DefaultQuestionsPerLevel,
+                MinimumEligibleQuestionsPerLevel,
+                DefaultQuestionsPerLevel);
+            return StartPlacementTestInternalAsync(requestedQuestionsPerLevel, cancellationToken);
+        }
+
+        private async Task<ApiResponse<PlacementAttemptSnapshotResponse>> StartPlacementTestInternalAsync(
+            int questionsPerSupportedLevel,
+            CancellationToken cancellationToken)
+        {
+            var userId = 0;
+            SemaphoreSlim? userLock = null;
+            try
+            {
+                userId = claimService.GetUserClaim().Id;
+                userLock = UserStartLocks.GetOrAdd(userId, _ => new SemaphoreSlim(1, 1));
+                await userLock.WaitAsync(cancellationToken);
+
+                var serverNow = EnsureUtc(UtcNowProvider());
+                var preExistingActive = await TryFindCanonicalActiveAttemptAsync(
+                    userId,
+                    serverNow,
+                    cancellationToken);
+                if (preExistingActive is not null)
+                {
+                    return ApiResponse<PlacementAttemptSnapshotResponse>.Success(
+                        BuildSnapshotResponse(
+                            preExistingActive.Value.Attempt,
+                            preExistingActive.Value.Snapshot,
+                            serverNow,
+                            isResumed: true),
+                        HttpStatusCode.OK);
+                }
+
+                var tests = await unitOfWork.MockTests.GetAllWithSectionsAndQuestionsAsync(cancellationToken);
+                var allLevels = (await unitOfWork.CertificateLevels.GetAllAsync(cancellationToken))
+                    .Where(l => !l.IsDeleted && l.Id > 0 && !string.IsNullOrWhiteSpace(l.Code))
+                    .ToList();
+
+                var supportedCatalogLevels = allLevels
+                    .Select(l => (LevelId: l.Id, LevelCode: NormalizeLevelCode(l.Code), Rank: GetLevelRank(l.Code)))
+                    .Where(l => IsSupportedLevel(l.LevelCode))
+                    .GroupBy(l => l.LevelCode)
+                    .Select(g => g.OrderBy(x => x.LevelId).First())
+                    .OrderBy(l => l.Rank)
+                    .ToDictionary(l => l.LevelCode);
+
+                var levelById = allLevels
+                    .Select(l => (LevelId: l.Id, LevelCode: NormalizeLevelCode(l.Code), Rank: GetLevelRank(l.Code)))
+                    .Where(l => IsSupportedLevel(l.LevelCode))
+                    .ToDictionary(l => l.LevelId);
+
+                var eligibleCandidates = new List<(
+                    MockTest Test,
+                    MockTestSection Section,
+                    MockQuestion Question,
+                    List<MockQuestionOption> ValidOptions,
+                    int CorrectOptionId,
+                    int LevelId,
+                    string LevelCode,
+                    int LevelRank)>();
+
+                var seenQuestionIds = new HashSet<int>();
+
+                foreach (var test in (tests ?? []).Where(t => t is not null && !t.IsDeleted && t.Id > 0 && t.CertificateLevelId > 0).OrderBy(t => t.Id))
+                {
+                    if (test.CertificateLevel is { IsDeleted: true })
+                    {
+                        continue;
+                    }
+
+                    string? resolvedCode = null;
+                    int resolvedLevelId = test.CertificateLevelId;
+
+                    if (test.CertificateLevel is { IsDeleted: false, Id: > 0 } navLevel &&
+                        !string.IsNullOrWhiteSpace(navLevel.Code))
+                    {
+                        resolvedCode = NormalizeLevelCode(navLevel.Code);
+                        resolvedLevelId = navLevel.Id;
+                    }
+                    else if (levelById.TryGetValue(test.CertificateLevelId, out var catLevel))
+                    {
+                        resolvedCode = catLevel.LevelCode;
+                        resolvedLevelId = catLevel.LevelId;
+                    }
+
+                    if (resolvedCode is null || !IsSupportedLevel(resolvedCode) || resolvedLevelId <= 0)
+                    {
+                        continue;
+                    }
+
+                    var levelRank = GetLevelRank(resolvedCode);
+                    if (!supportedCatalogLevels.ContainsKey(resolvedCode))
+                    {
+                        supportedCatalogLevels[resolvedCode] = (resolvedLevelId, resolvedCode, levelRank);
+                    }
+
+                    var orderedSections = (test.Sections ?? [])
+                        .Where(s => s is not null && !s.IsDeleted && s.Id > 0)
+                        .OrderBy(s => s.SortOrder)
+                        .ThenBy(s => s.Id);
+
+                    foreach (var section in orderedSections)
+                    {
+                        var orderedQuestions = (section.Questions ?? [])
+                            .Where(q => q is not null && !q.IsDeleted && q.Id > 0)
+                            .OrderBy(q => q.SortOrder)
+                            .ThenBy(q => q.Id);
+
+                        foreach (var question in orderedQuestions)
+                        {
+                            if (!HasUsablePrompt(question) || !seenQuestionIds.Add(question.Id))
+                            {
+                                continue;
+                            }
+
+                            var validOptions = (question.Options ?? [])
+                                .Where(o => o is not null &&
+                                            !o.IsDeleted &&
+                                            o.Id > 0 &&
+                                            !string.IsNullOrWhiteSpace(o.OptionText))
+                                .OrderBy(o => o.SortOrder)
+                                .ThenBy(o => o.Id)
+                                .ToList();
+
+                            if (validOptions.Count < 2)
+                            {
+                                continue;
+                            }
+
+                            if (validOptions.Select(o => o.Id).Distinct().Count() != validOptions.Count)
+                            {
+                                continue;
+                            }
+
+                            var correctOptions = validOptions.Where(o => o.IsCorrect).ToList();
+                            if (correctOptions.Count != 1)
+                            {
+                                continue;
+                            }
+
+                            eligibleCandidates.Add((
+                                Test: test,
+                                Section: section,
+                                Question: question,
+                                ValidOptions: validOptions,
+                                CorrectOptionId: correctOptions[0].Id,
+                                LevelId: resolvedLevelId,
+                                LevelCode: resolvedCode,
+                                LevelRank: levelRank));
+                        }
+                    }
+                }
+
+                var groupedByLevel = eligibleCandidates
+                    .GroupBy(c => c.LevelCode)
+                    .ToDictionary(g => g.Key, g => g.ToList());
+
+                foreach (var requiredLevel in SupportedLevels)
+                {
+                    if (!groupedByLevel.TryGetValue(requiredLevel, out var levelQuestions) ||
+                        levelQuestions.Count < MinimumEligibleQuestionsPerLevel)
+                    {
+                        return ApiResponse<PlacementAttemptSnapshotResponse>.Fail(
+                            "Ngân hàng câu hỏi đánh giá năng lực chưa đủ câu hỏi hợp lệ cho các cấp độ N5, N4 và N3.",
+                            HttpStatusCode.Conflict,
+                            errorCode: ErrorBankNotReady,
+                            retryable: false);
+                    }
+                }
+
+                var selectedQuestions = SupportedLevels
+                    .SelectMany(levelCode => groupedByLevel[levelCode].Take(questionsPerSupportedLevel))
+                    .ToList();
+
+                var timeLimitMinutes = ComputeTimeLimitMinutes(selectedQuestions.Count);
+
+                var startedAt = EnsureUtc(UtcNowProvider());
+                var expiresAt = EnsureUtc(startedAt.AddMinutes(timeLimitMinutes));
+
+                var snapshotDoc = new PlacementAttemptSnapshotDocument
+                {
+                    SchemaVersion = 2,
+                    TimeLimitMinutes = timeLimitMinutes,
+                    StartedAt = startedAt,
+                    ExpiresAt = expiresAt,
+                    CatalogLevels = supportedCatalogLevels.Values
+                        .OrderBy(l => l.Rank)
+                        .Select(l => new PlacementSnapshotLevelCatalogItem
+                        {
+                            JlptLevelId = l.LevelId,
+                            JlptLevelName = l.LevelCode,
+                            Rank = l.Rank,
+                        })
+                        .ToList(),
+                    Questions = selectedQuestions.Select((item, index) => new PlacementSnapshotQuestionItem
+                    {
+                        QuestionId = item.Question.Id,
+                        MockTestId = item.Test.Id,
+                        MockTestSectionId = item.Section.Id,
+                        SectionTitle = item.Section.Title ?? string.Empty,
+                        SectionOrder = item.Section.SortOrder,
+                        LanguageSkillName = item.Section.LanguageSkill?.Name ?? string.Empty,
+                        JlptLevelId = item.LevelId,
+                        JlptLevelName = item.LevelCode,
+                        Order = index + 1,
+                        Content = item.Question.QuestionText ?? string.Empty,
+                        AudioUrl = item.Question.AudioUrl,
+                        ImageUrl = item.Question.ImageUrl,
+                        CorrectOptionId = item.CorrectOptionId,
+                        SelectedOptionId = null,
+                        IsCorrect = false,
+                        Options = item.ValidOptions.Select(opt => new PlacementSnapshotOptionItem
+                        {
+                            OptionId = opt.Id,
+                            Content = opt.OptionText,
+                            Order = opt.SortOrder,
+                            IsCorrect = opt.IsCorrect,
+                        }).ToList(),
+                    }).ToList(),
+                };
+
+                var snapshotJson = JsonSerializer.Serialize(snapshotDoc, SnapshotJsonOptions);
+
+                ApiResponse<PlacementAttemptSnapshotResponse>? response = null;
+                try
+                {
+                    await unitOfWork.ExecuteInTransactionAsync(async transactionCancellationToken =>
+                    {
+                        await LockUserForPlacementStartAsync(userId, transactionCancellationToken);
+
+                        var nowInTx = EnsureUtc(UtcNowProvider());
+                        var allPlacementAttempts = await LoadUserPlacementAttemptsAsync(
+                            userId,
+                            transactionCancellationToken);
+
+                        var activeAfterLock = FindCanonicalActiveAttempt(allPlacementAttempts, nowInTx);
+                        if (activeAfterLock is not null)
+                        {
+                            response = ApiResponse<PlacementAttemptSnapshotResponse>.Success(
+                                BuildSnapshotResponse(
+                                    activeAfterLock.Value.Attempt,
+                                    activeAfterLock.Value.Snapshot,
+                                    nowInTx,
+                                    isResumed: true),
+                                HttpStatusCode.OK);
+                            return;
+                        }
+
+                        var staleOpenAttempts = allPlacementAttempts
+                            .Where(a => !a.IsCompleted && !a.IsDeleted)
+                            .ToList();
+                        if (staleOpenAttempts.Count > 0)
+                        {
+                            foreach (var stale in staleOpenAttempts)
+                            {
+                                if (TryDeserializeSnapshot(stale.QuestionSnapshotJson, out var staleDoc))
+                                {
+                                    staleDoc.IsSupersededExpired = true;
+                                    stale.QuestionSnapshotJson = JsonSerializer.Serialize(staleDoc, SnapshotJsonOptions);
+                                }
+                                stale.IsDeleted = true;
+                                stale.ModifiedDate = nowInTx;
+                                unitOfWork.MockTestAttempts.Update(stale);
+                            }
+
+                            await unitOfWork.SaveChangesAsync(transactionCancellationToken);
+                        }
+
+                        var attempt = new MockTestAttempt
+                        {
+                            UserId = userId,
+                            AttemptKind = AttemptKind.Placement,
+                            StartedAt = startedAt,
+                            ExpiresAt = expiresAt,
+                            SubmittedAt = null,
+                            TotalScore = null,
+                            IsCompleted = false,
+                            QuestionSnapshotJson = snapshotJson,
+                        };
+
+                        await unitOfWork.MockTestAttempts.AddAsync(attempt, transactionCancellationToken);
+                        await unitOfWork.SaveChangesAsync(transactionCancellationToken);
+
+                        var answerRows = selectedQuestions.Select(item => new MockTestAnswer
+                        {
+                            MockTestAttemptId = attempt.Id,
+                            MockQuestionId = item.Question.Id,
+                            SelectedOptionId = null,
+                            IsCorrect = false,
+                        });
+                        await unitOfWork.MockTestAnswers.AddRangeAsync(answerRows, transactionCancellationToken);
+                        await unitOfWork.SaveChangesAsync(transactionCancellationToken);
+
+                        response = ApiResponse<PlacementAttemptSnapshotResponse>.Created(
+                            BuildSnapshotResponse(attempt, snapshotDoc, startedAt, isResumed: false));
+                    }, cancellationToken);
+                }
+                catch (DbUpdateException)
+                {
+                    var recoveredNow = EnsureUtc(UtcNowProvider());
+                    var canonicalActive = await TryFindCanonicalActiveAttemptAsync(
+                        userId,
+                        recoveredNow,
+                        cancellationToken);
+                    if (canonicalActive is not null)
+                    {
+                        return ApiResponse<PlacementAttemptSnapshotResponse>.Success(
+                            BuildSnapshotResponse(
+                                canonicalActive.Value.Attempt,
+                                canonicalActive.Value.Snapshot,
+                                recoveredNow,
+                                isResumed: true),
+                            HttpStatusCode.OK);
+                    }
+
+                    return ApiResponse<PlacementAttemptSnapshotResponse>.Fail(
+                        "Không thể đồng bộ lượt làm bài với máy chủ. Vui lòng thử lại.",
+                        HttpStatusCode.Conflict,
+                        errorCode: ErrorAttemptNotReady,
+                        retryable: true);
+                }
+
+                return response!;
+            }
+            catch (Exception)
+            {
+                return ApiResponse<PlacementAttemptSnapshotResponse>.Fail(
+                    "Không thể bắt đầu bài kiểm tra đánh giá năng lực.",
+                    HttpStatusCode.InternalServerError);
+            }
+            finally
+            {
+                userLock?.Release();
+            }
+        }
+
+        public async Task<ApiResponse<PlacementTestResultResponse>> SubmitPlacementTestAsync(
+            int attemptId,
+            SubmitPlacementTestRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            var userId = 0;
+            SemaphoreSlim? attemptLock = null;
+            try
+            {
+                userId = claimService.GetUserClaim().Id;
+                attemptLock = AttemptSubmitLocks.GetOrAdd(attemptId, _ => new SemaphoreSlim(1, 1));
+                await attemptLock.WaitAsync(cancellationToken);
+
+                ApiResponse<PlacementTestResultResponse>? response = null;
+                try
+                {
+                    await unitOfWork.ExecuteInTransactionAsync(async transactionCancellationToken =>
+                    {
+                        var attempt = await LoadPlacementAttemptForSubmissionAsync(
+                            attemptId,
+                            transactionCancellationToken);
+
+                        if (attempt is null ||
+                            attempt.AttemptKind != AttemptKind.Placement ||
+                            attempt.UserId != userId)
+                        {
+                            response = ApiResponse<PlacementTestResultResponse>.NotFound(
+                                NotFoundAttemptMessage,
+                                errorCode: ErrorAttemptNotFound,
+                                retryable: false);
+                            return;
+                        }
+
+                        if (attempt.IsDeleted)
+                        {
+                            if (IsSupersededExpiredAttempt(attempt))
+                            {
+                                response = ApiResponse<PlacementTestResultResponse>.Fail(
+                                    "Lượt làm bài đã hết thời gian.",
+                                    HttpStatusCode.Conflict,
+                                    errorCode: ErrorAttemptExpired,
+                                    retryable: false);
+                                return;
+                            }
+
+                            response = ApiResponse<PlacementTestResultResponse>.NotFound(
+                                NotFoundAttemptMessage,
+                                errorCode: ErrorAttemptNotFound,
+                                retryable: false);
+                            return;
+                        }
+
+                        if (attempt.IsCompleted)
+                        {
+                            var canonicalCompleted = RecoverResultFromCompletedAttempt(attempt);
+                            if (canonicalCompleted is null)
+                            {
+                                response = ApiResponse<PlacementTestResultResponse>.Fail(
+                                    "Lượt làm bài không có snapshot kết quả hợp lệ.",
+                                    HttpStatusCode.Conflict,
+                                    errorCode: ErrorAttemptNotReady,
+                                    retryable: false);
+                                return;
+                            }
+
+                            response = ApiResponse<PlacementTestResultResponse>.Success(
+                                canonicalCompleted,
+                                HttpStatusCode.OK);
+                            return;
+                        }
+
+                        if (!TryDeserializeSnapshot(attempt.QuestionSnapshotJson, out var snapshotDoc) ||
+                            !HasValidSnapshotQuestions(snapshotDoc.Questions))
+                        {
+                            response = ApiResponse<PlacementTestResultResponse>.Fail(
+                                "Lượt làm bài không có snapshot câu hỏi hợp lệ. Vui lòng bắt đầu lại.",
+                                HttpStatusCode.Conflict,
+                                errorCode: ErrorAttemptNotReady,
+                                retryable: false);
+                            return;
+                        }
+
+                        var serverNow = EnsureUtc(UtcNowProvider());
+                        var expiresAt = EnsureUtc(attempt.ExpiresAt ?? snapshotDoc.ExpiresAt);
+                        var isExpired = serverNow >= expiresAt;
+
+                        if (request?.Answers is null)
+                        {
+                            response = ApiResponse<PlacementTestResultResponse>.Fail(
+                                "Danh sách câu trả lời không hợp lệ.",
+                                HttpStatusCode.BadRequest,
+                                errorCode: ErrorAnswerInvalid,
+                                retryable: false);
+                            return;
+                        }
+
+                        if (request.Answers.Any(answer => answer is null))
+                        {
+                            response = ApiResponse<PlacementTestResultResponse>.Fail(
+                                "Danh sách câu trả lời có phần tử không hợp lệ.",
+                                HttpStatusCode.BadRequest,
+                                errorCode: ErrorAnswerInvalid,
+                                retryable: false);
+                            return;
+                        }
+
+                        var duplicateQuestionIds = request.Answers
+                            .GroupBy(answer => answer.QuestionId)
+                            .Where(group => group.Count() > 1)
+                            .Select(group => group.Key)
+                            .OrderBy(id => id)
+                            .ToList();
+                        if (duplicateQuestionIds.Count > 0)
+                        {
+                            response = ApiResponse<PlacementTestResultResponse>.Fail(
+                                $"Không được gửi lặp câu hỏi: {string.Join(", ", duplicateQuestionIds)}.",
+                                HttpStatusCode.BadRequest,
+                                errorCode: ErrorAnswerInvalid,
+                                retryable: false);
+                            return;
+                        }
+
+                        var snapshotQuestionsById = snapshotDoc.Questions.ToDictionary(q => q.QuestionId);
+                        var invalidQuestionIds = request.Answers
+                            .Select(answer => answer.QuestionId)
+                            .Where(questionId => !snapshotQuestionsById.ContainsKey(questionId))
+                            .OrderBy(questionId => questionId)
+                            .ToList();
+                        if (invalidQuestionIds.Count > 0)
+                        {
+                            response = ApiResponse<PlacementTestResultResponse>.Fail(
+                                $"Câu hỏi không thuộc lượt làm bài: {string.Join(", ", invalidQuestionIds)}.",
+                                HttpStatusCode.BadRequest,
+                                errorCode: ErrorAnswerInvalid,
+                                retryable: false);
+                            return;
+                        }
+
+                        foreach (var submittedAnswer in request.Answers)
+                        {
+                            var frozenQuestion = snapshotQuestionsById[submittedAnswer.QuestionId];
+                            if (submittedAnswer.SelectedOptionId is not null &&
+                                !frozenQuestion.Options.Any(o => o.OptionId == submittedAnswer.SelectedOptionId.Value))
+                            {
+                                response = ApiResponse<PlacementTestResultResponse>.Fail(
+                                    $"Lựa chọn không thuộc câu hỏi {submittedAnswer.QuestionId}.",
+                                    HttpStatusCode.BadRequest,
+                                    errorCode: ErrorAnswerInvalid,
+                                    retryable: false);
+                                return;
+                            }
+                        }
+
+                        if (!isExpired)
+                        {
+                            foreach (var submittedAnswer in request.Answers)
+                            {
+                                var frozenQuestion = snapshotQuestionsById[submittedAnswer.QuestionId];
+                                frozenQuestion.SelectedOptionId = submittedAnswer.SelectedOptionId;
+                                frozenQuestion.IsCorrect = submittedAnswer.SelectedOptionId.HasValue &&
+                                    submittedAnswer.SelectedOptionId.Value == frozenQuestion.CorrectOptionId;
+                            }
+                        }
+
+                        var existingAnswerRows = await unitOfWork.MockTestAnswers.GetByAttemptIdAsync(
+                            attemptId,
+                            transactionCancellationToken);
+                        if (existingAnswerRows.Count > 0)
+                        {
+                            var answerRowsByQuestionId = existingAnswerRows.ToDictionary(a => a.MockQuestionId);
+                            foreach (var frozenQuestion in snapshotDoc.Questions)
+                            {
+                                if (answerRowsByQuestionId.TryGetValue(frozenQuestion.QuestionId, out var answerRow))
+                                {
+                                    answerRow.SelectedOptionId = frozenQuestion.SelectedOptionId;
+                                    answerRow.IsCorrect = frozenQuestion.IsCorrect;
+                                }
+                            }
+                        }
+
+                        var sectionResults = BuildSectionResultsFromSnapshot(attemptId, snapshotDoc.Questions);
+                        var existingSectionResults = await unitOfWork.MockTestSectionResults.GetByAttemptIdAsync(
+                            attemptId,
+                            transactionCancellationToken);
+                        if (existingSectionResults.Count == 0 && sectionResults.Entities.Count > 0)
+                        {
+                            await unitOfWork.MockTestSectionResults.AddRangeAsync(
+                                sectionResults.Entities,
+                                transactionCancellationToken);
+                        }
+
+                        var evaluation = EvaluateLevelsFromSnapshot(
+                            snapshotDoc.Questions,
+                            snapshotDoc.CatalogLevels,
+                            sectionResults.OverallScore);
+
+                        var canonicalResult = new PlacementTestResultResponse
+                        {
+                            AttemptId = attempt.Id,
+                            AttemptType = AttemptTypePlacement,
+                            Status = StatusCompleted,
+                            StartedAt = EnsureUtc(attempt.StartedAt),
+                            DurationSeconds = Math.Max(0, (int)(
+                                (isExpired ? expiresAt : serverNow) - EnsureUtc(attempt.StartedAt)).TotalSeconds),
+                            SubmittedAt = serverNow,
+                            TotalScore = sectionResults.OverallScore,
+                            CorrectCount = snapshotDoc.Questions.Count(q => q.IsCorrect),
+                            TotalQuestions = snapshotDoc.Questions.Count,
+                            AssessedJlptLevelId = evaluation.AssessedLevelId,
+                            AssessedJlptLevelName = evaluation.AssessedLevelName,
+                            RecommendedTargetJlptLevelId = evaluation.RecommendedTargetLevelId,
+                            RecommendedTargetJlptLevelName = evaluation.RecommendedTargetLevelName,
+                            WrongQuestionIds = snapshotDoc.Questions
+                                .Where(q => !q.IsCorrect)
+                                .Select(q => q.QuestionId)
+                                .OrderBy(id => id)
+                                .ToList(),
+                            LevelBreakdowns = evaluation.LevelBreakdowns,
+                            Sections = sectionResults.Responses,
+                        };
+
+                        snapshotDoc.CompletedResult = canonicalResult;
+                        attempt.SubmittedAt = serverNow;
+                        attempt.IsCompleted = true;
+                        attempt.TotalScore = sectionResults.OverallScore;
+                        attempt.QuestionSnapshotJson = JsonSerializer.Serialize(snapshotDoc, SnapshotJsonOptions);
+                        unitOfWork.MockTestAttempts.Update(attempt);
+
+                        // Assessment comes only from this owned, immutable Placement result;
+                        // it never changes the learner's chosen starting level, goal, or active path.
+                        var learner = await unitOfWork.UserAccounts.GetByIdForUpdateAsync(
+                            userId, transactionCancellationToken);
+                        if (learner is not null)
+                        {
+                            learner.AssessedCertificateLevelId = evaluation.AssessedLevelId;
+                            learner.PlacementDecision = PlacementDecision.Completed;
+                            unitOfWork.UserAccounts.Update(learner);
+                        }
+
+                        await unitOfWork.SaveChangesAsync(transactionCancellationToken);
+
+                        response = ApiResponse<PlacementTestResultResponse>.Success(
+                            canonicalResult,
+                            HttpStatusCode.OK);
+                    }, cancellationToken);
+                }
+                catch (DbUpdateException)
+                {
+                    var latestAttempt = await LoadPlacementAttemptByIdAsync(attemptId, cancellationToken);
+                    if (latestAttempt is not null &&
+                        !latestAttempt.IsDeleted &&
+                        latestAttempt.AttemptKind == AttemptKind.Placement &&
+                        latestAttempt.UserId == userId &&
+                        latestAttempt.IsCompleted)
+                    {
+                        var canonicalCompleted = RecoverResultFromCompletedAttempt(latestAttempt);
+                        if (canonicalCompleted is not null)
+                        {
+                            return ApiResponse<PlacementTestResultResponse>.Success(
+                                canonicalCompleted,
+                                HttpStatusCode.OK);
+                        }
+
+                        return ApiResponse<PlacementTestResultResponse>.Fail(
+                            "Lượt làm bài không có snapshot kết quả hợp lệ.",
+                            HttpStatusCode.Conflict,
+                            errorCode: ErrorAttemptNotReady,
+                            retryable: false);
+                    }
+
+                    return ApiResponse<PlacementTestResultResponse>.Fail(
+                        "Không thể đồng bộ kết quả với máy chủ. Vui lòng thử lại.",
+                        HttpStatusCode.Conflict,
+                        errorCode: ErrorAttemptNotReady,
+                        retryable: true);
+                }
+
+                return response!;
+            }
+            catch (Exception)
+            {
+                return ApiResponse<PlacementTestResultResponse>.Fail(
+                    "Không thể chấm điểm bài kiểm tra đánh giá năng lực.",
+                    HttpStatusCode.InternalServerError);
+            }
+            finally
+            {
+                attemptLock?.Release();
+            }
+        }
+
+        public async Task<ApiResponse<PlacementTestResultResponse>> GetPlacementTestResultAsync(
+            int attemptId,
+            CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                var userId = claimService.GetUserClaim().Id;
+                var attempt = await LoadPlacementAttemptByIdAsync(attemptId, cancellationToken);
+                if (attempt is null ||
+                    attempt.IsDeleted ||
+                    attempt.AttemptKind != AttemptKind.Placement ||
+                    attempt.UserId != userId)
+                {
+                    return ApiResponse<PlacementTestResultResponse>.NotFound(
+                        NotFoundAttemptMessage,
+                        errorCode: ErrorAttemptNotFound,
+                        retryable: false);
+                }
+
+                if (!attempt.IsCompleted)
+                {
+                    return ApiResponse<PlacementTestResultResponse>.Fail(
+                        "Lượt làm bài này chưa được nộp/chấm điểm.",
+                        HttpStatusCode.Conflict,
+                        errorCode: ErrorAttemptNotCompleted,
+                        retryable: false);
+                }
+
+                var canonicalResult = RecoverResultFromCompletedAttempt(attempt);
+                if (canonicalResult is null)
+                {
+                    return ApiResponse<PlacementTestResultResponse>.Fail(
+                        "Lượt làm bài không có snapshot kết quả hợp lệ.",
+                        HttpStatusCode.Conflict,
+                        errorCode: ErrorAttemptNotReady,
+                        retryable: false);
+                }
+
+                return ApiResponse<PlacementTestResultResponse>.Success(canonicalResult);
+            }
+            catch (Exception)
+            {
+                return ApiResponse<PlacementTestResultResponse>.Fail(
+                    "Không thể tải kết quả bài kiểm tra đánh giá năng lực.",
+                    HttpStatusCode.InternalServerError);
+            }
+        }
+
+        internal static IReadOnlyDictionary<string, double>? TryExtractSkillBreakdownFromSnapshot(string? snapshotJson)
+        {
+            var completedResult = TryGetCompletedResultFromSnapshot(snapshotJson);
+            if (completedResult?.Sections is not { Count: > 0 } sections)
+            {
+                return null;
+            }
+
+            var dict = sections
+                .Where(s => !string.IsNullOrWhiteSpace(s.SectionTitle))
+                .GroupBy(s => s.SectionTitle)
+                .ToDictionary(g => g.Key, g => g.Average(x => x.ScorePercent));
+            return dict.Count > 0 ? dict : null;
+        }
+
+        private async Task LockUserForPlacementStartAsync(
+            int userId,
+            CancellationToken cancellationToken)
+        {
+            if (unitOfWork.UserAccounts is null)
+            {
+                return;
+            }
+
+            try
+            {
+                await unitOfWork.UserAccounts.GetByIdForUpdateAsync(userId, cancellationToken);
+            }
+            catch (InvalidOperationException)
+            {
+            }
+        }
+
+        private async Task<(MockTestAttempt Attempt, PlacementAttemptSnapshotDocument Snapshot)?>
+            TryFindCanonicalActiveAttemptAsync(
+                int userId,
+                DateTime serverNowUtc,
+                CancellationToken cancellationToken)
+        {
+            var attempts = await LoadUserPlacementAttemptsAsync(userId, cancellationToken);
+            return FindCanonicalActiveAttempt(attempts, serverNowUtc);
+        }
+
+        private static (MockTestAttempt Attempt, PlacementAttemptSnapshotDocument Snapshot)?
+            FindCanonicalActiveAttempt(
+                IEnumerable<MockTestAttempt> placementAttempts,
+                DateTime serverNowUtc)
+        {
+            foreach (var candidate in placementAttempts
+                .Where(a => !a.IsDeleted &&
+                            a.AttemptKind == AttemptKind.Placement &&
+                            !a.IsCompleted &&
+                            a.ExpiresAt.HasValue &&
+                            EnsureUtc(a.ExpiresAt.Value) > serverNowUtc)
+                .OrderByDescending(a => a.StartedAt)
+                .ThenByDescending(a => a.Id))
+            {
+                if (TryDeserializeSnapshot(candidate.QuestionSnapshotJson, out var snapshotDoc) &&
+                    HasValidSnapshotQuestions(snapshotDoc.Questions))
+                {
+                    return (candidate, snapshotDoc);
+                }
+            }
+
+            return null;
+        }
+
+        private async Task<List<MockTestAttempt>> LoadUserPlacementAttemptsAsync(
+            int userId,
+            CancellationToken cancellationToken)
+        {
+            var attempts = await unitOfWork.MockTestAttempts.GetPlacementByUserAsync(userId, cancellationToken);
+            if (attempts is { Count: > 0 })
+            {
+                return attempts
+                    .Where(a => !a.IsDeleted && a.AttemptKind == AttemptKind.Placement && a.UserId == userId)
+                    .OrderByDescending(a => a.StartedAt)
+                    .ThenByDescending(a => a.Id)
+                    .ToList();
+            }
+
+            var fallback = await unitOfWork.MockTestAttempts.FindAsync(
+                a => a.UserId == userId && !a.IsDeleted && a.AttemptKind == AttemptKind.Placement,
+                cancellationToken);
+            return (fallback ?? [])
+                .Where(a => !a.IsDeleted && a.AttemptKind == AttemptKind.Placement && a.UserId == userId)
+                .OrderByDescending(a => a.StartedAt)
+                .ThenByDescending(a => a.Id)
+                .ToList();
+        }
+
+        private async Task<MockTestAttempt?> LoadPlacementAttemptByIdAsync(
+            int attemptId,
+            CancellationToken cancellationToken)
+        {
+            var attempt = await unitOfWork.MockTestAttempts.GetPlacementByIdAsync(attemptId, cancellationToken);
+            attempt ??= await unitOfWork.MockTestAttempts.GetByIdAsync(attemptId, cancellationToken);
+            if (attempt is null || attempt.IsDeleted || attempt.AttemptKind != AttemptKind.Placement)
+            {
+                return null;
+            }
+
+            return attempt;
+        }
+
+        private async Task<MockTestAttempt?> LoadPlacementAttemptForSubmissionAsync(
+            int attemptId,
+            CancellationToken cancellationToken)
+        {
+            MockTestAttempt? attempt = null;
+            try
+            {
+                attempt = await unitOfWork.MockTestAttempts.GetPlacementForSubmissionAsync(
+                    attemptId,
+                    cancellationToken);
+            }
+            catch (InvalidOperationException)
+            {
+                attempt = await unitOfWork.MockTestAttempts.GetByIdAsync(attemptId, cancellationToken);
+            }
+
+            attempt ??= await unitOfWork.MockTestAttempts.GetByIdAsync(attemptId, cancellationToken);
+            if (attempt is null || attempt.AttemptKind != AttemptKind.Placement)
+            {
+                return null;
+            }
+
+            return attempt;
+        }
+
+        private static bool IsSupersededExpiredAttempt(MockTestAttempt attempt)
+            => attempt.IsDeleted &&
+               !attempt.IsCompleted &&
+               TryDeserializeSnapshot(attempt.QuestionSnapshotJson, out var snapshotDoc) &&
+               snapshotDoc.IsSupersededExpired;
+
+        private static PlacementTestResultResponse? RecoverResultFromCompletedAttempt(MockTestAttempt attempt)
+        {
+            var cached = TryGetCompletedResultFromSnapshot(attempt.QuestionSnapshotJson);
+            if (cached is null)
+            {
+                return null;
+            }
+
+            cached.AttemptId = attempt.Id;
+            cached.AttemptType = AttemptTypePlacement;
+            cached.Status = StatusCompleted;
+            cached.StartedAt = EnsureUtc(attempt.StartedAt);
+            if (attempt.SubmittedAt.HasValue)
+            {
+                cached.SubmittedAt = EnsureUtc(attempt.SubmittedAt.Value);
+                if (cached.DurationSeconds <= 0)
+                    cached.DurationSeconds = Math.Max(0, (int)(cached.SubmittedAt.Value - cached.StartedAt).TotalSeconds);
+            }
+
+            return cached;
+        }
+
+        internal static PlacementTestResultResponse? TryGetCompletedResultFromSnapshot(string? snapshotJson)
+        {
+            if (!TryDeserializeSnapshot(snapshotJson, out var snapshotDoc) ||
+                snapshotDoc.CompletedResult is not { } completedResult ||
+                !IsValidCompletedResultSnapshot(completedResult))
+            {
+                return null;
+            }
+
+            return completedResult;
+        }
+
+        private static bool IsValidCompletedResultSnapshot(PlacementTestResultResponse result)
+            => result.TotalQuestions > 0 &&
+               result.CorrectCount >= 0 &&
+               result.CorrectCount <= result.TotalQuestions &&
+               result.TotalScore >= 0 &&
+               result.TotalScore <= 100 &&
+               result.AssessedJlptLevelId > 0 &&
+               IsSupportedLevel(result.AssessedJlptLevelName) &&
+               result.RecommendedTargetJlptLevelId > 0 &&
+               IsSupportedLevel(result.RecommendedTargetJlptLevelName) &&
+               result.LevelBreakdowns is { Count: > 0 } &&
+               result.Sections is { Count: > 0 };
+
+        private static bool HasValidSnapshotQuestions(List<PlacementSnapshotQuestionItem>? questions)
+            => questions is { Count: > 0 } &&
+               questions.All(q =>
+                   q is not null &&
+                   q.QuestionId > 0 &&
+                   q.JlptLevelId > 0 &&
+                   IsSupportedLevel(q.JlptLevelName));
+
+        private static PlacementAttemptSnapshotResponse BuildSnapshotResponse(
+            MockTestAttempt attempt,
+            PlacementAttemptSnapshotDocument snapshotDoc,
+            DateTime serverNowUtc,
+            bool isResumed)
+        {
+            var startedAt = EnsureUtc(attempt.StartedAt);
+            var expiresAt = EnsureUtc(attempt.ExpiresAt ?? snapshotDoc.ExpiresAt);
+
+            return new StartPlacementTestResponse
+            {
+                AttemptId = attempt.Id,
+                AttemptType = AttemptTypePlacement,
+                Status = StatusInProgress,
+                IsResumed = isResumed,
+                StartedAt = startedAt,
+                ExpiresAt = expiresAt,
+                ServerNow = EnsureUtc(serverNowUtc),
+                TimeLimitMinutes = snapshotDoc.TimeLimitMinutes,
+                TotalQuestions = snapshotDoc.Questions.Count,
+                Questions = snapshotDoc.Questions
+                    .OrderBy(q => q.Order)
+                    .ThenBy(q => q.QuestionId)
+                    .Select(q => new PlacementTestQuestionResponse
+                    {
+                        QuestionId = q.QuestionId,
+                        MockTestId = q.MockTestId,
+                        MockTestSectionId = q.MockTestSectionId,
+                        SectionTitle = q.SectionTitle,
+                        SectionOrder = q.SectionOrder,
+                        JlptLevelId = q.JlptLevelId,
+                        JlptLevelName = q.JlptLevelName,
+                        Order = q.Order,
+                        Content = q.Content,
+                        AudioUrl = q.AudioUrl,
+                        ImageUrl = q.ImageUrl,
+                        SelectedOptionId = q.SelectedOptionId,
+                        Options = q.Options
+                            .OrderBy(o => o.Order)
+                            .ThenBy(o => o.OptionId)
+                            .Select(o => new PlacementTestOptionResponse
+                            {
+                                OptionId = o.OptionId,
+                                Content = o.Content,
+                                Order = o.Order,
+                            })
+                            .ToList(),
+                    })
+                    .ToList(),
+            };
+        }
+
+        private static (
+            int AssessedLevelId,
+            string AssessedLevelName,
+            int RecommendedTargetLevelId,
+            string RecommendedTargetLevelName,
+            List<PlacementLevelBreakdownItem> LevelBreakdowns) EvaluateLevelsFromSnapshot(
+            List<PlacementSnapshotQuestionItem> questions,
+            List<PlacementSnapshotLevelCatalogItem> catalogLevels,
+            double overallScore)
+        {
+            var breakdowns = questions
+                .Where(q => IsSupportedLevel(q.JlptLevelName))
+                .GroupBy(q => (
+                    LevelId: q.JlptLevelId,
+                    LevelCode: NormalizeLevelCode(q.JlptLevelName),
+                    Rank: GetLevelRank(q.JlptLevelName)))
+                .OrderBy(group => group.Key.Rank)
+                .ThenBy(group => group.Key.LevelId)
+                .Select(group =>
+                {
+                    var total = group.Count();
+                    var correct = group.Count(q => q.IsCorrect);
+                    var score = total == 0 ? 0d : Math.Round(correct * 100d / total, 2);
+                    return new PlacementLevelBreakdownItem
+                    {
+                        JlptLevelId = group.Key.LevelId,
+                        JlptLevelName = group.Key.LevelCode,
+                        CorrectCount = correct,
+                        TotalCount = total,
+                        ScorePercent = score,
+                    };
+                })
+                .ToList();
+
+            var knownLevels = (catalogLevels ?? [])
+                .Select(l => (LevelId: l.JlptLevelId, LevelCode: NormalizeLevelCode(l.JlptLevelName), Rank: GetLevelRank(l.JlptLevelName)))
+                .Concat(breakdowns.Select(b => (LevelId: b.JlptLevelId, LevelCode: b.JlptLevelName, Rank: GetLevelRank(b.JlptLevelName))))
+                .Where(x => x.Rank >= 1 && x.Rank <= 3)
+                .GroupBy(x => x.LevelCode)
+                .Select(g => g.First())
+                .OrderBy(x => x.Rank)
+                .ToList();
+
+            if (knownLevels.Count == 0)
+            {
+                knownLevels.Add((LevelId: 1, LevelCode: "N5", Rank: 1));
+            }
+
+            (int LevelId, string LevelCode, int Rank) assessed;
+            if (breakdowns.Count > 1)
+            {
+                var passedLevels = breakdowns
+                    .Where(b => b.ScorePercent >= 60.0)
+                    .OrderBy(b => GetLevelRank(b.JlptLevelName))
+                    .ToList();
+                if (passedLevels.Count > 0)
+                {
+                    var highestPassed = passedLevels[^1];
+                    assessed = (
+                        highestPassed.JlptLevelId,
+                        highestPassed.JlptLevelName,
+                        GetLevelRank(highestPassed.JlptLevelName));
+                }
+                else
+                {
+                    var lowest = breakdowns[0];
+                    assessed = (
+                        lowest.JlptLevelId,
+                        lowest.JlptLevelName,
+                        GetLevelRank(lowest.JlptLevelName));
+                }
+            }
+            else
+            {
+                var targetCode = overallScore >= 80.0
+                    ? "N3"
+                    : overallScore >= 50.0
+                        ? "N4"
+                        : "N5";
+                var matched = knownLevels.FirstOrDefault(l => l.LevelCode == targetCode);
+                if (matched.LevelCode is not null)
+                {
+                    assessed = matched;
+                }
+                else if (breakdowns.Count == 1)
+                {
+                    assessed = (
+                        breakdowns[0].JlptLevelId,
+                        breakdowns[0].JlptLevelName,
+                        GetLevelRank(breakdowns[0].JlptLevelName));
+                }
+                else
+                {
+                    assessed = knownLevels[0];
+                }
+            }
+
+            var assessedBreakdown = breakdowns.FirstOrDefault(b => b.JlptLevelName == assessed.LevelCode);
+            var assessedScore = assessedBreakdown?.ScorePercent ?? overallScore;
+
+            (int LevelId, string LevelCode, int Rank) recommended = assessed;
+            if (assessedScore >= 75.0)
+            {
+                var nextLevel = knownLevels
+                    .Where(l => l.Rank > assessed.Rank && l.Rank <= 3)
+                    .OrderBy(l => l.Rank)
+                    .FirstOrDefault();
+                if (nextLevel.LevelCode is not null)
+                {
+                    recommended = nextLevel;
+                }
+            }
+
+            return (
+                assessed.LevelId,
+                assessed.LevelCode,
+                recommended.LevelId,
+                recommended.LevelCode,
+                breakdowns);
+        }
+
+        private static (List<MockTestSectionResult> Entities, List<SectionResultItem> Responses, double OverallScore)
+            BuildSectionResultsFromSnapshot(
+                int attemptId,
+                List<PlacementSnapshotQuestionItem> questions)
+        {
+            var grouped = questions
+                .GroupBy(q => (
+                    q.MockTestSectionId,
+                    q.SectionTitle,
+                    q.SectionOrder,
+                    q.LanguageSkillName))
+                .OrderBy(g => g.Key.SectionOrder)
+                .ThenBy(g => g.Key.MockTestSectionId)
+                .Select(g =>
+                {
+                    var total = g.Count();
+                    var correct = g.Count(q => q.IsCorrect);
+                    var score = total == 0 ? 0d : Math.Round(correct * 100d / total, 2);
+                    return (
+                        SectionId: g.Key.MockTestSectionId,
+                        SectionTitle: g.Key.SectionTitle,
+                        LanguageSkillName: g.Key.LanguageSkillName,
+                        Correct: correct,
+                        Total: total,
+                        Score: score);
+                })
+                .ToList();
+
+            var entities = grouped
+                .Where(g => g.SectionId > 0)
+                .Select(g => new MockTestSectionResult
+                {
+                    MockTestAttemptId = attemptId,
+                    MockTestSectionId = g.SectionId,
+                    CorrectCount = g.Correct,
+                    TotalCount = g.Total,
+                    ScorePercent = g.Score,
+                })
+                .ToList();
+
+            var responses = grouped.Select(g => new SectionResultItem
+            {
+                MockTestSectionId = g.SectionId,
+                SectionTitle = g.SectionTitle,
+                LanguageSkillName = g.LanguageSkillName,
+                CorrectCount = g.Correct,
+                TotalCount = g.Total,
+                Score = g.Score,
+                ScorePercent = g.Score,
+            }).ToList();
+
+            var totalCorrect = questions.Count(q => q.IsCorrect);
+            var totalCount = questions.Count;
+            var overallScore = totalCount == 0 ? 0d : Math.Round(totalCorrect * 100d / totalCount, 2);
+
+            return (entities, responses, overallScore);
+        }
+
+        private static bool TryDeserializeSnapshot(
+            string? json,
+            out PlacementAttemptSnapshotDocument document)
+        {
+            document = new PlacementAttemptSnapshotDocument();
+            if (string.IsNullOrWhiteSpace(json))
+            {
+                return false;
+            }
+
+            try
+            {
+                var parsed = JsonSerializer.Deserialize<PlacementAttemptSnapshotDocument>(json, SnapshotJsonOptions);
+                if (parsed is null)
+                {
+                    return false;
+                }
+
+                document = parsed;
+                return true;
             }
             catch (JsonException)
             {
@@ -36,633 +1468,132 @@ namespace RikiPath.Application.Services
             }
         }
 
-        private static bool IsMultipleChoiceCorrect(MockQuestion question, JsonElement? response)
+        private static bool HasUsablePrompt(MockQuestion question)
+            => !string.IsNullOrWhiteSpace(question.QuestionText) ||
+               !string.IsNullOrWhiteSpace(question.ImageUrl) ||
+               !string.IsNullOrWhiteSpace(question.AudioUrl);
+
+        private static bool IsSupportedLevel(string? levelCode)
         {
-            if (response is not { ValueKind: JsonValueKind.Array }) return false;
-            var submittedIds = response.Value.EnumerateArray()
-                .Where(x => x.ValueKind == JsonValueKind.Number && x.TryGetInt32(out _))
-                .Select(x => x.GetInt32())
-                .Distinct()
-                .OrderBy(x => x)
-                .ToArray();
-            if (submittedIds.Length != response.Value.GetArrayLength()) return false;
-            var correctIds = (question.Options ?? [])
-                .Where(x => x.IsCorrect)
-                .Select(x => x.Id)
-                .OrderBy(x => x)
-                .ToArray();
-            return submittedIds.SequenceEqual(correctIds);
+            var normalized = NormalizeLevelCode(levelCode);
+            return normalized is "N5" or "N4" or "N3";
         }
 
-        public async Task<ApiResponse<StartAttemptResponse>> StartAttemptAsync(int practiceTestId, CancellationToken cancellationToken = default)
+        private static int ComputeTimeLimitMinutes(int questionCount)
+            => Math.Clamp(questionCount * 2, 10, 45);
+
+        private static string NormalizeLevelCode(string? rawCode)
         {
-            try
+            var trimmed = (rawCode ?? string.Empty).Trim().ToUpperInvariant();
+            return trimmed switch
             {
-                var userId = claimService.GetUserClaim().Id;
-                var test = await unitOfWork.MockTests.GetWithSectionsAndQuestionsAsync(practiceTestId, cancellationToken);
-                if (test is null || test.IsDeleted)
-                    return ApiResponse<StartAttemptResponse>.NotFound(
-                        $"Không tìm thấy MockTest có Id = {practiceTestId}.");
-
-                var orderedQuestions = (test.Sections ?? [])
-                    .Where(section => !section.IsDeleted)
-                    .OrderBy(section => section.SortOrder)
-                    .ThenBy(section => section.Id)
-                    .SelectMany(section => (section.Questions ?? [])
-                        .Where(question => !question.IsDeleted)
-                        .OrderBy(question => question.SortOrder)
-                        .ThenBy(question => question.Id)
-                        .Select(question => (Section: section, Question: question)))
-                    .ToList();
-
-                if (orderedQuestions.Count == 0)
-                    return ApiResponse<StartAttemptResponse>.Fail(
-                        "Đề thi chưa có câu hỏi để bắt đầu.", HttpStatusCode.BadRequest);
-
-                var previousAttempts = (await unitOfWork.MockTestAttempts.FindAsync(a =>
-                    a.UserId == userId && a.IsCompleted && !a.IsDeleted && a.AttemptKind == AttemptKind.MockTest, cancellationToken))
-                    .Where(a => !a.IsDeleted && a.AttemptKind == AttemptKind.MockTest)
-                    .ToList();
-
-                var previousAttemptIds = previousAttempts.Select(a => a.Id).ToList();
-                var previouslyWrongQuestionIds = new List<int>();
-
-                if (previousAttemptIds.Count > 0)
-                {
-                    var pastAnswers = await unitOfWork.MockTestAnswers.FindAsync(ans =>
-                        previousAttemptIds.Contains(ans.MockTestAttemptId), cancellationToken);
-
-                    var currentQuestionIds = orderedQuestions
-                        .Select(item => item.Question.Id)
-                        .ToHashSet();
-
-                    previouslyWrongQuestionIds = pastAnswers
-                        .Where(answer => currentQuestionIds.Contains(answer.MockQuestionId))
-                        .GroupBy(ans => ans.MockQuestionId)
-                        .Where(g => !g.OrderByDescending(x => x.MockTestAttemptId).First().IsCorrect)
-                        .Select(g => g.Key)
-                        .ToList();
-                }
-
-                ApiResponse<StartAttemptResponse>? response = null;
-                await unitOfWork.ExecuteInTransactionAsync(async transactionCancellationToken =>
-                {
-                    var attempt = new MockTestAttempt
-                    {
-                        UserId = userId,
-                        IsPlacementAssessment = test.IsPlacementAssessment
-                            && !previousAttempts.Any(attempt => attempt.IsPlacementAssessment),
-                        StartedAt = DateTime.UtcNow,
-                        SubmittedAt = null,
-                        TotalScore = 0,
-                        IsCompleted = false,
-                    };
-
-                    await unitOfWork.MockTestAttempts.AddAsync(attempt, transactionCancellationToken);
-                    await unitOfWork.SaveChangesAsync(transactionCancellationToken);
-
-                    // Snapshot bằng các answer rỗng để attempt giữ đúng bộ câu hỏi tại thời điểm bắt đầu mà không đổi schema.
-                    var snapshots = orderedQuestions.Select(item => new MockTestAnswer
-                    {
-                        MockTestAttemptId = attempt.Id,
-                        MockQuestionId = item.Question.Id,
-                        SelectedOptionId = null,
-                        IsCorrect = false,
-                    });
-                    await unitOfWork.MockTestAnswers.AddRangeAsync(snapshots, transactionCancellationToken);
-                    await unitOfWork.SaveChangesAsync(transactionCancellationToken);
-
-                    response = ApiResponse<StartAttemptResponse>.Created(new StartAttemptResponse
-                    {
-                        AttemptId = attempt.Id,
-                        MockTestId = practiceTestId,
-                        StartedAt = attempt.StartedAt,
-                        TimeLimitMinutes = test.TimeLimitMinutes,
-                        TotalPreviouslyWrongQuestions = previouslyWrongQuestionIds.Count,
-                        PreviouslyWrongQuestionIds = previouslyWrongQuestionIds,
-                        Questions = orderedQuestions.Select(item => new StartAttemptQuestionResponse
-                        {
-                            QuestionId = item.Question.Id,
-                            MockTestSectionId = item.Section.Id,
-                            SectionTitle = item.Section.Title,
-                            SectionOrder = item.Section.SortOrder,
-                            Order = item.Question.SortOrder,
-                            Content = item.Question.QuestionText,
-                            QuestionType = item.Question.QuestionType,
-                            InteractionData = ParseJsonElement(item.Question.InteractionDataJson),
-                            AudioUrl = item.Question.AudioUrl,
-                            ImageUrl = item.Question.ImageUrl,
-                            Options = (item.Question.Options ?? [])
-                                .Where(option => !option.IsDeleted)
-                                .OrderBy(option => option.SortOrder)
-                                .ThenBy(option => option.Id)
-                                .Select(option => new StartAttemptOptionResponse
-                                {
-                                    OptionId = option.Id,
-                                    Content = option.OptionText,
-                                    Order = option.SortOrder,
-                                })
-                                .ToList(),
-                        }).ToList(),
-                    });
-                }, cancellationToken);
-
-                return response!;
-            }
-            catch (Exception)
-            {
-                return ApiResponse<StartAttemptResponse>.Fail(
-                    "Không thể bắt đầu lượt làm bài.", HttpStatusCode.InternalServerError);
-            }
+                "N5" or "JLPT N5" => "N5",
+                "N4" or "JLPT N4" => "N4",
+                "N3" or "JLPT N3" => "N3",
+                "N2" or "JLPT N2" => "N2",
+                "N1" or "JLPT N1" => "N1",
+                _ => trimmed,
+            };
         }
 
-        public async Task<ApiResponse<AttemptResultResponse>> SubmitAttemptAsync(int attemptId, SubmitAttemptRequest request, CancellationToken cancellationToken = default)
+        private static int GetLevelRank(string? code) => NormalizeLevelCode(code) switch
         {
-            try
-            {
-                var userId = claimService.GetUserClaim().Id;
-                if (request.Answers is null || request.Answers.Count == 0)
-                    return ApiResponse<AttemptResultResponse>.Fail(
-                        "Danh sách câu trả lời không được để trống.", HttpStatusCode.BadRequest);
+            "N5" => 1,
+            "N4" => 2,
+            "N3" => 3,
+            "N2" => 4,
+            "N1" => 5,
+            _ => 99,
+        };
 
-                // Từ chối duplicate để mỗi câu hỏi chỉ được chấm một lần và không vi phạm unique constraint.
-                var duplicateQuestionIds = request.Answers
-                    .GroupBy(answer => answer.QuestionId)
-                    .Where(group => group.Count() > 1)
-                    .Select(group => group.Key)
-                    .OrderBy(id => id)
-                    .ToList();
-                if (duplicateQuestionIds.Count > 0)
-                    return ApiResponse<AttemptResultResponse>.Fail(
-                        $"Không được gửi lặp câu hỏi: {string.Join(", ", duplicateQuestionIds)}.",
-                        HttpStatusCode.BadRequest);
+        private static DateTime EnsureUtc(DateTime value)
+            => BusinessDateHelper.EnsureUtc(value);
 
-                ApiResponse<AttemptResultResponse>? response = null;
-                await unitOfWork.ExecuteInTransactionAsync(async transactionCancellationToken =>
-                {
-                    var attempt = await unitOfWork.MockTestAttempts.GetForSubmissionAsync(
-                        attemptId, transactionCancellationToken);
-                    if (attempt is null || attempt.IsDeleted || attempt.AttemptKind != AttemptKind.MockTest)
-                    {
-                        response = ApiResponse<AttemptResultResponse>.NotFound(
-                            $"Không tìm thấy MockTestAttempt có Id = {attemptId}.");
-                        return;
-                    }
-
-                    // Chỉ Learner sở hữu attempt mới được phép submit; không tin attemptId từ client.
-                    if (attempt.UserId != userId)
-                    {
-                        response = ApiResponse<AttemptResultResponse>.Fail(
-                            "Bạn không có quyền nộp bài cho lượt làm bài này.", HttpStatusCode.Forbidden);
-                        return;
-                    }
-
-                    // Attempt đã hoàn tất không được chấm lại khi client retry request.
-                    if (attempt.IsCompleted)
-                    {
-                        response = ApiResponse<AttemptResultResponse>.Fail(
-                            "Lượt làm bài này đã được nộp trước đó.", HttpStatusCode.BadRequest);
-                        return;
-                    }
-
-                    var snapshotAnswers = await unitOfWork.MockTestAnswers.GetByAttemptIdAsync(
-                        attemptId, transactionCancellationToken);
-                    if (snapshotAnswers.Count == 0)
-                    {
-                        response = ApiResponse<AttemptResultResponse>.Fail(
-                            "Lượt làm bài không có snapshot câu hỏi hợp lệ. Vui lòng bắt đầu lại đề thi.",
-                            HttpStatusCode.Conflict);
-                        return;
-                    }
-
-                    var testIds = snapshotAnswers
-                        .Select(answer => answer.MockQuestion.MockTestSection.MockTestId)
-                        .Distinct()
-                        .ToList();
-                    if (testIds.Count != 1)
-                    {
-                        response = ApiResponse<AttemptResultResponse>.Fail(
-                            "Snapshot câu hỏi của lượt làm bài không hợp lệ.", HttpStatusCode.Conflict);
-                        return;
-                    }
-
-                    var mockTest = snapshotAnswers[0].MockQuestion.MockTestSection.MockTest;
-                    // Thời gian làm bài lấy từ StartedAt phía server, không tin đồng hồ hoặc elapsed time từ client.
-                    if (mockTest.TimeLimitMinutes > 0 &&
-                        DateTime.UtcNow > attempt.StartedAt.AddMinutes(mockTest.TimeLimitMinutes))
-                    {
-                        response = ApiResponse<AttemptResultResponse>.Fail(
-                            "Lượt làm bài đã hết thời gian.", HttpStatusCode.BadRequest);
-                        return;
-                    }
-
-                    var snapshotsByQuestionId = snapshotAnswers.ToDictionary(
-                        answer => answer.MockQuestionId);
-                    var invalidQuestionIds = request.Answers
-                        .Select(answer => answer.QuestionId)
-                        .Where(questionId => !snapshotsByQuestionId.ContainsKey(questionId))
-                        .OrderBy(questionId => questionId)
-                        .ToList();
-                    // Chỉ chấp nhận câu hỏi thuộc snapshot của đúng attempt để ngăn gửi ID từ đề khác.
-                    if (invalidQuestionIds.Count > 0)
-                    {
-                        response = ApiResponse<AttemptResultResponse>.Fail(
-                            $"Câu hỏi không thuộc lượt làm bài: {string.Join(", ", invalidQuestionIds)}.",
-                            HttpStatusCode.BadRequest);
-                        return;
-                    }
-
-                    foreach (var submittedAnswer in request.Answers)
-                    {
-                        var question = snapshotsByQuestionId[submittedAnswer.QuestionId].MockQuestion;
-                        if (question.QuestionType.Equals("SingleChoice", StringComparison.OrdinalIgnoreCase))
-                        {
-                            if (submittedAnswer.Response.HasValue)
-                            {
-                                response = ApiResponse<AttemptResultResponse>.Fail(
-                                    $"Câu hỏi {submittedAnswer.QuestionId} yêu cầu chọn một đáp án.", HttpStatusCode.BadRequest);
-                                return;
-                            }
-                        }
-                        else if (question.QuestionType.Equals("MultipleChoice", StringComparison.OrdinalIgnoreCase))
-                        {
-                            if (submittedAnswer.Response is not { ValueKind: JsonValueKind.Array })
-                            {
-                                response = ApiResponse<AttemptResultResponse>.Fail(
-                                    $"Câu hỏi {submittedAnswer.QuestionId} yêu cầu danh sách OptionId.", HttpStatusCode.BadRequest);
-                                return;
-                            }
-                        }
-                        else if (submittedAnswer.SelectedOptionId is not null || submittedAnswer.Response is null)
-                        {
-                            response = ApiResponse<AttemptResultResponse>.Fail(
-                                $"Câu hỏi {submittedAnswer.QuestionId} yêu cầu câu trả lời theo dạng {question.QuestionType}.", HttpStatusCode.BadRequest);
-                            return;
-                        }
-                        // Option phải thuộc đúng Question để client không thể ghép ID tùy ý khi chấm điểm.
-                        if (submittedAnswer.SelectedOptionId is not null &&
-                            !(question.Options ?? []).Any(option => option.Id == submittedAnswer.SelectedOptionId))
-                        {
-                            response = ApiResponse<AttemptResultResponse>.Fail(
-                                $"Lựa chọn không thuộc câu hỏi {submittedAnswer.QuestionId}.",
-                                HttpStatusCode.BadRequest);
-                            return;
-                        }
-                    }
-
-                    var correctByQuestion = snapshotAnswers.ToDictionary(
-                        answer => answer.MockQuestionId,
-                        _ => false);
-                    foreach (var submittedAnswer in request.Answers)
-                    {
-                        var snapshot = snapshotsByQuestionId[submittedAnswer.QuestionId];
-                        var question = snapshot.MockQuestion;
-                        var selectedOption = submittedAnswer.SelectedOptionId is null
-                            ? null
-                            : snapshot.MockQuestion.Options?.Single(
-                                option => option.Id == submittedAnswer.SelectedOptionId);
-                        snapshot.SelectedOptionId = submittedAnswer.SelectedOptionId;
-                        snapshot.ResponseJson = submittedAnswer.Response?.GetRawText();
-                        snapshot.IsCorrect = question.QuestionType.Equals("SingleChoice", StringComparison.OrdinalIgnoreCase)
-                            ? selectedOption?.IsCorrect == true
-                            : question.QuestionType.Equals("MultipleChoice", StringComparison.OrdinalIgnoreCase)
-                                ? IsMultipleChoiceCorrect(question, submittedAnswer.Response)
-                                : IsStructuredResponseCorrect(question, submittedAnswer.Response);
-                        correctByQuestion[submittedAnswer.QuestionId] = snapshot.IsCorrect;
-                    }
-                    var questions = snapshotAnswers.Select(answer => answer.MockQuestion).ToList();
-                    var sections = BuildSectionResults(attemptId, questions, correctByQuestion);
-                    await unitOfWork.MockTestSectionResults.AddRangeAsync(
-                        sections.Entities, transactionCancellationToken);
-
-                    attempt.SubmittedAt = DateTime.UtcNow;
-                    attempt.IsCompleted = true;
-                    attempt.TotalScore = sections.OverallScore;
-                    unitOfWork.MockTestAttempts.Update(attempt);
-
-                    // Answers, section results và trạng thái attempt cùng commit trong một transaction.
-                    await unitOfWork.SaveChangesAsync(transactionCancellationToken);
-
-                    response = ApiResponse<AttemptResultResponse>.Success(new AttemptResultResponse
-                    {
-                        AttemptId = attempt.Id,
-                        MockTestId = mockTest.Id,
-                        Status = StatusCompleted,
-                        StartedAt = attempt.StartedAt,
-                        SubmittedAt = attempt.SubmittedAt,
-                        TotalScore = attempt.TotalScore.Value,
-                        WrongQuestionIds = correctByQuestion
-                            .Where(item => !item.Value)
-                            .Select(item => item.Key)
-                            .OrderBy(id => id)
-                            .ToList(),
-                        Sections = sections.Responses,
-                    });
-                }, cancellationToken);
-
-                return response!;
-            }
-            catch (Exception)
-            {
-                return ApiResponse<AttemptResultResponse>.Fail(
-                    "Không thể chấm điểm lượt làm bài.", HttpStatusCode.InternalServerError);
-            }
+        public Task<ApiResponse<PlacementAnswerAckResponse>> SavePlacementAnswerAsync(int attemptId, SavePlacementAnswerRequest request, CancellationToken cancellationToken = default)
+        {
+            throw new NotImplementedException();
         }
 
-        public async Task<ApiResponse<AttemptResultResponse>> GetAttemptResultAsync(int attemptId, CancellationToken cancellationToken = default)
+        public Task<ApiResponse<StartAttemptResponse>> StartAttemptAsync(int practiceTestId, CancellationToken cancellationToken = default)
         {
-            try
-            {
-                var userId = claimService.GetUserClaim().Id;
-                var attempt = await unitOfWork.MockTestAttempts.GetByIdAsync(attemptId, cancellationToken);
-                if (attempt is null || attempt.IsDeleted || attempt.AttemptKind != AttemptKind.MockTest)
-                    return ApiResponse<AttemptResultResponse>.NotFound(
-                        $"Không tìm thấy MockTestAttempt có Id = {attemptId}.");
-
-                if (attempt.UserId != userId)
-                    return ApiResponse<AttemptResultResponse>.Fail(
-                        "Bạn không có quyền xem lượt làm bài này.", HttpStatusCode.Forbidden);
-
-                if (!attempt.IsCompleted)
-                    return ApiResponse<AttemptResultResponse>.Fail(
-                        "Lượt làm bài này chưa được nộp/chấm điểm.", HttpStatusCode.BadRequest);
-
-                var sectionResults = await unitOfWork.MockTestSectionResults.GetByAttemptIdAsync(
-                    attemptId, cancellationToken);
-
-                var result = new AttemptResultResponse
-                {
-                    AttemptId = attempt.Id,
-                    MockTestId = sectionResults
-                        .Select(section => section.MockTestSection.MockTestId)
-                        .FirstOrDefault(),
-                    Status = attempt.IsCompleted ? StatusCompleted : StatusInProgress,
-                    StartedAt = attempt.StartedAt,
-                    SubmittedAt = attempt.SubmittedAt,
-                    TotalScore = attempt.TotalScore.GetValueOrDefault(),
-                    Sections = sectionResults.Select(r => new SectionResultItem
-                    {
-                        MockTestSectionId = r.MockTestSectionId,
-                        SectionTitle = r.MockTestSection.Title,
-                        LanguageSkillName = r.MockTestSection.LanguageSkill.Name,
-                        CorrectCount = r.CorrectCount,
-                        TotalCount = r.TotalCount,
-                        Score = r.ScorePercent,
-                    }).ToList(),
-                };
-
-                return ApiResponse<AttemptResultResponse>.Success(result);
-            }
-            catch (Exception)
-            {
-                return ApiResponse<AttemptResultResponse>.Fail(
-                    "Không thể tải kết quả lượt làm bài.", HttpStatusCode.InternalServerError);
-            }
+            throw new NotImplementedException();
         }
 
-        public async Task<ApiResponse<List<TestSummaryResponse>>> GetTestsByLevelAsync(
-            int certificationLevelId, CancellationToken cancellationToken = default)
+        public Task<ApiResponse<AttemptResultResponse>> SubmitAttemptAsync(int attemptId, SubmitAttemptRequest request, CancellationToken cancellationToken = default)
         {
-            try
-            {
-                var tests = await unitOfWork.MockTests.GetByLevelAsync(certificationLevelId);
-
-                var result = tests.Select(t => new TestSummaryResponse
-                {
-                    MockTestId = t.Id,
-                    Title = t.Title,
-                    Description = t.Description,
-                    // NOTE: property response vẫn tên "JlptLevelName" (từ trước khi đổi model) - giữ tên
-                    // field để không vỡ FE, nhưng lấy giá trị từ CertificateLevel.Code (không còn Name).
-                    // Nên đổi tên field này thành CertificateLevelName trong Responses/MockTests
-                    // khi bạn tiện cập nhật FE.
-                    JlptLevelName = t.CertificateLevel?.Code ?? string.Empty,
-                    TimeLimitMinutes = t.TimeLimitMinutes,
-                }).ToList();
-
-                return ApiResponse<List<TestSummaryResponse>>.Success(result);
-            }
-            catch (Exception)
-            {
-                return ApiResponse<List<TestSummaryResponse>>.Fail(
-                    "Không thể tải danh sách đề thi.", HttpStatusCode.InternalServerError);
-            }
+            throw new NotImplementedException();
         }
 
-        public async Task<ApiResponse<List<TestSummaryResponse>>> GetPlacementTestsByCertificateLevelAsync(
-             int certificateLevelId,
-             CancellationToken cancellationToken = default)
+        public Task<ApiResponse<AttemptResultResponse>> GetAttemptResultAsync(int attemptId, CancellationToken cancellationToken = default)
         {
-            try
-            {
-                if (certificateLevelId <= 0)
-                    return ApiResponse<List<TestSummaryResponse>>.Fail(
-                        "Cấp độ chứng chỉ không hợp lệ.", HttpStatusCode.BadRequest);
-
-                var levelExists = await unitOfWork.CertificateLevels
-                    .AnyAsync(l => l.Id == certificateLevelId, cancellationToken);
-                if (!levelExists)
-                    return ApiResponse<List<TestSummaryResponse>>.NotFound("Không tìm thấy cấp độ chứng chỉ.");
-
-                var tests = await unitOfWork.MockTests
-                    .GetLearnerPlacementTestsByLevelAsync(certificateLevelId, cancellationToken);
-
-                var result = tests.Select(test => new TestSummaryResponse
-                {
-                    MockTestId = test.Id,
-                    Title = test.Title,
-                    Description = test.Description,
-                    JlptLevelName = test.CertificateLevel?.Code ?? string.Empty,
-                    TimeLimitMinutes = test.TimeLimitMinutes,
-                }).ToList();
-
-                return ApiResponse<List<TestSummaryResponse>>.Success(result);
-            }
-            catch (Exception)
-            {
-                return ApiResponse<List<TestSummaryResponse>>.Fail(
-                    "Không thể tải bài đánh giá năng lực.", HttpStatusCode.InternalServerError);
-            }
+            throw new NotImplementedException();
         }
 
-        public async Task<ApiResponse<DetailedAttemptResultResponse>> GetDetailedResultAsync(int attemptId, CancellationToken cancellationToken = default)
+        public Task<ApiResponse<List<TestSummaryResponse>>> GetTestsByLevelAsync(int jlptLevelId, CancellationToken cancellationToken = default)
         {
-            try
-            {
-                var userId = claimService.GetUserClaim().Id;
-                var attempt = await unitOfWork.MockTestAttempts.GetByIdAsync(attemptId, cancellationToken);
-                if (attempt is null || attempt.IsDeleted || attempt.AttemptKind != AttemptKind.MockTest)
-                    return ApiResponse<DetailedAttemptResultResponse>.NotFound(
-                        $"Không tìm thấy MockTestAttempt có Id = {attemptId}.");
-
-                if (attempt.UserId != userId)
-                    return ApiResponse<DetailedAttemptResultResponse>.Fail(
-                        "Bạn không có quyền xem lượt làm bài này.", HttpStatusCode.Forbidden);
-
-                if (!attempt.IsCompleted)
-                    return ApiResponse<DetailedAttemptResultResponse>.Fail(
-                        "Lượt làm bài này chưa được nộp/chấm điểm.", HttpStatusCode.BadRequest);
-
-                var answers = await unitOfWork.MockTestAnswers.GetByAttemptIdAsync(
-                    attemptId, cancellationToken);
-
-                var questions = answers.Select(a => new QuestionReviewCard
-                {
-                    QuestionId = a.MockQuestionId,
-                    QuestionText = a.MockQuestion.QuestionText,
-                    QuestionType = a.MockQuestion.QuestionType,
-                    Response = ParseJsonElement(a.ResponseJson),
-                    AnswerKey = ParseJsonElement(a.MockQuestion.AnswerKeyJson),
-                    Explanation = a.MockQuestion.Explanation,
-                    SelectedOptionId = a.SelectedOptionId,
-                    IsCorrect = a.IsCorrect,
-                    WasPreviouslyIncorrect = !a.IsCorrect,
-                    Options = (a.MockQuestion.Options ?? [])
-                        .OrderBy(option => option.SortOrder)
-                        .ThenBy(option => option.Id)
-                        .Select(o => new QuestionOptionReview
-                        {
-                            OptionId = o.Id,
-                            OptionText = o.OptionText,
-                            IsCorrect = o.IsCorrect,
-                        }).ToList(),
-                }).ToList();
-
-                return ApiResponse<DetailedAttemptResultResponse>.Success(new DetailedAttemptResultResponse
-                {
-                    AttemptId = attempt.Id,
-                    MockTestId = answers
-                        .Select(answer => answer.MockQuestion.MockTestSection.MockTestId)
-                        .FirstOrDefault(),
-                    TotalScore = attempt.TotalScore.GetValueOrDefault(),
-                    Questions = questions,
-                });
-            }
-            catch (Exception)
-            {
-                return ApiResponse<DetailedAttemptResultResponse>.Fail(
-                    "Không thể tải kết quả chi tiết.", HttpStatusCode.InternalServerError);
-            }
+            throw new NotImplementedException();
         }
 
-        // ---------------- Chế độ Ôn tập Câu hỏi Sai (Quizlet Review Mode) ----------------
-
-        public async Task<ApiResponse<List<QuestionReviewCard>>> GetWrongQuestionsReviewSessionAsync(int? practiceTestId = null, CancellationToken cancellationToken = default)
+        public Task<ApiResponse<MockTestDetailResponse>> GetPlacementTestDetailAsync(int certificateLevelId, CancellationToken cancellationToken = default)
         {
-            try
-            {
-                var userId = claimService.GetUserClaim().Id;
-                // 1. Lấy tất cả lượt làm bài đã hoàn thành
-                var attempts = (await unitOfWork.MockTestAttempts.FindAsync(a =>
-                    a.UserId == userId && a.IsCompleted && !a.IsDeleted && a.AttemptKind == AttemptKind.MockTest && (!practiceTestId.HasValue), cancellationToken))
-                    .Where(a => !a.IsDeleted && a.AttemptKind == AttemptKind.MockTest)
-                    .ToList();
-
-                var attemptIds = attempts.Select(a => a.Id).ToList();
-                if (attemptIds.Count == 0)
-                {
-                    return ApiResponse<List<QuestionReviewCard>>.Success([]);
-                }
-
-                // 2. Lấy tất cả câu trả lời của Learner trong các lượt làm bài đó
-                var pastAnswers = await unitOfWork.MockTestAnswers.FindAsync(ans => attemptIds.Contains(ans.MockTestAttemptId), cancellationToken);
-
-                // 3. Nhóm câu hỏi & lọc câu mà lần trả lời gần đây nhất bị SAI
-                var wrongStats = pastAnswers
-                    .GroupBy(ans => ans.MockQuestionId)
-                    .Select(g => new
-                    {
-                        QuestionId = g.Key,
-                        LatestAnswer = g.OrderByDescending(x => x.MockTestAttemptId).FirstOrDefault(),
-                        TimesWrong = g.Count(x => !x.IsCorrect)
-                    })
-                    .Where(x => x.LatestAnswer != null && !x.LatestAnswer.IsCorrect)
-                    .ToList();
-
-                if (wrongStats.Count == 0)
-                {
-                    return ApiResponse<List<QuestionReviewCard>>.Success([]);
-                }
-
-                var wrongQuestionIds = wrongStats.Select(x => x.QuestionId).ToList();
-                var questions = await unitOfWork.MockQuestions.GetByIdsWithOptionsAsync(wrongQuestionIds);
-                var statsDict = wrongStats.ToDictionary(x => x.QuestionId);
-
-                // 4. Map câu hỏi kèm thống kê Quizlet (ưu tiên câu sai nhiều lần lên trước)
-                var reviewItems = questions.Select(q =>
-                {
-                    var stat = statsDict.GetValueOrDefault(q.Id);
-                    return new QuestionReviewCard
-                    {
-                        QuestionId = q.Id,
-                        QuestionText = q.QuestionText,
-                        Explanation = q.Explanation,
-                        SelectedOptionId = stat?.LatestAnswer?.SelectedOptionId,
-                        IsCorrect = false,
-                        WasPreviouslyIncorrect = true,
-                        TimesAnsweredWrong = stat?.TimesWrong ?? 0,
-                        Options = q.Options.Select(o => new QuestionOptionReview
-                        {
-                            OptionId = o.Id,
-                            OptionText = o.OptionText,
-                            IsCorrect = o.IsCorrect,
-                        }).ToList(),
-                    };
-                }).OrderByDescending(x => x.TimesAnsweredWrong).ToList();
-
-                return ApiResponse<List<QuestionReviewCard>>.Success(reviewItems);
-            }
-            catch (Exception)
-            {
-                return ApiResponse<List<QuestionReviewCard>>.Fail(
-                    "Không thể tải danh sách câu hỏi cần ôn tập.", HttpStatusCode.InternalServerError);
-            }
+            throw new NotImplementedException();
         }
 
-        // ---------------- Helpers ----------------
-
-        private static (List<MockTestSectionResult> Entities, List<SectionResultItem> Responses, double OverallScore)
-            BuildSectionResults(
-                int attemptId,
-                List<MockQuestion> questions,
-                Dictionary<int, bool> correctByQuestion)
+        public Task<ApiResponse<DetailedAttemptResultResponse>> GetDetailedResultAsync(int attemptId, CancellationToken cancellationToken = default)
         {
-            var grouped = questions
-                .GroupBy(q => q.MockTestSection)
-                .Select(g =>
-                {
-                    var total = g.Count();
-                    var correct = g.Count(q => correctByQuestion[q.Id]);
-                    var score = total == 0 ? 0d : Math.Round(correct * 100d / total, 2);
-                    return (Section: g.Key, Correct: correct, Total: total, Score: score);
-                })
-                .ToList();
-
-            var entities = grouped.Select(g => new MockTestSectionResult
-            {
-                MockTestAttemptId = attemptId,
-                MockTestSectionId = g.Section.Id,
-                CorrectCount = g.Correct,
-                TotalCount = g.Total,
-                ScorePercent = g.Score,
-            }).ToList();
-
-            var responses = grouped.Select(g => new SectionResultItem
-            {
-                MockTestSectionId = g.Section.Id,
-                SectionTitle = g.Section.Title,
-                LanguageSkillName = g.Section.LanguageSkill.Name,
-                CorrectCount = g.Correct,
-                TotalCount = g.Total,
-                Score = g.Score,
-            }).ToList();
-
-            var totalCorrect = grouped.Sum(g => g.Correct);
-            var totalCount = grouped.Sum(g => g.Total);
-            var overallScore = totalCount == 0 ? 0d : Math.Round(totalCorrect * 100d / totalCount, 2);
-
-            return (entities, responses, overallScore);
+            throw new NotImplementedException();
         }
 
+        public Task<ApiResponse<List<QuestionReviewCard>>> GetWrongQuestionsReviewSessionAsync(int? practiceTestId = null, CancellationToken cancellationToken = default)
+        {
+            throw new NotImplementedException();
+        }
+
+        internal sealed class PlacementAttemptSnapshotDocument
+        {
+            public int SchemaVersion { get; set; } = 2;
+            public int TimeLimitMinutes { get; set; }
+            public DateTime StartedAt { get; set; }
+            public DateTime ExpiresAt { get; set; }
+            public bool IsSupersededExpired { get; set; }
+            public List<PlacementSnapshotLevelCatalogItem> CatalogLevels { get; set; } = [];
+            public List<PlacementSnapshotQuestionItem> Questions { get; set; } = [];
+            public PlacementTestResultResponse? CompletedResult { get; set; }
+        }
+
+        internal sealed class PlacementSnapshotLevelCatalogItem
+        {
+            public int JlptLevelId { get; set; }
+            public string JlptLevelName { get; set; } = string.Empty;
+            public int Rank { get; set; }
+        }
+
+        internal sealed class PlacementSnapshotQuestionItem
+        {
+            public int QuestionId { get; set; }
+            public int MockTestId { get; set; }
+            public int MockTestSectionId { get; set; }
+            public string SectionTitle { get; set; } = string.Empty;
+            public int SectionOrder { get; set; }
+            public string LanguageSkillName { get; set; } = string.Empty;
+            public int JlptLevelId { get; set; }
+            public string JlptLevelName { get; set; } = string.Empty;
+            public int Order { get; set; }
+            public string Content { get; set; } = string.Empty;
+            public string? AudioUrl { get; set; }
+            public string? ImageUrl { get; set; }
+            public int CorrectOptionId { get; set; }
+            public int? SelectedOptionId { get; set; }
+            public bool IsCorrect { get; set; }
+            public List<PlacementSnapshotOptionItem> Options { get; set; } = [];
+        }
+
+        internal sealed class PlacementSnapshotOptionItem
+        {
+            public int OptionId { get; set; }
+            public string Content { get; set; } = string.Empty;
+            public int Order { get; set; }
+            public bool IsCorrect { get; set; }
+        }
     }
 }

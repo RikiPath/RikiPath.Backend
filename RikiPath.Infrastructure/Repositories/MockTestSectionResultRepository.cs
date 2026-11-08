@@ -36,5 +36,26 @@ namespace RikiPath.Infrastructure.Repositories
                             x.MockTestAttempt.AttemptKind == AttemptKind.MockTest)
                 .ToListAsync();
         }
+
+        public async Task<List<MockTestSectionResult>> GetSkillHistoryByUserSinceAsync(
+            int userId,
+            DateTime fromUtc,
+            CancellationToken cancellationToken = default)
+            => await _context.MockTestSectionResults
+                .AsNoTracking()
+                .Include(x => x.MockTestSection)
+                    .ThenInclude(section => section.LanguageSkill)
+                .Include(x => x.MockTestAttempt)
+                .Where(x => !x.IsDeleted &&
+                            !x.MockTestAttempt.IsDeleted &&
+                            x.MockTestAttempt.UserId == userId &&
+                            x.MockTestAttempt.IsCompleted &&
+                            x.MockTestAttempt.SubmittedAt.HasValue &&
+                            x.MockTestAttempt.SubmittedAt.Value >= fromUtc &&
+                            (x.MockTestAttempt.AttemptKind == AttemptKind.MockTest ||
+                             x.MockTestAttempt.AttemptKind == AttemptKind.Placement))
+                .OrderBy(x => x.MockTestAttempt.SubmittedAt)
+                .ThenBy(x => x.Id)
+                .ToListAsync(cancellationToken);
     }
 }

@@ -80,6 +80,8 @@ namespace RikiPath.Application
         void AddMentorOutboxEvent(MentorOutboxEvent outboxEvent);
 
         IContentApprovalRequestRepository ContentApprovalRequests { get; }
+
+        IContentAiReviewRepository ContentAiReviews { get; }
         // Db Helpers
         Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
         Task ExecuteInTransactionAsync(

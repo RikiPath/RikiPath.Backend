@@ -1,10 +1,11 @@
+using Microsoft.EntityFrameworkCore;
 using RikiPath.Application.IRepositories;
 using RikiPath.Domain.Entities;
-using Microsoft.EntityFrameworkCore;
+using RikiPath.Domain.Enums;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
-using RikiPath.Domain.Enums;
 
 namespace RikiPath.Infrastructure.Repositories
 {
@@ -70,10 +71,26 @@ namespace RikiPath.Infrastructure.Repositories
                 .AsNoTracking()
                 .Include(test => test.CertificateLevel)
                 .Where(test => test.CertificateLevelId == certificateLevelId
-                    && !test.IsDeleted
-                    && test.IsPlacementAssessment)
+                    && !test.IsDeleted)
                 .OrderByDescending(test => test.CreatedDate)
                 .ThenBy(test => test.Id)
                 .ToListAsync(cancellationToken);
+
+        public async Task<MockTest?> GetPlacementTestDetailByLevelAsync(
+            int certificateLevelId,
+            CancellationToken cancellationToken = default)
+            => await _context.MockTests
+                .AsNoTracking()
+                .Where(t => !t.IsDeleted
+                    && t.CertificateLevelId == certificateLevelId)
+                .Include(t => t.CertificateLevel)
+                .Include(t => t.Sections.Where(s => !s.IsDeleted))
+                    .ThenInclude(s => s.LanguageSkill)
+                .Include(t => t.Sections.Where(s => !s.IsDeleted))
+                    .ThenInclude(s => s.Questions.Where(q => !q.IsDeleted))
+                    .ThenInclude(q => q.Options.Where(o => !o.IsDeleted))
+                .AsSplitQuery()
+                .OrderByDescending(t => t.CreatedDate)
+                .FirstOrDefaultAsync(cancellationToken);
     }
 }

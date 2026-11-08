@@ -86,6 +86,7 @@ namespace RikiPath.Infrastructure
         public void AddMentorOutboxEvent(MentorOutboxEvent outboxEvent) => _context.MentorOutboxEvents.Add(outboxEvent);
         public IContentApprovalRequestRepository ContentApprovalRequests { get; }
 
+        public IContentAiReviewRepository ContentAiReviews { get; }
         public UnitOfWork(AppDbContext context)
         {
             _context = context ?? throw new ArgumentNullException(nameof(context));
@@ -155,6 +156,8 @@ namespace RikiPath.Infrastructure
             MentorCreditLedger = new MentorCreditLedgerRepository(_context);
             MentorTeachingQualifications = new GenericRepository<MentorTeachingQualification>(_context);
             ContentApprovalRequests = new ContentApprovalRequestRepository(_context);
+
+            ContentAiReviews = new ContentAiReviewRepository(_context);
         }
 
         public async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)

@@ -446,7 +446,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 1,
                             CertificateLevelId = 1,
                             Code = "N5_VOCAB",
-                            CreatedDate = new DateTime(2026, 10, 31, 11, 13, 24, 991, DateTimeKind.Utc).AddTicks(5285),
+                            CreatedDate = new DateTime(2026, 11, 5, 7, 12, 34, 453, DateTimeKind.Utc).AddTicks(6122),
                             Description = "Phần thi kiểm tra chữ Hán, cách đọc và từ vựng cấp độ N5",
                             IsDeleted = false,
                             MaxScore = 0,
@@ -459,7 +459,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 2,
                             CertificateLevelId = 1,
                             Code = "N5_GRAMMAR_READING",
-                            CreatedDate = new DateTime(2026, 10, 31, 11, 13, 24, 991, DateTimeKind.Utc).AddTicks(5292),
+                            CreatedDate = new DateTime(2026, 11, 5, 7, 12, 34, 453, DateTimeKind.Utc).AddTicks(6127),
                             Description = "Phần thi kiểm tra cấu trúc ngữ pháp và đọc hiểu đoạn văn ngắn cấp độ N5",
                             IsDeleted = false,
                             MaxScore = 0,
@@ -472,7 +472,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 3,
                             CertificateLevelId = 1,
                             Code = "N5_LISTENING",
-                            CreatedDate = new DateTime(2026, 10, 31, 11, 13, 24, 991, DateTimeKind.Utc).AddTicks(5294),
+                            CreatedDate = new DateTime(2026, 11, 5, 7, 12, 34, 453, DateTimeKind.Utc).AddTicks(6129),
                             Description = "Phần thi nghe hiểu tình huống giao tiếp hàng ngày cấp độ N5",
                             IsDeleted = false,
                             MaxScore = 0,
@@ -485,7 +485,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 4,
                             CertificateLevelId = 2,
                             Code = "N4_VOCAB",
-                            CreatedDate = new DateTime(2026, 10, 31, 11, 13, 24, 991, DateTimeKind.Utc).AddTicks(5295),
+                            CreatedDate = new DateTime(2026, 11, 5, 7, 12, 34, 453, DateTimeKind.Utc).AddTicks(6130),
                             Description = "Phần thi kiểm tra chữ Hán, cách đọc và từ vựng cấp độ N4",
                             IsDeleted = false,
                             MaxScore = 0,
@@ -498,7 +498,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 5,
                             CertificateLevelId = 2,
                             Code = "N4_GRAMMAR",
-                            CreatedDate = new DateTime(2026, 10, 31, 11, 13, 24, 991, DateTimeKind.Utc).AddTicks(5296),
+                            CreatedDate = new DateTime(2026, 11, 5, 7, 12, 34, 453, DateTimeKind.Utc).AddTicks(6132),
                             Description = "Phần thi kiểm tra cấu trúc ngữ pháp và sắp xếp câu cấp độ N4",
                             IsDeleted = false,
                             MaxScore = 0,
@@ -511,7 +511,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 6,
                             CertificateLevelId = 2,
                             Code = "N4_READING",
-                            CreatedDate = new DateTime(2026, 10, 31, 11, 13, 24, 991, DateTimeKind.Utc).AddTicks(5297),
+                            CreatedDate = new DateTime(2026, 11, 5, 7, 12, 34, 453, DateTimeKind.Utc).AddTicks(6133),
                             Description = "Phần thi đọc hiểu văn bản, thông báo và biểu mẫu cấp độ N4",
                             IsDeleted = false,
                             MaxScore = 0,
@@ -524,7 +524,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 7,
                             CertificateLevelId = 2,
                             Code = "N4_LISTENING",
-                            CreatedDate = new DateTime(2026, 10, 31, 11, 13, 24, 991, DateTimeKind.Utc).AddTicks(5298),
+                            CreatedDate = new DateTime(2026, 11, 5, 7, 12, 34, 453, DateTimeKind.Utc).AddTicks(6134),
                             Description = "Phần thi nghe hiểu hội thoại và tình huống thực tế cấp độ N4",
                             IsDeleted = false,
                             MaxScore = 0,
@@ -589,6 +589,70 @@ namespace RikiPath.Infrastructure.Migrations
                             Name = "JLPT",
                             SortOrder = 1
                         });
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.ContentAiReview", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("ContentId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("CreatedDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int>("ErrorCount")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("IssuesJson")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid?>("ModifiedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("ModifiedDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int>("RequestedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("ReviewedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("Summary")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<string>("Verdict")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)");
+
+                    b.Property<int>("WarningCount")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ContentType", "ContentId", "ReviewedAt");
+
+                    b.ToTable("ContentAiReviews");
                 });
 
             modelBuilder.Entity("RikiPath.Domain.Entities.ContentApprovalRequest", b =>
@@ -4097,13 +4161,8 @@ namespace RikiPath.Infrastructure.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)");
 
-                    b.Property<int>("ActorId")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("ActorRole")
-                        .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("character varying(32)");
+                    b.Property<Guid?>("ModifiedBy")
+                        .HasColumnType("uuid");
 
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("timestamp without time zone");
