@@ -100,7 +100,10 @@ public sealed class MentorMeetingService(
                 Id = x.Id,
                 Name = $"{x.FirstName} {x.LastName}".Trim(),
                 AvatarUrl = x.AvatarUrl,
-                TeachingJlptLevels = teachingLevelsByMentor.TryGetValue(x.Id, out var levels) ? levels : []
+                TeachingJlptLevels = teachingLevelsByMentor.TryGetValue(x.Id, out var levels) ? levels : [],
+                Headline = x.MentorProfile?.Expertise,
+                Bio = x.MentorProfile?.Bio,
+                TeachingMethod = x.MentorProfile?.Workplace
             }).ToList());
     }
 

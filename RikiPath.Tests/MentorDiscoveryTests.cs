@@ -521,8 +521,9 @@ public sealed class MentorDiscoveryTests
         await using var db = CreateInMemoryDb();
         db.Users.Add(CreateMentor(40, "Sensei", "Timezone", MentorVerificationStatus.Approved));
 
-        // 23:30 UTC ngày 2026-11-05 tương đương 06:30 sáng ngày 2026-11-06 tại múi giờ Asia/Ho_Chi_Minh (+7)
-        var utcSlotStart = new DateTime(2026, 11, 5, 23, 30, 0, DateTimeKind.Utc);
+        // 23:30 UTC ngày hôm trước tương đương 06:30 sáng ngày hôm sau tại múi giờ Asia/Ho_Chi_Minh (+7)
+        var futureTargetDate = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(3));
+        var utcSlotStart = futureTargetDate.ToDateTime(new TimeOnly(0, 0), DateTimeKind.Utc).AddMinutes(-30);
         var utcSlotEnd = utcSlotStart.AddMinutes(90);
         db.MentorAvailabilities.Add(CreateSlot(401, 40, utcSlotStart, utcSlotEnd));
         await db.SaveChangesAsync();
@@ -530,8 +531,8 @@ public sealed class MentorDiscoveryTests
         var service = new MentorDiscoveryService(new UnitOfWork(db), NullLogger<MentorDiscoveryService>.Instance);
         var request = new MentorSlotBrowsingRequest
         {
-            StartDate = new DateOnly(2026, 11, 6),
-            EndDate = new DateOnly(2026, 11, 6),
+            StartDate = futureTargetDate,
+            EndDate = futureTargetDate,
             TimeZoneId = "Asia/Ho_Chi_Minh"
         };
 
@@ -539,7 +540,7 @@ public sealed class MentorDiscoveryTests
 
         Assert.True(result.IsSuccess);
         Assert.Equal(1, result.Result!.TotalAvailableSlots);
-        Assert.Equal(new DateOnly(2026, 11, 6), result.Result.DailySlots[0].Date);
+        Assert.Equal(futureTargetDate, result.Result.DailySlots[0].Date);
         Assert.Equal(new TimeOnly(6, 30), result.Result.DailySlots[0].Slots[0].LocalStart);
         Assert.Equal(new TimeOnly(8, 0), result.Result.DailySlots[0].Slots[0].LocalEnd);
         Assert.Equal("Morning", result.Result.DailySlots[0].Slots[0].DaypartCode);

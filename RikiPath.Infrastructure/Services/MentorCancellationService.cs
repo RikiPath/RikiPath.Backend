@@ -417,12 +417,40 @@ public sealed class MentorCancellationService : IMentorCancellationService
         }
 
         var oldReservation = await _context.MentorBookingReservations
-            .FirstOrDefaultAsync(r => r.MentorBookingId == booking.Id && r.ReleasedAtUtc == null, cancellationToken);
+            .FirstOrDefaultAsync(r => r.MentorBookingId == booking.Id, cancellationToken);
+
+        var localStartTz = TimeZoneInfo.FindSystemTimeZoneById("SE Asia Standard Time");
+        var utcSlotStart = DateTime.SpecifyKind(newSlot.StartTime, DateTimeKind.Utc);
+        var localStart = TimeZoneInfo.ConvertTimeFromUtc(utcSlotStart, localStartTz);
+        var localDate = DateOnly.FromDateTime(localStart);
 
         if (oldReservation is not null)
         {
-            oldReservation.ReleasedAtUtc = nowUtc;
+            oldReservation.MentorAvailabilityId = newSlot.Id;
+            oldReservation.MentorId = newSlot.MentorId;
+            oldReservation.StartUtc = newSlot.StartTime;
+            oldReservation.EndUtc = newSlot.EndTime;
+            oldReservation.LocalBusinessDate = localDate;
+            oldReservation.RestProtectedUntilUtc = newSlot.EndTime.AddMinutes(15);
+            oldReservation.ReleasedAtUtc = null;
+            oldReservation.PolicyVersion = newSlot.PolicyVersion ?? 1;
             _context.MentorBookingReservations.Update(oldReservation);
+        }
+        else
+        {
+            var newReservation = new MentorBookingReservation
+            {
+                MentorBookingId = booking.Id,
+                MentorAvailabilityId = newSlot.Id,
+                MentorId = newSlot.MentorId,
+                StartUtc = newSlot.StartTime,
+                EndUtc = newSlot.EndTime,
+                LocalBusinessDate = localDate,
+                RestProtectedUntilUtc = newSlot.EndTime.AddMinutes(15),
+                CreatedAtUtc = nowUtc,
+                PolicyVersion = newSlot.PolicyVersion ?? 1
+            };
+            _context.MentorBookingReservations.Add(newReservation);
         }
 
         var isInMemory = _context.Database.ProviderName == "Microsoft.EntityFrameworkCore.InMemory";
@@ -436,24 +464,6 @@ public sealed class MentorCancellationService : IMentorCancellationService
                 .Where(x => x.Id == oldSlot.Id && x.BookedCount > 0)
                 .ExecuteUpdateAsync(s => s.SetProperty(x => x.BookedCount, x => x.BookedCount - 1), cancellationToken);
         }
-
-        var localStartTz = TimeZoneInfo.FindSystemTimeZoneById("SE Asia Standard Time");
-        var localStart = TimeZoneInfo.ConvertTimeFromUtc(newSlot.StartTime, localStartTz);
-        var localDate = DateOnly.FromDateTime(localStart);
-
-        var newReservation = new MentorBookingReservation
-        {
-            MentorBookingId = booking.Id,
-            MentorAvailabilityId = newSlot.Id,
-            MentorId = newSlot.MentorId,
-            StartUtc = newSlot.StartTime,
-            EndUtc = newSlot.EndTime,
-            LocalBusinessDate = localDate,
-            RestProtectedUntilUtc = newSlot.EndTime.AddMinutes(15),
-            CreatedAtUtc = nowUtc,
-            PolicyVersion = newSlot.PolicyVersion ?? 1
-        };
-        _context.MentorBookingReservations.Add(newReservation);
 
         if (isInMemory)
         {

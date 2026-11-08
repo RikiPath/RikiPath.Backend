@@ -188,6 +188,8 @@ public sealed class LearningPathPersistenceTests
                     weaknesses = new[] { "Ngữ pháp" },
                     feasibility = "Khả thi",
                     focusTopics = new[] { "N4" },
+                    isExamDateRealistic = true,
+                    recommendedStudyDays = 5,
                     dailySchedules = schedules,
                 });
             });

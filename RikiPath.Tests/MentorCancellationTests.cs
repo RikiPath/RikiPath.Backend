@@ -504,13 +504,13 @@ public sealed class MentorCancellationTests
         Assert.NotNull(updatedNewSlot);
         Assert.Equal(1, updatedNewSlot.BookedCount);
 
-        var oldReservation = await db.MentorBookingReservations.FirstOrDefaultAsync(r => r.MentorBookingId == booking.Id && r.StartUtc == oldSlot.StartTime);
-        Assert.NotNull(oldReservation);
-        Assert.NotNull(oldReservation.ReleasedAtUtc);
-
-        var newReservation = await db.MentorBookingReservations.FirstOrDefaultAsync(r => r.MentorBookingId == booking.Id && r.StartUtc == newSlot.StartTime);
-        Assert.NotNull(newReservation);
-        Assert.Null(newReservation.ReleasedAtUtc);
+        // Kiểm tra reservation được chuyển nguyên tử sang slot mới (tuân thủ unique index IX_MentorBookingReservations_MentorBookingId)
+        var transferredReservation = await db.MentorBookingReservations.FirstOrDefaultAsync(r => r.MentorBookingId == booking.Id);
+        Assert.NotNull(transferredReservation);
+        Assert.Equal(newSlot.Id, transferredReservation.MentorAvailabilityId);
+        Assert.Equal(newSlot.StartTime, transferredReservation.StartUtc);
+        Assert.Equal(newSlot.EndTime, transferredReservation.EndUtc);
+        Assert.Null(transferredReservation.ReleasedAtUtc);
 
         // Kiểm tra Outbox event
         var outbox = await db.MentorOutboxEvents.FirstOrDefaultAsync(e => e.AggregateId == booking.Id.ToString() && e.EventType == "BookingRescheduled");
