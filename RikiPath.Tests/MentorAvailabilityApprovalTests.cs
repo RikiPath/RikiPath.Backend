@@ -38,7 +38,7 @@ public sealed class MentorAvailabilityApprovalTests
         await Seed(db);
         var uow = new UnitOfWork(db);
         var meeting = new MentorMeetingService(uow, Mock.Of<IPaymentGatewayClient>(), Claims(Role.Mentor, 501),
-            new AppSettings(), NullLogger<MentorMeetingService>.Instance);
+            new AppSettings(), NullLogger<MentorMeetingService>.Instance, Mock.Of<IMentorCreditLedgerService>());
         var start = DateTime.UtcNow.AddDays(1);
         Assert.False((await meeting.CreateAvailabilityAsync(new CreateMentorAvailabilityRequest
         { StartTime = start, EndTime = start.AddHours(1) }, default)).IsSuccess);

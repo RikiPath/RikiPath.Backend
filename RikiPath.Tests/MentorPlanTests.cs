@@ -8,7 +8,7 @@ namespace RikiPath.Tests;
 public sealed class MentorPlanTests
 {
     [Theory]
-    [InlineData(1, 14)] [InlineData(3, 35)]
+    [InlineData(1, 30)] [InlineData(3, 90)]
     public async Task Admin_sets_price_and_plan_duration_is_fixed(int sessions, int days)
     {
         await using var db = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);

@@ -7,6 +7,8 @@ namespace RikiPath.Application.IServices;
 public interface ILearnerEssayService
 {
     Task<ApiResponse<EssayScanResponse>> ScanAsync(IFormFile image, CancellationToken cancellationToken = default);
+    Task<ApiResponse<EssayDetailResponse>> CreateAsync(IFormFile? image, string contentText, string? originalOcrText, CancellationToken cancellationToken = default);
+    Task<ApiResponse<EssayDetailResponse>> SaveDraftAsync(int id, IFormFile? image, string contentText, string? originalOcrText, CancellationToken cancellationToken = default);
     Task<ApiResponse<List<EssayListItemResponse>>> GetAllAsync(CancellationToken cancellationToken = default);
     Task<ApiResponse<EssayDetailResponse>> GetByIdAsync(int id, CancellationToken cancellationToken = default);
     Task<ApiResponse<EssayDetailResponse>> UpdateAsync(int id, string contentText, CancellationToken cancellationToken = default);

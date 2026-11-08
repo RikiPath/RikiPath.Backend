@@ -14,6 +14,8 @@ namespace RikiPath.Infrastructure.Configuration
 
             // UserAccount side (Cascade) configured in UserConfig.
             builder.HasIndex(x => new { x.UserId, x.IsRead });
+            builder.Property(x => x.IdempotencyKey).HasMaxLength(200);
+            builder.HasIndex(x => x.IdempotencyKey).IsUnique().HasFilter(@"""IdempotencyKey"" IS NOT NULL");
         }
     }
 }

@@ -327,6 +327,7 @@ public sealed class MockTestIntegrityTests
             StartedAt = DateTime.UtcNow.AddMinutes(-1),
             IsCompleted = false,
             TotalScore = 0,
+            AttemptKind = AttemptKind.MockTest,
         };
 
         claims.Setup(service => service.GetUserClaim())
@@ -549,6 +550,10 @@ public sealed class MockTestIntegrityTests
                         ScorePercent = 50,
                     },
                 ]);
+            MockTestAnswers
+                .Setup(repository => repository.GetByAttemptIdAsync(
+                    Attempt.Id, It.IsAny<CancellationToken>()))
+                .ReturnsAsync([]);
         }
 
         public void ConfigureDetailedResult()

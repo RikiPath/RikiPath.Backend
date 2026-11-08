@@ -10,6 +10,8 @@ namespace RikiPath.Domain
         public SecretToken SecretToken { get; set; }
         public SmtpSettings SmtpSettings { get; set; }
         public PayOsSettings PayOs { get; set; }
+        public PayOsPayoutSettings PayOsPayout { get; set; } = new();
+        public MentorBankSecuritySettings MentorBankSecurity { get; set; } = new();
         public SupabaseSettings Supabase { get; set; }
         public AiSettings Ai { get; set; }
         public AzureSpeechSettings AzureSpeechSettings { get; set; }
@@ -17,6 +19,8 @@ namespace RikiPath.Domain
         public AwsSettings AWS { get; set; } = new();
         public OpenRouterSettings OpenRouter { get; set; } = new();
         public string FrontendBaseUrl { get; set; }
+        public GoogleAuthSettings Google { get; set; } = new();
+        public QaPaymentSimulatorSettings QaPaymentSimulator { get; set; } = new();
     }
     public class ConnectionStrings
     {
@@ -48,6 +52,11 @@ namespace RikiPath.Domain
         public string FromEmail { get; set; }
     }
 
+    public class GoogleAuthSettings
+    {
+        public string ClientId { get; set; } = string.Empty;
+    }
+
     public class PayOsSettings
     {
         public string ClientId { get; set; } = string.Empty;
@@ -59,11 +68,28 @@ namespace RikiPath.Domain
         public string MobileLandingBaseUrl { get; set; } = string.Empty;
     }
 
+    public sealed class PayOsPayoutSettings
+    {
+        /// <summary>Live payout mặc định DISABLED để ngăn gửi tiền thật khi chưa được phê duyệt vận hành.</summary>
+        public bool LivePayoutEnabled { get; set; } = false;
+        public bool QaSimulatorEnabled { get; set; } = true;
+        public string BaseUrl { get; set; } = "https://api-merchant.payos.vn";
+        public string ClientId { get; set; } = string.Empty;
+        public string ApiKey { get; set; } = string.Empty;
+        public string ChecksumKey { get; set; } = string.Empty;
+    }
+
+    public sealed class MentorBankSecuritySettings
+    {
+        public string EncryptionKey { get; set; } = "RikiPath-Mentor-Bank-AES256-Key-2026";
+    }
+
     public class SupabaseSettings
     {
         public string Url { get; set; } = string.Empty;
         public string ServiceRoleKey { get; set; } = string.Empty;
         public string Bucket { get; set; } = string.Empty;
+        public string VerificationBucket { get; set; } = string.Empty;
     }
 
     public class AiSettings
@@ -104,6 +130,13 @@ namespace RikiPath.Domain
         {
             return ApiKey?.Where(k => !string.IsNullOrWhiteSpace(k)).ToList() ?? new List<string>();
         }
+
+    }
+
+    public sealed class QaPaymentSimulatorSettings
+    {
+        public bool Enabled { get; set; }
+        public string AllowedDatabaseName { get; set; } = string.Empty;
     }
 
     public class AwsSettings

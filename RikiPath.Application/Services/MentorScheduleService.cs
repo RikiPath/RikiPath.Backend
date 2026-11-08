@@ -35,7 +35,7 @@ public sealed class MentorScheduleService(IUnitOfWork uow, IClaimService claims,
         if (user.Role is not (Role.Mentor or Role.Admin)) return Fail("Không có quyền đăng ký buổi rảnh.");
         var mentorId = user.Role == Role.Admin ? request.MentorId ?? 0 : user.Id;
         var mentor = await uow.UserAccounts.GetByIdAsync(mentorId, ct);
-        if (mentor is null || mentor.IsDeleted || mentor.Role != Role.Mentor) return Fail("Mentor không hợp lệ.");
+        if (mentor is null || mentor.IsDeleted || mentor.Role != Role.Mentor) return Fail("Cố vấn được chọn không hợp lệ.");
         var thisMonday = MentorScheduleRules.Monday(DateOnly.FromDateTime(DateTime.UtcNow.AddHours(7)));
         if (request.WeekStart.DayOfWeek != DayOfWeek.Monday ||
             (user.Role == Role.Mentor && !MentorScheduleRules.CanRegister(request.WeekStart, DateTime.UtcNow)) ||
@@ -68,12 +68,12 @@ public sealed class MentorScheduleService(IUnitOfWork uow, IClaimService claims,
         if (starts.Any(t => t <= DateTime.UtcNow)) return Fail("Không thể xếp tiết đã bắt đầu.");
         foreach (var start in starts)
             if (await uow.MentorAvailabilities.HasOverlappingSlotAsync(period.MentorId, start, start.AddMinutes(50), ct))
-                return Fail("Tiết bị trùng với lịch của mentor. Hãy tải lại lịch.");
+                return Fail("Khung giờ bị trùng với lịch của cố vấn. Vui lòng tải lại lịch.");
         foreach (var start in starts)
             await uow.MentorAvailabilities.AddAsync(new MentorAvailability {
                 MentorId = period.MentorId, MentorWeeklyAvailabilityId = period.Id, StartTime = start,
                 EndTime = start.AddMinutes(50), MaxLearners = 1, IsApproved = false }, ct);
-        // Optimistic lock on the parent serializes concurrent administrators assigning the same period.
+        // Khóa lạc quan trên lịch gốc ngăn hai quản trị viên xếp cùng một ca đồng thời.
         period.ModifiedDate = DateTime.UtcNow;
         await uow.SaveChangesAsync(ct);
         return ApiResponse<bool>.Success(true);
@@ -87,7 +87,7 @@ public sealed class MentorScheduleService(IUnitOfWork uow, IClaimService claims,
         if (from.AddDays(7) <= DateTime.UtcNow) return Fail("Tuần đã kết thúc.");
         var registrations = await uow.MentorWeeklyAvailabilities.Query().Include(x => x.Mentor)
             .Where(x => !x.IsDeleted && !x.Mentor.IsDeleted && x.Date >= weekStart && x.Date < weekStart.AddDays(7)).ToListAsync(ct);
-        if (registrations.Count == 0) return Fail("Chưa có mentor đăng ký trong tuần.");
+        if (registrations.Count == 0) return Fail("Chưa có cố vấn đăng ký lịch trong tuần.");
         var slots = await uow.MentorAvailabilities.Query().Where(x => !x.IsDeleted && x.RejectedAt == null
             && x.MentorWeeklyAvailabilityId != null && x.StartTime >= from && x.StartTime < from.AddDays(7)).ToListAsync(ct);
         var mentors = registrations.Select(x => x.Mentor).DistinctBy(x => x.Id).ToList();
@@ -125,7 +125,7 @@ public sealed class MentorScheduleService(IUnitOfWork uow, IClaimService claims,
         var admins = await uow.UserAccounts.FindAsync(x => !x.IsDeleted && x.Role == Role.Admin, ct);
         foreach (var admin in admins)
             await uow.Notifications.AddAsync(new Notification { UserId = admin.Id,
-                Title = "Mentor yêu cầu điều chỉnh lịch", Message = $"Mentor #{user.Id}, tiết #{slot.Id}: {reason.Trim()}",
+                Title = "Cố vấn yêu cầu điều chỉnh lịch", Message = $"Cố vấn đề nghị điều chỉnh một khung giờ: {reason.Trim()}",
                 Type = "MentorSchedule", LinkUrl = "/admin/mentor-schedules/" }, ct);
         await uow.SaveChangesAsync(ct);
         return ApiResponse<bool>.Success(true);
@@ -177,13 +177,13 @@ public sealed class MentorScheduleService(IUnitOfWork uow, IClaimService claims,
         if (user.Role != Role.Learner || booking is null || booking.UserSubscription.UserId != user.Id) return Fail("Không tìm thấy booking của bạn.");
         if (booking.Status == MentorStatus.Cancelled) return ApiResponse<bool>.Success(true);
         if (booking.Status is not (MentorStatus.Assigned or MentorStatus.Accepted) || booking.UserSubscription.PaymentStatus != PaymentStatus.Paid)
-            return Fail("Booking không ở trạng thái có thể hủy.");
+            return Fail("Lịch tư vấn này hiện không thể hủy.");
         if (booking.MentorAvailability is not {} slot || slot.StartTime - DateTime.UtcNow < TimeSpan.FromHours(24))
             return Fail("Chỉ được hủy trước giờ bắt đầu ít nhất 24 tiếng.");
         await uow.ExecuteInTransactionAsync(async token => {
             Refund(booking, false); booking.Status = MentorStatus.Cancelled; booking.MeetingLink = null;
             slot.BookedCount = Math.Max(0, slot.BookedCount - 1);
-            // A private room must not retain a cancelled learner's room link when this slot is booked again.
+            // Khi có người đặt lại khung giờ, phòng riêng không được giữ liên kết của học viên đã hủy.
             if (slot.MaxLearners == 1) slot.RoomId = Guid.NewGuid();
             await uow.SaveChangesAsync(token);
         }, ct);

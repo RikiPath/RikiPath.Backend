@@ -1,6 +1,5 @@
 namespace RikiPath.Domain.Entities;
 
-/// <summary>A whole morning, afternoon or evening offered by a mentor, never a meeting room.</summary>
 public sealed class MentorWeeklyAvailability : Base
 {
     public int Id { get; set; }

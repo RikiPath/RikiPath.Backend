@@ -40,5 +40,8 @@ namespace RikiPath.Application.IServices
         /// </summary>
         Task<ApiResponse<BulkReviewResponse>> ReviewBatchAsync(
             BulkReviewRequest request, CancellationToken cancellationToken = default);
+
+        Task<ApiResponse<List<ContentApprovalListItemResponse>>> GetMyApprovalsAsync(
+            CancellationToken cancellationToken = default);
     }
 }
