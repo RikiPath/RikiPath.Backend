@@ -12,5 +12,10 @@ namespace RikiPath.Application.IServices
 
         /// <summary>Điểm trung bình theo từng kỹ năng (Từ vựng/Kanji, Đọc hiểu, Nghe) từ các bài thi thử.</summary>
         Task<ApiResponse<List<LanguageSkillBreakdownItem>>> GetLanguageSkillBreakdownAsync(CancellationToken cancellationToken);
+
+        /// <summary>Monthly per-skill performance from completed Mock Tests and Placement Tests.</summary>
+        Task<ApiResponse<SkillMonthlyAnalyticsResponse>> GetMonthlySkillAnalyticsAsync(
+            int months,
+            CancellationToken cancellationToken);
     }
 }

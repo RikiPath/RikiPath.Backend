@@ -2,6 +2,7 @@ using RikiPath.Application.IServices;
 using RikiPath.Application.Responses;
 using RikiPath.Application.Responses.Analytics;
 using System.Net;
+using RikiPath.Domain.Entities;
 
 namespace RikiPath.Application.Services
 {
@@ -138,6 +139,152 @@ namespace RikiPath.Application.Services
                     "Không thể tải phân tích điểm mạnh/yếu.", HttpStatusCode.InternalServerError, errors: BuildDebugErrors(ex));
             }
         }
+
+        public async Task<ApiResponse<SkillMonthlyAnalyticsResponse>> GetMonthlySkillAnalyticsAsync(
+            int months,
+            CancellationToken cancellationToken)
+        {
+            if (months is < 1 or > 24)
+                return ApiResponse<SkillMonthlyAnalyticsResponse>.Fail(
+                    "Số tháng phải trong khoảng 1 đến 24.", HttpStatusCode.BadRequest);
+
+            try
+            {
+                var userId = claimService.GetUserClaim().Id;
+                var user = await unitOfWork.UserAccounts.GetWithLearningGoalAsync(userId, cancellationToken);
+                var nowVn = DateTime.UtcNow.AddHours(7);
+                var currentMonth = new DateTime(nowVn.Year, nowVn.Month, 1);
+                var firstMonth = currentMonth.AddMonths(-(months - 1));
+                var fromUtc = DateTime.SpecifyKind(firstMonth.AddHours(-7), DateTimeKind.Utc);
+                var rows = await unitOfWork.MockTestSectionResults.GetSkillHistoryByUserSinceAsync(
+                    userId, fromUtc, cancellationToken);
+
+                var monthKeys = Enumerable.Range(0, months)
+                    .Select(index => firstMonth.AddMonths(index).ToString("yyyy-MM"))
+                    .ToList();
+                var rowsWithSkill = rows
+                    .Where(row => row.MockTestSection?.LanguageSkill is not null && row.TotalCount > 0)
+                    .Select(row => new
+                    {
+                        SkillName = row.MockTestSection!.LanguageSkill!.Name,
+                        row.CorrectCount,
+                        row.TotalCount,
+                        row.MockTestAttemptId,
+                        AttemptKind = row.MockTestAttempt!.AttemptKind,
+                        SubmittedAtVn = row.MockTestAttempt!.SubmittedAt!.Value.AddHours(7),
+                    })
+                    .ToList();
+
+                var skillItems = rowsWithSkill
+                    .GroupBy(row => row.SkillName)
+                    .Select(skillGroup =>
+                    {
+                        var monthlyScores = monthKeys.Select(monthKey =>
+                        {
+                            var monthRows = skillGroup
+                                .Where(row => row.SubmittedAtVn.ToString("yyyy-MM") == monthKey)
+                                .ToList();
+                            var questionCount = monthRows.Sum(row => row.TotalCount);
+                            var correctCount = monthRows.Sum(row => row.CorrectCount);
+                            return new SkillMonthlyScore
+                            {
+                                Month = monthKey,
+                                ScorePercent = questionCount == 0
+                                    ? null
+                                    : Math.Round(correctCount * 100d / questionCount, 2),
+                                AttemptCount = monthRows.Select(row => row.MockTestAttemptId).Distinct().Count(),
+                                MockTestAttemptCount = monthRows
+                                    .Where(row => row.AttemptKind == RikiPath.Domain.Enums.AttemptKind.MockTest)
+                                    .Select(row => row.MockTestAttemptId).Distinct().Count(),
+                                PlacementAttemptCount = monthRows
+                                    .Where(row => row.AttemptKind == RikiPath.Domain.Enums.AttemptKind.Placement)
+                                    .Select(row => row.MockTestAttemptId).Distinct().Count(),
+                                QuestionCount = questionCount,
+                            };
+                        }).ToList();
+
+                        var recordedMonths = monthlyScores.Where(score => score.ScorePercent.HasValue).ToList();
+                        var current = recordedMonths.LastOrDefault();
+                        var previous = recordedMonths.Count > 1 ? recordedMonths[^2] : null;
+                        return new SkillMonthlyAnalyticsItem
+                        {
+                            LanguageSkillName = skillGroup.Key,
+                            CurrentScorePercent = current?.ScorePercent,
+                            CurrentAssessment = current?.ScorePercent is double currentScore
+                                ? DescribeSkillScore(currentScore)
+                                : "Chưa có dữ liệu",
+                            ChangeFromPreviousRecordedMonth = current is not null && previous is not null
+                                ? Math.Round(current.ScorePercent!.Value - previous.ScorePercent!.Value, 2)
+                                : null,
+                            ComparedMonth = previous?.Month,
+                            TotalAttempts = skillGroup.Select(row => row.MockTestAttemptId).Distinct().Count(),
+                            MockTestAttempts = skillGroup
+                                .Where(row => row.AttemptKind == RikiPath.Domain.Enums.AttemptKind.MockTest)
+                                .Select(row => row.MockTestAttemptId).Distinct().Count(),
+                            PlacementAttempts = skillGroup
+                                .Where(row => row.AttemptKind == RikiPath.Domain.Enums.AttemptKind.Placement)
+                                .Select(row => row.MockTestAttemptId).Distinct().Count(),
+                            MonthlyScores = monthlyScores,
+                        };
+                    })
+                    .OrderByDescending(skill => skill.CurrentScorePercent ?? -1)
+                    .ThenBy(skill => skill.LanguageSkillName)
+                    .ToList();
+
+                var latestMonthRows = rowsWithSkill
+                    .GroupBy(row => row.SubmittedAtVn.ToString("yyyy-MM"))
+                    .OrderByDescending(group => group.Key)
+                    .FirstOrDefault();
+                var latestQuestionCount = latestMonthRows?.Sum(row => row.TotalCount) ?? 0;
+                var latestOverallScore = latestQuestionCount == 0
+                    ? (double?)null
+                    : Math.Round(latestMonthRows!.Sum(row => row.CorrectCount) * 100d / latestQuestionCount, 2);
+                var strongest = skillItems.FirstOrDefault(skill => skill.CurrentScorePercent.HasValue);
+                var weakest = skillItems.LastOrDefault(skill => skill.CurrentScorePercent.HasValue);
+
+                var summary = latestOverallScore.HasValue
+                    ? $"Tháng {latestMonthRows!.Key}, điểm tổng hợp theo kỹ năng là {latestOverallScore.Value:0.##}%. " +
+                      (strongest is not null && weakest is not null && strongest.LanguageSkillName != weakest.LanguageSkillName
+                          ? $"Kỹ năng tốt nhất hiện tại: {strongest.LanguageSkillName} ({strongest.CurrentScorePercent:0.##}%). Cần ưu tiên: {weakest.LanguageSkillName} ({weakest.CurrentScorePercent:0.##}%)."
+                          : $"Kỹ năng nổi bật hiện tại: {strongest?.LanguageSkillName ?? "chưa có dữ liệu"}.")
+                    : "Chưa có bài Placement Test hoặc Mock Test đã nộp trong khoảng thời gian này.";
+
+                return ApiResponse<SkillMonthlyAnalyticsResponse>.Success(new SkillMonthlyAnalyticsResponse
+                {
+                    MonthsRequested = months,
+                    AssessedJlptLevel = user?.AssessedCertificateLevel?.Code,
+                    TargetJlptLevel = user?.TargetCertificateLevel?.Code,
+                    TotalAttempts = rows.Select(row => row.MockTestAttemptId).Distinct().Count(),
+                    MockTestAttempts = rows.Where(row => row.MockTestAttempt?.AttemptKind == RikiPath.Domain.Enums.AttemptKind.MockTest)
+                        .Select(row => row.MockTestAttemptId).Distinct().Count(),
+                    PlacementAttempts = rows.Where(row => row.MockTestAttempt?.AttemptKind == RikiPath.Domain.Enums.AttemptKind.Placement)
+                        .Select(row => row.MockTestAttemptId).Distinct().Count(),
+                    CurrentOverallScorePercent = latestOverallScore,
+                    Summary = summary,
+                    Skills = skillItems,
+                });
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                return ApiResponse<SkillMonthlyAnalyticsResponse>.Fail(
+                    "Không thể tải tiến trình năng lực theo kỹ năng.",
+                    HttpStatusCode.InternalServerError,
+                    errors: BuildDebugErrors(ex));
+            }
+        }
+
+        private static string DescribeSkillScore(double score) => score switch
+        {
+            < 30 => "Cần xây lại nền tảng",
+            < 50 => "Cần củng cố nhiều",
+            < 70 => "Đang phát triển",
+            < 85 => "Khá vững",
+            _ => "Vững",
+        };
 
         private static List<string> BuildDebugErrors(Exception ex)
         {
