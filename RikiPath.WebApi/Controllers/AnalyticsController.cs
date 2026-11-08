@@ -72,5 +72,19 @@ namespace RikiPath.WebApi.Controllers
             var result = await analyticsService.GetLanguageSkillBreakdownAsync(cancellationToken);
             return StatusCode((int)result.StatusCode, result);
         }
+
+        /// <summary>
+        /// Lấy năng lực cá nhân theo từng kỹ năng theo tháng, từ Placement Test và Mock Test đã nộp.
+        /// </summary>
+        /// <param name="months">Số tháng cần xem, từ 1 đến 24; mặc định 12 tháng.</param>
+        /// <param name="cancellationToken">Token hủy request.</param>
+        [HttpGet("skill-monthly")]
+        public async Task<IActionResult> GetMonthlySkillAnalytics(
+            [FromQuery] int months = 12,
+            CancellationToken cancellationToken = default)
+        {
+            var result = await analyticsService.GetMonthlySkillAnalyticsAsync(months, cancellationToken);
+            return StatusCode((int)result.StatusCode, result);
+        }
     }
 }

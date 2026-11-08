@@ -15,6 +15,8 @@
         /// <summary>Optional - Kanji liên kết Lesson qua bảng LessonKanji (nhiều-nhiều), không phải FK trực tiếp.
         /// Không tham gia so sánh Modified/Unchanged ở bước diff này, chỉ mang theo cho bước Apply sau.</summary>
         public string? LessonTitle { get; set; }
+        public string? StrokeOrderImageUrl { get; set; }
+        public string? AudioUrl { get; set; }
     }
 }
 

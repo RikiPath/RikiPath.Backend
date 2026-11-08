@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using Microsoft.EntityFrameworkCore;
 using RikiPath.Application.Exceptions;
 using RikiPath.Application.IClients;
 using RikiPath.Application.IServices;
@@ -13,6 +14,7 @@ using RikiPath.Domain.Enums;
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace RikiPath.Application.Services
 {
@@ -23,39 +25,60 @@ namespace RikiPath.Application.Services
         ILogger<LearningPathService> logger) : ILearningPathService
     {
         // ===== Constants =====
-        private const int MaxPlanDays = 180;          // Kế hoạch dài hạn ít nhất 6 tháng
-        private const int ShortPlanDays = 30;
-        private const int MaxAiAttempts = 2;          // Retry khi AI trả JSON sai / thiếu ngày / chọn bài không hợp lệ
+        private const int MaxPlanDays = 180;          // Tổng số ngày ôn tối đa khi gap kỹ năng lớn (>=3 cấp)
+        private const int ShortPlanDays = 30;          // Số ngày lập lịch chi tiết tối đa cho AI mỗi lần (tránh phình token)
+        private const int MaxAiAttempts = 2;           // Retry khi AI trả JSON sai / lẫn tiếng Anh / chọn bài không hợp lệ
         private const int MaxNotebookWords = 50;
         private const int MaxLessonProgressItems = 30;
-        private const int MaxCatalogLessons = 200;    // Số bài học tối đa đưa vào prompt
+        private const int MaxCatalogLessons = 200;     // Số bài học tối đa đưa vào prompt (tổng cả 3 kỹ năng)
+        private const double MinimumPracticePassPercent = 70;
         private const double CompletedPercent = 100;
         private static readonly JsonSerializerOptions StoredPathJsonOptions =
             new(JsonSerializerDefaults.Web);
 
         public Func<DateTime> UtcNowProvider { get; init; } = static () => DateTime.UtcNow;
 
-        /// <summary>Một bài học trong DB thuộc cấp độ mục tiêu, kèm tiến độ của người học.</summary>
-        private sealed record CatalogLesson(int Id, string Title, string LevelCode, double ProgressPercent);
+        /// <summary>Một bài học trong DB, gắn với 1 trong 3 nhóm kỹ năng thi JLPT và mức độ của bài học đó.</summary>
+        private sealed record CatalogLesson(int Id, string Title, string LevelCode, double ProgressPercent, SkillGroup Group);
+
+        /// <summary>
+        /// 3 nhóm kỹ năng theo đúng cấu trúc thi JLPT thật:
+        /// Kiến thức ngôn ngữ (Từ vựng + Ngữ pháp + Hán tự gộp lại), Đọc hiểu, Nghe hiểu.
+        /// </summary>
+        private enum SkillGroup { LanguageKnowledge, Reading, Listening }
+
+        /// <summary>Kết quả đánh giá năng lực của người học cho MỘT nhóm kỹ năng, dựa trên bài Placement gần nhất.</summary>
+        private sealed record SkillAssessment(
+            SkillGroup Group,
+            string Label,
+            bool HasData,
+            double ScorePercent,
+            int TestLevelRank,
+            string TestLevelCode,
+            int EstimatedLevelRank,
+            string EstimatedLevelCode,
+            int TargetLevelRank,
+            string TargetLevelCode,
+            int GapLevels,
+            bool MeetsTarget);
 
         // =====================================================================
         // MAIN FLOW
         // AI Personalized Learning Path requires a real completed Placement result.
         // Standard Roadmap is the separate, non-AI path for learners who skip Placement.
-        // -> AI phân tích DỮ LIỆU TRONG DB (bài đánh giá, tiến độ, notebook, danh mục bài học)
-        //    + ngày thi => nhận xét + lộ trình dùng đúng bài học có trong hệ thống
+        // -> Hệ thống (C#) TỰ TÍNH mức năng lực từng kỹ năng, số ngày cần ôn, ngày thi khả thi.
+        //    AI chỉ viết tóm tắt + chọn bài học (từ catalog đã lọc sẵn theo đúng kỹ năng/mức) cho từng ngày.
         // =====================================================================
         public async Task<ApiResponse<LearningPathResponse>> GenerateLearningPathAsync(
             GenerateLearningPathRequest request,
             CancellationToken cancellationToken)
-            => await GenerateInternalAsync(request?.Horizon, request?.TargetExamDate, null, isPreview: false, cancellationToken);
+            => await GenerateInternalAsync(request?.TargetExamDate, null, isPreview: false, cancellationToken);
 
         public async Task<ApiResponse<LearningPathResponse>> PreviewLearningPathAsync(
             PreviewLearningPathRequest request, CancellationToken cancellationToken)
-            => await GenerateInternalAsync(request?.Horizon, request?.TargetExamDate, request, isPreview: true, cancellationToken);
+            => await GenerateInternalAsync(request?.TargetExamDate, request, isPreview: true, cancellationToken);
 
         private async Task<ApiResponse<LearningPathResponse>> GenerateInternalAsync(
-            string? requestedHorizon,
             DateTime? requestedExamDate,
             PreviewLearningPathRequest? preview,
             bool isPreview,
@@ -93,17 +116,8 @@ namespace RikiPath.Application.Services
             var target = visibleLevels.FirstOrDefault(level => level.Id == targetLevelId.Value);
             if (starting is null || target is null || !JlptCurriculum.IsValidSpan(starting, target))
                 return ApiResponse<LearningPathResponse>.Fail(
-                    "Lộ trình chỉ hỗ trợ cấp độ bắt đầu đến mục tiêu theo thứ tự N5 → N4 → N3.",
+                    "Lộ trình chỉ hỗ trợ các cặp cấp độ bắt đầu/mục tiêu mà hệ thống đã cấu hình.",
                     HttpStatusCode.BadRequest, errorCode: "LEARNING_PATH_LEVEL_UNSUPPORTED");
-
-            // Include the full foundation below the target. Placement level decides
-            // whether the learner can skip earlier levels, but the AI can only select
-            // from this real DB catalog, ordered N5 -> N4 -> N3.
-            var spanLevels = visibleLevels
-                .Where(level => JlptCurriculum.Rank(level.Code) > 0
-                    && JlptCurriculum.Rank(level.Code) <= JlptCurriculum.Rank(target.Code))
-                .OrderBy(level => JlptCurriculum.Rank(level.Code))
-                .ToList();
 
             // Standard Roadmap remains available without Placement; an existing AI path
             // must only be replaced through preview and explicit confirmation.
@@ -130,8 +144,8 @@ namespace RikiPath.Application.Services
             int daysUntilExam = normalizedExamDate.HasValue
                 ? BusinessDateHelper.GetDaysUntilExam(normalizedExamDate.Value, utcNow)
                 : 0;
-            // A real Placement result and the target gap determine whether foundations are needed.
-            // The selected AI model evaluates date feasibility; the server applies hard safety rules.
+
+            // ---------- 2. Bắt buộc phải có kết quả Placement để đánh giá riêng từng kỹ năng ----------
             PlacementTestResultResponse? placementForPlan;
             try
             {
@@ -145,61 +159,64 @@ namespace RikiPath.Application.Services
                     HttpStatusCode.InternalServerError,
                     errors: BuildDebugErrors(ex));
             }
-            var skillScores = placementForPlan?.Sections
-                .Select(section => new
-                {
-                    Name = string.IsNullOrWhiteSpace(section.LanguageSkillName) ? section.SectionTitle : section.LanguageSkillName,
-                    section.ScorePercent,
-                })
-                .Where(section => !string.IsNullOrWhiteSpace(section.Name))
-                .GroupBy(section => section.Name)
-                .ToDictionary(group => group.Key, group => group.Average(section => section.ScorePercent));
-            var targetLevelGap = placementForPlan is null ? 0 : Math.Max(0,
-                JlptCurriculum.Rank(target.Code) - JlptCurriculum.Rank(placementForPlan.AssessedJlptLevelName));
-            var catalogStartRank = JlptCurriculum.Rank(starting.Code);
-            var assessedRank = JlptCurriculum.Rank(placementForPlan?.AssessedJlptLevelName);
-            if (assessedRank > 0)
-                catalogStartRank = Math.Min(catalogStartRank, assessedRank);
-            spanLevels = spanLevels
-                .Where(level => JlptCurriculum.Rank(level.Code) >= catalogStartRank)
-                .ToList();
-            var needsFoundation = placementForPlan is null ||
-                placementForPlan.TotalScore < 50 ||
-                (skillScores?.Values.Any(score => score < 30) ?? true) ||
-                targetLevelGap > 0;
-            var horizon = normalizedExamDate.HasValue
-                ? "long_term"
-                : needsFoundation ? "long_term" : NormalizeHorizon(requestedHorizon, daysUntilExam);
-            int planDays = normalizedExamDate.HasValue
-                ? MaxPlanDays
-                : horizon == "short_term" ? ShortPlanDays : MaxPlanDays;
 
-            // ---------- 3. Valid owned Placement is mandatory for AI generation/preview ----------
+            if (placementForPlan is null)
+                return ApiResponse<LearningPathResponse>.Fail(
+                    "Bạn cần hoàn thành bài Placement Test hợp lệ trước khi tạo lộ trình AI.",
+                    HttpStatusCode.BadRequest, errorCode: "LEARNING_PATH_PLACEMENT_REQUIRED");
+
+            // ---------- 3. Đánh giá RIÊNG từng kỹ năng (Kiến thức ngôn ngữ / Đọc hiểu / Nghe hiểu) ----------
+            var targetRank = JlptCurriculum.Rank(target.Code);
+            var codeByRank = visibleLevels
+                .GroupBy(level => JlptCurriculum.Rank(level.Code))
+                .ToDictionary(group => group.Key, group => group.First().Code);
+
+            var assessments = ComputeSkillAssessments(placementForPlan, targetRank, target.Code, codeByRank);
+
+            // Số ngày ôn cần thiết + ngày thi khả thi hay không: TÍNH BẰNG C#, không để AI tự suy luận lại.
+            var recommendedStudyDays = ComputeRecommendedStudyDays(assessments);
+            bool? isExamDateRealistic = normalizedExamDate.HasValue
+                ? daysUntilExam >= recommendedStudyDays
+                : null;
+            DateTime? suggestedExamDate = normalizedExamDate.HasValue && isExamDateRealistic == false
+                ? today.AddDays(recommendedStudyDays + 7) // +1 tuần đệm như yêu cầu
+                : null;
+
+            // Lịch chi tiết ngày-qua-ngày chỉ cần lập cho tối đa ShortPlanDays ngày gần nhất,
+            // KHÔNG bị cắt ngắn theo daysUntilExam nữa (tránh lệch số ngày khuyến nghị vs lịch chi tiết).
+            int planDays = Math.Max(1, Math.Min(recommendedStudyDays, ShortPlanDays));
+
+            var horizon = recommendedStudyDays <= 45 ? "short_term" : "long_term";
+
+            // ---------- 4. Tải catalog bài học THEO TỪNG KỸ NĂNG, đúng khoảng mức cần ôn ----------
             string promptText;
             Dictionary<int, CatalogLesson> catalogById;
-            LearningPathPromptContext promptContext;
+            List<CatalogLesson> catalog;
             try
             {
-                var learnerData = await LoadLearnerDataAsync(userId, spanLevels, certName, placementForPlan);
-                promptContext = learnerData.Context;
-                var catalog = learnerData.Catalog;
-
-                if (!promptContext.LatestTestScorePercent.HasValue)
-                    return ApiResponse<LearningPathResponse>.Fail(
-                        "Bạn cần hoàn thành bài Placement Test hợp lệ trước khi tạo lộ trình AI.",
-                        HttpStatusCode.BadRequest, errorCode: "LEARNING_PATH_PLACEMENT_REQUIRED");
+                var learnerData = await LoadLearnerDataAsync(userId, visibleLevels, assessments);
+                catalog = learnerData.Catalog;
 
                 if (catalog.Count == 0)
                 {
                     return ApiResponse<LearningPathResponse>.Fail(
-                        $"Hiện chưa có bài học nào cho cấp độ {certName} (hoặc bạn đã hoàn thành tất cả).",
+                        $"Hiện chưa có bài học nào phù hợp để ôn tập cho {certName} (hoặc bạn đã hoàn thành tất cả).",
                         HttpStatusCode.BadRequest, errorCode: "LEARNING_PATH_NO_ELIGIBLE_LESSONS");
                 }
 
                 catalogById = catalog.ToDictionary(c => c.Id);
 
-                promptText = BuildPrompt(promptContext, catalog, $"JLPT {starting.Code} → {target.Code}", normalizedExamDate, today,
-                    daysUntilExam, planDays, horizon, user.DailyStudyMinutes, user.StudyTimePreference);
+                // DEBUG: xác nhận catalog thực tế theo từng kỹ năng trước khi gửi AI.
+                logger.LogWarning(
+                    "LearningPath catalog loaded. UserId={UserId}, CatalogCount={Count}, ByGroup={ByGroup}",
+                    userId, catalog.Count,
+                    string.Join(" | ", catalog.GroupBy(c => c.Group).Select(g => $"{g.Key}:{g.Count()}")));
+
+                promptText = BuildPrompt(
+                    assessments, catalog, learnerData.LessonProgress, learnerData.NotebookWords,
+                    certName, normalizedExamDate, today, daysUntilExam, planDays,
+                    recommendedStudyDays, isExamDateRealistic, suggestedExamDate,
+                    user.DailyStudyMinutes, user.StudyTimePreference);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -208,7 +225,7 @@ namespace RikiPath.Application.Services
                     "Không thể tải dữ liệu học tập của bạn.", HttpStatusCode.InternalServerError, errors: BuildDebugErrors(ex));
             }
 
-            // ---------- 4. Gọi AI (retry khi sai định dạng / thiếu ngày / bài học không hợp lệ) ----------
+            // ---------- 5. Gọi AI (retry khi sai định dạng / lẫn tiếng Anh / chọn bài không hợp lệ) ----------
             AiLearningPathResult? aiResult = null;
             string? lastError = null;
 
@@ -218,10 +235,9 @@ namespace RikiPath.Application.Services
                 {
                     cancellationToken.ThrowIfCancellationRequested();
 
-                    // Lần retry: nói rõ lý do lần trước bị từ chối để AI sửa
                     string currentPrompt = lastError is null
                         ? promptText
-                        : $"{promptText}\n\n[LƯU Ý] Lần trả lời trước bị từ chối vì: {lastError}. Hãy sửa đúng lỗi này.";
+                        : $"{promptText}\n\n[LƯU Ý QUAN TRỌNG] Lần trả lời trước bị từ chối vì: {lastError}. Hãy sửa lại và trả về ĐÚNG {planDays} ngày, 100% tiếng Việt.";
 
                     string rawJson = StripCodeFence(
                         await aiClient.GenerateLearningPathJsonAsync(userId, currentPrompt, cancellationToken));
@@ -229,29 +245,11 @@ namespace RikiPath.Application.Services
                     try
                     {
                         var parsed = ParseAiResponse(rawJson);
-
-                        var isExamDateRealistic = AssessExamDateFeasibility(
-                            parsed, promptContext, daysUntilExam, normalizedExamDate.HasValue);
-                        var minRecommendedDays = GetMinimumRecommendedStudyDays(promptContext);
-                        parsed = parsed with
-                        {
-                            RecommendedStudyDays = Math.Max(parsed.RecommendedStudyDays, minRecommendedDays),
-                        };
-
-                        // Chỉ giữ bài học có thật trong DB (chống AI bịa id), rồi mới validate
                         int dropped = NormalizeLessons(parsed, catalogById);
                         if (dropped > 0)
                             logger.LogWarning("AI referenced {Dropped} unknown lesson ids. UserId={UserId}", dropped, userId);
 
-                        horizon = normalizedExamDate.HasValue
-                            ? isExamDateRealistic == true && daysUntilExam <= 60 ? "short_term" : "long_term"
-                            : horizon;
-                        planDays = normalizedExamDate.HasValue && isExamDateRealistic == true
-                            ? Math.Min(daysUntilExam, MaxPlanDays)
-                            : normalizedExamDate.HasValue ? MaxPlanDays : horizon == "short_term" ? ShortPlanDays : MaxPlanDays;
-                        parsed = parsed with { IsExamDateRealistic = isExamDateRealistic, Horizon = horizon };
-
-                        lastError = ValidateAiResult(parsed, planDays);
+                        lastError = ValidateAiResult(parsed, planDays, catalogById.Count);
                         if (lastError is null)
                         {
                             aiResult = parsed;
@@ -260,7 +258,7 @@ namespace RikiPath.Application.Services
                     }
                     catch (JsonException ex)
                     {
-                        lastError = "JSON sai định dạng";
+                        lastError = "JSON sai định dạng (có thể do bị ngắt giữa chừng)";
                         logger.LogWarning(ex, "AI returned invalid JSON (attempt {Attempt}/{Max}). UserId={UserId}",
                             attempt, MaxAiAttempts, userId);
                     }
@@ -286,7 +284,13 @@ namespace RikiPath.Application.Services
                     $"AI trả về kết quả không hợp lệ ({lastError}). Vui lòng thử lại.", HttpStatusCode.BadGateway);
             }
 
-            // ---------- 5. Save DRAFT or first ACTIVE in a learner-row-locked transaction ----------
+            // ---------- 6. Ghép nội dung: số liệu + nhận xét do C# tính (chuẩn, tiếng Việt), AI chỉ góp summary/lịch ----------
+            var (strengths, weaknesses) = BuildSkillNarrative(assessments);
+            var feasibility = BuildFeasibilityText(
+                assessments, target.Code, normalizedExamDate.HasValue, daysUntilExam,
+                recommendedStudyDays, isExamDateRealistic, suggestedExamDate);
+
+            // ---------- 7. Save DRAFT or first ACTIVE in a learner-row-locked transaction ----------
             try
             {
                 var generatedAt = BusinessDateHelper.EnsureUtc(UtcNowProvider());
@@ -305,17 +309,16 @@ namespace RikiPath.Application.Services
                     PreviewExpiresAt = isPreview ? generatedAt.AddHours(24) : null,
                     ConfirmedAt = isPreview ? null : generatedAt,
                     Summary = aiResult.Summary,
-                    Strengths = aiResult.Strengths,
-                    Weaknesses = aiResult.Weaknesses,
-                    Feasibility = aiResult.Feasibility,
-                    IsExamDateRealistic = aiResult.IsExamDateRealistic,
-                    RecommendedStudyDays = aiResult.RecommendedStudyDays,
-                    SuggestedExamDate = normalizedExamDate.HasValue && aiResult.IsExamDateRealistic == false
-                        ? today.AddDays(Math.Max(Math.Max(aiResult.RecommendedStudyDays, MaxPlanDays), daysUntilExam + 1))
-                        : null,
+                    Strengths = strengths,
+                    Weaknesses = weaknesses,
+                    Feasibility = feasibility,
+                    IsExamDateRealistic = isExamDateRealistic,
+                    RecommendedStudyDays = recommendedStudyDays,
+                    SuggestedExamDate = suggestedExamDate,
                     FocusTopics = aiResult.FocusTopics,
                     DailySchedules = aiResult.DailySchedules,
                 };
+                RefreshDayAvailability(response);
                 ApiResponse<LearningPathResponse>? conflict = null;
                 await unitOfWork.ExecuteInTransactionAsync(async transactionCancellationToken =>
                 {
@@ -403,6 +406,116 @@ namespace RikiPath.Application.Services
             }
         }
 
+        public Task<ApiResponse<LearningPathResponse>> StartActiveDayAsync(
+            int day, CancellationToken cancellationToken)
+            => UpdateActiveDayAsync(day, complete: false, cancellationToken);
+
+        public Task<ApiResponse<LearningPathResponse>> CompleteActiveDayAsync(
+            int day, CancellationToken cancellationToken)
+            => UpdateActiveDayAsync(day, complete: true, cancellationToken);
+
+        private async Task<ApiResponse<LearningPathResponse>> UpdateActiveDayAsync(
+            int day, bool complete, CancellationToken cancellationToken)
+        {
+            if (day <= 0)
+                return ApiResponse<LearningPathResponse>.Fail(
+                    "Ngày trong lộ trình không hợp lệ.", HttpStatusCode.BadRequest);
+
+            var userId = 0;
+            try
+            {
+                userId = claimService.GetUserClaim().Id;
+                var stored = await unitOfWork.RecommendedLearningPaths.GetActiveByUserIdAsync(
+                    userId, cancellationToken);
+                if (stored is null)
+                    return ApiResponse<LearningPathResponse>.NotFound("Bạn chưa có lộ trình đang học.");
+
+                var response = await RestoreStoredPathAsync(stored, cancellationToken);
+                var daySchedule = response.DailySchedules.FirstOrDefault(item => item.Day == day);
+                if (daySchedule is null)
+                    return ApiResponse<LearningPathResponse>.NotFound($"Không tìm thấy ngày {day} trong lộ trình.");
+
+                RefreshDayAvailability(response);
+                if (complete)
+                {
+                    if (daySchedule.IsCompleted)
+                        return ApiResponse<LearningPathResponse>.Success(response);
+                    if (!daySchedule.IsStarted || !daySchedule.CanStart)
+                        return ApiResponse<LearningPathResponse>.Fail(
+                            "Hãy bắt đầu ngày học này trước khi đánh dấu hoàn thành.",
+                            HttpStatusCode.Conflict, errorCode: "LEARNING_PATH_DAY_NOT_STARTED");
+
+                    var hasPassedExercise = daySchedule.LessonIds.Count > 0 &&
+                        await unitOfWork.PracticeExerciseAttempts.Query()
+                            .Join(unitOfWork.PracticeExercises.Query(),
+                                attempt => attempt.PracticeExerciseId,
+                                exercise => exercise.Id,
+                                (attempt, exercise) => new { attempt, exercise })
+                            .AnyAsync(item =>
+                                !item.attempt.IsDeleted &&
+                                item.attempt.UserId == userId &&
+                                item.attempt.IsCompleted &&
+                                daySchedule.StartedAt.HasValue &&
+                                item.attempt.StartedAt >= daySchedule.StartedAt.Value &&
+                                item.attempt.ScorePercent >= MinimumPracticePassPercent &&
+                                !item.exercise.IsDeleted &&
+                                daySchedule.LessonIds.Contains(item.exercise.LessonId),
+                                cancellationToken);
+                    if (!hasPassedExercise)
+                        return ApiResponse<LearningPathResponse>.Fail(
+                            $"Hãy hoàn thành một Practice Exercise thuộc lesson của ngày này với điểm tối thiểu {MinimumPracticePassPercent:0}% để mở ngày tiếp theo.",
+                            HttpStatusCode.Conflict, errorCode: "LEARNING_PATH_PRACTICE_PASS_REQUIRED");
+
+                    daySchedule.IsCompleted = true;
+                    daySchedule.CompletedAt = BusinessDateHelper.EnsureUtc(UtcNowProvider());
+                }
+                else
+                {
+                    if (!daySchedule.CanStart)
+                        return ApiResponse<LearningPathResponse>.Fail(
+                            "Hãy hoàn thành ngày trước đó để mở ngày học này.",
+                            HttpStatusCode.Conflict, errorCode: "LEARNING_PATH_DAY_LOCKED");
+
+                    daySchedule.IsStarted = true;
+                    daySchedule.StartedAt ??= BusinessDateHelper.EnsureUtc(UtcNowProvider());
+                }
+
+                RefreshDayAvailability(response);
+                stored.SuggestionJson = JsonSerializer.Serialize(response, StoredPathJsonOptions);
+                unitOfWork.RecommendedLearningPaths.Update(stored);
+                await unitOfWork.SaveChangesAsync(cancellationToken);
+                return ApiResponse<LearningPathResponse>.Success(response);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Failed to update learning path day. UserId={UserId}, Day={Day}, Complete={Complete}",
+                    userId, day, complete);
+                return ApiResponse<LearningPathResponse>.Fail(
+                    "Không thể cập nhật tiến độ ngày học.",
+                    HttpStatusCode.InternalServerError,
+                    errors: BuildDebugErrors(ex));
+            }
+        }
+
+        private static void RefreshDayAvailability(LearningPathResponse response)
+        {
+            response.DailySchedules ??= [];
+            var schedules = response.DailySchedules.OrderBy(item => item.Day).ToList();
+            var previousDayCompleted = true;
+            for (var index = 0; index < schedules.Count; index++)
+            {
+                var schedule = schedules[index];
+                schedule.IsCompleted |= schedule.CompletedAt.HasValue;
+                schedule.IsStarted |= schedule.StartedAt.HasValue;
+                schedule.CanStart = !schedule.IsCompleted && previousDayCompleted;
+                previousDayCompleted = schedule.IsCompleted;
+            }
+        }
+
         public async Task<ApiResponse<IReadOnlyList<LearningPathResponse>>> GetHistoryAsync(
             CancellationToken cancellationToken)
         {
@@ -470,8 +583,6 @@ namespace RikiPath.Application.Services
                         return;
                     }
 
-                    // Under the learner row lock, retire the old plan before activating
-                    // the new one. A transaction rollback restores the old ACTIVE plan.
                     if (current is not null)
                     {
                         current.Status = LearningPathStatus.Superseded;
@@ -539,21 +650,24 @@ namespace RikiPath.Application.Services
             var response = JsonSerializer.Deserialize<LearningPathResponse>(stored.SuggestionJson, StoredPathJsonOptions);
             if (response is null || response.UserId == 0 || response.GeneratedAt == default)
             {
+                // Phục hồi dữ liệu cũ (trước khi migrate sang schema mới): stored.SuggestionJson khi đó
+                // chỉ là JSON thô do AI trả về (schema cũ), không phải LearningPathResponse đầy đủ.
+                // Các trường Strengths/Weaknesses/Feasibility không khôi phục được từ bản ghi quá cũ này.
                 var user = await unitOfWork.UserAccounts.GetWithLearningGoalAsync(stored.UserId, cancellationToken);
                 if (user?.TargetCertificateLevelId is null)
                     throw new InvalidOperationException("Legacy path has no target level.");
                 var lessons = await unitOfWork.Lessons.GetByCertificateLevelAsync(
                     user.TargetCertificateLevelId.Value, cancellationToken);
                 var catalog = lessons.ToDictionary(lesson => lesson.Id,
-                    lesson => new CatalogLesson(lesson.Id, lesson.Title, string.Empty, 0));
+                    lesson => new CatalogLesson(lesson.Id, lesson.Title, string.Empty, 0, SkillGroup.LanguageKnowledge));
                 var legacy = ParseAiResponse(stored.SuggestionJson);
                 NormalizeLessons(legacy, catalog);
                 response = new LearningPathResponse
                 {
                     Summary = legacy.Summary,
-                    Strengths = legacy.Strengths,
-                    Weaknesses = legacy.Weaknesses,
-                    Feasibility = legacy.Feasibility,
+                    Strengths = new List<string>(),
+                    Weaknesses = new List<string>(),
+                    Feasibility = string.Empty,
                     FocusTopics = legacy.FocusTopics,
                     DailySchedules = legacy.DailySchedules,
                 };
@@ -568,79 +682,213 @@ namespace RikiPath.Application.Services
             response.BaseActivePathId = stored.BaseActivePathId;
             response.PreviewExpiresAt = stored.PreviewExpiresAt;
             response.ConfirmedAt = stored.ConfirmedAt;
+            RefreshDayAvailability(response);
             return response;
         }
 
         // =====================================================================
-        // DỮ LIỆU TỪ DB: bài đánh giá + tiến độ + notebook + DANH MỤC BÀI HỌC của cấp độ mục tiêu
+        // ĐÁNH GIÁ TỪNG KỸ NĂNG (xác định bằng công thức cố định, không qua AI)
         // =====================================================================
-        private async Task<(LearningPathPromptContext Context, List<CatalogLesson> Catalog)> LoadLearnerDataAsync(
-            int userId, IReadOnlyList<CertificateLevel> levels, string targetCertification,
-            PlacementTestResultResponse? immutableResult)
+
+        private static string SkillGroupLabel(SkillGroup group) => group switch
+        {
+            SkillGroup.Reading => "Kỹ năng đọc hiểu",
+            SkillGroup.Listening => "Kỹ năng nghe hiểu",
+            _ => "Kiến thức ngôn ngữ (Từ vựng - Ngữ pháp - Hán tự)",
+        };
+
+        /// <summary>
+        /// Phân loại một LanguageSkill (dữ liệu do admin cấu hình, ví dụ "Từ vựng", "Ngữ pháp", "Hán tự",
+        /// "Đọc hiểu", "Nghe hiểu") vào 1 trong 3 nhóm kỹ năng thi JLPT thật. Dò theo từ khóa (không phân
+        /// biệt hoa/thường) để không phụ thuộc cứng vào đúng chuỗi ký tự trong DB.
+        /// </summary>
+        private static SkillGroup ClassifySkillGroup(string? skillName)
+        {
+            var name = (skillName ?? string.Empty).ToLowerInvariant();
+            if (name.Contains("đọc") || name.Contains("doc") || name.Contains("reading"))
+                return SkillGroup.Reading;
+            if (name.Contains("nghe") || name.Contains("listening"))
+                return SkillGroup.Listening;
+            return SkillGroup.LanguageKnowledge; // Từ vựng, Ngữ pháp, Hán tự/Kanji, ...
+        }
+
+        /// <summary>
+        /// Ước tính mức JLPT hiện tại của từng kỹ năng dựa trên % điểm phần thi tương ứng trong bài
+        /// Placement gần nhất (đề thi ở mức nào thì ước tính không thể vượt quá mức đó, vì chưa được
+        /// kiểm chứng ở mức cao hơn):
+        ///   điểm >= 80%  -> giữ nguyên mức đề thi
+        ///   điểm 60-79%  -> thấp hơn đề thi 1 cấp
+        ///   điểm 40-59%  -> thấp hơn đề thi 2 cấp
+        ///   điểm &lt; 40%    -> thấp hơn đề thi 3 cấp
+        /// </summary>
+        private static List<SkillAssessment> ComputeSkillAssessments(
+            PlacementTestResultResponse placement,
+            int targetRank,
+            string targetCode,
+            Dictionary<int, string> codeByRank)
+        {
+            var testLevelRank = JlptCurriculum.Rank(placement.AssessedJlptLevelName);
+            var testLevelCode = placement.AssessedJlptLevelName;
+
+            var scoreByGroup = placement.Sections
+                .GroupBy(section => ClassifySkillGroup(
+                    string.IsNullOrWhiteSpace(section.LanguageSkillName) ? section.SectionTitle : section.LanguageSkillName))
+                .ToDictionary(group => group.Key, group => group.Average(section => section.Score));
+
+            var result = new List<SkillAssessment>();
+            foreach (var group in new[] { SkillGroup.LanguageKnowledge, SkillGroup.Reading, SkillGroup.Listening })
+            {
+                var hasData = scoreByGroup.TryGetValue(group, out var scorePercent);
+                int estimatedRank;
+                if (!hasData)
+                {
+                    // Chưa có dữ liệu của phần thi này trong bài Placement -> ước tính thận trọng:
+                    // thấp hơn mức đề thi 1 cấp, để lộ trình vẫn ôn đủ mà không bỏ sót.
+                    estimatedRank = Math.Max(1, testLevelRank - 1);
+                    scorePercent = 0;
+                }
+                else if (scorePercent >= 80) estimatedRank = testLevelRank;
+                else if (scorePercent >= 60) estimatedRank = Math.Max(1, testLevelRank - 1);
+                else if (scorePercent >= 40) estimatedRank = Math.Max(1, testLevelRank - 2);
+                else estimatedRank = Math.Max(1, testLevelRank - 3);
+
+                estimatedRank = Math.Min(estimatedRank, testLevelRank);
+                var estimatedCode = codeByRank.GetValueOrDefault(estimatedRank, testLevelCode);
+                var gap = Math.Max(0, targetRank - estimatedRank);
+
+                result.Add(new SkillAssessment(
+                    group, SkillGroupLabel(group), hasData, scorePercent,
+                    testLevelRank, testLevelCode, estimatedRank, estimatedCode,
+                    targetRank, targetCode, gap, gap <= 0));
+            }
+            return result;
+        }
+
+        /// <summary>Số ngày ôn khuyến nghị = tra theo gap (số cấp độ còn thiếu) của kỹ năng YẾU NHẤT.</summary>
+        private static readonly Dictionary<int, int> StudyDaysByGapLevel = new()
+        {
+            [0] = 14,   // Đã đạt cả 3 kỹ năng -> chỉ cần ôn củng cố nhẹ
+            [1] = 60,
+            [2] = 120,
+            // gap >= 3 -> MaxPlanDays (180)
+        };
+
+        private static int ComputeRecommendedStudyDays(IReadOnlyList<SkillAssessment> assessments)
+        {
+            var maxGap = assessments.Count == 0 ? 0 : assessments.Max(a => a.GapLevels);
+            return StudyDaysByGapLevel.TryGetValue(maxGap, out var days) ? days : MaxPlanDays;
+        }
+
+        /// <summary>Điểm mạnh / điểm yếu theo từng kỹ năng — viết sẵn bằng tiếng Việt, không qua AI.</summary>
+        private static (List<string> Strengths, List<string> Weaknesses) BuildSkillNarrative(
+            IReadOnlyList<SkillAssessment> assessments)
+        {
+            var strengths = new List<string>();
+            var weaknesses = new List<string>();
+            foreach (var a in assessments)
+            {
+                if (!a.HasData)
+                {
+                    weaknesses.Add($"{a.Label}: chưa có dữ liệu từ bài đánh giá năng lực; hệ thống tạm ước tính ở mức {a.EstimatedLevelCode} để lên kế hoạch ôn tập an toàn.");
+                    continue;
+                }
+                if (a.MeetsTarget)
+                    strengths.Add($"{a.Label}: đạt {a.ScorePercent:0}% ở đề {a.TestLevelCode} — đã đạt năng lực tương đương mục tiêu {a.TargetLevelCode}.");
+                else
+                    weaknesses.Add($"{a.Label}: đạt {a.ScorePercent:0}% ở đề {a.TestLevelCode} — ước tính năng lực hiện tại khoảng {a.EstimatedLevelCode}, còn cách mục tiêu {a.TargetLevelCode} khoảng {a.GapLevels} cấp độ.");
+            }
+            return (strengths, weaknesses);
+        }
+
+        /// <summary>Đoạn đánh giá khả thi + đề xuất ngày thi — viết sẵn bằng tiếng Việt, không qua AI.</summary>
+        private static string BuildFeasibilityText(
+            IReadOnlyList<SkillAssessment> assessments,
+            string targetCode,
+            bool hasExamDate,
+            int daysUntilExam,
+            int recommendedStudyDays,
+            bool? isExamDateRealistic,
+            DateTime? suggestedExamDate)
+        {
+            var weakest = assessments.Where(a => a.GapLevels > 0).OrderByDescending(a => a.GapLevels).FirstOrDefault();
+
+            if (!hasExamDate)
+                return weakest is null
+                    ? $"Bạn đã đạt năng lực tương đương {targetCode} ở cả 3 phần thi; chỉ cần ôn tập củng cố khoảng {recommendedStudyDays} ngày trước khi thi."
+                    : $"Ước tính cần khoảng {recommendedStudyDays} ngày ôn tập để đạt {targetCode}, trọng tâm là {weakest.Label.ToLowerInvariant()} (hiện ở mức {weakest.EstimatedLevelCode}).";
+
+            if (isExamDateRealistic == true)
+                return weakest is null
+                    ? $"Với tiến độ hiện tại, bạn đã đạt năng lực {targetCode} ở cả 3 phần thi và có thể giữ phong độ trong {daysUntilExam} ngày tới."
+                    : $"Trong {daysUntilExam} ngày tới, bạn có đủ thời gian để cải thiện {weakest.Label.ToLowerInvariant()} (hiện ở mức {weakest.EstimatedLevelCode}) và đạt mục tiêu {targetCode} nếu ôn tập đều đặn.";
+
+            var suggestedText = suggestedExamDate.HasValue ? suggestedExamDate.Value.ToString("dd/MM/yyyy") : "chưa xác định";
+            var extraDays = Math.Max(0, recommendedStudyDays - daysUntilExam) + 7;
+            return weakest is null
+                ? $"Còn {daysUntilExam} ngày là không đủ an toàn dù năng lực hiện tại đã gần đạt {targetCode}; nên lùi ngày thi thêm khoảng {extraDays} ngày, dự kiến thi vào {suggestedText}."
+                : $"Còn {daysUntilExam} ngày khó đạt {targetCode} vì {weakest.Label.ToLowerInvariant()} đang ở mức {weakest.EstimatedLevelCode}, cần khoảng {recommendedStudyDays} ngày để cải thiện. Nên lùi ngày thi thêm khoảng {extraDays} ngày, dự kiến thi vào {suggestedText}.";
+        }
+
+        // =====================================================================
+        // DỮ LIỆU TỪ DB: catalog bài học theo TỪNG KỸ NĂNG + đúng khoảng mức cần ôn, tiến độ, sổ tay
+        // =====================================================================
+        private async Task<(List<CatalogLesson> Catalog, List<(string Title, int ProgressPercent)> LessonProgress, List<string> NotebookWords)> LoadLearnerDataAsync(
+            int userId,
+            IReadOnlyList<CertificateLevel> allLevels,
+            IReadOnlyList<SkillAssessment> assessments)
         {
             var lessonProgresses = await unitOfWork.LessonProgresses.GetByUserAsync(userId) ?? [];
             var notebookEntries = await unitOfWork.LearnerNoteEntries.GetByUserAsync(userId, vocabularyListId: null) ?? [];
 
-            IReadOnlyDictionary<string, double>? skillBreakdown = null;
-            if (immutableResult?.Sections is { Count: > 0 } sections)
-            {
-                var sectionScores = sections
-                    .Select(section => new
-                    {
-                        Name = string.IsNullOrWhiteSpace(section.LanguageSkillName)
-                            ? section.SectionTitle
-                            : section.LanguageSkillName,
-                        section.ScorePercent,
-                    })
-                    .Where(section => !string.IsNullOrWhiteSpace(section.Name))
-                    .GroupBy(section => section.Name)
-                    .ToDictionary(group => group.Key, group => group.Average(section => section.ScorePercent));
-                skillBreakdown = sectionScores.Count > 0 ? sectionScores : null;
-            }
-
-            // Accept the immutable result snapshot, or the persisted section score rows
-            // written by the legacy submit flow. Never rebuild scores from mutable banks.
-            // ---- Danh mục bài học của cấp độ mục tiêu (nguồn duy nhất AI được phép chọn) ----
-            var catalogWithLevels = new List<CatalogLesson>();
-            foreach (var level in levels)
-            {
-                var levelLessons = await unitOfWork.Lessons.GetByCertificateLevelAsync(level.Id);
-                catalogWithLevels.AddRange(levelLessons.Select(lesson => new CatalogLesson(
-                    lesson.Id, lesson.Title, level.Code, 0)));
-            }
+            // CẦN: unitOfWork.LanguageSkills (repository cho bảng LanguageSkill) với 1 method lấy toàn bộ.
+            // Nếu IUnitOfWork/ILanguageSkillRepository của bạn đặt tên khác GetAllAsync(), đổi lại dòng dưới.
+            var languageSkills = await unitOfWork.LanguageSkills.GetAllAsync();
+            var skillGroupById = languageSkills.ToDictionary(skill => skill.Id, skill => ClassifySkillGroup(skill.Name));
 
             var progressByLesson = lessonProgresses
                 .GroupBy(p => p.LessonId)
                 .ToDictionary(g => g.Key, g => g.Max(p => Convert.ToDouble(p.ProgressPercent)));
 
-            // Bài đã hoàn thành 100% không đưa vào danh mục (tiết kiệm token, tránh học lại)
-            var catalog = catalogWithLevels
-                .Select(lesson => lesson with
+            var catalog = new List<CatalogLesson>();
+            foreach (var assessment in assessments)
+            {
+                var lowRank = Math.Min(assessment.EstimatedLevelRank, assessment.TargetLevelRank);
+                var highRank = assessment.TargetLevelRank;
+                var levelsForGroup = allLevels
+                    .Where(level => JlptCurriculum.Rank(level.Code) >= lowRank && JlptCurriculum.Rank(level.Code) <= highRank)
+                    .OrderBy(level => JlptCurriculum.Rank(level.Code))
+                    .ToList();
+
+                foreach (var level in levelsForGroup)
                 {
-                    ProgressPercent = progressByLesson.GetValueOrDefault(lesson.Id),
-                })
+                    var levelLessons = await unitOfWork.Lessons.GetByCertificateLevelAsync(level.Id);
+                    var matchingLessons = levelLessons.Where(lesson =>
+                        skillGroupById.GetValueOrDefault(lesson.LanguageSkillId, SkillGroup.LanguageKnowledge) == assessment.Group);
+
+                    catalog.AddRange(matchingLessons.Select(lesson => new CatalogLesson(
+                        lesson.Id, lesson.Title, level.Code,
+                        progressByLesson.GetValueOrDefault(lesson.Id), assessment.Group)));
+                }
+            }
+
+            catalog = catalog
                 .Where(c => c.ProgressPercent < CompletedPercent)
                 .DistinctBy(c => c.Id)
                 .Take(MaxCatalogLessons)
                 .ToList();
 
-            var context = new LearningPathPromptContext(
-                targetJlptLevel: targetCertification.Replace("JLPT ", string.Empty, StringComparison.OrdinalIgnoreCase),
-                assessedJlptLevel: immutableResult?.AssessedJlptLevelName ?? "chưa xác định",
-                lessonProgress: lessonProgresses
-                    .Take(MaxLessonProgressItems)
-                    .Select(p => (p.Lesson?.Title ?? string.Empty, p.ProgressPercent))
-                    .ToList(),
-                notebookWords: notebookEntries
-                    .Select(n => n.Vocabulary?.Word ?? n.Kanji?.Character ?? n.ManualWord ?? string.Empty)
-                    .Where(w => !string.IsNullOrEmpty(w))
-                    .Distinct()
-                    .Take(MaxNotebookWords)
-                    .ToList(),
-                latestTestScorePercent: immutableResult?.TotalScore,
-                latestTestLanguageSkillBreakdown: skillBreakdown);
+            var progressList = lessonProgresses
+                .Take(MaxLessonProgressItems)
+                .Select(p => (p.Lesson?.Title ?? string.Empty, p.ProgressPercent))
+                .ToList();
+            var notebookWords = notebookEntries
+                .Select(n => n.Vocabulary?.Word ?? n.Kanji?.Character ?? n.ManualWord ?? string.Empty)
+                .Where(w => !string.IsNullOrEmpty(w))
+                .Distinct()
+                .Take(MaxNotebookWords)
+                .ToList();
 
-            return (context, catalog);
+            return (catalog, progressList, notebookWords);
         }
 
         private async Task<PlacementTestResultResponse?> LoadLatestPlacementResultAsync(int userId)
@@ -659,8 +907,11 @@ namespace RikiPath.Application.Services
             }
 
             var latestCompleted = await unitOfWork.MockTestAttempts.GetLatestCompletedPlacementByUserAsync(userId);
-            return latestCompleted is { IsDeleted: false, AttemptKind: AttemptKind.Placement,
-                IsCompleted: true, TotalScore: not null }
+            return latestCompleted is
+            {
+                IsDeleted: false, AttemptKind: AttemptKind.Placement,
+                IsCompleted: true, TotalScore: not null
+            }
                 ? await TryGetStoredPlacementResultAsync(latestCompleted, userId)
                 : null;
         }
@@ -668,8 +919,6 @@ namespace RikiPath.Application.Services
         private async Task<PlacementTestResultResponse?> TryGetStoredPlacementResultAsync(
             MockTestAttempt attempt, int userId)
         {
-            // Use the stored section rows as the source of truth for AI analysis. The
-            // snapshot fallback supports completed Placement attempts created by older flows.
             if (!attempt.SubmittedAt.HasValue || attempt.TotalScore is not double totalScore ||
                 totalScore is < 0 or > 100)
                 return PracticeTestService.TryGetCompletedResultFromSnapshot(attempt.QuestionSnapshotJson);
@@ -733,142 +982,96 @@ namespace RikiPath.Application.Services
             };
         }
 
+        /// <summary>Chấp nhận N1-N5 (trước đây hard-code chỉ N5/N4/N3, chặn nhầm N2/N1).</summary>
         private static bool IsSupportedJlptCode(string? code)
-            => code?.Trim().ToUpperInvariant() is "N5" or "N4" or "N3";
+            => Regex.IsMatch((code ?? string.Empty).Trim().ToUpperInvariant(), "^N[1-5]$");
 
         // =====================================================================
-        // PROMPT
+        // PROMPT — ép buộc tiếng Việt, cung cấp sẵn số liệu đã tính, AI chỉ viết summary + chọn lịch học
         // =====================================================================
         private static string BuildPrompt(
-            LearningPathPromptContext promptContext,
+            IReadOnlyList<SkillAssessment> assessments,
             List<CatalogLesson> catalog,
+            List<(string Title, int ProgressPercent)> lessonProgress,
+            List<string> notebookWords,
             string certName,
             DateTime? examDate,
             DateTime today,
             int daysUntilExam,
             int planDays,
-            string horizon,
+            int recommendedStudyDays,
+            bool? isExamDateRealistic,
+            DateTime? suggestedExamDate,
             int dailyStudyMinutes,
             string? studyTimePreference)
         {
-            string strategy = examDate.HasValue
-                ? "Đánh giá khả năng đạt mục tiêu theo dữ liệu Placement trước, sau đó tự chọn ngắn hạn đến ngày thi hoặc dài hạn nếu cần dời lịch."
-                : horizon == "short_term"
-                    ? "NGẮN HẠN: củng cố nhanh các kỹ năng yếu nhất, ưu tiên bài cốt lõi và luyện đề có chọn lọc."
-                    : "DÀI HẠN: xây nền theo thứ tự, phân bổ đều kiến thức và kỹ năng, tăng dần luyện đề ở giai đoạn cuối.";
-
             var sb = new StringBuilder();
-            sb.AppendLine("[THÔNG TIN NGƯỜI HỌC VÀ KẾT QUẢ ĐÁNH GIÁ NĂNG LỰC (DỮ LIỆU THẬT TRONG HỆ THỐNG)]");
-            sb.AppendLine(promptContext.ToPromptText());
+            sb.AppendLine("BẮT BUỘC: Toàn bộ nội dung trả về (summary, focusTopics, title và focus của từng ngày) PHẢI viết 100% bằng TIẾNG VIỆT. Không được dùng tiếng Anh ở bất kỳ trường nào, kể cả một từ.");
+
+            sb.AppendLine("\n[KẾT QUẢ ĐÁNH GIÁ NĂNG LỰC THEO TỪNG KỸ NĂNG — hệ thống đã tính sẵn, AI KHÔNG được tự suy luận lại các con số này]");
+            foreach (var a in assessments)
+            {
+                sb.AppendLine(a.HasData
+                    ? $"- {a.Label}: đạt {a.ScorePercent:0}% ở đề {a.TestLevelCode} → ước tính năng lực hiện tại ở mức {a.EstimatedLevelCode}; mục tiêu {a.TargetLevelCode}; {(a.MeetsTarget ? "ĐÃ ĐẠT mục tiêu" : $"còn thiếu {a.GapLevels} cấp độ")}."
+                    : $"- {a.Label}: chưa có dữ liệu bài đánh giá, tạm ước tính ở mức {a.EstimatedLevelCode}; mục tiêu {a.TargetLevelCode}.");
+            }
             sb.AppendLine($"- Chứng chỉ mục tiêu: {certName}");
-            sb.AppendLine($"- Năng lực hiện tại theo Placement gần nhất: JLPT {promptContext.AssessedJlptLevel}");
-            sb.AppendLine($"- Hôm nay: {today:yyyy-MM-dd}");
-            sb.AppendLine(examDate.HasValue
-                ? $"- Ngày dự định thi: {examDate.Value:yyyy-MM-dd} (còn {daysUntilExam} ngày)"
-                : "- Người học chưa đặt ngày thi cụ thể.");
-            sb.AppendLine(examDate.HasValue
-                ? $"- Hãy tự quyết định kế hoạch NGẮN HẠN đến ngày thi ({daysUntilExam} ngày) nếu thật sự khả thi; nếu không, lập kế hoạch DÀI HẠN đúng {MaxPlanDays} ngày và khuyên ngày thi phù hợp hơn."
-                : $"- Chưa có ngày thi cụ thể; lập kế hoạch {horizon} trong đúng {planDays} ngày.");
-            sb.AppendLine("- Nếu năng lực hiện tại thấp hơn mục tiêu 2 cấp JLPT (ví dụ N5 lên N3), tối thiểu khuyến nghị 180 ngày; nếu thấp hơn 1 cấp, tối thiểu 90 ngày. Không được đánh giá khả thi cho thời hạn ngắn hơn các mức này.");
-            sb.AppendLine($"- Chiến lược ôn luyện: {strategy}");
-            sb.AppendLine($"- Thời gian học mỗi ngày: {dailyStudyMinutes} phút (số bài mỗi ngày PHẢI vừa khung thời gian này).");
-            if (!string.IsNullOrWhiteSpace(studyTimePreference))
-                sb.AppendLine($"- Khung giờ học ưa thích: {studyTimePreference}.");
-
-            sb.AppendLine("\n[DANH SÁCH BÀI HỌC CÓ SẴN TRONG HỆ THỐNG - CHỈ ĐƯỢC CHỌN BÀI TRONG DANH SÁCH NÀY]");
-            foreach (var l in catalog)
-                sb.AppendLine($"- id={l.Id} | JLPT {l.LevelCode} | {l.Title} | tiến độ hiện tại {l.ProgressPercent:0}%");
-
-            sb.AppendLine("\n[YÊU CẦU 1 - NHẬN XÉT NĂNG LỰC]");
-            sb.AppendLine("- Dựa trên điểm Placement và điểm từng kỹ năng, nêu điểm mạnh và điểm yếu cụ thể.");
-            sb.AppendLine(examDate.HasValue
-                ? $"- Đánh giá trung thực khả năng đạt {certName} trong {daysUntilExam} ngày. Nếu tổng Placement dưới 50% hoặc có kỹ năng dưới 30%, mặc định KHÔNG khả thi trong thời hạn này."
-                : $"- Đánh giá tiến độ hiện tại và điều kiện cần để tiến tới {certName} sau kế hoạch {planDays} ngày.");
-            sb.AppendLine("- Trả về isExamDateRealistic (boolean hoặc null nếu chưa đặt ngày thi) và recommendedStudyDays (số ngày học thực tế cần có).");
-
-            sb.AppendLine("\n[YÊU CẦU 2 - LỘ TRÌNH ÔN LUYỆN THEO NGÀY]");
+            sb.AppendLine($"- Hệ thống đã tính: tổng số ngày ôn tập cần thiết = {recommendedStudyDays} ngày.");
             if (examDate.HasValue)
             {
-                sb.AppendLine($"- Nếu isExamDateRealistic=true: dailySchedules phải có đúng {Math.Min(daysUntilExam, MaxPlanDays)} ngày (một ngày cho mỗi ngày đến kỳ thi, tối đa {MaxPlanDays}).");
-                sb.AppendLine($"- Nếu isExamDateRealistic=false: dailySchedules phải có đúng {MaxPlanDays} ngày và summary/feasibility phải khuyên dời lịch thi, đề xuất số ngày cần chuẩn bị.");
+                sb.AppendLine($"- Ngày dự định thi: {examDate.Value:dd/MM/yyyy} (còn {daysUntilExam} ngày).");
+                sb.AppendLine(isExamDateRealistic == true
+                    ? "- Hệ thống đánh giá: ngày thi này KHẢ THI."
+                    : $"- Hệ thống đánh giá: ngày thi này KHÔNG khả thi; ngày thi gợi ý mới là {suggestedExamDate:dd/MM/yyyy}.");
             }
             else
             {
-                sb.AppendLine($"- Chia lộ trình thành ĐÚNG {planDays} NGÀY liên tục (day = 1 đến day = {planDays}), không bỏ sót, không trùng.");
+                sb.AppendLine("- Người học chưa chọn ngày thi cụ thể.");
             }
-            sb.AppendLine("- Mỗi ngày chọn các bài học từ DANH SÁCH ở trên bằng id. TUYỆT ĐỐI không tự bịa bài học hay id không có trong danh sách.");
-            sb.AppendLine("- Ưu tiên kỹ năng yếu theo Placement; bài đang học dở nên hoàn thành trước.");
-            sb.AppendLine("- Nếu người học có từ trong sổ tay (notebook), có thể dành một số ngày/phần ôn lại các từ đó trong 'focus'.");
-            sb.AppendLine("- Những ngày cuối trước kỳ thi: giảm nội dung mới, ưu tiên ôn lại và luyện đề.");
+            sb.AppendLine($"- Thời gian học mỗi ngày: {dailyStudyMinutes} phút (số bài mỗi ngày phải vừa khung thời gian này).");
+            if (!string.IsNullOrWhiteSpace(studyTimePreference))
+                sb.AppendLine($"- Khung giờ học ưa thích: {studyTimePreference}.");
 
-            sb.AppendLine("\n[ĐỊNH DẠNG ĐẦU RA]");
-            sb.AppendLine("- Chỉ trả về JSON hợp lệ, KHÔNG kèm giải thích hay markdown, với các khóa:");
-            sb.AppendLine("  summary (string - nhận xét năng lực hiện tại), strengths (string[]), weaknesses (string[]), feasibility (string),");
-            sb.AppendLine("  isExamDateRealistic (boolean/null), recommendedStudyDays (int), focusTopics (string[]),");
-            sb.AppendLine("  dailySchedules (mảng: day:int, title:string, focus:string, lessonIds:int[] - id lấy từ danh sách bài học).");
+            if (lessonProgress.Count > 0)
+            {
+                sb.AppendLine("\n[TIẾN ĐỘ HỌC HIỆN TẠI CỦA NGƯỜI HỌC]");
+                foreach (var (title, percent) in lessonProgress)
+                    sb.AppendLine($"- {title}: {percent:0}%");
+            }
+            if (notebookWords.Count > 0)
+                sb.AppendLine($"\n[TỪ TRONG SỔ TAY CÁ NHÂN]: {string.Join(", ", notebookWords)}");
+
+            sb.AppendLine("\n[DANH SÁCH BÀI HỌC CÓ SẴN TRONG HỆ THỐNG, CHIA THEO TỪNG KỸ NĂNG — CHỈ ĐƯỢC CHỌN BÀI TRONG DANH SÁCH NÀY]");
+            foreach (var group in catalog.GroupBy(c => c.Group))
+            {
+                sb.AppendLine($"-- {SkillGroupLabel(group.Key)} --");
+                foreach (var lesson in group)
+                    sb.AppendLine($"  id={lesson.Id} | JLPT {lesson.LevelCode} | {lesson.Title} | tiến độ hiện tại {lesson.ProgressPercent:0}%");
+            }
+
+            sb.AppendLine("\n[YÊU CẦU LẬP LỊCH ÔN LUYỆN]");
+            sb.AppendLine($"- Lập đúng {planDays} ngày (day = 1 đến {planDays}).");
+            sb.AppendLine("- Mỗi ngày chọn bài học bằng id TỪ DANH SÁCH TRÊN. TUYỆT ĐỐI không tự bịa id hay bài học không có trong danh sách.");
+            sb.AppendLine("- Ưu tiên phân bổ nhiều ngày hơn cho kỹ năng còn thiếu nhiều cấp độ nhất; kỹ năng đã đạt mục tiêu chỉ cần ôn củng cố nhẹ, không cần dàn trải nhiều.");
+            sb.AppendLine("- Mỗi ngày có thể kết hợp bài học của nhiều kỹ năng khác nhau (ví dụ vừa ôn từ vựng/ngữ pháp vừa luyện đọc hiểu trong cùng 1 ngày) để việc ôn tập toàn diện.");
+            sb.AppendLine($"- Hệ thống hiện có {catalog.Count} bài học khả dụng. BẮT BUỘC đa dạng hóa, KHÔNG lặp lại chỉ 1-2 bài cho toàn bộ lộ trình nếu có nhiều bài khả dụng hơn.");
+
+            sb.AppendLine("\n[ĐỊNH DẠNG ĐẦU RA — CHỈ TRẢ VỀ JSON HỢP LỆ, KHÔNG KÈM GIẢI THÍCH HAY MARKDOWN]");
+            sb.AppendLine("Các khóa bắt buộc:");
+            sb.AppendLine("  summary (string, tiếng Việt, 2-4 câu tóm tắt năng lực từng kỹ năng dựa trên dữ liệu đã cho ở trên, không tự bịa số liệu khác),");
+            sb.AppendLine("  focusTopics (string[], tiếng Việt),");
+            sb.AppendLine($"  dailySchedules (mảng đúng {planDays} phần tử: day:int, title:string tiếng Việt, focus:string tiếng Việt, lessonIds:int[]).");
 
             return sb.ToString();
         }
 
-        private static string NormalizeHorizon(string? requestedHorizon, int daysUntilExam)
-        {
-            if (string.Equals(requestedHorizon, "short_term", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(requestedHorizon, "short", StringComparison.OrdinalIgnoreCase))
-                return "short_term";
-            if (string.Equals(requestedHorizon, "long_term", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(requestedHorizon, "long", StringComparison.OrdinalIgnoreCase))
-                return "long_term";
-            return daysUntilExam is > 0 and <= 30 ? "short_term" : "long_term";
-        }
-
-        private static bool? AssessExamDateFeasibility(
-            AiLearningPathResult assessment,
-            LearningPathPromptContext context,
-            int daysUntilExam,
-            bool hasExamDate)
-        {
-            if (!hasExamDate)
-                return null;
-
-            var requiredMinimumDays = GetMinimumRecommendedStudyDays(context);
-
-            if (assessment.IsExamDateRealistic != true ||
-                assessment.RecommendedStudyDays <= 0 ||
-                assessment.RecommendedStudyDays > daysUntilExam ||
-                daysUntilExam < requiredMinimumDays ||
-                (context.LatestTestScorePercent ?? 0) < 50)
-                return false;
-
-            if (context.LatestTestLanguageSkillBreakdown is { Count: > 0 } skills &&
-                skills.Values.Any(score => score < 30))
-                return false;
-
-            return true;
-        }
-
-        private static int GetMinimumRecommendedStudyDays(LearningPathPromptContext context)
-        {
-            var levelGap = Math.Max(0, JlptCurriculum.Rank(context.TargetJlptLevel) -
-                                       JlptCurriculum.Rank(context.AssessedJlptLevel));
-            if (levelGap >= 2 || (context.LatestTestScorePercent ?? 0) < 50 ||
-                context.LatestTestLanguageSkillBreakdown is { Count: > 0 } skills && skills.Values.Any(score => score < 30))
-                return MaxPlanDays;
-            return levelGap == 1 ? 90 : 1;
-        }
-
         // =====================================================================
-        // AI RESPONSE: parse + normalize + validate
+        // AI RESPONSE: parse + normalize + validate (schema rút gọn: AI không còn tự tính số liệu)
         // =====================================================================
         private sealed record AiLearningPathResult(
             string Summary,
-            List<string> Strengths,
-            List<string> Weaknesses,
-            string Feasibility,
             List<string> FocusTopics,
-            List<DailyScheduleResponse> DailySchedules,
-            bool? IsExamDateRealistic,
-            int RecommendedStudyDays,
-            string Horizon);
+            List<DailyScheduleResponse> DailySchedules);
 
         private static AiLearningPathResult ParseAiResponse(string rawJson)
         {
@@ -893,22 +1096,16 @@ namespace RikiPath.Application.Services
                             Day = ReadInt(dayEl, "day"),
                             Title = ReadString(dayEl, "title"),
                             Focus = ReadString(dayEl, "focus"),
-                            LessonIds = ReadIntList(dayEl, "lessonIds"),   // id thô từ AI, sẽ được lọc ở NormalizeLessons
-                            Lessons = new List<string>(),                   // tiêu đề bài học, điền ở NormalizeLessons
+                            LessonIds = ReadIntList(dayEl, "lessonIds"),
+                            Lessons = new List<string>(),
                         });
                     }
                 }
 
                 return new AiLearningPathResult(
                     Summary: ReadString(root, "summary"),
-                    Strengths: ReadStringList(root, "strengths") ?? new List<string>(),
-                    Weaknesses: ReadStringList(root, "weaknesses") ?? new List<string>(),
-                    Feasibility: ReadString(root, "feasibility"),
                     FocusTopics: ReadStringList(root, "focusTopics") ?? new List<string>(),
-                    DailySchedules: dailySchedules,
-                    IsExamDateRealistic: ReadNullableBool(root, "isExamDateRealistic"),
-                    RecommendedStudyDays: ReadInt(root, "recommendedStudyDays"),
-                    Horizon: string.Empty);
+                    DailySchedules: dailySchedules);
             }
             catch (Exception ex) when (ex is InvalidOperationException or FormatException)
             {
@@ -917,15 +1114,17 @@ namespace RikiPath.Application.Services
         }
 
         /// <summary>
-        /// Giữ lại đúng các bài học có trong DB, loại id AI tự bịa, gán tiêu đề thật.
-        /// Trả về số id bị loại.
+        /// Giữ lại đúng các bài học có thật trong DB, loại id AI tự bịa, gán tiêu đề thật và chuẩn hóa stt ngày.
         /// </summary>
         private static int NormalizeLessons(AiLearningPathResult result, Dictionary<int, CatalogLesson> catalogById)
         {
             int dropped = 0;
+            int dayCounter = 1;
 
             foreach (var day in result.DailySchedules)
             {
+                day.Day = dayCounter++;
+
                 var validIds = new List<int>();
                 var titles = new List<string>();
 
@@ -949,27 +1148,53 @@ namespace RikiPath.Application.Services
             return dropped;
         }
 
-        /// <summary>Trả null nếu hợp lệ, ngược lại trả lý do bị từ chối.</summary>
-        private static string? ValidateAiResult(AiLearningPathResult result, int expectedDays)
+        // Các từ nối tiếng Anh thông dụng — nếu một đoạn văn xuất hiện nhiều từ này, khả năng cao
+        // AI đã trả lời bằng tiếng Anh (hoặc lẫn tiếng Anh), cần từ chối và yêu cầu AI viết lại.
+        private static readonly string[] EnglishTellSigns =
+        {
+            " the ", " and ", " you ", " your ", " is ", " are ", " with ", " this ", " that ",
+            " for ", " have ", " has ", " will ", " would ", " should ", " on ", " in ", " at ",
+            " to ", " of ", " however ", " given ", " per ", " level ", " week ", " study ",
+        };
+
+        private static bool LooksEnglish(string? text)
+        {
+            if (string.IsNullOrWhiteSpace(text)) return false;
+            var padded = " " + text.ToLowerInvariant() + " ";
+            return EnglishTellSigns.Count(sign => padded.Contains(sign)) >= 3;
+        }
+
+        /// <summary>Trả null nếu hợp lệ, ngược lại trả lý do bị từ chối (để AI tự sửa ở lần retry).</summary>
+        private static string? ValidateAiResult(AiLearningPathResult result, int expectedDays, int catalogSize)
         {
             if (string.IsNullOrWhiteSpace(result.Summary))
                 return "thiếu nhận xét tổng quan";
+            if (LooksEnglish(result.Summary))
+                return "phần summary lẫn tiếng Anh, phải viết hoàn toàn bằng tiếng Việt";
+            if (result.FocusTopics.Any(LooksEnglish))
+                return "focusTopics lẫn tiếng Anh, phải viết hoàn toàn bằng tiếng Việt";
 
-            if (result.RecommendedStudyDays <= 0)
-                return "thiếu recommendedStudyDays hợp lệ";
-
-            if (result.DailySchedules.Count != expectedDays)
+            if (result.DailySchedules.Count == 0 || Math.Abs(result.DailySchedules.Count - expectedDays) > 3)
                 return $"số ngày ({result.DailySchedules.Count}) khác yêu cầu ({expectedDays})";
 
-            var days = result.DailySchedules.Select(d => d.Day).OrderBy(d => d).ToList();
-            for (int i = 0; i < days.Count; i++)
-            {
-                if (days[i] != i + 1)
-                    return "số thứ tự ngày không liên tục từ 1";
-            }
+            if (result.DailySchedules.Any(d => LooksEnglish(d.Title) || LooksEnglish(d.Focus)))
+                return "tiêu đề/mô tả một số ngày lẫn tiếng Anh, phải viết hoàn toàn bằng tiếng Việt";
 
             if (result.DailySchedules.All(d => d.LessonIds is null || d.LessonIds.Count == 0))
                 return "không chọn được bài học hợp lệ nào từ hệ thống";
+
+            // Chặn trường hợp AI lặp lại đúng 1 (hoặc rất ít) bài cho toàn bộ lộ trình
+            // dù catalog thực tế có nhiều bài học khả dụng hơn.
+            if (catalogSize > 3)
+            {
+                var distinctLessonsUsed = result.DailySchedules
+                    .SelectMany(d => d.LessonIds ?? new List<int>())
+                    .Distinct()
+                    .Count();
+                var minExpectedDistinct = Math.Min(catalogSize, Math.Max(3, expectedDays / 5));
+                if (distinctLessonsUsed < minExpectedDistinct)
+                    return $"chỉ dùng {distinctLessonsUsed} bài học khác nhau dù hệ thống có {catalogSize} bài khả dụng; cần đa dạng hóa bài học";
+            }
 
             return null;
         }
@@ -984,18 +1209,6 @@ namespace RikiPath.Application.Services
             el.TryGetProperty(name, out var p) && p.ValueKind == JsonValueKind.Number && p.TryGetInt32(out var v)
                 ? v
                 : 0;
-
-        private static bool? ReadNullableBool(JsonElement el, string name)
-        {
-            if (!el.TryGetProperty(name, out var value) || value.ValueKind == JsonValueKind.Null)
-                return null;
-            return value.ValueKind switch
-            {
-                JsonValueKind.True => true,
-                JsonValueKind.False => false,
-                _ => null,
-            };
-        }
 
         private static List<string>? ReadStringList(JsonElement el, string name)
         {
@@ -1025,14 +1238,21 @@ namespace RikiPath.Application.Services
         /// <summary>AI đôi khi bọc JSON trong ```json ... ```; bỏ lớp bọc đó.</summary>
         private static string StripCodeFence(string raw)
         {
+            if (string.IsNullOrWhiteSpace(raw)) return string.Empty;
             var s = raw.Trim();
             if (!s.StartsWith("```")) return s;
 
             int firstNewLine = s.IndexOf('\n');
             int lastFence = s.LastIndexOf("```", StringComparison.Ordinal);
-            return firstNewLine >= 0 && lastFence > firstNewLine
-                ? s[(firstNewLine + 1)..lastFence].Trim()
-                : s;
+            if (firstNewLine >= 0 && lastFence > firstNewLine)
+            {
+                return s[(firstNewLine + 1)..lastFence].Trim();
+            }
+            if (firstNewLine >= 0)
+            {
+                return s[(firstNewLine + 1)..].Trim();
+            }
+            return s;
         }
 
         private static List<string> BuildDebugErrors(Exception ex)
@@ -1045,7 +1265,6 @@ namespace RikiPath.Application.Services
                 errors.Add(ex.StackTrace);
             return errors;
 #else
-            // Production: không lộ chi tiết exception ra client (đã có log phía server)
             return new List<string>();
 #endif
         }

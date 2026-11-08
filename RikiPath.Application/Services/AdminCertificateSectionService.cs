@@ -260,22 +260,22 @@ namespace RikiPath.Application.Services
         private static CertificateSectionResponse Map(
             CertificateSection section,
             string? certificateLevelCode = null) => new()
-        {
-            Id = section.Id,
-            CertificateLevelId = section.CertificateLevelId,
-            CertificateLevelCode = certificateLevelCode
+            {
+                Id = section.Id,
+                CertificateLevelId = section.CertificateLevelId,
+                CertificateLevelCode = certificateLevelCode
                 ?? section.CertificateLevel?.Code
                 ?? string.Empty,
-            Name = section.Name,
-            Code = section.Code,
-            Description = section.Description,
-            DurationMinutes = section.DurationMinutes,
-            MaxScore = section.MaxScore,
-            PassingScore = section.PassingScore,
-            SortOrder = section.SortOrder,
-            IsArchived = section.IsDeleted,
-            CreatedDate = section.CreatedDate,
-            ModifiedDate = section.ModifiedDate,
-        };
+                Name = section.Name,
+                Code = section.Code,
+                Description = section.Description,
+                DurationMinutes = section.DurationMinutes,
+                MaxScore = section.MaxScore,
+                PassingScore = section.PassingScore,
+                SortOrder = section.SortOrder,
+                IsArchived = section.IsDeleted,
+                CreatedDate = section.CreatedDate,
+                ModifiedDate = section.ModifiedDate,
+            };
     }
 }

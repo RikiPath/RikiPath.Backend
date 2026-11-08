@@ -13,6 +13,9 @@ namespace RikiPath.Application.IServices
         Task<ApiResponse<LearningPathResponse?>> GetLatestLearningPathAsync(
              CancellationToken cancellationToken);
 
+        Task<ApiResponse<LearningPathResponse>> StartActiveDayAsync(int day, CancellationToken cancellationToken);
+        Task<ApiResponse<LearningPathResponse>> CompleteActiveDayAsync(int day, CancellationToken cancellationToken);
+
         Task<ApiResponse<LearningPathResponse>> PreviewLearningPathAsync(
             PreviewLearningPathRequest request, CancellationToken cancellationToken);
         Task<ApiResponse<LearningPathResponse>> ConfirmPreviewAsync(int previewId, CancellationToken cancellationToken);
