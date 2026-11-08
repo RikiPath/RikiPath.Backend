@@ -478,7 +478,7 @@ namespace RikiPath.Application.Services
                     StartedAt = attempt.StartedAt,
                     SubmittedAt = attempt.SubmittedAt,
                     TotalScore = attempt.TotalScore.GetValueOrDefault(),
-                    WrongQuestionIds = answers
+                    WrongQuestionIds = (answers ?? Enumerable.Empty<MockTestAnswer>())
                         .Where(a => !a.IsCorrect)
                         .Select(a => a.MockQuestionId)
                         .OrderBy(id => id)

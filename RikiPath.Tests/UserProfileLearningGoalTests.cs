@@ -202,6 +202,8 @@ public sealed class UserProfileLearningGoalTests
                 weaknesses = new[] { "Ngữ pháp" },
                 feasibility = "Khả thi",
                 focusTopics = new[] { "N5" },
+                isExamDateRealistic = true,
+                recommendedStudyDays = 1,
                 dailySchedules = new[]
                 {
                     new { day = 1, title = "Day 1", focus = "Grammar", lessonIds = new[] { 5501 } },
@@ -219,7 +221,18 @@ public sealed class UserProfileLearningGoalTests
         var start = await placementService.StartPlacementTestAsync(CancellationToken.None);
         var submit = await placementService.SubmitPlacementTestAsync(
             start.Result!.AttemptId,
-            new SubmitPlacementTestRequest { Answers = [] },
+            new SubmitPlacementTestRequest
+            {
+                Answers =
+                [
+                    new AnswerSubmissionItem { QuestionId = 501, SelectedOptionId = 5011 },
+                    new AnswerSubmissionItem { QuestionId = 502, SelectedOptionId = 5021 },
+                    new AnswerSubmissionItem { QuestionId = 401, SelectedOptionId = 4011 },
+                    new AnswerSubmissionItem { QuestionId = 402, SelectedOptionId = 4021 },
+                    new AnswerSubmissionItem { QuestionId = 301, SelectedOptionId = 3011 },
+                    new AnswerSubmissionItem { QuestionId = 302, SelectedOptionId = 3021 },
+                ],
+            },
             CancellationToken.None);
         Assert.True(submit.IsSuccess);
 
