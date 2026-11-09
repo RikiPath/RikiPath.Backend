@@ -50,26 +50,67 @@ public sealed class CanonicalApiOperationFilter : IOperationFilter
             ?? "Api";
         operation.OperationId = BuildOperationId(controllerName, method, route);
 
-        operation.Summary = ActionSummaries.TryGetValue(context.MethodInfo.Name, out var knownSummary)
-            ? knownSummary
-            : BuildFallbackSummary(method, route);
-        operation.Description = $"{operation.Summary}. API áp dụng quyền truy cập và quy tắc nghiệp vụ đã cấu hình cho thao tác này.";
+        var hasCatalog = CanonicalApiOperationCatalog.TryGetOperation(operation.OperationId, out var catalogMeta);
 
-        operation.Tags = [new OpenApiTag { Name = GetBusinessTag(route) }];
+        // 1. Phân nhóm Canonical Tags theo chuẩn Product Owner
+        var tagName = hasCatalog
+            ? catalogMeta.Tag
+            : GetBusinessTag(route);
+        operation.Tags = [new OpenApiTag { Name = tagName }];
 
+        // 2. Summary: Ưu tiên XML comment nếu có và hợp lệ, nếu không lấy từ Catalog hoặc Fallback
+        if (string.IsNullOrWhiteSpace(operation.Summary) || IsBoilerplateSummary(operation.Summary))
+        {
+            if (hasCatalog)
+            {
+                operation.Summary = catalogMeta.Summary;
+            }
+            else
+            {
+                operation.Summary = ActionSummaries.TryGetValue(context.MethodInfo.Name, out var knownSummary)
+                    ? knownSummary
+                    : BuildFallbackSummary(method, route);
+            }
+        }
+
+        // 3. Description: Ưu tiên XML remarks nếu có và hợp lệ, nếu không lấy từ Catalog
+        if (string.IsNullOrWhiteSpace(operation.Description) || IsBoilerplateDescription(operation.Description))
+        {
+            if (hasCatalog)
+            {
+                operation.Description = catalogMeta.Description;
+            }
+            else
+            {
+                operation.Description = $"{operation.Summary}. API thực hiện thao tác theo cấu hình nghiệp vụ của hệ thống.";
+            }
+        }
+
+        // 4. Parameter Descriptions
         foreach (var parameter in operation.Parameters)
         {
-            parameter.Description = "Giá trị tham số này được sử dụng trong yêu cầu.";
+            if (string.IsNullOrWhiteSpace(parameter.Description) || parameter.Description == "Giá trị tham số này được sử dụng trong yêu cầu.")
+            {
+                parameter.Description = CanonicalApiOperationCatalog.GetParameterDescription(parameter.Name, route);
+            }
         }
 
+        // 5. Request Body Description
         if (operation.RequestBody is not null)
         {
-            operation.RequestBody.Description = "Dữ liệu đầu vào của yêu cầu.";
+            if (string.IsNullOrWhiteSpace(operation.RequestBody.Description) || operation.RequestBody.Description == "Dữ liệu đầu vào của yêu cầu.")
+            {
+                operation.RequestBody.Description = CanonicalApiOperationCatalog.GetRequestBodyDescription(operation.OperationId);
+            }
         }
 
+        // 6. Response Descriptions
         foreach (var response in operation.Responses)
         {
-            response.Value.Description = GetResponseDescription(response.Key);
+            if (string.IsNullOrWhiteSpace(response.Value.Description) || IsBoilerplateResponse(response.Value.Description))
+            {
+                response.Value.Description = CanonicalApiOperationCatalog.GetResponseDescription(response.Key, operation.Summary);
+            }
         }
 
         if (context.ApiDescription.ActionDescriptor.EndpointMetadata?.OfType<IAllowAnonymous>().Any() == true)
@@ -78,6 +119,20 @@ public sealed class CanonicalApiOperationFilter : IOperationFilter
             operation.Security = [];
         }
     }
+
+    private static bool IsBoilerplateSummary(string summary) =>
+        summary.Contains("kỳ bảng lương tháng của Cố vấn") ||
+        summary.Contains("tài nguyên API") ||
+        summary.Contains("dữ liệu liên quan");
+
+    private static bool IsBoilerplateDescription(string description) =>
+        description.Contains("API áp dụng quyền truy cập và quy tắc nghiệp vụ đã cấu hình cho thao tác này.") ||
+        description.Contains("API áp dụng quyền truy cập");
+
+    private static bool IsBoilerplateResponse(string description) =>
+        description == "Yêu cầu được xử lý thành công." ||
+        description == "Tài nguyên được tạo thành công." ||
+        description.StartsWith("Phản hồi HTTP");
 
     public static string BuildOperationId(string controllerName, string method, string route)
     {

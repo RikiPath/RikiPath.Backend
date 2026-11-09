@@ -421,11 +421,19 @@ internal class Program
         builder.Services.AddEndpointsApiExplorer();
         builder.Services.AddSwaggerGen(c =>
         {
-            var xmlFile = $"{Assembly.GetExecutingAssembly().GetName().Name}.xml";
-            var xmlPath = Path.Combine(AppContext.BaseDirectory, xmlFile);
-
-            // Include source XML comments; canonical filters normalize all published documentation to English.
-            c.IncludeXmlComments(xmlPath, includeControllerXmlComments: true);
+            var xmlFiles = new[]
+            {
+                $"{Assembly.GetExecutingAssembly().GetName().Name}.xml",
+                "RikiPath.Application.xml"
+            };
+            foreach (var file in xmlFiles)
+            {
+                var xmlPath = Path.Combine(AppContext.BaseDirectory, file);
+                if (File.Exists(xmlPath))
+                {
+                    c.IncludeXmlComments(xmlPath, includeControllerXmlComments: true);
+                }
+            }
             c.SwaggerDoc("v1", new OpenApiInfo
             {
                 Title = "RikiPath API",

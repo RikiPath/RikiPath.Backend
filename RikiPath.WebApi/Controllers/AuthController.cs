@@ -72,7 +72,7 @@ namespace RikiPath.WebApi.Controllers
         /// <remarks>
         /// - Màn hình sử dụng: Màn hình xác thực email (Verify Email) hoặc link từ email.
         /// - Luồng xử lý: Kiểm tra token, cập nhật trạng thái emailVerified trong CSDL; có thể ghi log xác thực.
-        /// - Lưu ý cho FE: Gửi token và email trong body; không cần Bearer Token. Response nhanh (<500ms).
+        /// - Lưu ý cho FE: Gửi token và email trong body; không cần Bearer Token. Response nhanh (&lt;500ms).
         /// </remarks>
         /// <param name="request">VerifyEmailRequest: Email (Required), Token (Required).</param>
         /// <param name="cancellationToken">Token hủy request (Optional).</param>

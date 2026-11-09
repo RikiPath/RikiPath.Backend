@@ -37,6 +37,7 @@ namespace RikiPath.Application.IServices
         Task<ApiResponse<PlacementTestResultResponse>> GetPlacementTestResultAsync(
             int attemptId,
             CancellationToken cancellationToken = default);
+
         /// <summary>
         /// Autosave 1 câu trả lời cho bài đánh giá năng lực (placement) ngay khi học viên chọn đáp án,
         /// để nếu mất điện/tắt web giữa chừng thì quay lại vẫn còn tiến độ đã làm.
@@ -45,8 +46,38 @@ namespace RikiPath.Application.IServices
             int attemptId,
             SavePlacementAnswerRequest request,
             CancellationToken cancellationToken = default);
+
         Task<ApiResponse<MockTestDetailResponse>> GetPlacementTestsByCertificateLevelAsync(
-             int certificateLevelId,
-             CancellationToken cancellationToken = default);
+            int certificateLevelId,
+            CancellationToken cancellationToken = default);
+
+        Task<ApiResponse<StartAttemptResponse>> StartAttemptAsync(
+            int practiceTestId,
+            CancellationToken cancellationToken = default);
+
+        Task<ApiResponse<AttemptResultResponse>> SubmitAttemptAsync(
+            int attemptId,
+            SubmitAttemptRequest request,
+            CancellationToken cancellationToken = default);
+
+        Task<ApiResponse<AttemptResultResponse>> GetAttemptResultAsync(
+            int attemptId,
+            CancellationToken cancellationToken = default);
+
+        Task<ApiResponse<List<TestSummaryResponse>>> GetTestsByLevelAsync(
+            int certificationLevelId,
+            CancellationToken cancellationToken = default);
+
+        Task<ApiResponse<MockTestDetailResponse>> GetPlacementTestDetailAsync(
+            int certificateLevelId,
+            CancellationToken cancellationToken = default);
+
+        Task<ApiResponse<DetailedAttemptResultResponse>> GetDetailedResultAsync(
+            int attemptId,
+            CancellationToken cancellationToken = default);
+
+        Task<ApiResponse<List<QuestionReviewCard>>> GetWrongQuestionsReviewSessionAsync(
+            int? practiceTestId = null,
+            CancellationToken cancellationToken = default);
     }
 }
