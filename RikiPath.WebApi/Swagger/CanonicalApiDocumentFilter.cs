@@ -28,7 +28,27 @@ public sealed class CanonicalApiDocumentFilter : IDocumentFilter
 
             foreach (var tag in swaggerDoc.Tags)
             {
-                tag.Description = $"Nhóm chức năng {tag.Name} của API RikiPath.";
+                if (CanonicalApiOperationCatalog.TagDescriptions.TryGetValue(tag.Name, out var richDesc))
+                {
+                    tag.Description = richDesc;
+                }
+                else
+                {
+                    tag.Description = $"Nhóm chức năng {tag.Name} của API RikiPath.";
+                }
+            }
+
+            // Đảm bảo mọi nhóm được dùng đều có thông tin mô tả chi tiết trên Swagger UI
+            var existingTagNames = swaggerDoc.Tags.Select(t => t.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            foreach (var tagName in usedTags)
+            {
+                if (!existingTagNames.Contains(tagName))
+                {
+                    var desc = CanonicalApiOperationCatalog.TagDescriptions.TryGetValue(tagName, out var d)
+                        ? d
+                        : $"Nhóm chức năng {tagName} của API RikiPath.";
+                    swaggerDoc.Tags.Add(new OpenApiTag { Name = tagName, Description = desc });
+                }
             }
         }
     }

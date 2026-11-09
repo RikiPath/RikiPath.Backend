@@ -65,7 +65,7 @@ namespace RikiPath.WebApi.Controllers
         /// <remarks>
         /// - Màn hình sử dụng: Màn hình Lịch sử luyện tập / My Submissions.
         /// - Luồng nghiệp vụ: Truy vấn danh sách các nộp bài của user, có phân trang/lọc nếu cần (FE nên gọi kèm tham số phân trang nếu endpoint hỗ trợ).
-        /// - Lưu ý cho FE: Yêu cầu Bearer Token (Role = Learner). Kết quả có thể lớn, nên FE cần hỗ trợ lazy-loading/pagination; response thường trả nhanh (<200ms) nếu có index trên DB.
+        /// - Lưu ý cho FE: Yêu cầu Bearer Token (Role = Learner). Kết quả có thể lớn, nên FE cần hỗ trợ lazy-loading/pagination; response thường trả nhanh (&lt;200ms) nếu có index trên DB.
         /// </remarks>
         /// <param name="cancellationToken">Token hủy request (Optional).</param>
         /// <response code="200">Thành công: Trả về danh sách nộp bài (có thể kèm metadata phân trang).</response>

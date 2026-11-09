@@ -17,6 +17,7 @@ public class AdminOperationsController(IUnitOfWork uow) : ControllerBase
     /// <summary>Lấy danh sách tài khoản, có thể lọc theo role và tùy chọn bao gồm tài khoản đã vô hiệu hóa.</summary>
     /// <param name="role">Role cần lọc; bỏ trống để lấy mọi role.</param>
     /// <param name="includeInactive">True để bao gồm tài khoản đã vô hiệu hóa.</param>
+    /// <param name="includeDisabled">True để bao gồm tài khoản đã bị khóa.</param>
     /// <param name="ct">Token hủy request.</param>
     [HttpGet("users")]
     public async Task<IActionResult> GetUsers([FromQuery] Role? role, [FromQuery] bool includeInactive = false, bool includeDisabled = false, CancellationToken ct = default)

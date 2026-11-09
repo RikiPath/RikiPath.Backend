@@ -908,27 +908,59 @@ namespace RikiPath.Application.Services
             try
             {
                 var userId = claimService.GetUserClaim().Id;
-                if (request is null || request.MockTestId <= 0)
-                    return ApiResponse<PlacementAttemptSnapshotResponse>.Fail(
-                        "MockTestId không hợp lệ.", HttpStatusCode.BadRequest);
+                List<MockQuestion> questions;
+                int limitMinutes;
 
-                var test = await unitOfWork.MockTests.GetWithSectionsAndQuestionsAsync(
-                    request.MockTestId, cancellationToken);
-                if (test is null || test.IsDeleted)
-                    return ApiResponse<PlacementAttemptSnapshotResponse>.NotFound(
-                        $"Không tìm thấy bài đánh giá năng lực có Id = {request.MockTestId}.");
+                if (request is not null && request.MockTestId > 0)
+                {
+                    var test = await unitOfWork.MockTests.GetWithSectionsAndQuestionsAsync(
+                        request.MockTestId, cancellationToken);
+                    if (test is null || test.IsDeleted)
+                        return ApiResponse<PlacementAttemptSnapshotResponse>.NotFound(
+                            $"Không tìm thấy bài đánh giá năng lực có Id = {request.MockTestId}.");
 
-                // Lấy toàn bộ câu hỏi của đề theo đúng thứ tự section -> câu hỏi.
-                var questions = (test.Sections ?? [])
-                    .Where(s => !s.IsDeleted)
-                    .OrderBy(s => s.SortOrder).ThenBy(s => s.Id)
-                    .SelectMany(s => (s.Questions ?? [])
-                        .Where(q => !q.IsDeleted)
-                        .OrderBy(q => q.SortOrder).ThenBy(q => q.Id))
-                    .ToList();
-                if (questions.Count == 0)
-                    return ApiResponse<PlacementAttemptSnapshotResponse>.Fail(
-                        "Bài đánh giá chưa có câu hỏi.", HttpStatusCode.BadRequest);
+                    // Lấy toàn bộ câu hỏi của đề theo đúng thứ tự section -> câu hỏi.
+                    questions = (test.Sections ?? [])
+                        .Where(s => !s.IsDeleted)
+                        .OrderBy(s => s.SortOrder).ThenBy(s => s.Id)
+                        .SelectMany(s => (s.Questions ?? [])
+                            .Where(q => !q.IsDeleted)
+                            .OrderBy(q => q.SortOrder).ThenBy(q => q.Id))
+                        .ToList();
+                    if (questions.Count == 0)
+                        return ApiResponse<PlacementAttemptSnapshotResponse>.Fail(
+                            "Bài đánh giá chưa có câu hỏi.", HttpStatusCode.BadRequest);
+
+                    limitMinutes = test.TimeLimitMinutes > 0 ? test.TimeLimitMinutes : DefaultPlacementMinutes;
+                }
+                else
+                {
+                    var allTests = await unitOfWork.MockTests.GetAllWithSectionsAndQuestionsAsync(cancellationToken);
+                    var eligibleTests = (allTests ?? [])
+                        .Where(t => t is not null && !t.IsDeleted && t.CertificateLevelId is >= 1 and <= 3)
+                        .OrderBy(t => t.CertificateLevelId)
+                        .ThenBy(t => t.Id)
+                        .ToList();
+
+                    questions = eligibleTests
+                        .GroupBy(t => t.CertificateLevelId)
+                        .OrderBy(g => g.Key)
+                        .SelectMany(g => g
+                            .SelectMany(t => (t.Sections ?? [])
+                                .Where(s => !s.IsDeleted)
+                                .OrderBy(s => s.SortOrder).ThenBy(s => s.Id)
+                                .SelectMany(s => (s.Questions ?? [])
+                                    .Where(q => !q.IsDeleted && (q.Options ?? []).Any(o => !o.IsDeleted && o.IsCorrect))
+                                    .OrderBy(q => q.SortOrder).ThenBy(q => q.Id)))
+                            .Take(5))
+                        .ToList();
+
+                    if (questions.Count == 0)
+                        return ApiResponse<PlacementAttemptSnapshotResponse>.Fail(
+                            "Bài đánh giá chưa có câu hỏi.", HttpStatusCode.BadRequest);
+
+                    limitMinutes = Math.Clamp(questions.Count * 2, 10, DefaultPlacementMinutes);
+                }
 
                 ApiResponse<PlacementAttemptSnapshotResponse>? response = null;
                 await unitOfWork.ExecuteInTransactionAsync(async ct =>
@@ -952,7 +984,6 @@ namespace RikiPath.Application.Services
                         // Attempt cũ đã hết giờ: KHÔNG xóa, giữ lại làm lịch sử số lần làm bài.
                     }
 
-                    var limitMinutes = test.TimeLimitMinutes > 0 ? test.TimeLimitMinutes : DefaultPlacementMinutes;
                     var now = DateTime.UtcNow;
                     var attempt = new MockTestAttempt
                     {

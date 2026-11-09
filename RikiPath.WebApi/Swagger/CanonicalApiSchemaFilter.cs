@@ -14,11 +14,17 @@ public sealed class CanonicalApiSchemaFilter : ISchemaFilter
     public void Apply(OpenApiSchema schema, SchemaFilterContext context)
     {
         var typeName = Humanize(context.Type.Name.Split('`')[0]);
-        schema.Description = $"Cấu trúc dữ liệu {typeName} của API RikiPath.";
+        if (string.IsNullOrWhiteSpace(schema.Description) || schema.Description.StartsWith("Cấu trúc dữ liệu"))
+        {
+            schema.Description = $"Mô hình dữ liệu {typeName} trong hệ thống RikiPath.";
+        }
 
         foreach (var (propertyName, propertySchema) in schema.Properties)
         {
-            propertySchema.Description = $"Giá trị của trường {Humanize(propertyName)}.";
+            if (string.IsNullOrWhiteSpace(propertySchema.Description) || propertySchema.Description.StartsWith("Giá trị của trường"))
+            {
+                propertySchema.Description = $"Thông tin {Humanize(propertyName)}.";
+            }
         }
     }
 
