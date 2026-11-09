@@ -17,6 +17,7 @@ namespace RikiPath.Domain
         public AzureSpeechSettings AzureSpeechSettings { get; set; }
         public GeminiSettings Gemini { get; set; }
         public AwsSettings AWS { get; set; } = new();
+        public OpenRouterSettings OpenRouter { get; set; } = new();
         public string FrontendBaseUrl { get; set; }
         public GoogleAuthSettings Google { get; set; } = new();
         public QaPaymentSimulatorSettings QaPaymentSimulator { get; set; } = new();
@@ -104,7 +105,7 @@ namespace RikiPath.Domain
         // vì yêu cầu suy luận thấp hơn chấm điểm. Đổi trực tiếp trong appsettings.json, không cần
         // build lại và không cần sửa code.
         public string LearningPathModel { get; set; } = "openai/gpt-oss-120b";
-        public string LearningPathProvider { get; set; } = "Bedrock";
+        public string LearningPathProvider { get; set; } = "OpenRouter";
 
         public AiRateLimitSettings RateLimit { get; set; } = new();
     }
@@ -143,6 +144,14 @@ namespace RikiPath.Domain
         public string ApiKey { get; set; } = string.Empty;
         public string Region { get; set; } = "ap-southeast-1";
         public string LearningPathModelId { get; set; } = "anthropic.claude-haiku-4-5-20251001-v1:0";
+    }
+
+    public class OpenRouterSettings
+    {
+        public string ApiKey { get; set; } = string.Empty;
+        public string BaseUrl { get; set; } = "https://openrouter.ai/api/v1";
+        public string Model { get; set; } = string.Empty;
+        public string AppName { get; set; } = "RikiPath";
     }
 
     public class AzureSpeechSettings

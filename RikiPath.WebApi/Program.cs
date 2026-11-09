@@ -47,6 +47,7 @@ internal class Program
         builder.Services.Configure<PayOsSettings>(payOsSection);
         builder.Services.Configure<AiSettings>(configuration.GetSection("Ai"));
         builder.Services.Configure<AwsSettings>(configuration.GetSection("AWS"));
+        builder.Services.Configure<OpenRouterSettings>(configuration.GetSection("OpenRouter"));
         builder.Services.AddOptions<MentorSlotGenerationOptions>()
             .Bind(configuration.GetSection(MentorSlotGenerationOptions.SectionName))
             .Validate(options =>
@@ -237,26 +238,44 @@ internal class Program
                 // M4E2E must never fall through to an external AI provider.
                 builder.Services.AddSingleton<IAiLearningPathClient, M4E2eAiLearningPathClient>();
             }
-            else if (string.Equals(
-                         configuration["Ai:LearningPathProvider"] ?? appSettings?.Ai?.LearningPathProvider,
-                         "Gemini",
-                         StringComparison.OrdinalIgnoreCase))
-            {
-                builder.Services.AddHttpClient<IAiLearningPathClient, AiLearningPathClient>(client =>
-                {
-                    var baseUrl = appSettings?.Ai?.BaseUrl;
-                    if (!string.IsNullOrEmpty(baseUrl)) client.BaseAddress = new Uri(baseUrl);
-                    client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-
-                    var apiKey = appSettings?.Ai?.ApiKey;
-                    if (!string.IsNullOrWhiteSpace(apiKey))
-                        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
-                });
-            }
             else
             {
-                builder.Services.AddHttpClient<IAiLearningPathClient, BedrockAiLearningPathClient>(client =>
-                    client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json")));
+                var explicitlyConfiguredProvider = configuration["Ai:LearningPathProvider"] ??
+                                                   configuration["AppSettings:Ai:LearningPathProvider"];
+                var openRouterApiKey = configuration["OPENROUTER_API_KEY"] ??
+                                       configuration["OpenRouter:ApiKey"];
+                var learningPathProvider = explicitlyConfiguredProvider ??
+                                           (!string.IsNullOrWhiteSpace(openRouterApiKey)
+                                               ? "OpenRouter"
+                                               : appSettings?.Ai?.LearningPathProvider ?? "OpenRouter");
+                if (string.Equals(learningPathProvider, "OpenRouter", StringComparison.OrdinalIgnoreCase))
+                {
+                    builder.Services.AddHttpClient<IAiLearningPathClient, OpenRouterAiLearningPathClient>(client =>
+                        client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json")));
+                }
+                else if (string.Equals(learningPathProvider, "Gemini", StringComparison.OrdinalIgnoreCase))
+                {
+                    builder.Services.AddHttpClient<IAiLearningPathClient, AiLearningPathClient>(client =>
+                    {
+                        var baseUrl = appSettings?.Ai?.BaseUrl;
+                        if (!string.IsNullOrEmpty(baseUrl)) client.BaseAddress = new Uri(baseUrl);
+                        client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
+                        var apiKey = appSettings?.Ai?.ApiKey;
+                        if (!string.IsNullOrWhiteSpace(apiKey))
+                            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+                    });
+                }
+                else if (string.Equals(learningPathProvider, "Bedrock", StringComparison.OrdinalIgnoreCase))
+                {
+                    builder.Services.AddHttpClient<IAiLearningPathClient, BedrockAiLearningPathClient>(client =>
+                        client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json")));
+                }
+                else
+                {
+                    throw new InvalidOperationException(
+                        $"Ai:LearningPathProvider '{learningPathProvider}' không được hỗ trợ. Dùng OpenRouter, Bedrock hoặc Gemini.");
+                }
             }
         }
 

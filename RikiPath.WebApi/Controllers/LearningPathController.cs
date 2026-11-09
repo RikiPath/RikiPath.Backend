@@ -28,6 +28,22 @@ namespace RikiPath.WebApi.Controllers
             return StatusCode((int)response.StatusCode, response);
         }
 
+        /// <summary>Bắt đầu hoặc tiếp tục một ngày đang được mở trong lộ trình ACTIVE.</summary>
+        [HttpPost("active/days/{day:int}/start")]
+        public async Task<IActionResult> StartActiveDay(int day, CancellationToken cancellationToken)
+        {
+            var response = await learningPathService.StartActiveDayAsync(day, cancellationToken);
+            return StatusCode((int)response.StatusCode, response);
+        }
+
+        /// <summary>Đánh dấu ngày học hoàn thành để mở ngày tiếp theo.</summary>
+        [HttpPost("active/days/{day:int}/complete")]
+        public async Task<IActionResult> CompleteActiveDay(int day, CancellationToken cancellationToken)
+        {
+            var response = await learningPathService.CompleteActiveDayAsync(day, cancellationToken);
+            return StatusCode((int)response.StatusCode, response);
+        }
+
         /// <summary>Lịch sử lộ trình của Learner, gồm ACTIVE và SUPERSEDED.</summary>
         [HttpGet("history")]
         public async Task<IActionResult> GetHistory(CancellationToken cancellationToken)
