@@ -28,9 +28,9 @@ namespace RikiPath.WebApi.Controllers
         }
 
         [HttpGet("all")]
-        public async Task<IActionResult> GetAll([FromQuery] int count = 100, CancellationToken cancellationToken = default)
+        public async Task<IActionResult> GetAll(CancellationToken cancellationToken = default)
         {
-            var result = await kanjiWritingPracticeService.GetAllForPracticeAsync(count, cancellationToken);
+            var result = await kanjiWritingPracticeService.GetAllForPracticeAsync(cancellationToken);
             return Ok(result);
         }
 
