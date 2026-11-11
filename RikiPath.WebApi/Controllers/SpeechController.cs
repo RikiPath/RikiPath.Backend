@@ -9,6 +9,17 @@ namespace RikiPath.WebApi.Controllers
     [ApiController]
     public class SpeechController(ISpeechToTextService speechService) : ControllerBase
     {
+        /// <summary>Creates a short-lived Japanese PCM streaming session for Amazon Transcribe.</summary>
+        [Authorize(Roles = "Learner")]
+        [HttpPost("streaming-session")]
+        [Microsoft.AspNetCore.RateLimiting.EnableRateLimiting("speech-session")]
+        [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
+        public async Task<IActionResult> CreateStreamingSession(CancellationToken cancellationToken)
+        {
+            var result = await speechService.CreateStreamingSessionAsync(cancellationToken);
+            return StatusCode(result.StatusCode, result);
+        }
+
         /// <summary>
         /// Lấy token tạm thời của Azure Speech để FE nhận diện giọng nói trực tiếp.
         /// </summary>

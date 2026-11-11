@@ -1,4 +1,3 @@
-﻿using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using RikiPath.Application.IClients;
 using RikiPath.Application.IServices;
@@ -6,21 +5,29 @@ using RikiPath.Application.Responses;
 using RikiPath.Application.Responses.SpeechToText;
 using RikiPath.Domain;
 using System;
-using System.Collections.Generic;
-using System.Linq;
 using System.Net;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace RikiPath.Application.Services
 {
-    public class SpeechToTextService(IAzureSpeechClient azureSpeechClient, AppSettings appSettings, ILogger<SpeechToTextService> logger) : ISpeechToTextService
+    public class SpeechToTextService(IAzureSpeechClient azureSpeechClient, AppSettings appSettings, ILogger<SpeechToTextService> logger, ITranscribeSpeechClient transcribeClient) : ISpeechToTextService
     {
         private const int TokenLifetimeSeconds = 600;
 
-        public Task<string> ConvertAudioToTextAsync(IFormFile audioFile)
+        public async Task<ApiResponse<SpeechStreamingSessionResponse>> CreateStreamingSessionAsync(CancellationToken cancellationToken)
         {
-            throw new NotImplementedException();
+            try
+            {
+                return ApiResponse<SpeechStreamingSessionResponse>.Success(
+                    await transcribeClient.CreateStreamingSessionAsync(cancellationToken));
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+            catch
+            {
+                // Credential errors can contain provider details. Do not expose keys or signed URLs.
+                logger.LogWarning("Could not create an Amazon Transcribe streaming session. Check AWS IAM credentials and region.");
+                return ApiResponse<SpeechStreamingSessionResponse>.Fail(
+                    "Không thể mở phiên nhận dạng. Hãy kiểm tra cấu hình AWS và quyền Amazon Transcribe.", HttpStatusCode.ServiceUnavailable);
+            }
         }
 
         public async Task<ApiResponse<SpeechTokenResponse>> GetTokenAsync(CancellationToken cancellationToken)
