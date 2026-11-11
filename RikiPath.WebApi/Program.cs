@@ -1,3 +1,4 @@
+using RikiPath.Infrastructure.Options;
 using DocumentFormat.OpenXml.Office2016.Drawing.ChartDrawing;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
@@ -48,6 +49,26 @@ internal class Program
         builder.Services.Configure<AiSettings>(configuration.GetSection("Ai"));
         builder.Services.Configure<AwsSettings>(configuration.GetSection("AWS"));
         builder.Services.Configure<OpenRouterSettings>(configuration.GetSection("OpenRouter"));
+        builder.Services.AddOptions<AmazonTranscribeSettings>()
+            .Bind(configuration.GetSection("AmazonTranscribe"))
+            .Validate(settings => settings.Language == "ja-JP" && settings.SampleRate == 16000,
+                "RikiPath Amazon Transcribe requires ja-JP and 16000 Hz PCM.")
+            .Validate(settings => settings.SessionUrlLifetimeSeconds is >= 15 and <= 300,
+                "Amazon Transcribe session URL lifetime must be 15–300 seconds.");
+        builder.Services.AddHttpClient("TranscribeAudioDownload")
+            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+        builder.Services.AddHttpClient("TranscribeTranscriptDownload");
+        builder.Services.AddRateLimiter(options =>
+        {
+            options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+            options.AddPolicy("speech-session", context =>
+                System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+                    context.User.FindFirstValue(ClaimTypes.NameIdentifier) ?? context.Connection.RemoteIpAddress?.ToString() ?? "anonymous",
+                    _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+                    {
+                        PermitLimit = 10, Window = TimeSpan.FromMinutes(1), QueueLimit = 0,
+                    }));
+        });
         builder.Services.AddOptions<MentorSlotGenerationOptions>()
             .Bind(configuration.GetSection(MentorSlotGenerationOptions.SectionName))
             .Validate(options =>
@@ -504,6 +525,7 @@ internal class Program
         app.UseCors("DefaultCorsPolicy");
         app.UseAuthentication();
         app.UseAuthorization();
+        app.UseRateLimiter();
         app.MapControllers();
 
         app.MapHub<MentorMeetingHub>("/hubs/mentor-meeting");
