@@ -195,20 +195,28 @@ public sealed class UserProfileLearningGoalTests
         var aiClient = new Mock<IAiLearningPathClient>();
         aiClient
             .Setup(c => c.GenerateLearningPathJsonAsync(7004, It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(JsonSerializer.Serialize(new
+            .ReturnsAsync((int _, string prompt, CancellationToken _) =>
             {
-                summary = "Lộ trình 1 ngày",
-                strengths = new[] { "Từ vựng" },
-                weaknesses = new[] { "Ngữ pháp" },
-                feasibility = "Khả thi",
-                focusTopics = new[] { "N5" },
-                isExamDateRealistic = true,
-                recommendedStudyDays = 1,
-                dailySchedules = new[]
+                var days = int.Parse(System.Text.RegularExpressions.Regex.Match(
+                    prompt, @"Lập đúng (\d+) ngày").Groups[1].Value);
+                return JsonSerializer.Serialize(new
                 {
-                    new { day = 1, title = "Day 1", focus = "Grammar", lessonIds = new[] { 5501 } },
-                },
-            }));
+                    summary = "Lộ trình ôn tập JLPT",
+                    strengths = new[] { "Từ vựng" },
+                    weaknesses = new[] { "Ngữ pháp" },
+                    feasibility = "Khả thi",
+                    focusTopics = new[] { "N5" },
+                    isExamDateRealistic = true,
+                    recommendedStudyDays = days,
+                    dailySchedules = Enumerable.Range(1, days).Select(day => new
+                    {
+                        day,
+                        title = $"Ngày {day}",
+                        focus = "Ôn tập ngữ pháp",
+                        lessonIds = new[] { 5501 },
+                    }),
+                });
+            });
         var learningPathService = new LearningPathService(
             new UnitOfWork(context),
             aiClient.Object,
@@ -251,7 +259,8 @@ public sealed class UserProfileLearningGoalTests
         var pathBeforeRollover = await learningPathService.GenerateLearningPathAsync(
             new GenerateLearningPathRequest(),
             CancellationToken.None);
-        Assert.True(pathBeforeRollover.IsSuccess);
+        Assert.True(pathBeforeRollover.IsSuccess,
+            $"HTTP {pathBeforeRollover.StatusCode}: {pathBeforeRollover.ErrorCode} {pathBeforeRollover.ErrorMessage}");
 
         // 2) 1 second later: 2026-10-26T17:00:00Z == 2026-10-27 00:00:00 ICT (Vietnam date rolled over to Oct 27, while UTC is still Oct 26!).
         // Exam date 2026-10-27 must now be rejected by SetJlptGoal, mark IsReadyForLearningPath=false in Status, and be rejected by LearningPath!

@@ -173,12 +173,14 @@ public sealed class LearningPathPersistenceTests
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync((int _, string prompt, CancellationToken _) =>
             {
-                // Extract expected days from prompt or build 5-day schedule
-                var schedules = Enumerable.Range(1, 5).Select(day => new
+                // Phản hồi giả lập tuân theo số ngày mà hợp đồng prompt hiện hành yêu cầu.
+                var days = int.Parse(System.Text.RegularExpressions.Regex.Match(
+                    prompt, @"Lập đúng (\d+) ngày").Groups[1].Value);
+                var schedules = Enumerable.Range(1, days).Select(day => new
                 {
                     day,
-                    title = $"Day {day}",
-                    focus = "Grammar",
+                    title = $"Ngày {day}",
+                    focus = "Ôn tập ngữ pháp",
                     lessonIds = new[] { 4401 },
                 });
                 return JsonSerializer.Serialize(new
@@ -189,7 +191,7 @@ public sealed class LearningPathPersistenceTests
                     feasibility = "Khả thi",
                     focusTopics = new[] { "N4" },
                     isExamDateRealistic = true,
-                    recommendedStudyDays = 5,
+                    recommendedStudyDays = days,
                     dailySchedules = schedules,
                 });
             });
@@ -246,8 +248,9 @@ public sealed class LearningPathPersistenceTests
             new GenerateLearningPathRequest(),
             CancellationToken.None);
 
-        Assert.True(generated.IsSuccess);
-        Assert.Equal(5, generated.Result!.DailySchedules.Count);
+        Assert.True(generated.IsSuccess,
+            $"HTTP {generated.StatusCode}: {generated.ErrorCode} {generated.ErrorMessage}");
+        Assert.Equal(generated.Result!.PlanDurationDays, generated.Result.DailySchedules.Count);
         Assert.Equal(levelN4.Id, user.TargetCertificateLevelId);
 
         // An active AI path is never replaced by another generate call. A new

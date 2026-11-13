@@ -55,9 +55,22 @@ namespace RikiPath.Application.IServices
             int practiceTestId,
             CancellationToken cancellationToken = default);
 
+        Task<ApiResponse<StartAttemptResponse?>> GetActiveMockAttemptAsync(
+            int practiceTestId,
+            CancellationToken cancellationToken = default);
+
         Task<ApiResponse<AttemptResultResponse>> SubmitAttemptAsync(
             int attemptId,
             SubmitAttemptRequest request,
+            CancellationToken cancellationToken = default);
+
+        Task<ApiResponse<bool>> SaveAttemptAnswerAsync(
+            int attemptId,
+            AnswerSubmissionItem answer,
+            CancellationToken cancellationToken = default);
+
+        Task<ApiResponse<AttemptResultResponse>> FinalizeExpiredAttemptAsync(
+            int attemptId,
             CancellationToken cancellationToken = default);
 
         Task<ApiResponse<AttemptResultResponse>> GetAttemptResultAsync(

@@ -7,6 +7,7 @@ namespace RikiPath.Application.IRepositories
     public interface IMockTestAttemptRepository : IGenericRepository<MockTestAttempt>
     {
         Task<List<MockTestAttempt>> GetByUserAsync(int userId);
+        Task LockMockStartAsync(int userId, CancellationToken cancellationToken = default);
         Task<List<MockTestAttempt>> GetPlacementByUserAsync(
             int userId,
             CancellationToken cancellationToken = default);

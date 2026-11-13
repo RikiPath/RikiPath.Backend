@@ -18,6 +18,8 @@ namespace RikiPath.Application.Responses.MockTests
         public string SectionTitle { get; set; } = string.Empty;
         public int SectionOrder { get; set; }
         public int Order { get; set; }
+        public int? SelectedOptionId { get; set; }
+        public System.Text.Json.JsonElement? Response { get; set; }
         public string Content { get; set; } = string.Empty;
         public string QuestionType { get; set; } = "SingleChoice";
         public System.Text.Json.JsonElement? InteractionData { get; set; }
