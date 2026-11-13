@@ -23,6 +23,9 @@ public sealed class MockTestIntegrityTests
         Assert.True(response.IsSuccess);
         Assert.Equal((int)HttpStatusCode.Created, response.StatusCode);
         Assert.Equal(fixture.Attempt.Id, response.Result!.AttemptId);
+        fixture.MockTestAttempts.Verify(repository => repository.AddAsync(
+            It.Is<MockTestAttempt>(attempt => attempt.ExpiresAt == attempt.StartedAt.AddMinutes(30)),
+            It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -33,6 +36,20 @@ public sealed class MockTestIntegrityTests
         var response = await fixture.Service.StartAttemptAsync(fixture.Test.Id);
 
         Assert.Equal([11, 12, 21], response.Result!.Questions.Select(question => question.QuestionId));
+    }
+
+    [Fact]
+    public async Task Start_freezes_question_content_and_answer_key_on_attempt()
+    {
+        var fixture = CreateFixture();
+
+        await fixture.Service.StartAttemptAsync(fixture.Test.Id);
+
+        Assert.NotNull(fixture.StartedAttempt?.QuestionSnapshotJson);
+        using var document = System.Text.Json.JsonDocument.Parse(fixture.StartedAttempt.QuestionSnapshotJson);
+        var first = document.RootElement.GetProperty("Questions")[0];
+        Assert.Equal("Question 11", first.GetProperty("Prompt").GetProperty("Content").GetString());
+        Assert.Equal(112, first.GetProperty("CorrectOptionIds")[0].GetInt32());
     }
 
     [Fact]
@@ -259,6 +276,192 @@ public sealed class MockTestIntegrityTests
     }
 
     [Fact]
+    public async Task Saving_an_answer_before_deadline_does_not_grade_or_complete_attempt()
+    {
+        var fixture = CreateFixture();
+        fixture.ConfigureSubmission();
+
+        var response = await fixture.Service.SaveAttemptAnswerAsync(
+            fixture.Attempt.Id, new AnswerSubmissionItem { QuestionId = 11, SelectedOptionId = 112 });
+
+        Assert.True(response.IsSuccess);
+        Assert.Equal(112, fixture.SnapshotByQuestionId(11).SelectedOptionId);
+        Assert.False(fixture.Attempt.IsCompleted);
+        Assert.Equal(0, fixture.SectionResultWriteCount);
+    }
+
+    [Fact]
+    public async Task Saving_an_answer_after_deadline_is_rejected()
+    {
+        var fixture = CreateFixture();
+        fixture.ConfigureSubmission(startedAt: DateTime.UtcNow.AddMinutes(-31));
+
+        var response = await fixture.Service.SaveAttemptAnswerAsync(
+            fixture.Attempt.Id, new AnswerSubmissionItem { QuestionId = 11, SelectedOptionId = 112 });
+
+        Assert.Equal((int)HttpStatusCode.Conflict, response.StatusCode);
+        Assert.Equal(0, fixture.SaveCount);
+    }
+
+    [Fact]
+    public async Task Frozen_deadline_remains_authoritative_after_test_duration_changes()
+    {
+        var fixture = CreateFixture();
+        fixture.ConfigureSubmission(startedAt: DateTime.UtcNow.AddMinutes(-2));
+        fixture.Attempt.ExpiresAt = DateTime.UtcNow.AddMinutes(-1);
+        fixture.Test.TimeLimitMinutes = 90;
+
+        var response = await fixture.Service.SaveAttemptAnswerAsync(
+            fixture.Attempt.Id, new AnswerSubmissionItem { QuestionId = 11, SelectedOptionId = 112 });
+
+        Assert.Equal((int)HttpStatusCode.Conflict, response.StatusCode);
+        Assert.Equal(0, fixture.SaveCount);
+    }
+
+    [Fact]
+    public async Task Active_attempt_returns_frozen_duration_after_test_duration_changes()
+    {
+        var fixture = CreateFixture();
+        fixture.ConfigureSubmission();
+        fixture.Attempt.ExpiresAt = fixture.Attempt.StartedAt.AddMinutes(30);
+        fixture.Test.TimeLimitMinutes = 90;
+        fixture.MockTestAttempts.Setup(repository => repository.GetByUserAsync(7))
+            .ReturnsAsync([fixture.Attempt]);
+
+        var response = await fixture.Service.GetActiveMockAttemptAsync(fixture.Test.Id);
+
+        Assert.True(response.IsSuccess);
+        Assert.Equal(30, response.Result!.TimeLimitMinutes);
+    }
+
+    [Fact]
+    public async Task Active_attempt_uses_frozen_question_content_after_editor_changes()
+    {
+        var fixture = CreateFixture();
+        await fixture.Service.StartAttemptAsync(fixture.Test.Id);
+        fixture.ConfigureSubmission();
+        fixture.Attempt.QuestionSnapshotJson = fixture.StartedAttempt!.QuestionSnapshotJson;
+        fixture.QuestionById(11).QuestionText = "Edited after start";
+        fixture.MockTestAttempts.Setup(repository => repository.GetByUserAsync(7))
+            .ReturnsAsync([fixture.Attempt]);
+
+        var response = await fixture.Service.GetActiveMockAttemptAsync(fixture.Test.Id);
+
+        Assert.Equal("Question 11", response.Result!.Questions.Single(item => item.QuestionId == 11).Content);
+    }
+
+    [Fact]
+    public async Task Submit_grades_frozen_answer_key_after_editor_changes()
+    {
+        var fixture = CreateFixture();
+        await fixture.Service.StartAttemptAsync(fixture.Test.Id);
+        fixture.ConfigureSubmission();
+        fixture.Attempt.QuestionSnapshotJson = fixture.StartedAttempt!.QuestionSnapshotJson;
+        fixture.QuestionById(11).Options!.Single(option => option.Id == 112).IsCorrect = false;
+        fixture.QuestionById(11).Options!.Single(option => option.Id == 111).IsCorrect = true;
+
+        var response = await fixture.Service.SubmitAttemptAsync(fixture.Attempt.Id, fixture.ValidSubmission());
+
+        Assert.True(response.IsSuccess);
+        Assert.Equal(33.33, response.Result!.TotalScore);
+    }
+
+    [Fact]
+    public async Task Expired_attempt_grades_frozen_answer_key_after_editor_changes()
+    {
+        var fixture = CreateFixture();
+        await fixture.Service.StartAttemptAsync(fixture.Test.Id);
+        fixture.ConfigureSubmission(startedAt: DateTime.UtcNow.AddMinutes(-31));
+        fixture.Attempt.QuestionSnapshotJson = fixture.StartedAttempt!.QuestionSnapshotJson;
+        fixture.SnapshotByQuestionId(11).SelectedOptionId = 112;
+        fixture.QuestionById(11).Options!.Single(option => option.Id == 112).IsCorrect = false;
+
+        var response = await fixture.Service.FinalizeExpiredAttemptAsync(fixture.Attempt.Id);
+
+        Assert.True(response.IsSuccess);
+        Assert.Equal(33.33, response.Result!.TotalScore);
+    }
+
+    [Fact]
+    public async Task Corrupted_frozen_snapshot_is_not_graded_against_live_answer_key()
+    {
+        var fixture = CreateFixture();
+        fixture.ConfigureSubmission();
+        fixture.Attempt.QuestionSnapshotJson = "{not-json";
+
+        var response = await fixture.Service.SubmitAttemptAsync(fixture.Attempt.Id, fixture.ValidSubmission());
+
+        Assert.Equal((int)HttpStatusCode.InternalServerError, response.StatusCode);
+        Assert.Equal(0, fixture.SaveCount);
+    }
+
+    [Fact]
+    public async Task Expiry_finalization_grades_only_server_saved_answers_once()
+    {
+        var fixture = CreateFixture();
+        fixture.ConfigureSubmission(startedAt: DateTime.UtcNow.AddMinutes(-31));
+        fixture.SnapshotByQuestionId(11).SelectedOptionId = 112;
+
+        var response = await fixture.Service.FinalizeExpiredAttemptAsync(fixture.Attempt.Id);
+
+        Assert.True(response.IsSuccess);
+        Assert.True(fixture.Attempt.IsCompleted);
+        Assert.Equal(33.33, response.Result!.TotalScore);
+        Assert.Equal(2, response.Result.WrongQuestionIds.Count);
+        Assert.Equal(1, fixture.SectionResultWriteCount);
+        Assert.Equal(1, fixture.SaveCount);
+    }
+
+    [Fact]
+    public async Task Finalization_before_server_deadline_does_not_write()
+    {
+        var fixture = CreateFixture();
+        fixture.ConfigureSubmission();
+
+        var response = await fixture.Service.FinalizeExpiredAttemptAsync(fixture.Attempt.Id);
+
+        Assert.Equal((int)HttpStatusCode.Conflict, response.StatusCode);
+        Assert.Equal(0, fixture.SaveCount);
+    }
+
+    [Fact]
+    public async Task Active_attempt_restores_server_saved_answer_without_creating_another_attempt()
+    {
+        var fixture = CreateFixture();
+        fixture.ConfigureSubmission();
+        fixture.SnapshotByQuestionId(11).SelectedOptionId = 112;
+        fixture.MockTestAttempts.Setup(repository => repository.GetByUserAsync(7))
+            .ReturnsAsync([fixture.Attempt]);
+
+        var response = await fixture.Service.GetActiveMockAttemptAsync(fixture.Test.Id);
+
+        Assert.True(response.IsSuccess);
+        Assert.Equal(fixture.Attempt.Id, response.Result!.AttemptId);
+        Assert.Equal(112, response.Result.Questions.Single(q => q.QuestionId == 11).SelectedOptionId);
+        fixture.MockTestAttempts.Verify(repository => repository.AddAsync(
+            It.IsAny<MockTestAttempt>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Start_reuses_existing_active_attempt_under_start_lock()
+    {
+        var fixture = CreateFixture();
+        fixture.ConfigureSubmission();
+        fixture.MockTestAttempts.Setup(repository => repository.GetByUserAsync(7))
+            .ReturnsAsync([fixture.Attempt]);
+
+        var response = await fixture.Service.StartAttemptAsync(fixture.Test.Id);
+
+        Assert.True(response.IsSuccess);
+        Assert.Equal((int)HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(fixture.Attempt.Id, response.Result!.AttemptId);
+        fixture.MockTestAttempts.Verify(repository => repository.LockMockStartAsync(
+            7, It.IsAny<CancellationToken>()), Times.Once);
+        fixture.MockTestAttempts.Verify(repository => repository.AddAsync(
+            It.IsAny<MockTestAttempt>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
     public async Task Summary_result_remains_valid()
     {
         var fixture = CreateFixture();
@@ -288,6 +491,24 @@ public sealed class MockTestIntegrityTests
         Assert.Equal(fixture.Test.Id, response.Result!.MockTestId);
         Assert.Equal(3, response.Result.Questions.Count);
         Assert.Equal(2, response.Result.Questions[0].Options.Count);
+    }
+
+    [Fact]
+    public async Task Detailed_result_uses_frozen_content_and_correct_option_after_editor_changes()
+    {
+        var fixture = CreateFixture();
+        await fixture.Service.StartAttemptAsync(fixture.Test.Id);
+        fixture.ConfigureDetailedResult();
+        fixture.Attempt.QuestionSnapshotJson = fixture.StartedAttempt!.QuestionSnapshotJson;
+        fixture.QuestionById(11).QuestionText = "Edited after submission";
+        fixture.QuestionById(11).Options!.Single(option => option.Id == 112).IsCorrect = false;
+
+        var response = await fixture.Service.GetDetailedResultAsync(fixture.Attempt.Id);
+
+        Assert.True(response.IsSuccess);
+        var question = response.Result!.Questions.Single(item => item.QuestionId == 11);
+        Assert.Equal("Question 11", question.QuestionText);
+        Assert.True(question.Options.Single(option => option.OptionId == 112).IsCorrect);
     }
 
     [Fact]
@@ -359,6 +580,13 @@ public sealed class MockTestIntegrityTests
             .Setup(repository => repository.FindAsync(
                 It.IsAny<Expression<Func<MockTestAttempt, bool>>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync([]);
+        attempts
+            .Setup(repository => repository.LockMockStartAsync(
+                It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        attempts
+            .Setup(repository => repository.GetByUserAsync(It.IsAny<int>()))
+            .ReturnsAsync([]);
         answers
             .Setup(repository => repository.FindAsync(
                 It.IsAny<Expression<Func<MockTestAnswer, bool>>>(), It.IsAny<CancellationToken>()))
@@ -366,7 +594,11 @@ public sealed class MockTestIntegrityTests
         attempts
             .Setup(repository => repository.AddAsync(
                 It.IsAny<MockTestAttempt>(), It.IsAny<CancellationToken>()))
-            .Callback((MockTestAttempt entity, CancellationToken _) => entity.Id = attempt.Id)
+            .Callback((MockTestAttempt entity, CancellationToken _) =>
+            {
+                entity.Id = attempt.Id;
+                fixture.StartedAttempt = entity;
+            })
             .Returns((MockTestAttempt entity, CancellationToken _) => Task.FromResult(entity));
         answers
             .Setup(repository => repository.AddRangeAsync(
@@ -474,6 +706,7 @@ public sealed class MockTestIntegrityTests
         public Mock<IMockTestSectionResultRepository> MockTestSectionResults { get; } = mockTestSectionResults;
         public MockTest Test { get; } = test;
         public MockTestAttempt Attempt { get; } = attempt;
+        public MockTestAttempt? StartedAttempt { get; set; }
         public List<MockTestAnswer> AddedSnapshots { get; } = [];
         public List<MockTestSectionResult> AddedSectionResults { get; } = [];
         public List<MockTestAnswer> SubmissionSnapshots { get; private set; } = [];

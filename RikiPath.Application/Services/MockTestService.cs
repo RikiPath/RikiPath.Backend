@@ -17,6 +17,67 @@ namespace RikiPath.Application.Services
         private const string StatusInProgress = "in_progress";
         private const string StatusCompleted = "completed";
 
+        private sealed class MockAttemptSnapshot
+        {
+            public MockAttemptSnapshot() { }
+            public int MockTestId { get; set; }
+            public List<MockQuestionSnapshot> Questions { get; set; } = [];
+        }
+
+        private sealed class MockQuestionSnapshot
+        {
+            public MockQuestionSnapshot() { }
+            public StartAttemptQuestionResponse Prompt { get; set; } = new();
+            public List<int> CorrectOptionIds { get; set; } = [];
+            public string? AnswerKeyJson { get; set; }
+            public string? Explanation { get; set; }
+        }
+
+        private static MockAttemptSnapshot? ReadMockSnapshot(MockTestAttempt attempt)
+        {
+            if (string.IsNullOrWhiteSpace(attempt.QuestionSnapshotJson)) return null;
+            var snapshot = JsonSerializer.Deserialize<MockAttemptSnapshot>(attempt.QuestionSnapshotJson);
+            if (snapshot?.Questions.Count > 0) return snapshot;
+            throw new JsonException("Dữ liệu đề thi đã lưu không hợp lệ.");
+        }
+
+        private static Dictionary<int, MockQuestionSnapshot>? ReadFrozenQuestions(
+            MockTestAttempt attempt, IEnumerable<MockTestAnswer> answers)
+        {
+            var snapshot = ReadMockSnapshot(attempt);
+            if (snapshot is null) return null; // Lượt thi cũ chưa có bản chụp nội dung.
+            var questions = snapshot.Questions.ToDictionary(item => item.Prompt.QuestionId);
+            if (!questions.Keys.ToHashSet().SetEquals(answers.Select(answer => answer.MockQuestionId)))
+                throw new JsonException("Bản chụp đề thi không khớp các câu hỏi của lượt thi.");
+            return questions;
+        }
+
+        private static bool IsFrozenAnswerCorrect(
+            MockQuestionSnapshot question, int? selectedOptionId, JsonElement? response)
+        {
+            if (question.Prompt.QuestionType.Equals("SingleChoice", StringComparison.OrdinalIgnoreCase))
+                return selectedOptionId.HasValue && question.CorrectOptionIds.Contains(selectedOptionId.Value);
+            if (question.Prompt.QuestionType.Equals("MultipleChoice", StringComparison.OrdinalIgnoreCase))
+            {
+                if (response is not { ValueKind: JsonValueKind.Array }) return false;
+                var submitted = response.Value.EnumerateArray()
+                    .Where(item => item.ValueKind == JsonValueKind.Number && item.TryGetInt32(out _))
+                    .Select(item => item.GetInt32()).Distinct().OrderBy(id => id).ToArray();
+                return submitted.Length == response.Value.GetArrayLength() &&
+                    submitted.SequenceEqual(question.CorrectOptionIds.OrderBy(id => id));
+            }
+            if (response is null || string.IsNullOrWhiteSpace(question.AnswerKeyJson)) return false;
+            try
+            {
+                return JsonNode.DeepEquals(JsonNode.Parse(question.AnswerKeyJson),
+                    JsonNode.Parse(response.Value.GetRawText()));
+            }
+            catch (JsonException)
+            {
+                return false;
+            }
+        }
+
         private static JsonElement? ParseJsonElement(string? json)
         {
             if (string.IsNullOrWhiteSpace(json)) return null;
@@ -154,6 +215,40 @@ namespace RikiPath.Application.Services
                 if (orderedQuestions.Count == 0)
                     return ApiResponse<StartAttemptResponse>.Fail(
                         "Đề thi chưa có câu hỏi để bắt đầu.", HttpStatusCode.BadRequest);
+                if (test.TimeLimitMinutes <= 0)
+                    return ApiResponse<StartAttemptResponse>.Fail(
+                        "Đề thi chưa có thời lượng hợp lệ.", HttpStatusCode.BadRequest);
+
+                var frozenQuestions = orderedQuestions.Select(item => new MockQuestionSnapshot
+                {
+                    Prompt = new StartAttemptQuestionResponse
+                    {
+                        QuestionId = item.Question.Id,
+                        MockTestSectionId = item.Section.Id,
+                        SectionTitle = item.Section.Title,
+                        SectionOrder = item.Section.SortOrder,
+                        Order = item.Question.SortOrder,
+                        Content = item.Question.QuestionText,
+                        QuestionType = item.Question.QuestionType,
+                        InteractionData = ParseJsonElement(item.Question.InteractionDataJson),
+                        AudioUrl = item.Question.AudioUrl,
+                        ImageUrl = item.Question.ImageUrl,
+                        Options = (item.Question.Options ?? [])
+                            .Where(option => !option.IsDeleted)
+                            .OrderBy(option => option.SortOrder).ThenBy(option => option.Id)
+                            .Select(option => new StartAttemptOptionResponse
+                            {
+                                OptionId = option.Id,
+                                Content = option.OptionText,
+                                Order = option.SortOrder,
+                            }).ToList(),
+                    },
+                    CorrectOptionIds = (item.Question.Options ?? [])
+                        .Where(option => !option.IsDeleted && option.IsCorrect)
+                        .Select(option => option.Id).ToList(),
+                    AnswerKeyJson = item.Question.AnswerKeyJson,
+                    Explanation = item.Question.Explanation,
+                }).ToList();
 
                 var previousAttempts = (await unitOfWork.MockTestAttempts.FindAsync(a =>
                     a.UserId == userId && a.IsCompleted && !a.IsDeleted && a.AttemptKind == AttemptKind.MockTest, cancellationToken))
@@ -183,10 +278,31 @@ namespace RikiPath.Application.Services
                 ApiResponse<StartAttemptResponse>? response = null;
                 await unitOfWork.ExecuteInTransactionAsync(async transactionCancellationToken =>
                 {
+                    await unitOfWork.MockTestAttempts.LockMockStartAsync(userId, transactionCancellationToken);
+                    var active = await GetActiveMockAttemptAsync(practiceTestId, transactionCancellationToken);
+                    if (!active.IsSuccess)
+                    {
+                        response = ApiResponse<StartAttemptResponse>.Fail(
+                            "Không thể kiểm tra lượt thi đang làm.", HttpStatusCode.InternalServerError);
+                        return;
+                    }
+                    if (active.Result is not null)
+                    {
+                        response = ApiResponse<StartAttemptResponse>.Success(active.Result);
+                        return;
+                    }
+
+                    var startedAt = DateTime.UtcNow;
                     var attempt = new MockTestAttempt
                     {
                         UserId = userId,
-                        StartedAt = DateTime.UtcNow,
+                        StartedAt = startedAt,
+                        ExpiresAt = startedAt.AddMinutes(test.TimeLimitMinutes),
+                        QuestionSnapshotJson = JsonSerializer.Serialize(new MockAttemptSnapshot
+                        {
+                            MockTestId = practiceTestId,
+                            Questions = frozenQuestions,
+                        }),
                         SubmittedAt = null,
                         TotalScore = 0,
                         IsCompleted = false,
@@ -195,7 +311,7 @@ namespace RikiPath.Application.Services
                     await unitOfWork.MockTestAttempts.AddAsync(attempt, transactionCancellationToken);
                     await unitOfWork.SaveChangesAsync(transactionCancellationToken);
 
-                    // Snapshot bằng các answer rỗng để attempt giữ đúng bộ câu hỏi tại thời điểm bắt đầu mà không đổi schema.
+                    // Lưu cả nội dung/đáp án trong QuestionSnapshotJson và quan hệ câu hỏi trong các answer rỗng.
                     var snapshots = orderedQuestions.Select(item => new MockTestAnswer
                     {
                         MockTestAttemptId = attempt.Id,
@@ -214,30 +330,7 @@ namespace RikiPath.Application.Services
                         TimeLimitMinutes = test.TimeLimitMinutes,
                         TotalPreviouslyWrongQuestions = previouslyWrongQuestionIds.Count,
                         PreviouslyWrongQuestionIds = previouslyWrongQuestionIds,
-                        Questions = orderedQuestions.Select(item => new StartAttemptQuestionResponse
-                        {
-                            QuestionId = item.Question.Id,
-                            MockTestSectionId = item.Section.Id,
-                            SectionTitle = item.Section.Title,
-                            SectionOrder = item.Section.SortOrder,
-                            Order = item.Question.SortOrder,
-                            Content = item.Question.QuestionText,
-                            QuestionType = item.Question.QuestionType,
-                            InteractionData = ParseJsonElement(item.Question.InteractionDataJson),
-                            AudioUrl = item.Question.AudioUrl,
-                            ImageUrl = item.Question.ImageUrl,
-                            Options = (item.Question.Options ?? [])
-                                .Where(option => !option.IsDeleted)
-                                .OrderBy(option => option.SortOrder)
-                                .ThenBy(option => option.Id)
-                                .Select(option => new StartAttemptOptionResponse
-                                {
-                                    OptionId = option.Id,
-                                    Content = option.OptionText,
-                                    Order = option.SortOrder,
-                                })
-                                .ToList(),
-                        }).ToList(),
+                        Questions = frozenQuestions.Select(question => question.Prompt).ToList(),
                     });
                 }, cancellationToken);
 
@@ -321,9 +414,10 @@ namespace RikiPath.Application.Services
                     }
 
                     var mockTest = snapshotAnswers[0].MockQuestion.MockTestSection.MockTest;
+                    var frozenQuestionsById = ReadFrozenQuestions(attempt, snapshotAnswers);
                     // Thời gian làm bài lấy từ StartedAt phía server, không tin đồng hồ hoặc elapsed time từ client.
-                    if (mockTest.TimeLimitMinutes > 0 &&
-                        DateTime.UtcNow > attempt.StartedAt.AddMinutes(mockTest.TimeLimitMinutes))
+                    if ((attempt.ExpiresAt.HasValue || mockTest.TimeLimitMinutes > 0) &&
+                        DateTime.UtcNow > (attempt.ExpiresAt ?? attempt.StartedAt.AddMinutes(mockTest.TimeLimitMinutes)))
                     {
                         response = ApiResponse<AttemptResultResponse>.Fail(
                             "Lượt làm bài đã hết thời gian.", HttpStatusCode.BadRequest);
@@ -349,7 +443,13 @@ namespace RikiPath.Application.Services
                     foreach (var submittedAnswer in request.Answers)
                     {
                         var question = snapshotsByQuestionId[submittedAnswer.QuestionId].MockQuestion;
-                        if (question.QuestionType.Equals("SingleChoice", StringComparison.OrdinalIgnoreCase))
+                        var frozenQuestion = frozenQuestionsById is not null &&
+                            frozenQuestionsById.TryGetValue(submittedAnswer.QuestionId, out var foundQuestion)
+                            ? foundQuestion : null;
+                        var questionType = frozenQuestion?.Prompt.QuestionType ?? question.QuestionType;
+                        var validOptionIds = frozenQuestion?.Prompt.Options.Select(option => option.OptionId).ToHashSet() ??
+                            (question.Options ?? []).Where(option => !option.IsDeleted).Select(option => option.Id).ToHashSet();
+                        if (questionType.Equals("SingleChoice", StringComparison.OrdinalIgnoreCase))
                         {
                             if (submittedAnswer.Response.HasValue)
                             {
@@ -358,7 +458,7 @@ namespace RikiPath.Application.Services
                                 return;
                             }
                         }
-                        else if (question.QuestionType.Equals("MultipleChoice", StringComparison.OrdinalIgnoreCase))
+                        else if (questionType.Equals("MultipleChoice", StringComparison.OrdinalIgnoreCase))
                         {
                             if (submittedAnswer.Response is not { ValueKind: JsonValueKind.Array })
                             {
@@ -370,12 +470,12 @@ namespace RikiPath.Application.Services
                         else if (submittedAnswer.SelectedOptionId is not null || submittedAnswer.Response is null)
                         {
                             response = ApiResponse<AttemptResultResponse>.Fail(
-                                $"Câu hỏi {submittedAnswer.QuestionId} yêu cầu câu trả lời theo dạng {question.QuestionType}.", HttpStatusCode.BadRequest);
+                                $"Câu hỏi {submittedAnswer.QuestionId} yêu cầu câu trả lời theo dạng {questionType}.", HttpStatusCode.BadRequest);
                             return;
                         }
                         // Option phải thuộc đúng Question để client không thể ghép ID tùy ý khi chấm điểm.
                         if (submittedAnswer.SelectedOptionId is not null &&
-                            !(question.Options ?? []).Any(option => option.Id == submittedAnswer.SelectedOptionId))
+                            !validOptionIds.Contains(submittedAnswer.SelectedOptionId.Value))
                         {
                             response = ApiResponse<AttemptResultResponse>.Fail(
                                 $"Lựa chọn không thuộc câu hỏi {submittedAnswer.QuestionId}.",
@@ -391,13 +491,18 @@ namespace RikiPath.Application.Services
                     {
                         var snapshot = snapshotsByQuestionId[submittedAnswer.QuestionId];
                         var question = snapshot.MockQuestion;
-                        var selectedOption = submittedAnswer.SelectedOptionId is null
+                        var frozenQuestion = frozenQuestionsById is not null &&
+                            frozenQuestionsById.TryGetValue(submittedAnswer.QuestionId, out var foundQuestion)
+                            ? foundQuestion : null;
+                        var selectedOption = frozenQuestion is not null || submittedAnswer.SelectedOptionId is null
                             ? null
-                            : snapshot.MockQuestion.Options?.Single(
+                            : snapshot.MockQuestion.Options?.FirstOrDefault(
                                 option => option.Id == submittedAnswer.SelectedOptionId);
                         snapshot.SelectedOptionId = submittedAnswer.SelectedOptionId;
                         snapshot.ResponseJson = submittedAnswer.Response?.GetRawText();
-                        snapshot.IsCorrect = question.QuestionType.Equals("SingleChoice", StringComparison.OrdinalIgnoreCase)
+                        snapshot.IsCorrect = frozenQuestion is not null
+                            ? IsFrozenAnswerCorrect(frozenQuestion, submittedAnswer.SelectedOptionId, submittedAnswer.Response)
+                            : question.QuestionType.Equals("SingleChoice", StringComparison.OrdinalIgnoreCase)
                             ? selectedOption?.IsCorrect == true
                             : question.QuestionType.Equals("MultipleChoice", StringComparison.OrdinalIgnoreCase)
                                 ? IsMultipleChoiceCorrect(question, submittedAnswer.Response)
@@ -440,6 +545,252 @@ namespace RikiPath.Application.Services
             {
                 return ApiResponse<AttemptResultResponse>.Fail(
                     "Không thể chấm điểm lượt làm bài.", HttpStatusCode.InternalServerError);
+            }
+        }
+
+        public async Task<ApiResponse<bool>> SaveAttemptAnswerAsync(
+            int attemptId, AnswerSubmissionItem answer, CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                var userId = claimService.GetUserClaim().Id;
+                ApiResponse<bool>? response = null;
+                await unitOfWork.ExecuteInTransactionAsync(async ct =>
+                {
+                    var attempt = await unitOfWork.MockTestAttempts.GetForSubmissionAsync(attemptId, ct);
+                    if (attempt is null || attempt.IsDeleted || attempt.AttemptKind != AttemptKind.MockTest)
+                    {
+                        response = ApiResponse<bool>.NotFound("Không tìm thấy lượt thi thử.");
+                        return;
+                    }
+                    if (attempt.UserId != userId)
+                    {
+                        response = ApiResponse<bool>.Fail("Bạn không có quyền sửa lượt thi này.", HttpStatusCode.Forbidden);
+                        return;
+                    }
+                    var snapshots = await unitOfWork.MockTestAnswers.GetByAttemptIdAsync(attemptId, ct);
+                    var timeLimitMinutes = snapshots.FirstOrDefault()?.MockQuestion.MockTestSection.MockTest.TimeLimitMinutes ?? 0;
+                    if (attempt.IsCompleted || (!attempt.ExpiresAt.HasValue && timeLimitMinutes <= 0) ||
+                        DateTime.UtcNow >= (attempt.ExpiresAt ?? attempt.StartedAt.AddMinutes(timeLimitMinutes)))
+                    {
+                        response = ApiResponse<bool>.Fail("Lượt thi đã kết thúc hoặc hết thời gian.", HttpStatusCode.Conflict);
+                        return;
+                    }
+
+                    var snapshot = snapshots.FirstOrDefault(item => item.MockQuestionId == answer.QuestionId);
+                    if (snapshot is null)
+                    {
+                        response = ApiResponse<bool>.Fail("Câu hỏi không thuộc lượt thi này.", HttpStatusCode.BadRequest);
+                        return;
+                    }
+                    var question = snapshot.MockQuestion;
+                    var frozenQuestionsById = ReadFrozenQuestions(attempt, snapshots);
+                    var frozen = frozenQuestionsById is not null &&
+                        frozenQuestionsById.TryGetValue(answer.QuestionId, out var frozenQuestion)
+                        ? frozenQuestion : null;
+                    var questionType = frozen?.Prompt.QuestionType ?? question.QuestionType;
+                    var validOptionIds = frozen?.Prompt.Options.Select(option => option.OptionId).ToHashSet() ??
+                        (question.Options ?? []).Where(option => !option.IsDeleted).Select(option => option.Id).ToHashSet();
+                    if (questionType.Equals("SingleChoice", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (answer.Response.HasValue || (answer.SelectedOptionId.HasValue &&
+                            !validOptionIds.Contains(answer.SelectedOptionId.Value)))
+                        {
+                            response = ApiResponse<bool>.Fail("Đáp án không hợp lệ cho câu hỏi này.", HttpStatusCode.BadRequest);
+                            return;
+                        }
+                    }
+                    else if (questionType.Equals("MultipleChoice", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (answer.SelectedOptionId.HasValue || answer.Response is not { ValueKind: JsonValueKind.Array } ||
+                            answer.Response.Value.EnumerateArray().Any(option => option.ValueKind != JsonValueKind.Number ||
+                                !option.TryGetInt32(out var optionId) || !validOptionIds.Contains(optionId)))
+                        {
+                            response = ApiResponse<bool>.Fail("Danh sách đáp án không hợp lệ.", HttpStatusCode.BadRequest);
+                            return;
+                        }
+                    }
+                    else if (answer.SelectedOptionId.HasValue || answer.Response is null)
+                    {
+                        response = ApiResponse<bool>.Fail("Câu trả lời không đúng định dạng.", HttpStatusCode.BadRequest);
+                        return;
+                    }
+
+                    snapshot.SelectedOptionId = answer.SelectedOptionId;
+                    snapshot.ResponseJson = answer.Response?.GetRawText();
+                    await unitOfWork.SaveChangesAsync(ct);
+                    response = ApiResponse<bool>.Success(true);
+                }, cancellationToken);
+                return response!;
+            }
+            catch (Exception)
+            {
+                return ApiResponse<bool>.Fail("Không thể lưu câu trả lời.", HttpStatusCode.InternalServerError);
+            }
+        }
+
+        public async Task<ApiResponse<StartAttemptResponse?>> GetActiveMockAttemptAsync(
+            int practiceTestId, CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                var userId = claimService.GetUserClaim().Id;
+                var attempts = await unitOfWork.MockTestAttempts.GetByUserAsync(userId);
+                foreach (var attempt in attempts.Where(item => !item.IsCompleted && !item.IsDeleted))
+                {
+                    var answers = await unitOfWork.MockTestAnswers.GetByAttemptIdAsync(attempt.Id, cancellationToken);
+                    var frozenQuestions = ReadFrozenQuestions(attempt, answers);
+                    var frozen = frozenQuestions is null ? null : ReadMockSnapshot(attempt);
+                    if (answers.Count == 0 || (frozen is not null
+                            ? frozen.MockTestId != practiceTestId
+                            : answers.Any(answer => answer.MockQuestion.MockTestSection.MockTestId != practiceTestId)))
+                        continue;
+
+                    var test = answers[0].MockQuestion.MockTestSection.MockTest;
+                    return ApiResponse<StartAttemptResponse?>.Success(new StartAttemptResponse
+                    {
+                        AttemptId = attempt.Id,
+                        MockTestId = practiceTestId,
+                        StartedAt = attempt.StartedAt,
+                        TimeLimitMinutes = attempt.ExpiresAt.HasValue
+                            ? (int)Math.Ceiling((attempt.ExpiresAt.Value - attempt.StartedAt).TotalMinutes)
+                            : test.TimeLimitMinutes,
+                        Questions = answers.Select(answer =>
+                        {
+                            var frozenQuestion = frozenQuestions is not null &&
+                                frozenQuestions.TryGetValue(answer.MockQuestionId, out var foundQuestion)
+                                ? foundQuestion : null;
+                            if (frozenQuestion is not null)
+                            {
+                                frozenQuestion.Prompt.SelectedOptionId = answer.SelectedOptionId;
+                                frozenQuestion.Prompt.Response = ParseJsonElement(answer.ResponseJson);
+                                return frozenQuestion.Prompt;
+                            }
+                            var question = answer.MockQuestion;
+                            var section = question.MockTestSection;
+                            return new StartAttemptQuestionResponse
+                            {
+                                QuestionId = question.Id,
+                                MockTestSectionId = section.Id,
+                                SectionTitle = section.Title,
+                                SectionOrder = section.SortOrder,
+                                Order = question.SortOrder,
+                                SelectedOptionId = answer.SelectedOptionId,
+                                Response = ParseJsonElement(answer.ResponseJson),
+                                Content = question.QuestionText,
+                                QuestionType = question.QuestionType,
+                                InteractionData = ParseJsonElement(question.InteractionDataJson),
+                                AudioUrl = question.AudioUrl,
+                                ImageUrl = question.ImageUrl,
+                                Options = (question.Options ?? [])
+                                    .Where(option => !option.IsDeleted)
+                                    .OrderBy(option => option.SortOrder).ThenBy(option => option.Id)
+                                    .Select(option => new StartAttemptOptionResponse
+                                    {
+                                        OptionId = option.Id,
+                                        Content = option.OptionText,
+                                        Order = option.SortOrder,
+                                    }).ToList(),
+                            };
+                        }).OrderBy(question => question.SectionOrder)
+                            .ThenBy(question => question.Order)
+                            .ThenBy(question => question.QuestionId)
+                            .ToList(),
+                    });
+                }
+
+                return ApiResponse<StartAttemptResponse?>.Success(null);
+            }
+            catch (Exception)
+            {
+                return ApiResponse<StartAttemptResponse?>.Fail(
+                    "Không thể khôi phục lượt thi thử.", HttpStatusCode.InternalServerError);
+            }
+        }
+
+        public async Task<ApiResponse<AttemptResultResponse>> FinalizeExpiredAttemptAsync(
+            int attemptId, CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                var userId = claimService.GetUserClaim().Id;
+                ApiResponse<AttemptResultResponse>? response = null;
+                var alreadyCompleted = false;
+                await unitOfWork.ExecuteInTransactionAsync(async ct =>
+                {
+                    var attempt = await unitOfWork.MockTestAttempts.GetForSubmissionAsync(attemptId, ct);
+                    if (attempt is null || attempt.IsDeleted || attempt.AttemptKind != AttemptKind.MockTest)
+                    {
+                        response = ApiResponse<AttemptResultResponse>.NotFound("Không tìm thấy lượt thi thử.");
+                        return;
+                    }
+                    if (attempt.UserId != userId)
+                    {
+                        response = ApiResponse<AttemptResultResponse>.Fail("Bạn không có quyền kết thúc lượt thi này.", HttpStatusCode.Forbidden);
+                        return;
+                    }
+                    if (attempt.IsCompleted)
+                    {
+                        alreadyCompleted = true;
+                        return;
+                    }
+                    var answers = await unitOfWork.MockTestAnswers.GetByAttemptIdAsync(attemptId, ct);
+                    if (answers.Count == 0 || answers.Select(a => a.MockQuestion.MockTestSection.MockTestId).Distinct().Count() != 1)
+                    {
+                        response = ApiResponse<AttemptResultResponse>.Fail("Dữ liệu câu hỏi của lượt thi không hợp lệ.", HttpStatusCode.Conflict);
+                        return;
+                    }
+                    var mockTest = answers[0].MockQuestion.MockTestSection.MockTest;
+                    var deadline = attempt.ExpiresAt ?? attempt.StartedAt.AddMinutes(mockTest.TimeLimitMinutes);
+                    if ((!attempt.ExpiresAt.HasValue && mockTest.TimeLimitMinutes <= 0) || DateTime.UtcNow < deadline)
+                    {
+                        response = ApiResponse<AttemptResultResponse>.Fail("Lượt thi chưa hết thời gian.", HttpStatusCode.Conflict);
+                        return;
+                    }
+
+                    var correctByQuestion = new Dictionary<int, bool>();
+                    var frozenQuestionsById = ReadFrozenQuestions(attempt, answers);
+                    foreach (var answer in answers)
+                    {
+                        var question = answer.MockQuestion;
+                        var selected = (question.Options ?? []).FirstOrDefault(option => option.Id == answer.SelectedOptionId);
+                        var structured = ParseJsonElement(answer.ResponseJson);
+                        var frozenQuestion = frozenQuestionsById is not null &&
+                            frozenQuestionsById.TryGetValue(answer.MockQuestionId, out var foundQuestion)
+                            ? foundQuestion : null;
+                        answer.IsCorrect = frozenQuestion is not null
+                            ? IsFrozenAnswerCorrect(frozenQuestion, answer.SelectedOptionId, structured)
+                            : question.QuestionType.Equals("SingleChoice", StringComparison.OrdinalIgnoreCase)
+                            ? selected?.IsCorrect == true
+                            : question.QuestionType.Equals("MultipleChoice", StringComparison.OrdinalIgnoreCase)
+                                ? IsMultipleChoiceCorrect(question, structured)
+                                : IsStructuredResponseCorrect(question, structured);
+                        correctByQuestion[answer.MockQuestionId] = answer.IsCorrect;
+                    }
+                    var sections = BuildSectionResults(attemptId, answers.Select(a => a.MockQuestion).ToList(), correctByQuestion);
+                    await unitOfWork.MockTestSectionResults.AddRangeAsync(sections.Entities, ct);
+                    attempt.SubmittedAt = deadline;
+                    attempt.IsCompleted = true;
+                    attempt.TotalScore = sections.OverallScore;
+                    unitOfWork.MockTestAttempts.Update(attempt);
+                    await unitOfWork.SaveChangesAsync(ct);
+                    response = ApiResponse<AttemptResultResponse>.Success(new AttemptResultResponse
+                    {
+                        AttemptId = attempt.Id,
+                        MockTestId = mockTest.Id,
+                        Status = StatusCompleted,
+                        StartedAt = attempt.StartedAt,
+                        SubmittedAt = attempt.SubmittedAt,
+                        TotalScore = sections.OverallScore,
+                        WrongQuestionIds = correctByQuestion.Where(item => !item.Value).Select(item => item.Key).OrderBy(id => id).ToList(),
+                        Sections = sections.Responses,
+                    });
+                }, cancellationToken);
+                return alreadyCompleted ? await GetAttemptResultAsync(attemptId, cancellationToken) : response!;
+            }
+            catch (Exception)
+            {
+                return ApiResponse<AttemptResultResponse>.Fail("Không thể kết thúc lượt thi thử.", HttpStatusCode.InternalServerError);
             }
         }
 
@@ -624,27 +975,43 @@ namespace RikiPath.Application.Services
 
                 var answers = await unitOfWork.MockTestAnswers.GetByAttemptIdAsync(
                     attemptId, cancellationToken);
+                var frozenQuestionsById = ReadFrozenQuestions(attempt, answers);
 
                 var questions = answers.Select(a => new QuestionReviewCard
                 {
                     QuestionId = a.MockQuestionId,
-                    QuestionText = a.MockQuestion.QuestionText,
-                    QuestionType = a.MockQuestion.QuestionType,
+                    QuestionText = frozenQuestionsById is not null &&
+                        frozenQuestionsById.TryGetValue(a.MockQuestionId, out var frozenText)
+                            ? frozenText.Prompt.Content : a.MockQuestion.QuestionText,
+                    QuestionType = frozenQuestionsById is not null &&
+                        frozenQuestionsById.TryGetValue(a.MockQuestionId, out var frozenType)
+                            ? frozenType.Prompt.QuestionType : a.MockQuestion.QuestionType,
                     Response = ParseJsonElement(a.ResponseJson),
-                    AnswerKey = ParseJsonElement(a.MockQuestion.AnswerKeyJson),
-                    Explanation = a.MockQuestion.Explanation,
+                    AnswerKey = ParseJsonElement(frozenQuestionsById is not null &&
+                        frozenQuestionsById.TryGetValue(a.MockQuestionId, out var frozenKey)
+                            ? frozenKey.AnswerKeyJson : a.MockQuestion.AnswerKeyJson),
+                    Explanation = frozenQuestionsById is not null &&
+                        frozenQuestionsById.TryGetValue(a.MockQuestionId, out var frozenExplanation)
+                            ? frozenExplanation.Explanation : a.MockQuestion.Explanation,
                     SelectedOptionId = a.SelectedOptionId,
                     IsCorrect = a.IsCorrect,
                     WasPreviouslyIncorrect = !a.IsCorrect,
-                    Options = (a.MockQuestion.Options ?? [])
-                        .OrderBy(option => option.SortOrder)
-                        .ThenBy(option => option.Id)
-                        .Select(o => new QuestionOptionReview
-                        {
-                            OptionId = o.Id,
-                            OptionText = o.OptionText,
-                            IsCorrect = o.IsCorrect,
-                        }).ToList(),
+                    Options = frozenQuestionsById is not null &&
+                        frozenQuestionsById.TryGetValue(a.MockQuestionId, out var frozenOptions)
+                            ? frozenOptions.Prompt.Options.Select(option => new QuestionOptionReview
+                            {
+                                OptionId = option.OptionId,
+                                OptionText = option.Content,
+                                IsCorrect = frozenOptions.CorrectOptionIds.Contains(option.OptionId),
+                            }).ToList()
+                            : (a.MockQuestion.Options ?? [])
+                                .OrderBy(option => option.SortOrder).ThenBy(option => option.Id)
+                                .Select(option => new QuestionOptionReview
+                                {
+                                    OptionId = option.Id,
+                                    OptionText = option.OptionText,
+                                    IsCorrect = option.IsCorrect,
+                                }).ToList(),
                 }).ToList();
 
                 return ApiResponse<DetailedAttemptResultResponse>.Success(new DetailedAttemptResultResponse

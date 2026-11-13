@@ -262,12 +262,22 @@ namespace RikiPath.WebApi.Controllers
         /// <param name="cancellationToken">Token hủy request (Optional).</param>
         [HttpPost("{practiceTestId:int}/start")]
         [ProducesResponseType(typeof(ApiResponse<StartAttemptResponse>), StatusCodes.Status201Created)]
+        [ProducesResponseType(typeof(ApiResponse<StartAttemptResponse>), StatusCodes.Status200OK)]
         [ProducesResponseType(typeof(ApiResponse<StartAttemptResponse>), StatusCodes.Status400BadRequest)]
         [ProducesResponseType(typeof(ApiResponse<StartAttemptResponse>), StatusCodes.Status404NotFound)]
         [ProducesResponseType(typeof(ApiResponse<StartAttemptResponse>), StatusCodes.Status500InternalServerError)]
         public async Task<IActionResult> StartAttempt(int practiceTestId, CancellationToken cancellationToken)
         {
             var result = await mockTestService.StartAttemptAsync(practiceTestId, cancellationToken);
+            return StatusCode((int)result.StatusCode, result);
+        }
+
+        /// <summary>Khôi phục lượt thi thử đang làm của học viên cho đề đã chọn.</summary>
+        [HttpGet("{practiceTestId:int}/active")]
+        [ProducesResponseType(typeof(ApiResponse<StartAttemptResponse?>), StatusCodes.Status200OK)]
+        public async Task<IActionResult> GetActiveMockAttempt(int practiceTestId, CancellationToken cancellationToken)
+        {
+            var result = await mockTestService.GetActiveMockAttemptAsync(practiceTestId, cancellationToken);
             return StatusCode((int)result.StatusCode, result);
         }
 
@@ -290,6 +300,27 @@ namespace RikiPath.WebApi.Controllers
             CancellationToken cancellationToken)
         {
             var result = await mockTestService.SubmitAttemptAsync(attemptId, request, cancellationToken);
+            return StatusCode((int)result.StatusCode, result);
+        }
+
+        /// <summary>Lưu đáp án của một câu trong lượt thi thử đang làm.</summary>
+        [HttpPut("attempts/{attemptId:int}/answer")]
+        [ProducesResponseType(typeof(ApiResponse<bool>), StatusCodes.Status200OK)]
+        public async Task<IActionResult> SaveAttemptAnswer(
+            int attemptId,
+            [FromBody] AnswerSubmissionItem answer,
+            CancellationToken cancellationToken)
+        {
+            var result = await mockTestService.SaveAttemptAnswerAsync(attemptId, answer, cancellationToken);
+            return StatusCode((int)result.StatusCode, result);
+        }
+
+        /// <summary>Kết thúc lượt thi thử hết giờ bằng các đáp án đã lưu trên máy chủ.</summary>
+        [HttpPost("attempts/{attemptId:int}/finalize")]
+        [ProducesResponseType(typeof(ApiResponse<AttemptResultResponse>), StatusCodes.Status200OK)]
+        public async Task<IActionResult> FinalizeExpiredAttempt(int attemptId, CancellationToken cancellationToken)
+        {
+            var result = await mockTestService.FinalizeExpiredAttemptAsync(attemptId, cancellationToken);
             return StatusCode((int)result.StatusCode, result);
         }
 
