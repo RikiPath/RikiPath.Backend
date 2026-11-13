@@ -226,6 +226,7 @@ namespace RikiPath.Application.Services
             KanjiId = kanji.Id,
             Character = kanji.Character,
             Meaning = kanji.Meaning,
+            SinoVietnamese = kanji.SinoVietnamese,
             OnYomi = kanji.OnYomi,
             KunYomi = kanji.KunYomi,
             StrokeCount = kanji.StrokeCount,

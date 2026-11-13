@@ -34,6 +34,17 @@ namespace RikiPath.WebApi.Controllers
             return Ok(result);
         }
 
+        /// <summary>Nhận dạng một chữ Kanji vẽ tay, không lưu ảnh hoặc bài viết.</summary>
+        [HttpPost("recognize")]
+        [RequestSizeLimit(1100000)]
+        public async Task<IActionResult> Recognize(
+            [FromForm] IFormFile image, [FromServices] IKanjiRecognitionService recognition,
+            CancellationToken cancellationToken)
+        {
+            var result = await recognition.RecognizeAsync(image, cancellationToken);
+            return StatusCode(result.StatusCode, result);
+        }
+
         /// <summary>
         /// Ghi nhận kết quả 1 lượt luyện viết 1 chữ Kanji, tính lại lịch ôn theo SM-2.
         /// </summary>
