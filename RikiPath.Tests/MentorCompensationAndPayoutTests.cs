@@ -1246,6 +1246,6 @@ public sealed class MentorCompensationAndPayoutTests
 
         var json = Microsoft.OpenApi.Extensions.OpenApiSerializableExtensions.SerializeAsJson(
             doc, Microsoft.OpenApi.OpenApiSpecVersion.OpenApi3_0);
-        System.IO.File.WriteAllText(@"C:\Temp\rikipath-mentor-compensation-openapi-20261104.json", json);
+        System.IO.File.WriteAllText(System.IO.Path.Combine(System.IO.Path.GetTempPath(), "rikipath-mentor-compensation-openapi-20261104.json"), json);
     }
 }

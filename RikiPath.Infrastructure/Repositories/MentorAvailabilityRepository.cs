@@ -39,9 +39,12 @@ namespace RikiPath.Infrastructure.Repositories
                     && (x.PolicyVersion != null ? (x.Mentor.MentorProfile != null && x.Mentor.MentorProfile.VerificationStatus == MentorVerificationStatus.Approved) : (x.Mentor.MentorProfile == null || x.Mentor.MentorProfile.VerificationStatus == MentorVerificationStatus.Approved)), cancellationToken);
 
         // Lịch bị từ chối không còn chiếm khung giờ của mentor.
-        public Task<bool> HasOverlappingSlotAsync(int mentorId, DateTime startTime, DateTime endTime, CancellationToken cancellationToken = default)
-            => _context.MentorAvailabilities.AnyAsync(x => x.MentorId == mentorId && !x.IsDeleted && x.RejectedAt == null
-                && x.StartTime < endTime && startTime < x.EndTime, cancellationToken);
+        public async Task<bool> HasOverlappingSlotAsync(int mentorId, DateTime startTime, DateTime endTime, CancellationToken cancellationToken = default)
+            => await _context.MentorAvailabilities.AnyAsync(x => x.MentorId == mentorId && !x.IsDeleted && x.RejectedAt == null
+                && x.StartTime < endTime && startTime < x.EndTime, cancellationToken)
+                || await _context.StudyCourses.AnyAsync(c => c.Status == "Active" && c.MentorId == mentorId
+                    && c.Sessions.Any(s => s.Status == "Scheduled" && s.ScheduledAt < endTime
+                        && s.ScheduledAt.AddMinutes(c.SessionMinutes) > startTime), cancellationToken);
 
         // Phòng họp theo RoomId của lịch (hub dùng để kiểm tra quyền vào phòng).
         public Task<MentorAvailability?> GetMeetingByRoomIdAsync(Guid roomId, CancellationToken cancellationToken = default)
