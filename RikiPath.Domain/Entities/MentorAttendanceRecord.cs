@@ -5,7 +5,9 @@ namespace RikiPath.Domain.Entities;
 public sealed class MentorAttendanceRecord
 {
     public int Id { get; set; }
-    public int MentorBookingId { get; set; }
+    public int? MentorBookingId { get; set; }
+    public int? CourseSessionId { get; set; }
+    public StudyCourseSession? CourseSession { get; set; }
     public MentorBooking MentorBooking { get; set; } = null!;
     public Guid RoomId { get; set; }
     public int UserId { get; set; }

@@ -84,6 +84,9 @@ namespace RikiPath.Application
         IContentAiReviewRepository ContentAiReviews { get; }
         IStudyCourseRepository StudyCourses { get; }
         IGenericRepository<StudyCoursePlan> StudyCoursePlans { get; }
+        IGenericRepository<StudyCohort> StudyCohorts { get; }
+        IGenericRepository<CourseScheduleRequest> CourseScheduleRequests { get; }
+        IGenericRepository<JlptExamSchedule> JlptExamSchedules { get; }
 
         // Db Helpers
         Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);

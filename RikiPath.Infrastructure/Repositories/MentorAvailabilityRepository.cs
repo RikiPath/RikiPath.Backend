@@ -19,6 +19,8 @@ namespace RikiPath.Infrastructure.Repositories
             IQueryable<MentorAvailability> query = _context.MentorAvailabilities
                 .Where(x => x.IsApproved && x.RejectedAt == null
                     && x.MaxLearners == 1 && x.BookedCount < x.MaxLearners && !x.IsDeleted
+                    && x.ChangeRequestedAt == null
+                    && !_context.StudyCohorts.Any(c => c.Sessions.Any(s => s.AvailabilityId == x.Id))
                     && x.StartTime >= from && x.EndTime <= to
                     && x.StartTime > DateTime.UtcNow && x.Mentor != null && !x.Mentor.IsDeleted && x.Mentor.Role == Role.Mentor
                     && (x.PolicyVersion != null ? (x.Mentor.MentorProfile != null && x.Mentor.MentorProfile.VerificationStatus == MentorVerificationStatus.Approved) : (x.Mentor.MentorProfile == null || x.Mentor.MentorProfile.VerificationStatus == MentorVerificationStatus.Approved)));
@@ -34,6 +36,8 @@ namespace RikiPath.Infrastructure.Repositories
                 .ThenInclude(m => m!.MentorProfile)
                 .FirstOrDefaultAsync(x => x.Id == id && !x.IsDeleted
                     && x.IsApproved && x.RejectedAt == null && x.MaxLearners == 1 && x.BookedCount < x.MaxLearners
+                    && x.ChangeRequestedAt == null
+                    && !_context.StudyCohorts.Any(c => c.Sessions.Any(s => s.AvailabilityId == x.Id))
                     && x.StartTime > after
                     && x.Mentor != null && !x.Mentor.IsDeleted && x.Mentor.Role == Role.Mentor
                     && (x.PolicyVersion != null ? (x.Mentor.MentorProfile != null && x.Mentor.MentorProfile.VerificationStatus == MentorVerificationStatus.Approved) : (x.Mentor.MentorProfile == null || x.Mentor.MentorProfile.VerificationStatus == MentorVerificationStatus.Approved)), cancellationToken);

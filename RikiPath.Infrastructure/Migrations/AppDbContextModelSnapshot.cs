@@ -966,6 +966,57 @@ namespace RikiPath.Infrastructure.Migrations
                     b.ToTable("CourseRetakeRequests", (string)null);
                 });
 
+            modelBuilder.Entity("RikiPath.Domain.Entities.CourseScheduleRequest", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("CourseId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("RequestedById")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Response")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("ReviewedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("ReviewedById")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("SessionId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Status")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CourseId", "SessionId")
+                        .IsUnique()
+                        .HasFilter("\"Status\" = 'Pending'");
+
+                    b.ToTable("CourseScheduleRequests", (string)null);
+                });
+
             modelBuilder.Entity("RikiPath.Domain.Entities.EmailVerification", b =>
                 {
                     b.Property<int>("Id")
@@ -1314,6 +1365,56 @@ namespace RikiPath.Infrastructure.Migrations
                     b.HasIndex("LessonId");
 
                     b.ToTable("HomeworkSubmissions");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.JlptExamSchedule", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateOnly>("ExamDate")
+                        .HasColumnType("date");
+
+                    b.Property<DateTime>("ImportedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("Location")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("ReviewNote")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("ReviewedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("ReviewedById")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("SourceKey")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("SourceUrl")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Status")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SourceKey")
+                        .IsUnique();
+
+                    b.ToTable("JlptExamSchedules", (string)null);
                 });
 
             modelBuilder.Entity("RikiPath.Domain.Entities.JlptLevelPayCoefficient", b =>
@@ -3302,6 +3403,9 @@ namespace RikiPath.Infrastructure.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
+                    b.Property<int?>("CourseSessionId")
+                        .HasColumnType("integer");
+
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("timestamp without time zone");
 
@@ -3317,7 +3421,7 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Property<DateTime?>("LeftAtUtc")
                         .HasColumnType("timestamp without time zone");
 
-                    b.Property<int>("MentorBookingId")
+                    b.Property<int?>("MentorBookingId")
                         .HasColumnType("integer");
 
                     b.Property<int>("ReconnectionCount")
@@ -3345,6 +3449,8 @@ namespace RikiPath.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("CourseSessionId");
+
                     b.HasIndex("RoomId")
                         .HasDatabaseName("IX_MentorAttendanceRecords_RoomId");
 
@@ -3357,6 +3463,10 @@ namespace RikiPath.Infrastructure.Migrations
                     b.HasIndex("MentorBookingId", "UserId")
                         .IsUnique()
                         .HasDatabaseName("IX_MentorAttendanceRecords_Booking_User");
+
+                    b.HasIndex("RoomId", "UserId")
+                        .IsUnique()
+                        .HasFilter("\"MentorBookingId\" IS NULL");
 
                     b.ToTable("MentorAttendanceRecords", null, t =>
                         {
@@ -3978,6 +4088,44 @@ namespace RikiPath.Infrastructure.Migrations
 
                             t.HasCheckConstraint("CK_MentorBookingTerms_PolicyVersion", "\"PolicyVersion\" > 0");
                         });
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.MentorCalendarConnection", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime?>("LastSyncedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int>("MentorId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ProtectedRefreshToken")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("StateExpiresAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("StateHash")
+                        .HasColumnType("text");
+
+                    b.Property<string>("SyncedEventsJson")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MentorId")
+                        .IsUnique();
+
+                    b.HasIndex("StateHash")
+                        .IsUnique();
+
+                    b.ToTable("MentorCalendarConnections", (string)null);
                 });
 
             modelBuilder.Entity("RikiPath.Domain.Entities.MentorChatMessage", b =>
@@ -5335,6 +5483,11 @@ namespace RikiPath.Infrastructure.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("integer");
 
+                    b.Property<bool>("IsPlacementAssessment")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
                     b.Property<int>("CertificateLevelId")
@@ -6238,6 +6391,79 @@ namespace RikiPath.Infrastructure.Migrations
                     b.ToTable("ReviewHistories");
                 });
 
+            modelBuilder.Entity("RikiPath.Domain.Entities.StudyCohort", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("Capacity")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("EndsAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int>("MentorId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<int>("PlanId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Revision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("StartsAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MentorId");
+
+                    b.HasIndex("PlanId");
+
+                    b.ToTable("StudyCohorts", (string)null);
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.StudyCohortSession", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("AvailabilityId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("CohortId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Number")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AvailabilityId")
+                        .IsUnique();
+
+                    b.HasIndex("CohortId", "Number")
+                        .IsUnique();
+
+                    b.ToTable("StudyCohortSessions", (string)null);
+                });
+
             modelBuilder.Entity("RikiPath.Domain.Entities.StudyCourse", b =>
                 {
                     b.Property<int>("Id")
@@ -6255,6 +6481,9 @@ namespace RikiPath.Infrastructure.Migrations
 
                     b.Property<string>("CheckoutUrl")
                         .HasColumnType("text");
+
+                    b.Property<int?>("CohortId")
+                        .HasColumnType("integer");
 
                     b.Property<DateTime?>("CompletedAt")
                         .HasColumnType("timestamp without time zone");
@@ -6313,6 +6542,12 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Property<int>("SessionMinutes")
                         .HasColumnType("integer");
 
+                    b.Property<string>("SessionType")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text")
+                        .HasDefaultValue("Individual");
+
                     b.Property<int>("SessionsPerWeek")
                         .HasColumnType("integer");
 
@@ -6323,12 +6558,17 @@ namespace RikiPath.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<DateTime?>("TargetExamDate")
+                        .HasColumnType("timestamp without time zone");
+
                     b.Property<int>("TotalSessions")
                         .HasColumnType("integer");
 
                     b.HasKey("Id");
 
                     b.HasIndex("CertificateLevelId");
+
+                    b.HasIndex("CohortId");
 
                     b.HasIndex("MentorId");
 
@@ -6400,6 +6640,11 @@ namespace RikiPath.Infrastructure.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
+                    b.Property<int>("Capacity")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(1);
+
                     b.Property<int>("CertificateLevelId")
                         .HasColumnType("integer");
 
@@ -6428,8 +6673,17 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Property<int?>("SessionMinutes")
                         .HasColumnType("integer");
 
+                    b.Property<string>("SessionType")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text")
+                        .HasDefaultValue("Individual");
+
                     b.Property<int>("SessionsPerWeek")
                         .HasColumnType("integer");
+
+                    b.Property<DateTime?>("TargetExamDate")
+                        .HasColumnType("timestamp without time zone");
 
                     b.Property<int?>("TotalSessions")
                         .HasColumnType("integer");
@@ -6450,6 +6704,9 @@ namespace RikiPath.Infrastructure.Migrations
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
                     b.Property<int>("Attempt")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("AvailabilityId")
                         .HasColumnType("integer");
 
                     b.Property<DateTime?>("ConfirmedAt")
@@ -6480,6 +6737,8 @@ namespace RikiPath.Infrastructure.Migrations
                         .HasColumnType("character varying(30)");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("AvailabilityId");
 
                     b.HasIndex("CourseId", "Number", "Attempt")
                         .IsUnique();
@@ -7415,6 +7674,17 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Navigation("Course");
                 });
 
+            modelBuilder.Entity("RikiPath.Domain.Entities.CourseScheduleRequest", b =>
+                {
+                    b.HasOne("RikiPath.Domain.Entities.StudyCourse", "Course")
+                        .WithMany()
+                        .HasForeignKey("CourseId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Course");
+                });
+
             modelBuilder.Entity("RikiPath.Domain.Entities.EmailVerification", b =>
                 {
                     b.HasOne("RikiPath.Domain.Entities.UserAccount", "User")
@@ -7777,17 +8047,23 @@ namespace RikiPath.Infrastructure.Migrations
 
             modelBuilder.Entity("RikiPath.Domain.Entities.MentorAttendanceRecord", b =>
                 {
+                    b.HasOne("RikiPath.Domain.Entities.StudyCourseSession", "CourseSession")
+                        .WithMany()
+                        .HasForeignKey("CourseSessionId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("RikiPath.Domain.Entities.MentorBooking", "MentorBooking")
                         .WithMany()
                         .HasForeignKey("MentorBookingId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Cascade);
 
                     b.HasOne("RikiPath.Domain.Entities.UserAccount", "UserAccount")
                         .WithMany()
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.Navigation("CourseSession");
 
                     b.Navigation("MentorBooking");
 
@@ -7943,6 +8219,17 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Navigation("MentorAvailability");
 
                     b.Navigation("MentorBooking");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.MentorCalendarConnection", b =>
+                {
+                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "Mentor")
+                        .WithMany()
+                        .HasForeignKey("MentorId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Mentor");
                 });
 
             modelBuilder.Entity("RikiPath.Domain.Entities.MentorChatMessage", b =>
@@ -8672,6 +8959,44 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Navigation("ReviewCard");
                 });
 
+            modelBuilder.Entity("RikiPath.Domain.Entities.StudyCohort", b =>
+                {
+                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "Mentor")
+                        .WithMany()
+                        .HasForeignKey("MentorId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("RikiPath.Domain.Entities.StudyCoursePlan", "Plan")
+                        .WithMany()
+                        .HasForeignKey("PlanId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Mentor");
+
+                    b.Navigation("Plan");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.StudyCohortSession", b =>
+                {
+                    b.HasOne("RikiPath.Domain.Entities.MentorAvailability", "Availability")
+                        .WithMany()
+                        .HasForeignKey("AvailabilityId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("RikiPath.Domain.Entities.StudyCohort", "Cohort")
+                        .WithMany("Sessions")
+                        .HasForeignKey("CohortId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Availability");
+
+                    b.Navigation("Cohort");
+                });
+
             modelBuilder.Entity("RikiPath.Domain.Entities.StudyCourse", b =>
                 {
                     b.HasOne("RikiPath.Domain.Entities.CertificateLevel", "CertificateLevel")
@@ -8679,6 +9004,11 @@ namespace RikiPath.Infrastructure.Migrations
                         .HasForeignKey("CertificateLevelId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.HasOne("RikiPath.Domain.Entities.StudyCohort", "Cohort")
+                        .WithMany("Enrollments")
+                        .HasForeignKey("CohortId")
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("RikiPath.Domain.Entities.UserAccount", "Learner")
                         .WithMany()
@@ -8703,6 +9033,8 @@ namespace RikiPath.Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.Restrict);
 
                     b.Navigation("CertificateLevel");
+
+                    b.Navigation("Cohort");
 
                     b.Navigation("Learner");
 
@@ -8737,11 +9069,18 @@ namespace RikiPath.Infrastructure.Migrations
 
             modelBuilder.Entity("RikiPath.Domain.Entities.StudyCourseSession", b =>
                 {
+                    b.HasOne("RikiPath.Domain.Entities.MentorAvailability", "Availability")
+                        .WithMany()
+                        .HasForeignKey("AvailabilityId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("RikiPath.Domain.Entities.StudyCourse", "Course")
                         .WithMany("Sessions")
                         .HasForeignKey("CourseId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.Navigation("Availability");
 
                     b.Navigation("Course");
                 });
@@ -9024,6 +9363,13 @@ namespace RikiPath.Infrastructure.Migrations
             modelBuilder.Entity("RikiPath.Domain.Entities.ReviewCard", b =>
                 {
                     b.Navigation("ReviewHistories");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.StudyCohort", b =>
+                {
+                    b.Navigation("Enrollments");
+
+                    b.Navigation("Sessions");
                 });
 
             modelBuilder.Entity("RikiPath.Domain.Entities.StudyCourse", b =>

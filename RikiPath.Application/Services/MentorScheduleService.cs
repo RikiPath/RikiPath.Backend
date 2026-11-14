@@ -138,6 +138,9 @@ public sealed class MentorScheduleService(IUnitOfWork uow, IClaimService claims,
         var slot = await uow.MentorAvailabilities.Query().Include(x => x.Mentor).Include(x => x.MentorBookings).ThenInclude(x => x.UserSubscription).ThenInclude(x => x.UserAccount)
             .FirstOrDefaultAsync(x => x.Id == slotId && !x.IsDeleted, ct);
         if (slot is null || slot.StartTime <= DateTime.UtcNow) return Fail("Không tìm thấy tiết tương lai.");
+        if (request.CancelSlot && await uow.StudyCourses.AnyAsync(c => c.PaymentStatus == "Paid"
+            && c.Sessions.Any(s => s.AvailabilityId == slotId && s.Status == "Scheduled"), ct))
+            return Fail("Buổi đã thuộc khóa học. Xử lý qua yêu cầu hủy/dời trong mục Ngoại lệ để cập nhật học viên và lịch chung.");
         if (request.CancelSlot && slot.MentorBookings.Any(b => b.Status == MentorStatus.AwaitingPayment
             && b.UserSubscription.PaymentStatus == PaymentStatus.Pending && b.UserSubscription.PaymentExpiresAt > DateTime.UtcNow))
             return Fail("Tiết đang được giữ trong lúc thanh toán. Chờ tối đa 15 phút rồi kiểm tra lại trước khi hủy.");

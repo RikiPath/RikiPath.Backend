@@ -10,6 +10,12 @@ namespace RikiPath.WebApi.Controllers;
 [Authorize(Roles = "Admin")]
 public sealed class AdminMentorAvailabilityController(IMentorMeetingService service, IMentorAvailabilityReviewService reviewService) : ControllerBase
 {
+    [HttpPost("{id:int}/split")]
+    public async Task<IActionResult> Split(int id, SplitMentorAvailabilityRequest request, CancellationToken ct)
+    {
+        var response = await reviewService.SplitAsync(id, request.SessionMinutes, ct);
+        return StatusCode(response.StatusCode, response);
+    }
     [HttpGet("pending")]
     public async Task<IActionResult> GetPendingAvailabilities(CancellationToken cancellationToken)
         => ToActionResult(await service.GetPendingAvailabilitiesAsync(cancellationToken));
@@ -58,3 +64,4 @@ public sealed class ReviewMentorAvailabilityRequest
     [System.ComponentModel.DataAnnotations.MaxLength(1000)]
     public string? Reason { get; init; }
 }
+public sealed record SplitMentorAvailabilityRequest(int SessionMinutes);

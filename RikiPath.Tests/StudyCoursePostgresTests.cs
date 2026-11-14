@@ -32,8 +32,12 @@ public sealed class StudyCoursePostgresTests
         try
         {
             await using var db = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>().UseNpgsql(connectionString).Options);
-            var migration = new AddStudyCoursesAndRetakePolicy();
-            var statements = db.GetService<IMigrationsSqlGenerator>().Generate(migration.UpOperations, db.Model);
+            await using (var prerequisites = new NpgsqlCommand("CREATE TABLE \"MentorAvailabilities\" (\"Id\" integer PRIMARY KEY); CREATE TABLE \"MentorAttendanceRecords\" (\"Id\" integer PRIMARY KEY, \"MentorBookingId\" integer NOT NULL, \"RoomId\" uuid NOT NULL, \"UserId\" integer NOT NULL);", connection))
+                await prerequisites.ExecuteNonQueryAsync();
+            // The current EF model includes cohort fields, so apply both course migrations.
+            var operations = new AddStudyCoursesAndRetakePolicy().UpOperations
+                .Concat(new MentorCohortsAndExamDrafts().UpOperations).ToList();
+            var statements = db.GetService<IMigrationsSqlGenerator>().Generate(operations, db.Model);
             foreach (var sql in statements)
             {
                 Assert.DoesNotContain("DROP COLUMN", sql.CommandText, StringComparison.OrdinalIgnoreCase);

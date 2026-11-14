@@ -590,10 +590,49 @@ public sealed class MentorMeetingService(
         }
     }
 
-    public Task<ApiResponse<List<MentorAvailabilityResponse>>> CreateAvailabilityAsync(
+    public async Task<ApiResponse<List<MentorAvailabilityResponse>>> CreateAvailabilityAsync(
         CreateMentorAvailabilityRequest request, CancellationToken cancellationToken = default)
-        => Task.FromResult(ApiResponse<List<MentorAvailabilityResponse>>.Fail(
-            "Vui lòng đăng ký lịch tư vấn hằng tuần trước khi tạo khung giờ.", HttpStatusCode.Conflict));
+    {
+        var actor = claimService.GetUserClaim();
+        if (actor.Role != Role.Mentor) return ApiResponse<List<MentorAvailabilityResponse>>.Fail("Chỉ Mentor được đăng ký lịch rảnh.", HttpStatusCode.Forbidden);
+        if (request.StartTime.Kind != DateTimeKind.Utc || request.EndTime.Kind != DateTimeKind.Utc
+            || request.StartTime <= DateTime.UtcNow || request.EndTime <= request.StartTime
+            || request.EndTime - request.StartTime > TimeSpan.FromHours(8)
+            || request.StartTime.AddHours(7).Date != request.EndTime.AddTicks(-1).AddHours(7).Date)
+            return ApiResponse<List<MentorAvailabilityResponse>>.Fail("Chọn giờ rảnh trong tương lai, cùng ngày, tối đa 8 giờ và có múi giờ UTC.");
+        var startDate = DateOnly.FromDateTime(request.StartTime.AddHours(7));
+        var until = request.RepeatUntil ?? startDate;
+        var days = request.Weekdays;
+        if (until < startDate || until > startDate.AddDays(366)
+            || (request.RepeatUntil.HasValue && (days is null || days.Count == 0 || days.Any(x => !Enum.IsDefined(x)))))
+            return ApiResponse<List<MentorAvailabilityResponse>>.Fail("Chọn ngày lặp và hạn kết thúc tối đa một năm.");
+        var rows = new List<MentorAvailability>();
+        for (var day = startDate; day <= until; day = day.AddDays(1))
+            if (!request.RepeatUntil.HasValue || days!.Contains(day.DayOfWeek))
+            {
+                var delta = day.DayNumber - startDate.DayNumber;
+                rows.Add(new() { MentorId = actor.Id, StartTime = request.StartTime.AddDays(delta),
+                    EndTime = request.EndTime.AddDays(delta), MaxLearners = 1, IsApproved = false });
+            }
+        if (rows.Count == 0 || rows.Count > 500) return ApiResponse<List<MentorAvailabilityResponse>>.Fail("Không có ngày phù hợp hoặc quá nhiều buổi.");
+        try { return await CreateRows(); }
+        catch (AvailabilityOverlapException) { return ApiResponse<List<MentorAvailabilityResponse>>.Fail("Có ngày/giờ trùng lịch; chưa lưu đăng ký nào.", HttpStatusCode.Conflict); }
+        async Task<ApiResponse<List<MentorAvailabilityResponse>>> CreateRows()
+        {
+            await unitOfWork.ExecuteInTransactionAsync(async token =>
+            {
+                await unitOfWork.StudyCourses.LockScheduleAsync(actor.Id, actor.Id, token);
+                foreach (var slot in rows)
+                    if (await unitOfWork.MentorAvailabilities.HasOverlappingSlotAsync(actor.Id, slot.StartTime, slot.EndTime, token))
+                        throw new AvailabilityOverlapException();
+                await unitOfWork.MentorAvailabilities.AddRangeAsync(rows, token);
+                await unitOfWork.SaveChangesAsync(token);
+            }, cancellationToken);
+            return ApiResponse<List<MentorAvailabilityResponse>>.Success(rows.Select(MapAvailability).ToList());
+        }
+    }
+    private sealed class AvailabilityOverlapException : Exception;
+
 
     public async Task<ApiResponse<bool>> DeleteAvailabilityAsync(int id, CancellationToken cancellationToken)
     {
@@ -605,8 +644,8 @@ public sealed class MentorMeetingService(
                 return ApiResponse<bool>.Fail("Không tìm thấy khung giờ.", HttpStatusCode.NotFound);
             if (slot.MentorId != claims.Id && claims.Role != Role.Admin)
                 return ApiResponse<bool>.Fail("Bạn không có quyền xóa khung giờ này.", HttpStatusCode.Forbidden);
-            if (slot.BookedCount > 0)
-                return ApiResponse<bool>.Fail("Không thể xóa khung giờ đã có người đặt.", HttpStatusCode.BadRequest);
+            if (slot.IsApproved || slot.BookedCount > 0)
+                return ApiResponse<bool>.Fail("Lịch đã duyệt phải gửi yêu cầu điều chỉnh/hủy để Admin xem xét.", HttpStatusCode.Conflict);
 
             slot.IsDeleted = true;
             await unitOfWork.SaveChangesAsync(cancellationToken);
@@ -642,6 +681,8 @@ public sealed class MentorMeetingService(
             if (slots.Count != ids.Count)
                 return ApiResponse<List<MentorAvailabilityResponse>>.Fail("Có khung giờ không tồn tại.", HttpStatusCode.NotFound);
 
+            if (await unitOfWork.StudyCohorts.AnyAsync(c => c.Sessions.Any(s => ids.Contains(s.AvailabilityId)), cancellationToken))
+                return ApiResponse<List<MentorAvailabilityResponse>>.Fail("Lịch thuộc lớp nhóm; gửi yêu cầu trong hồ sơ khóa học để xử lý đúng phạm vi.", HttpStatusCode.Conflict);
             var now = DateTime.UtcNow;
             if (slots.Any(x => x.CancelRequestedAt is not null))
                 return ApiResponse<List<MentorAvailabilityResponse>>.Fail("Có khung giờ đang chờ quản trị viên duyệt hủy.", HttpStatusCode.Conflict);

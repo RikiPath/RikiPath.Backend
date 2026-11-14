@@ -15,7 +15,7 @@ public sealed class MentorMeetingHub(
     IMeetingNoteService meetingNoteService,
     IMentorAttendanceService? attendanceService = null) : Hub
 {
-    private const int MaxLearners = 5;
+
 
     // Trạng thái nội bộ của hub phục vụ WebRTC mesh
     private sealed record Joined(Guid RoomId, int UserId, bool IsMentor, string Name);
@@ -47,8 +47,8 @@ public sealed class MentorMeetingHub(
         lock (RoomLock)
         {
             var learnerCount = JoinedRooms.Count(x => x.Value.RoomId == roomId && !x.Value.IsMentor && x.Key != Context.ConnectionId);
-            if (!isMentor && learnerCount >= MaxLearners)
-                throw new HubException($"Phòng đã đủ {MaxLearners} học viên.");
+            if (!isMentor && learnerCount >= meeting.Capacity)
+                throw new HubException($"Phòng đã đủ {meeting.Capacity} học viên.");
             isNewConnection = !JoinedRooms.ContainsKey(Context.ConnectionId);
             JoinedRooms[Context.ConnectionId] = me;
         }
