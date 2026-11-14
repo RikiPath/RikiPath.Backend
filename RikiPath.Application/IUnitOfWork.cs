@@ -82,6 +82,9 @@ namespace RikiPath.Application
         IContentApprovalRequestRepository ContentApprovalRequests { get; }
 
         IContentAiReviewRepository ContentAiReviews { get; }
+        IStudyCourseRepository StudyCourses { get; }
+        IGenericRepository<StudyCoursePlan> StudyCoursePlans { get; }
+
         // Db Helpers
         Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
         Task ExecuteInTransactionAsync(

@@ -327,6 +327,14 @@ public sealed class MentorBookingService : IMentorBookingService
             if (slot is null)
                 return ApiResponse<MentorBookingResponse>.Fail("Khung giờ không tồn tại.", HttpStatusCode.NotFound);
 
+            if (!isInMemory)
+                await _unitOfWork.StudyCourses.LockScheduleAsync(slot.MentorId, learnerId, cancellationToken);
+            if (await _context.StudyCourses.AnyAsync(c => c.Status == "Active"
+                && (c.MentorId == slot.MentorId || c.LearnerId == learnerId)
+                && c.Sessions.Any(s => s.Status == "Scheduled" && s.ScheduledAt < slot.EndTime
+                    && s.ScheduledAt.AddMinutes(c.SessionMinutes) > slot.StartTime), cancellationToken))
+                return ApiResponse<MentorBookingResponse>.Fail("Mentor hoặc học viên có lịch khóa học 1–1 trùng giờ này.", HttpStatusCode.Conflict);
+
             if (!slot.IsApproved || slot.RejectedAt is not null || slot.CancelRequestedAt is not null)
                 return ApiResponse<MentorBookingResponse>.Fail("Khung giờ chưa được phê duyệt hoặc đã bị hủy.", HttpStatusCode.Conflict);
 
