@@ -17,6 +17,8 @@ namespace RikiPath.Infrastructure.Configuration
             builder.Property(x => x.LearningMode).HasConversion<string>().HasMaxLength(20);
 
             builder.HasIndex(x => x.Email).IsUnique();
+            builder.HasIndex(x => x.GoogleSubject).IsUnique();
+            builder.Property(x => x.GoogleSubject).HasMaxLength(255).IsConcurrencyToken();
 
             builder.Property(x => x.FirstName).HasMaxLength(100);
             builder.Property(x => x.LastName).HasMaxLength(100);

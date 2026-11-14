@@ -24,7 +24,7 @@ namespace RikiPath.Application.Handlers
             page = Math.Max(page, 1);
             pageSize = Math.Clamp(pageSize, 1, 200);
 
-            var query = unitOfWork.ContentApprovalRequests.Query().Where(x => !x.IsDeleted);
+            var query = unitOfWork.ContentApprovalRequests.Query().Where(x => !x.IsDeleted && x.Status != ContentApprovalStatus.Draft);
             if (status.HasValue) query = query.Where(x => x.Status == status.Value);
             if (entityType.HasValue) query = query.Where(x => x.EntityType == entityType.Value);
             if (batchId.HasValue) query = query.Where(x => x.BatchId == batchId.Value);
@@ -49,7 +49,7 @@ namespace RikiPath.Application.Handlers
         public async Task<ContentApprovalDetailResponse?> GetDetailAsync(int id, CancellationToken cancellationToken)
         {
             var request = await unitOfWork.ContentApprovalRequests.Query()
-                .FirstOrDefaultAsync(x => x.Id == id && !x.IsDeleted, cancellationToken);
+                .FirstOrDefaultAsync(x => x.Id == id && !x.IsDeleted && x.Status != ContentApprovalStatus.Draft, cancellationToken);
             if (request is null) return null;
 
             var details = await BuildDetailsAsync(new List<ApprovalRequest> { request }, cancellationToken);
@@ -60,7 +60,7 @@ namespace RikiPath.Application.Handlers
         public async Task<ContentApprovalBatchResponse?> GetBatchAsync(Guid batchId, CancellationToken cancellationToken)
         {
             var requests = await unitOfWork.ContentApprovalRequests.Query()
-                .Where(x => x.BatchId == batchId && !x.IsDeleted)
+                .Where(x => x.BatchId == batchId && !x.IsDeleted && x.Status != ContentApprovalStatus.Draft)
                 .OrderBy(x => x.EntityType).ThenBy(x => x.SourceRowNumber).ThenBy(x => x.Id)
                 .ToListAsync(cancellationToken);
             if (requests.Count == 0) return null;

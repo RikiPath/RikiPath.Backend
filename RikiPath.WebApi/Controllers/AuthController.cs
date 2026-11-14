@@ -108,6 +108,15 @@ namespace RikiPath.WebApi.Controllers
             return StatusCode((int)result.StatusCode, result);
         }
 
+        [AllowAnonymous]
+        [HttpPost("google")]
+        [Consumes("application/json")]
+        public async Task<IActionResult> ContinueWithGoogle([FromBody] GoogleAuthRequest request, CancellationToken cancellationToken)
+        {
+            var result = await authService.ContinueWithGoogleAsync(request, cancellationToken);
+            return StatusCode(result.StatusCode, result);
+        }
+
         /// <summary>
         /// Đăng nhập bằng số điện thoại qua Firebase Auth và nhận JWT token hệ thống.
         /// </summary>

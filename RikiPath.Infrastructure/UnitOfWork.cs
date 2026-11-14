@@ -23,6 +23,7 @@ namespace RikiPath.Infrastructure
 
         // 3. Lessons & Learning Progress
         public ILessonRepository Lessons { get; }
+        public ITopicRepository Topics { get; }
         public ILessonProgressRepository LessonProgresses { get; }
 
         // 4. Content Banks
@@ -95,6 +96,7 @@ namespace RikiPath.Infrastructure
             LanguageSkills = new LanguageSkillRepository(_context);
 
             Lessons = new LessonRepository(_context);
+            Topics = new TopicRepository(_context);
             LessonProgresses = new LessonProgressRepository(_context);
 
             Kanjis = new KanjiRepository(_context);
@@ -177,6 +179,39 @@ namespace RikiPath.Infrastructure
                     throw;
                 }
             });
+        }
+
+        public Task ExecuteContentAuthorWriteAsync(int authorId, Func<CancellationToken, Task> operation, CancellationToken cancellationToken)
+        {
+            if (!_context.Database.IsNpgsql())
+                return operation(cancellationToken);
+
+            return ExecuteInTransactionAsync(async token =>
+            {
+                await UserAccounts.GetByIdForUpdateAsync(authorId, token);
+                await operation(token);
+            }, cancellationToken);
+        }
+
+        public Task ExecuteLessonTopicApprovalAsync(Func<CancellationToken, Task> operation, CancellationToken cancellationToken)
+        {
+            if (!_context.Database.IsNpgsql())
+                return operation(cancellationToken);
+
+            return ExecuteInTransactionAsync(async token =>
+            {
+                try
+                {
+                    // Keep finding or creating a topic serialized until the lesson and approval are committed.
+                    await _context.Database.ExecuteSqlRawAsync("""LOCK TABLE "Topics" IN SHARE ROW EXCLUSIVE MODE""", token);
+                    await operation(token);
+                }
+                catch
+                {
+                    _context.ChangeTracker.Clear();
+                    throw;
+                }
+            }, cancellationToken);
         }
 
         public async Task<T> ExecuteScalarAsync<T>(string sql)

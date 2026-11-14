@@ -1,8 +1,11 @@
-namespace RikiPath.Application.Responses.PracticeExercises;
+﻿namespace RikiPath.Application.Responses.PracticeExercises;
 
 public class PracticeExerciseSummaryResponse
 {
     public int Id { get; set; }
+    public int PracticeExerciseId => Id;
+    public double MinimumPassingScorePercent { get; set; } = 70;
+    public bool Passed { get; set; }
     public int LessonId { get; set; }
     public string Title { get; set; } = string.Empty;
     public string? Description { get; set; }

@@ -1,5 +1,6 @@
 ﻿using RikiPath.Application.IServices;
 using RikiPath.Application.Responses.MentorMeetings;
+using Microsoft.EntityFrameworkCore;
 using RikiPath.Domain.Entities;
 using RikiPath.Domain.Enums;
 using System.Collections.Concurrent;
@@ -92,6 +93,20 @@ namespace RikiPath.Application.Services
                 Mentor = mentor,
                 Learners = learners
             };
+        }
+
+        public async Task RecordAttendanceAsync(Guid roomId, int mentorId, int[] learnerIds,
+            CancellationToken cancellationToken)
+        {
+            if (learnerIds.Length == 0) return;
+            var now = DateTime.UtcNow;
+            var latestStart = now.AddMinutes(10);
+            await HomeworkService.ScheduledBookings(unitOfWork)
+                .Where(booking => booking.AttendedAt == null && booking.MentorAvailability!.RoomId == roomId &&
+                    booking.MentorAvailability.AttendanceTrackingEnabled &&
+                    booking.MentorAvailability.MentorId == mentorId && booking.MentorAvailability.StartTime <= latestStart &&
+                    booking.MentorAvailability.EndTime > now && learnerIds.Contains(booking.UserSubscription.UserId))
+                .ExecuteUpdateAsync(setters => setters.SetProperty(booking => booking.AttendedAt, now), cancellationToken);
         }
 
         /// <summary>Hub gọi khi có 1 connection mới vào phòng (đếm người để biết khi nào phòng trống).</summary>

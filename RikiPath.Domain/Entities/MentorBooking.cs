@@ -20,6 +20,7 @@ namespace RikiPath.Domain.Entities
         /// <summary>Filled when the learner books: URL that contains the slot's RoomId.</summary>
         public string? MeetingLink { get; set; }
         public DateTime? CompletedAt { get; set; }
+        public DateTime? AttendedAt { get; set; }
 
         public Note? Note { get; set; }
     }

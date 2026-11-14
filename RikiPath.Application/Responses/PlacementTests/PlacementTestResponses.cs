@@ -1,5 +1,6 @@
 using System.Text.Json.Serialization;
 using RikiPath.Application.Responses.MockTests;
+using RikiPath.Application.Responses.LearningPaths;
 
 namespace RikiPath.Application.Responses.PlacementTests
 {
@@ -52,7 +53,10 @@ namespace RikiPath.Application.Responses.PlacementTests
         [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
         public DateTime? TargetExamDate { get; set; }
 
+        public bool RequiresMiniAssessment => false;
+
         public bool IsReadyForLearningPath { get; set; }
+        public bool IsComprehensiveAssessmentRequired => false;
     }
 
     public class PlacementAttemptSnapshotResponse
@@ -65,6 +69,10 @@ namespace RikiPath.Application.Responses.PlacementTests
         public DateTime ExpiresAt { get; set; }
         public DateTime ServerNow { get; set; }
         public int TimeLimitMinutes { get; set; }
+        public int? ParentAssessmentAttemptId { get; set; }
+        public bool IsMiniAssessment => ParentAssessmentAttemptId.HasValue;
+        public bool IsComprehensiveAssessment { get; set; }
+        public bool IsShortenedAssessment { get; set; }
         public int TotalQuestions { get; set; }
         public List<PlacementTestQuestionResponse> Questions { get; set; } = [];
     }
@@ -87,6 +95,9 @@ namespace RikiPath.Application.Responses.PlacementTests
 
         /// <summary>Last saved learner choice; null if unanswered.</summary>
         public int? SelectedOptionId { get; set; }
+        public string QuestionType { get; set; } = "SingleChoice";
+        public System.Text.Json.JsonElement? InteractionData { get; set; }
+        public System.Text.Json.JsonElement? Response { get; set; }
 
         [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
         public string? AudioUrl { get; set; }
@@ -107,6 +118,7 @@ namespace RikiPath.Application.Responses.PlacementTests
     public class PlacementTestOptionResponse
     {
         public int OptionId { get; set; }
+        public string? ImageUrl { get; set; }
         public string Content { get; set; } = string.Empty;
         public int Order { get; set; }
     }
@@ -133,8 +145,29 @@ namespace RikiPath.Application.Responses.PlacementTests
         [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
         public DateTime? SubmittedAt { get; set; }
 
+        public int? AssessmentTargetLevelId { get; set; }
+        public int? ParentAssessmentAttemptId { get; set; }
+        public bool IsMiniAssessment => ParentAssessmentAttemptId.HasValue;
+        public bool IsComprehensiveAssessment { get; set; }
+        public bool IsShortenedAssessment { get; set; }
+        public bool RequiresMiniAssessment => false;
+        public string? ScreeningLevelName => AssessmentTargetLevelId is int targetId && !IsMiniAssessment && !IsComprehensiveAssessment
+            ? LevelBreakdowns.FirstOrDefault(level => level.JlptLevelId == targetId)?.JlptLevelName
+            : null;
+        public string? AssessmentMessage => ScreeningLevelName is { } level
+            ? TotalScore < 50
+                ? level == "N5"
+                    ? "Bạn có thể bắt đầu lộ trình N5 từ nền tảng, ưu tiên các kỹ năng còn yếu."
+                    : $"Lộ trình ôn {level} sẽ ưu tiên củng cố những kỹ năng còn yếu trước khi luyện đề."
+                : $"Bạn có thể lập lộ trình ôn {level} theo kết quả từng kỹ năng."
+            : null;
+
+        internal bool CanRetake { get; set; }
+        public string? FollowUpUnavailableReason { get; internal set; }
+        public string[] NextActions => CanRetake ? ["RETAKE_TARGET_ASSESSMENT"] : [];
         public double TotalScore { get; set; }
         public int CorrectCount { get; set; }
+        public int NotStudiedCount { get; set; }
         public int TotalQuestions { get; set; }
         public int AssessedJlptLevelId { get; set; }
         public string AssessedJlptLevelName { get; set; } = string.Empty;
@@ -143,5 +176,6 @@ namespace RikiPath.Application.Responses.PlacementTests
         public List<int> WrongQuestionIds { get; set; } = [];
         public List<PlacementLevelBreakdownItem> LevelBreakdowns { get; set; } = [];
         public List<SectionResultItem> Sections { get; set; } = [];
+        public List<LearningPathSectionAssessmentResponse> SkillAssessments { get; set; } = [];
     }
 }

@@ -24,17 +24,32 @@ namespace RikiPath.Application.Services
         private const int MaxTextContentLength = 4000;
 
         private const string EssayGradingSystemPrompt = """
-            Bạn là giám khảo chấm bài luận tiếng Nhật (作文) cho người học luyện thi JLPT. Chỉ chấm dựa
-            trên bài làm và cấp độ mục tiêu được cung cấp; không bịa thêm thông tin ngoài bài làm.
+            Bạn chấm kỹ năng viết tiếng Nhật (作文) theo tiêu chí luyện viết của RikiPath. Chỉ đánh giá bài làm
+            theo đề và độ khó được cung cấp. Mã cấp độ chỉ dùng để điều chỉnh kỳ vọng về kỹ năng viết.
+            Không quy đổi điểm sang điểm thi JLPT hoặc suy luận khả năng đỗ.
             Chấm theo 5 tiêu chí, mỗi tiêu chí thang điểm 0-10: "Nội dung & ý tưởng", "Ngữ pháp",
             "Từ vựng", "Cấu trúc & bố cục", "Chính tả & cách dùng Kanji".
-            overallScore là điểm tổng quy đổi thang 0-100 (trung bình 5 tiêu chí nhân 2).
+            overallScore là điểm tổng quy đổi thang 0-100 (trung bình 5 tiêu chí nhân 10).
             Liệt kê cụ thể các lỗi tìm thấy trong corrections: original (câu/cụm gốc có lỗi),
             suggestion (cách sửa đề xuất), reason (giải thích ngắn gọn vì sao sai).
             Đưa ra nhận xét thẳng thắn, mang tính xây dựng, phù hợp trình độ người học.
             BẮT BUỘC: Toàn bộ nội dung (comment, strengths, improvements, reason...) viết 100% bằng
             TIẾNG VIỆT, không dùng tiếng Anh.
             Chỉ trả về một JSON object hợp lệ, không Markdown, đúng cấu trúc:
+            { "overallScore": number, "criteria": [ { "name": string, "score": number, "comment": string } ],
+              "strengths": string[], "improvements": string[],
+              "corrections": [ { "original": string, "suggestion": string, "reason": string } ] }
+            """;
+
+        private const string SpeakingGradingSystemPrompt = """
+            Bạn chấm kỹ năng nói tiếng Nhật theo tiêu chí luyện nói của RikiPath, dựa trên bản chép lời.
+            Mã cấp độ chỉ dùng để điều chỉnh kỳ vọng về kỹ năng nói.
+            Không quy đổi điểm sang điểm thi JLPT hoặc suy luận khả năng đỗ.
+            Đối chiếu câu mẫu hoặc đề bài nếu được cung cấp. Chấm mỗi tiêu chí từ 0-10:
+            Mức độ đáp ứng đề, Ngữ pháp, Từ vựng, Tính mạch lạc, Cách diễn đạt.
+            overallScore là trung bình điểm 5 tiêu chí nhân 10, trong khoảng 0-100.
+            Chỉ đánh giá nội dung thể hiện trong văn bản. Không suy đoán phát âm, ngữ điệu hoặc tốc độ nói.
+            Viết phản hồi tiếng Việt và trả một JSON object đúng cấu trúc:
             { "overallScore": number, "criteria": [ { "name": string, "score": number, "comment": string } ],
               "strengths": string[], "improvements": string[],
               "corrections": [ { "original": string, "suggestion": string, "reason": string } ] }
@@ -70,7 +85,7 @@ namespace RikiPath.Application.Services
                 await unitOfWork.PracticeSubmissions.AddAsync(submission, cancellationToken);
                 await unitOfWork.SaveChangesAsync(cancellationToken);
 
-                if (request.Type != SubmissionType.Writing)
+                if (!request.GradeWithAi || !SupportsAiGrading(submission))
                 {
                     return ApiResponse<SubmitPracticeResponse>.Success(new SubmitPracticeResponse
                     {
@@ -78,12 +93,14 @@ namespace RikiPath.Application.Services
                         Type = submission.Type,
                         SubmittedAt = submission.SubmittedAt,
                         Grading = null,
-                        GradingNote = $"Loại bài {submission.Type} chưa hỗ trợ chấm tự động.",
+                        GradingNote = request.GradeWithAi
+                            ? $"Loại bài {submission.Type} chưa có nội dung hỗ trợ chấm tự động."
+                            : null,
                     });
                 }
 
-                var (grading, gradingNote) = await GradeEssayAsync(
-                    userId, submission.TextContent!, level.Code, request.Topic, cancellationToken);
+                var (grading, gradingNote) = await GradeAsync(
+                    userId, submission.Type, submission.TextContent!, level.Code, request.Topic, cancellationToken);
 
                 if (grading is not null)
                 {
@@ -103,6 +120,7 @@ namespace RikiPath.Application.Services
                     SubmissionId = submission.Id,
                     Type = submission.Type,
                     SubmittedAt = submission.SubmittedAt,
+                    Transcript = submission.Type == SubmissionType.Speaking ? submission.TextContent : null,
                     Grading = grading,
                     GradingNote = gradingNote,
                 });
@@ -204,12 +222,12 @@ namespace RikiPath.Application.Services
                 if (submission.UserId != userId)
                     return ApiResponse<SubmitPracticeResponse>.Fail(
                         "Bạn không có quyền chấm lại bài này.", HttpStatusCode.Forbidden);
-                if (submission.Type != SubmissionType.Writing || string.IsNullOrWhiteSpace(submission.TextContent))
+                if (!SupportsAiGrading(submission))
                     return ApiResponse<SubmitPracticeResponse>.Fail(
                         $"Loại bài {submission.Type} chưa hỗ trợ chấm tự động.", HttpStatusCode.BadRequest);
 
-                var (grading, gradingNote) = await GradeEssayAsync(
-                    userId, submission.TextContent, submission.CertificateLevel?.Code ?? string.Empty,
+                var (grading, gradingNote) = await GradeAsync(
+                    userId, submission.Type, submission.TextContent!, submission.CertificateLevel?.Code ?? string.Empty,
                     topic: null, cancellationToken);
 
                 if (grading is not null)
@@ -239,6 +257,7 @@ namespace RikiPath.Application.Services
                     SubmissionId = submission.Id,
                     Type = submission.Type,
                     SubmittedAt = submission.SubmittedAt,
+                    Transcript = submission.Type == SubmissionType.Speaking ? submission.TextContent : null,
                     Grading = grading,
                     GradingNote = gradingNote,
                 });
@@ -255,10 +274,12 @@ namespace RikiPath.Application.Services
         // =====================================================================
         // AI GRADING PIPELINE
         // =====================================================================
-        private async Task<(GradingResultResponse? Grading, string? Note)> GradeEssayAsync(
-            int userId, string essayText, string certificateLevelCode, string? topic,
+        private async Task<(GradingResultResponse? Grading, string? Note)> GradeAsync(
+            int userId, SubmissionType type, string essayText, string certificateLevelCode, string? topic,
             CancellationToken cancellationToken)
         {
+            var systemPrompt = type == SubmissionType.Speaking
+                ? SpeakingGradingSystemPrompt : EssayGradingSystemPrompt;
             var userPrompt = BuildGradingUserPrompt(essayText, certificateLevelCode, topic);
             string? lastError = null;
 
@@ -274,7 +295,7 @@ namespace RikiPath.Application.Services
                 try
                 {
                     rawJson = StripCodeFence(await aiClient.GenerateGradingJsonAsync(
-                        userId, EssayGradingSystemPrompt, currentPrompt, cancellationToken));
+                        userId, systemPrompt, currentPrompt, cancellationToken));
                 }
                 catch (AiQuotaExceededException)
                 {
@@ -300,13 +321,17 @@ namespace RikiPath.Application.Services
         private static string BuildGradingUserPrompt(string essayText, string certificateLevelCode, string? topic)
         {
             var sb = new StringBuilder();
-            sb.AppendLine($"[CẤP ĐỘ MỤC TIÊU]: JLPT {certificateLevelCode}");
+            sb.AppendLine($"[ĐỘ KHÓ THAM CHIẾU CỦA BÀI LUYỆN]: {certificateLevelCode}");
             if (!string.IsNullOrWhiteSpace(topic))
                 sb.AppendLine($"[ĐỀ BÀI]: {topic.Trim()}");
             sb.AppendLine("\n[BÀI LÀM CỦA HỌC VIÊN]");
             sb.AppendLine(essayText);
             return sb.ToString();
         }
+
+        private static bool SupportsAiGrading(PracticeSubmission submission) =>
+            submission.Type is SubmissionType.Writing or SubmissionType.Speaking
+            && !string.IsNullOrWhiteSpace(submission.TextContent);
 
         private static string? ValidateSubmitRequest(SubmitPracticeRequest request)
         {
@@ -326,8 +351,10 @@ namespace RikiPath.Application.Services
                         return "Bài Kanji cần có ảnh (ImageUrl).";
                     break;
                 case SubmissionType.Speaking:
-                    if (string.IsNullOrWhiteSpace(request.AudioUrl))
-                        return "Bài Speaking cần có file ghi âm (AudioUrl).";
+                    if (string.IsNullOrWhiteSpace(request.AudioUrl) && string.IsNullOrWhiteSpace(request.TextContent))
+                        return "Bài nói cần có bản ghi âm hoặc bản chép lời.";
+                    if (request.TextContent?.Trim().Length > MaxTextContentLength)
+                        return $"Bản chép lời không được vượt quá {MaxTextContentLength} ký tự.";
                     break;
             }
             return null;

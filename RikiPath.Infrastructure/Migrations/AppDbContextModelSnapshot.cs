@@ -446,7 +446,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 1,
                             CertificateLevelId = 1,
                             Code = "N5_VOCAB",
-                            CreatedDate = new DateTime(2026, 11, 5, 7, 12, 34, 453, DateTimeKind.Utc).AddTicks(6122),
+                            CreatedDate = new DateTime(2026, 11, 9, 12, 6, 36, 635, DateTimeKind.Utc).AddTicks(8210),
                             Description = "Phần thi kiểm tra chữ Hán, cách đọc và từ vựng cấp độ N5",
                             IsDeleted = false,
                             MaxScore = 0,
@@ -459,7 +459,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 2,
                             CertificateLevelId = 1,
                             Code = "N5_GRAMMAR_READING",
-                            CreatedDate = new DateTime(2026, 11, 5, 7, 12, 34, 453, DateTimeKind.Utc).AddTicks(6127),
+                            CreatedDate = new DateTime(2026, 11, 9, 12, 6, 36, 635, DateTimeKind.Utc).AddTicks(8216),
                             Description = "Phần thi kiểm tra cấu trúc ngữ pháp và đọc hiểu đoạn văn ngắn cấp độ N5",
                             IsDeleted = false,
                             MaxScore = 0,
@@ -472,7 +472,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 3,
                             CertificateLevelId = 1,
                             Code = "N5_LISTENING",
-                            CreatedDate = new DateTime(2026, 11, 5, 7, 12, 34, 453, DateTimeKind.Utc).AddTicks(6129),
+                            CreatedDate = new DateTime(2026, 11, 9, 12, 6, 36, 635, DateTimeKind.Utc).AddTicks(8218),
                             Description = "Phần thi nghe hiểu tình huống giao tiếp hàng ngày cấp độ N5",
                             IsDeleted = false,
                             MaxScore = 0,
@@ -485,7 +485,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 4,
                             CertificateLevelId = 2,
                             Code = "N4_VOCAB",
-                            CreatedDate = new DateTime(2026, 11, 5, 7, 12, 34, 453, DateTimeKind.Utc).AddTicks(6130),
+                            CreatedDate = new DateTime(2026, 11, 9, 12, 6, 36, 635, DateTimeKind.Utc).AddTicks(8220),
                             Description = "Phần thi kiểm tra chữ Hán, cách đọc và từ vựng cấp độ N4",
                             IsDeleted = false,
                             MaxScore = 0,
@@ -498,7 +498,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 5,
                             CertificateLevelId = 2,
                             Code = "N4_GRAMMAR",
-                            CreatedDate = new DateTime(2026, 11, 5, 7, 12, 34, 453, DateTimeKind.Utc).AddTicks(6132),
+                            CreatedDate = new DateTime(2026, 11, 9, 12, 6, 36, 635, DateTimeKind.Utc).AddTicks(8222),
                             Description = "Phần thi kiểm tra cấu trúc ngữ pháp và sắp xếp câu cấp độ N4",
                             IsDeleted = false,
                             MaxScore = 0,
@@ -511,7 +511,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 6,
                             CertificateLevelId = 2,
                             Code = "N4_READING",
-                            CreatedDate = new DateTime(2026, 11, 5, 7, 12, 34, 453, DateTimeKind.Utc).AddTicks(6133),
+                            CreatedDate = new DateTime(2026, 11, 9, 12, 6, 36, 635, DateTimeKind.Utc).AddTicks(8223),
                             Description = "Phần thi đọc hiểu văn bản, thông báo và biểu mẫu cấp độ N4",
                             IsDeleted = false,
                             MaxScore = 0,
@@ -524,7 +524,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 7,
                             CertificateLevelId = 2,
                             Code = "N4_LISTENING",
-                            CreatedDate = new DateTime(2026, 11, 5, 7, 12, 34, 453, DateTimeKind.Utc).AddTicks(6134),
+                            CreatedDate = new DateTime(2026, 11, 9, 12, 6, 36, 635, DateTimeKind.Utc).AddTicks(8225),
                             Description = "Phần thi nghe hiểu hội thoại và tình huống thực tế cấp độ N4",
                             IsDeleted = false,
                             MaxScore = 0,
@@ -1147,7 +1147,7 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Property<int>("LearnerId")
                         .HasColumnType("integer");
 
-                    b.Property<int?>("LessonId")
+                    b.Property<int?>("MentorBookingId")
                         .HasColumnType("integer");
 
                     b.Property<int>("MentorId")
@@ -1171,13 +1171,43 @@ namespace RikiPath.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("LessonId");
+                    b.HasIndex("MentorBookingId");
 
                     b.HasIndex("MentorId");
 
                     b.HasIndex("LearnerId", "DueAt");
 
                     b.ToTable("HomeworkAssignments");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.HomeworkAssignmentExercise", b =>
+                {
+                    b.Property<int>("HomeworkAssignmentId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("PracticeExerciseId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("HomeworkAssignmentId", "PracticeExerciseId");
+
+                    b.HasIndex("PracticeExerciseId");
+
+                    b.ToTable("HomeworkAssignmentExercises");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.HomeworkAssignmentLesson", b =>
+                {
+                    b.Property<int>("HomeworkAssignmentId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("LessonId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("HomeworkAssignmentId", "LessonId");
+
+                    b.HasIndex("LessonId");
+
+                    b.ToTable("HomeworkAssignmentLessons");
                 });
 
             modelBuilder.Entity("RikiPath.Domain.Entities.HomeworkSubmission", b =>
@@ -1206,7 +1236,7 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Property<int>("LearnerId")
                         .HasColumnType("integer");
 
-                    b.Property<int>("LessonId")
+                    b.Property<int?>("LessonId")
                         .HasColumnType("integer");
 
                     b.Property<Guid?>("ModifiedBy")
@@ -2927,12 +2957,17 @@ namespace RikiPath.Infrastructure.Migrations
                         .HasMaxLength(300)
                         .HasColumnType("character varying(300)");
 
+                    b.Property<int?>("TopicId")
+                        .HasColumnType("integer");
+
                     b.Property<int?>("UserAccountId")
                         .HasColumnType("integer");
 
                     b.HasKey("Id");
 
                     b.HasIndex("LanguageSkillId");
+
+                    b.HasIndex("TopicId");
 
                     b.HasIndex("UserAccountId");
 
@@ -3051,6 +3086,11 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Property<string>("AdminName")
                         .HasColumnType("text");
 
+                    b.Property<bool>("AttendanceTrackingEnabled")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
+
                     b.Property<int>("BookedCount")
                         .HasColumnType("integer");
 
@@ -3153,6 +3193,7 @@ namespace RikiPath.Infrastructure.Migrations
                         new
                         {
                             Id = 990001,
+                            AttendanceTrackingEnabled = true,
                             AdminName = "Seed Demo",
                             BookedCount = 1,
                             CreatedDate = new DateTime(2026, 10, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
@@ -3168,6 +3209,7 @@ namespace RikiPath.Infrastructure.Migrations
                         new
                         {
                             Id = 990002,
+                            AttendanceTrackingEnabled = true,
                             AdminName = "Seed Demo",
                             BookedCount = 0,
                             CreatedDate = new DateTime(2026, 10, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
@@ -3183,6 +3225,7 @@ namespace RikiPath.Infrastructure.Migrations
                         new
                         {
                             Id = 990003,
+                            AttendanceTrackingEnabled = true,
                             AdminName = "Seed Demo",
                             BookedCount = 0,
                             CreatedDate = new DateTime(2026, 10, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
@@ -3198,6 +3241,7 @@ namespace RikiPath.Infrastructure.Migrations
                         new
                         {
                             Id = 990004,
+                            AttendanceTrackingEnabled = true,
                             AdminName = "Seed Demo",
                             BookedCount = 0,
                             CreatedDate = new DateTime(2026, 10, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
@@ -3219,6 +3263,9 @@ namespace RikiPath.Infrastructure.Migrations
                         .HasColumnType("integer");
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime?>("AttendedAt")
+                        .HasColumnType("timestamp without time zone");
 
                     b.Property<DateTime?>("CompletedAt")
                         .HasColumnType("timestamp without time zone");
@@ -3498,6 +3545,7 @@ namespace RikiPath.Infrastructure.Migrations
 
             modelBuilder.Entity("RikiPath.Domain.Entities.MockQuestionOption", b =>
                 {
+                    b.Property<string>("ImageUrl").HasColumnType("text");
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("integer");
@@ -3984,6 +4032,9 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Property<DateTime?>("CreatedDate")
                         .HasColumnType("timestamp without time zone");
 
+                    b.Property<int?>("HomeworkAssignmentId")
+                        .HasColumnType("integer");
+
                     b.Property<bool>("IsCompleted")
                         .HasColumnType("boolean");
 
@@ -4014,6 +4065,9 @@ namespace RikiPath.Infrastructure.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("PracticeExerciseId");
+
+                    b.HasIndex("HomeworkAssignmentId", "PracticeExerciseId")
+                        .IsUnique();
 
                     b.HasIndex("UserId", "PracticeExerciseId", "StartedAt");
 
@@ -4437,7 +4491,7 @@ namespace RikiPath.Infrastructure.Migrations
                         new
                         {
                             Id = 1,
-                            AiGradingQuota = 0,
+                            AiGradingQuota = 1,
                             CreatedDate = new DateTime(2026, 10, 1, 0, 0, 0, 0, DateTimeKind.Utc),
                             Description = "Truy cập nội dung ôn luyện các chứng chỉ tiếng Nhật trong 1 tuần.",
                             DurationDays = 7,
@@ -4447,13 +4501,13 @@ namespace RikiPath.Infrastructure.Migrations
                             IsTrial = false,
                             MeetingSessionCount = 0,
                             Name = "Tự học tiếng Nhật - 1 tuần",
-                            Price = 79000m,
+                            Price = 1000m,
                             SortOrder = 6
                         },
                         new
                         {
                             Id = 2,
-                            AiGradingQuota = 0,
+                            AiGradingQuota = 2,
                             CreatedDate = new DateTime(2026, 10, 1, 0, 0, 0, 0, DateTimeKind.Utc),
                             Description = "Truy cập nội dung ôn luyện các chứng chỉ tiếng Nhật trong 2 tuần.",
                             DurationDays = 14,
@@ -4463,13 +4517,13 @@ namespace RikiPath.Infrastructure.Migrations
                             IsTrial = false,
                             MeetingSessionCount = 0,
                             Name = "Tự học tiếng Nhật - 2 tuần",
-                            Price = 119000m,
+                            Price = 1000m,
                             SortOrder = 5
                         },
                         new
                         {
                             Id = 3,
-                            AiGradingQuota = 0,
+                            AiGradingQuota = 3,
                             CreatedDate = new DateTime(2026, 10, 1, 0, 0, 0, 0, DateTimeKind.Utc),
                             Description = "Truy cập nội dung ôn luyện các chứng chỉ tiếng Nhật trong 3 tuần.",
                             DurationDays = 21,
@@ -4479,13 +4533,13 @@ namespace RikiPath.Infrastructure.Migrations
                             IsTrial = false,
                             MeetingSessionCount = 0,
                             Name = "Tự học tiếng Nhật - 3 tuần",
-                            Price = 159000m,
+                            Price = 2000m,
                             SortOrder = 4
                         },
                         new
                         {
                             Id = 4,
-                            AiGradingQuota = 0,
+                            AiGradingQuota = 5,
                             CreatedDate = new DateTime(2026, 10, 1, 0, 0, 0, 0, DateTimeKind.Utc),
                             Description = "Truy cập nội dung ôn luyện các chứng chỉ tiếng Nhật trong 1 tháng.",
                             DurationDays = 30,
@@ -4495,13 +4549,13 @@ namespace RikiPath.Infrastructure.Migrations
                             IsTrial = false,
                             MeetingSessionCount = 0,
                             Name = "Tự học tiếng Nhật - 1 tháng",
-                            Price = 199000m,
+                            Price = 2000m,
                             SortOrder = 3
                         },
                         new
                         {
                             Id = 5,
-                            AiGradingQuota = 0,
+                            AiGradingQuota = 10,
                             CreatedDate = new DateTime(2026, 10, 1, 0, 0, 0, 0, DateTimeKind.Utc),
                             Description = "Truy cập nội dung ôn luyện các chứng chỉ tiếng Nhật trong 2 tháng.",
                             DurationDays = 60,
@@ -4511,13 +4565,13 @@ namespace RikiPath.Infrastructure.Migrations
                             IsTrial = false,
                             MeetingSessionCount = 0,
                             Name = "Tự học tiếng Nhật - 2 tháng",
-                            Price = 349000m,
+                            Price = 3000m,
                             SortOrder = 2
                         },
                         new
                         {
                             Id = 6,
-                            AiGradingQuota = 0,
+                            AiGradingQuota = 15,
                             CreatedDate = new DateTime(2026, 10, 1, 0, 0, 0, 0, DateTimeKind.Utc),
                             Description = "Truy cập nội dung ôn luyện các chứng chỉ tiếng Nhật trong 3 tháng.",
                             DurationDays = 90,
@@ -4527,7 +4581,7 @@ namespace RikiPath.Infrastructure.Migrations
                             IsTrial = false,
                             MeetingSessionCount = 0,
                             Name = "Tự học tiếng Nhật - 3 tháng",
-                            Price = 459000m,
+                            Price = 3000m,
                             SortOrder = 1
                         },
                         new
@@ -4546,6 +4600,45 @@ namespace RikiPath.Infrastructure.Migrations
                             Price = 1000m,
                             SortOrder = 7
                         });
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.Topic", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("CreatedDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("Description")
+                        .HasColumnType("text");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid?>("ModifiedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("ModifiedDate")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("Topics");
                 });
 
             modelBuilder.Entity("RikiPath.Domain.Entities.UserAccount", b =>
@@ -4575,6 +4668,15 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Property<int>("DailyStudyMinutes")
                         .HasColumnType("integer");
 
+                    b.Property<int?>("DailyStudyMinutesMax")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("DailyStudyMinutesMin")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("DeclaredJlptCertificateCode")
+                        .HasColumnType("text");
+
                     b.Property<string>("Email")
                         .HasColumnType("text");
 
@@ -4583,6 +4685,11 @@ namespace RikiPath.Infrastructure.Migrations
 
                     b.Property<string>("FirebaseUid")
                         .HasColumnType("text");
+
+                    b.Property<string>("GoogleSubject")
+                        .IsConcurrencyToken()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
 
                     b.Property<string>("FirstName")
                         .HasMaxLength(100)
@@ -4662,6 +4769,9 @@ namespace RikiPath.Infrastructure.Migrations
                     b.HasIndex("AssessedCertificateLevelId");
 
                     b.HasIndex("Email")
+                        .IsUnique();
+
+                    b.HasIndex("GoogleSubject")
                         .IsUnique();
 
                     b.HasIndex("StartingCertificateLevelId");
@@ -5222,22 +5332,60 @@ namespace RikiPath.Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
-                    b.HasOne("RikiPath.Domain.Entities.Lesson", "Lesson")
-                        .WithMany()
-                        .HasForeignKey("LessonId")
-                        .OnDelete(DeleteBehavior.SetNull);
-
                     b.HasOne("RikiPath.Domain.Entities.UserAccount", "Mentor")
                         .WithMany()
                         .HasForeignKey("MentorId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("RikiPath.Domain.Entities.MentorBooking", "MentorBooking")
+                        .WithMany()
+                        .HasForeignKey("MentorBookingId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.Navigation("Learner");
 
-                    b.Navigation("Lesson");
-
                     b.Navigation("Mentor");
+
+                    b.Navigation("MentorBooking");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.HomeworkAssignmentExercise", b =>
+                {
+                    b.HasOne("RikiPath.Domain.Entities.HomeworkAssignment", "HomeworkAssignment")
+                        .WithMany("Exercises")
+                        .HasForeignKey("HomeworkAssignmentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("RikiPath.Domain.Entities.PracticeExercise", "PracticeExercise")
+                        .WithMany()
+                        .HasForeignKey("PracticeExerciseId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("HomeworkAssignment");
+
+                    b.Navigation("PracticeExercise");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.HomeworkAssignmentLesson", b =>
+                {
+                    b.HasOne("RikiPath.Domain.Entities.HomeworkAssignment", "HomeworkAssignment")
+                        .WithMany("HomeworkAssignmentLessons")
+                        .HasForeignKey("HomeworkAssignmentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("RikiPath.Domain.Entities.Lesson", "Lesson")
+                        .WithMany("HomeworkAssignmentLessons")
+                        .HasForeignKey("LessonId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("HomeworkAssignment");
+
+                    b.Navigation("Lesson");
                 });
 
             modelBuilder.Entity("RikiPath.Domain.Entities.HomeworkSubmission", b =>
@@ -5257,8 +5405,7 @@ namespace RikiPath.Infrastructure.Migrations
                     b.HasOne("RikiPath.Domain.Entities.Lesson", "Lesson")
                         .WithMany()
                         .HasForeignKey("LessonId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.Navigation("HomeworkAssignment");
 
@@ -5391,6 +5538,11 @@ namespace RikiPath.Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("RikiPath.Domain.Entities.Topic", "Topic")
+                        .WithMany("Lessons")
+                        .HasForeignKey("TopicId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("RikiPath.Domain.Entities.UserAccount", null)
                         .WithMany("AuthoredLessons")
                         .HasForeignKey("UserAccountId");
@@ -5398,6 +5550,8 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Navigation("CertificateLevel");
 
                     b.Navigation("LanguageSkill");
+
+                    b.Navigation("Topic");
                 });
 
             modelBuilder.Entity("RikiPath.Domain.Entities.LessonGrammar", b =>
@@ -5717,6 +5871,11 @@ namespace RikiPath.Infrastructure.Migrations
 
             modelBuilder.Entity("RikiPath.Domain.Entities.PracticeExerciseAttempt", b =>
                 {
+                    b.HasOne("RikiPath.Domain.Entities.HomeworkAssignment", "HomeworkAssignment")
+                        .WithMany()
+                        .HasForeignKey("HomeworkAssignmentId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
                     b.HasOne("RikiPath.Domain.Entities.PracticeExercise", "PracticeExercise")
                         .WithMany("Attempts")
                         .HasForeignKey("PracticeExerciseId")
@@ -5728,6 +5887,8 @@ namespace RikiPath.Infrastructure.Migrations
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.Navigation("HomeworkAssignment");
 
                     b.Navigation("PracticeExercise");
 
@@ -5920,6 +6081,10 @@ namespace RikiPath.Infrastructure.Migrations
 
             modelBuilder.Entity("RikiPath.Domain.Entities.HomeworkAssignment", b =>
                 {
+                    b.Navigation("Exercises");
+
+                    b.Navigation("HomeworkAssignmentLessons");
+
                     b.Navigation("Submission");
                 });
 
@@ -5968,6 +6133,8 @@ namespace RikiPath.Infrastructure.Migrations
 
             modelBuilder.Entity("RikiPath.Domain.Entities.Lesson", b =>
                 {
+                    b.Navigation("HomeworkAssignmentLessons");
+
                     b.Navigation("LessonGrammars");
 
                     b.Navigation("LessonKanjis");
@@ -6050,6 +6217,11 @@ namespace RikiPath.Infrastructure.Migrations
             modelBuilder.Entity("RikiPath.Domain.Entities.SubscriptionPlan", b =>
                 {
                     b.Navigation("UserSubscriptions");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.Topic", b =>
+                {
+                    b.Navigation("Lessons");
                 });
 
             modelBuilder.Entity("RikiPath.Domain.Entities.UserAccount", b =>

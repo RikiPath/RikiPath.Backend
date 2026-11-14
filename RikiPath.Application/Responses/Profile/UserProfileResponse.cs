@@ -16,6 +16,8 @@ namespace RikiPath.Application.Responses.Profile
         public bool IsEmailVerified { get; set; }
 
         [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+        public int? TargetCertificateTypeId { get; set; }
+
         public int? TargetJlptLevelId { get; set; }
 
         [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
@@ -43,6 +45,9 @@ namespace RikiPath.Application.Responses.Profile
 
         public string PlacementDecision { get; set; } = "NOT_TAKEN";
 
+        public int? DailyStudyMinutesMin { get; set; }
+        public string? DeclaredJlptCertificateCode { get; set; }
+        public int? DailyStudyMinutesMax { get; set; }
         public int DailyStudyMinutes { get; set; }
 
         [JsonIgnore(Condition = JsonIgnoreCondition.Never)]

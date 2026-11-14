@@ -8,8 +8,8 @@ public class HomeworkSubmission : Base
     public HomeworkAssignment HomeworkAssignment { get; set; } = null!;
     public int LearnerId { get; set; }
     public UserAccount Learner { get; set; } = null!;
-    public int LessonId { get; set; }
-    public Lesson Lesson { get; set; } = null!;
+    public int? LessonId { get; set; }
+    public Lesson? Lesson { get; set; }
     public string? TextContent { get; set; }
     public string? FileUrl { get; set; }
     public DateTime SubmittedAt { get; set; }

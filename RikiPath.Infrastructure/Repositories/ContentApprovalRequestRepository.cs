@@ -19,8 +19,7 @@ namespace RikiPath.Infrastructure.Repositories
         public async Task<IReadOnlyList<ContentApprovalRequest>> GetPendingByTypeAsync(
             ImportEntityType entityType, CancellationToken cancellationToken)
             => await _context.Set<ContentApprovalRequest>()
-                .Where(x => x.EntityType == entityType &&
-                            (x.Status == ContentApprovalStatus.Draft || x.Status == ContentApprovalStatus.PendingReview))
+                .Where(x => !x.IsDeleted && x.EntityType == entityType && x.Status == ContentApprovalStatus.PendingReview)
                 .OrderBy(x => x.SubmittedAt)
                 .ToListAsync(cancellationToken);
     }

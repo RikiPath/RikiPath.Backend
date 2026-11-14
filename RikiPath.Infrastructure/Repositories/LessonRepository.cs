@@ -94,6 +94,14 @@ namespace RikiPath.Infrastructure.Repositories
                      && lesson.CertificateLevel.CertificateType.IsActive
                      && lesson.CertificateLevel.CertificateType.Name == "JLPT"
                      && !lesson.LanguageSkill.IsDeleted)
+                 .Include(x => x.Topic)
+                 .Include(x => x.LessonKanjis!.Where(link => !link.Kanji.IsDeleted))
+                     .ThenInclude(link => link.Kanji)
+                 .Include(x => x.LessonVocabularies!.Where(link => !link.Vocabulary.IsDeleted))
+                     .ThenInclude(link => link.Vocabulary)
+                 .Include(x => x.LessonGrammars!.Where(link => !link.GrammarPattern.IsDeleted))
+                     .ThenInclude(link => link.GrammarPattern)
+                 .AsSplitQuery()
                  .OrderBy(x => x.SortOrder)
                  .ThenBy(x => x.Id)
                  .ToListAsync(cancellationToken);

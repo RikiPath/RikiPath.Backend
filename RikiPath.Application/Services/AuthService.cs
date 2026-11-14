@@ -12,16 +12,18 @@ using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Logging;
 
 namespace RikiPath.Application.Services
 {
-    public class AuthService(
+    public partial class AuthService(
         IUnitOfWork unitOfWork,
         AppSettings appSettings,
         IEmailService emailService,
         IFirebaseAuthService firebaseAuthService,
         IMemoryCache memoryCache,
-        IClaimService claimService) : IAuthService
+        IClaimService claimService,
+        ILogger<AuthService>? logger = null) : IAuthService
     {
         private const int VerificationCodeLifetimeMinutes = 30;
         private const int ResendCooldownSeconds = 60;
@@ -31,7 +33,8 @@ namespace RikiPath.Application.Services
         {
             try
             {
-                var existingUser = await unitOfWork.UserAccounts.GetByEmailAsync(request.Email);
+                var email = request.Email.Trim().ToLowerInvariant();
+                var existingUser = await unitOfWork.UserAccounts.GetByEmailAsync(email);
                 if (existingUser is not null)
                     return ApiResponse<RegisterResponse>.Fail("Email này đã được đăng ký.");
 
@@ -39,7 +42,7 @@ namespace RikiPath.Application.Services
 
                 var user = new UserAccount
                 {
-                    Email = request.Email,
+                    Email = email,
                     PasswordHash = hash,
                     PasswordSalt = salt,
                     FirstName = request.FirstName,
@@ -235,7 +238,7 @@ namespace RikiPath.Application.Services
             try
             {
                 var user = await unitOfWork.UserAccounts.GetByEmailAsync(request.Email);
-                if (user is null || !VerifyPasswordHash(request.Password, user.PasswordHash, user.PasswordSalt))
+                if (user is null || user.IsDeleted || !VerifyPasswordHash(request.Password, user.PasswordHash, user.PasswordSalt))
                     return ApiResponse<LoginResponse>.Fail("Email hoặc mật khẩu không đúng.");
 
                 if (!user.IsEmailVerified)
@@ -310,10 +313,11 @@ namespace RikiPath.Application.Services
                 if (user is null)
                     return ApiResponse.NotFound("Không tìm thấy người dùng.");
 
-                if (await unitOfWork.UserAccounts.GetByEmailAsync(request.NewEmail) is not null)
+                var newEmail = request.NewEmail.Trim().ToLowerInvariant();
+                if (await unitOfWork.UserAccounts.GetByEmailAsync(newEmail) is not null)
                     return ApiResponse.Fail("Email mới đã được sử dụng bởi tài khoản khác.");
 
-                user.Email = request.NewEmail;
+                user.Email = newEmail;
                 user.IsEmailVerified = false;
                 unitOfWork.UserAccounts.Update(user);
 
@@ -427,9 +431,10 @@ namespace RikiPath.Application.Services
 
         private static bool VerifyPasswordHash(string password, byte[] passwordHash, byte[] passwordSalt)
         {
+            if (passwordHash is not { Length: 64 } || passwordSalt is not { Length: > 0 }) return false;
             using var hmac = new HMACSHA512(passwordSalt);
             var computedHash = hmac.ComputeHash(Encoding.UTF8.GetBytes(password));
-            return computedHash.SequenceEqual(passwordHash);
+            return CryptographicOperations.FixedTimeEquals(computedHash, passwordHash);
         }
 
         private static string GenerateVerificationCode() => Random.Shared.Next(100000, 999999).ToString();

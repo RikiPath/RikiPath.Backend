@@ -13,6 +13,8 @@ namespace RikiPath.Application.Responses.Lessons
     public sealed class LearningLessonSummaryResponse
     {
         public int LessonId { get; init; }
+        public bool HasPracticeExercise { get; init; }
+        public bool PracticePassed { get; init; }
         public string Title { get; init; } = string.Empty;
         public string? Description { get; init; }
         public int SortOrder { get; init; }

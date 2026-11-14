@@ -17,11 +17,28 @@ public class PracticeExercisesController(IPracticeQuizService practiceQuizServic
         return StatusCode((int)response.StatusCode, response);
     }
 
-    [HttpPost("{practiceExerciseId:int}/attempts")]
-    public async Task<IActionResult> StartAttempt(int practiceExerciseId, CancellationToken cancellationToken)
+    [HttpGet("assessment-roadmap/lessons/{lessonId:int}")]
+    [RequireSelfStudy]
+    public async Task<IActionResult> GetForAssessmentRoadmapLesson(int lessonId, CancellationToken cancellationToken)
     {
-        var response = await practiceQuizService.StartAttemptAsync(practiceExerciseId, cancellationToken);
+        var response = await practiceQuizService.GetAssessmentRoadmapExercisesAsync(lessonId, cancellationToken);
+        return StatusCode(response.StatusCode, response);
+    }
+
+    [HttpPost("{practiceExerciseId:int}/attempts")]
+    public async Task<IActionResult> StartAttempt(int practiceExerciseId, CancellationToken cancellationToken,
+        [FromQuery] bool fromCatalog = false, [FromQuery] string? skill = null)
+    {
+        var response = await practiceQuizService.StartAttemptAsync(practiceExerciseId, cancellationToken, fromCatalog, skill);
         return StatusCode((int)response.StatusCode, response);
+    }
+
+    [HttpPost("{practiceExerciseId:int}/assessment-roadmap/attempts")]
+    [RequireSelfStudy]
+    public async Task<IActionResult> StartAssessmentRoadmapAttempt(int practiceExerciseId, CancellationToken cancellationToken)
+    {
+        var response = await practiceQuizService.StartAssessmentRoadmapAttemptAsync(practiceExerciseId, cancellationToken);
+        return StatusCode(response.StatusCode, response);
     }
 
     [HttpPost("attempts/{attemptId:int}/submit")]
@@ -30,5 +47,14 @@ public class PracticeExercisesController(IPracticeQuizService practiceQuizServic
     {
         var response = await practiceQuizService.SubmitAttemptAsync(attemptId, request, cancellationToken);
         return StatusCode((int)response.StatusCode, response);
+    }
+
+    [HttpPost("assessment-roadmap/attempts/{attemptId:int}/submit")]
+    [RequireSelfStudy]
+    public async Task<IActionResult> SubmitAssessmentRoadmapAttempt(
+        int attemptId, [FromBody] SubmitPracticeExerciseAttemptRequest request, CancellationToken cancellationToken)
+    {
+        var response = await practiceQuizService.SubmitAssessmentRoadmapAttemptAsync(attemptId, request, cancellationToken);
+        return StatusCode(response.StatusCode, response);
     }
 }

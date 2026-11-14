@@ -1,5 +1,6 @@
-using Microsoft.AspNetCore.Authorization;
+﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.ModelBinding;
 using RikiPath.Application.IServices;
 using RikiPath.Application.Requests.PlacementTests;
 
@@ -8,7 +9,7 @@ namespace RikiPath.WebApi.Controllers
     [Route("api/[controller]")]
     [ApiController]
     [Authorize(Roles = "Learner")]
-    public class PlacementTestController(IMockTestService placementTestService) : ControllerBase
+    public class PlacementTestController(IPracticeTestService placementTestService) : ControllerBase
     {
         /// <summary>
         /// Kiểm tra trạng thái hoàn thành bài kiểm tra đánh giá năng lực đầu vào (Placement Test) và mức độ sẵn sàng tạo lộ trình.
@@ -51,12 +52,15 @@ namespace RikiPath.WebApi.Controllers
         }
 
         /// <summary>
-        /// Bắt đầu mới hoặc tiếp tục lượt làm bài kiểm tra đánh giá năng lực đầu vào (Placement Test) qua các cấp độ N5-N3.
+        /// Bắt đầu mới hoặc tiếp tục lượt làm bài kiểm tra đánh giá năng lực đầu vào (Placement Test) theo mục tiêu hiện tại. Với mục tiêu N2, N3 hoặc N4, bắt đầu bài đúng cấp độ hoặc bài mini theo kết quả bài đầu.
         /// </summary>
+        /// <remarks>Gửi RetakeTargetAssessment = true để làm lại bài theo cấp mục tiêu khi đang được yêu cầu làm bài mini.</remarks>
         [HttpPost("start")]
-        public async Task<IActionResult> StartPlacementTest(CancellationToken cancellationToken = default)
+        public async Task<IActionResult> StartPlacementTest(
+            [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] StartPlacementTestRequest? request,
+            CancellationToken cancellationToken = default)
         {
-            var result = await placementTestService.StartPlacementTestAsync(cancellationToken);
+            var result = await placementTestService.StartPlacementTestAsync(request, cancellationToken);
             return StatusCode((int)result.StatusCode, result);
         }
 

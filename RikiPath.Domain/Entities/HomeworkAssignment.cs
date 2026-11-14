@@ -1,6 +1,6 @@
 namespace RikiPath.Domain.Entities;
 
-/// <summary>An assignment from a mentor to a learner, optionally associated with a lesson.</summary>
+/// <summary>An assignment from a mentor to a learner, associated with zero or more lessons.</summary>
 public class HomeworkAssignment : Base
 {
     public int Id { get; set; }
@@ -8,8 +8,10 @@ public class HomeworkAssignment : Base
     public UserAccount Learner { get; set; } = null!;
     public int MentorId { get; set; }
     public UserAccount Mentor { get; set; } = null!;
-    public int? LessonId { get; set; }
-    public Lesson? Lesson { get; set; }
+    public int? MentorBookingId { get; set; }
+    public MentorBooking? MentorBooking { get; set; }
+    public List<HomeworkAssignmentLesson> HomeworkAssignmentLessons { get; set; } = new();
+    public List<HomeworkAssignmentExercise> Exercises { get; set; } = new();
     public string Title { get; set; } = string.Empty;
     public string? Instructions { get; set; }
     public DateTime? DueAt { get; set; }

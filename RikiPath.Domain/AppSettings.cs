@@ -11,12 +11,13 @@ namespace RikiPath.Domain
         public SmtpSettings SmtpSettings { get; set; }
         public PayOsSettings PayOs { get; set; }
         public SupabaseSettings Supabase { get; set; }
-        public AiSettings Ai { get; set; }
-        public AzureSpeechSettings AzureSpeechSettings { get; set; }
-        public GeminiSettings Gemini { get; set; }
-        public AwsSettings AWS { get; set; } = new();
-        public OpenRouterSettings OpenRouter { get; set; } = new();
+        public AiSettings Ai { get; set; } = new();
+        public GoogleAuthSettings GoogleAuth { get; set; } = new();
         public string FrontendBaseUrl { get; set; }
+    }
+    public class GoogleAuthSettings
+    {
+        public string? ClientId { get; set; }
     }
     public class ConnectionStrings
     {
@@ -68,19 +69,6 @@ namespace RikiPath.Domain
 
     public class AiSettings
     {
-        public string BaseUrl { get; set; } = string.Empty;
-        public string ApiKey { get; set; } = string.Empty;
-
-        // Model dùng để chấm bài viết/kanji - nên dùng model mạnh hơn vì sai lệch ở đây ảnh hưởng
-        // trực tiếp tới điểm học viên. Mặc định openai/gpt-oss-120b.
-        public string GradingModel { get; set; } = "openai/gpt-oss-120b";
-
-        // Model dùng để gợi ý lộ trình học - có thể dùng model nhẹ/rẻ hơn (vd "openai/gpt-oss-20b")
-        // vì yêu cầu suy luận thấp hơn chấm điểm. Đổi trực tiếp trong appsettings.json, không cần
-        // build lại và không cần sửa code.
-        public string LearningPathModel { get; set; } = "openai/gpt-oss-120b";
-        public string LearningPathProvider { get; set; } = "OpenRouter";
-
         public AiRateLimitSettings RateLimit { get; set; } = new();
     }
 
@@ -92,47 +80,6 @@ namespace RikiPath.Domain
         // Tổng số token (input + output cộng dồn, lấy từ usage.total_tokens của provider)
         // tối đa / user / ngày, tính riêng theo từng feature.
         public int MaxTokensPerUserPerDay { get; set; } = 50000;
-    }
-
-    public class GeminiSettings
-    {
-        public List<string> ApiKey { get; set; } = new();
-        public string BaseUrl { get; set; } = string.Empty;
-
-        // Hàm tiện ích lấy danh sách key không bị rỗng
-        public List<string> GetValidKeys()
-        {
-            return ApiKey?.Where(k => !string.IsNullOrWhiteSpace(k)).ToList() ?? new List<string>();
-        }
-    }
-
-    public class AwsSettings
-    {
-        public string ApiKey { get; set; } = string.Empty;
-        public string Region { get; set; } = "ap-southeast-1";
-        public string LearningPathModelId { get; set; } = "anthropic.claude-haiku-4-5-20251001-v1:0";
-    }
-
-    public class OpenRouterSettings
-    {
-        public string ApiKey { get; set; } = string.Empty;
-        public string BaseUrl { get; set; } = "https://openrouter.ai/api/v1";
-        public string Model { get; set; } = string.Empty;
-        public string AppName { get; set; } = "RikiPath";
-    }
-
-    public class AzureSpeechSettings
-    {
-        // Region của resource Azure Speech Service (vd "southeastasia", "eastasia") - lấy trong
-        // Azure Portal > resource Speech > Keys and Endpoint. PHẢI khớp đúng region của resource,
-        // sai region sẽ báo lỗi 401/404 dù key đúng.
-        public string Region { get; set; } = string.Empty;
-
-        // 1 trong 2 key (KEY 1 hoặc KEY 2) trong Azure Portal > resource Speech > Keys and Endpoint.
-        public string SubscriptionKey { get; set; } = string.Empty;
-
-        // Locale nhận diện giọng nói - mặc định tiếng Nhật vì hệ thống luyện thi JLPT.
-        public string Language { get; set; } = "ja-JP";
     }
 
 }

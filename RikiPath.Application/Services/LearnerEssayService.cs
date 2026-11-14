@@ -13,7 +13,7 @@ public class LearnerEssayService(
     IUnitOfWork unitOfWork,
     IClaimService claimService,
     IFileStorageService fileStorage,
-    IGeminiOcrClient geminiOcrClient) : ILearnerEssayService
+    IAiOcrClient aiOcrClient) : ILearnerEssayService
 {
     private static readonly string[] AllowedContentTypes =
         ["image/jpeg", "image/png", "image/webp"];
@@ -44,8 +44,8 @@ STRICT INSTRUCTIONS:
             // 1. Chuyển đổi file ảnh sang Base64
             var (base64Image, mimeType) = await ConvertFormFileToBase64Async(image, cancellationToken);
 
-            // 2. Gọi Gemini AI OCR Client
-            var text = await geminiOcrClient.ScanHandwritingAsync(
+            // 2. Gọi OpenAI OCR Client
+            var text = await aiOcrClient.ScanHandwritingAsync(
                 JapaneseOcrPrompt, base64Image, mimeType, cancellationToken);
 
             if (string.IsNullOrWhiteSpace(text))
@@ -148,8 +148,8 @@ STRICT INSTRUCTIONS:
             // 1. Chuyển đổi file ảnh sang Base64
             var (base64Image, mimeType) = await ConvertFormFileToBase64Async(image, cancellationToken);
 
-            // 2. Scan lại bằng Gemini AI OCR Client
-            var text = await geminiOcrClient.ScanHandwritingAsync(
+            // 2. Scan lại bằng OpenAI OCR Client
+            var text = await aiOcrClient.ScanHandwritingAsync(
                 JapaneseOcrPrompt, base64Image, mimeType, cancellationToken);
 
             if (string.IsNullOrWhiteSpace(text))

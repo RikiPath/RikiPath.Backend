@@ -7,7 +7,7 @@ namespace RikiPath.Application.IServices
     }
 
     // Kiểm tra & ghi nhận quota sử dụng AI theo từng user/theo ngày (giờ Việt Nam), dùng chung
-    // cho AiGradingClient và AiLearningPathClient để chống spam và khống chế chi phí Groq.
+    // cho OpenAiGradingClient và OpenAiLearningPathClient để chống spam và khống chế chi phí OpenAI.
     // Giới hạn (số request/ngày, số token/ngày) đọc từ AppSettings.Ai.RateLimit.
     public interface IAiUsageQuotaService
     {

@@ -1,5 +1,6 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using RikiPath.Application.Helpers;
+using RikiPath.Application.IServices;
 using RikiPath.Application.Responses.Content;
 using RikiPath.Domain.Enums;
 using System.Text.Json;
@@ -19,7 +20,7 @@ namespace RikiPath.Application.Handlers
     ///  - Số thứ tự câu ("Question Sort Order") không được trùng trong 1 bài tập.
     ///  - Khóa so khớp với DB: Lesson + Title.
     /// </summary>
-    public sealed class PracticeExerciseImportHandler(IUnitOfWork unitOfWork) : IWorkbookLessonAwareImportHandler
+    public sealed class PracticeExerciseImportHandler(IUnitOfWork unitOfWork, IClaimService? claims = null) : IWorkbookLessonAwareImportHandler
     {
         private static readonly string[] OptionHeaders = ["Option 1", "Option 2", "Option 3", "Option 4"];
 
@@ -100,13 +101,16 @@ namespace RikiPath.Application.Handlers
             CancellationToken cancellationToken)
         {
             var dbLessons = await unitOfWork.Lessons.Query()
-                .Where(l => !l.IsDeleted)
+                .Where(l => !l.IsDeleted && (l.CertificateLevel.Code == "N5" || l.CertificateLevel.Code == "N4" ||
+                    l.CertificateLevel.Code == "N3" || l.CertificateLevel.Code == "N2"))
                 .Select(l => new { l.Id, l.Title, l.CertificateLevelId, Code = l.CertificateLevel.Code })
                 .ToListAsync(cancellationToken);
             var candidates = dbLessons.Select(l => new LessonRef(l.Id, l.Title, l.CertificateLevelId, l.Code)).ToList();
 
+            var authorId = claims?.GetUserClaim().Id;
             var pendingPayloads = await unitOfWork.ContentApprovalRequests.Query()
                 .Where(x => !x.IsDeleted
+                    && x.SubmittedByUserId == authorId
                     && x.EntityType == ImportEntityType.Lesson
                     && (x.Status == ContentApprovalStatus.Draft || x.Status == ContentApprovalStatus.PendingReview))
                 .Select(x => x.PayloadJson)
@@ -117,7 +121,8 @@ namespace RikiPath.Application.Handlers
                 LessonImportPayloadResponse? p;
                 try { p = JsonSerializer.Deserialize<LessonImportPayloadResponse>(json); }
                 catch (JsonException) { continue; }
-                if (p is null || string.IsNullOrWhiteSpace(p.Title)) continue;
+                if (p is null || string.IsNullOrWhiteSpace(p.Title) ||
+                    p.CertificateLevelCode is not ("N5" or "N4" or "N3" or "N2")) continue;
                 if (candidates.Any(c => c.Title == p.Title && c.CertificateLevelId == p.CertificateLevelId)) continue;
                 candidates.Add(new LessonRef(null, p.Title, p.CertificateLevelId, p.CertificateLevelCode));
             }

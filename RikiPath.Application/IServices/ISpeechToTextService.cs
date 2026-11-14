@@ -6,7 +6,7 @@ namespace RikiPath.Application.IServices
 {
     public interface ISpeechToTextService
     {
-        Task<string> ConvertAudioToTextAsync(IFormFile audioFile);
+        Task<string> ConvertAudioToTextAsync(IFormFile audioFile, CancellationToken cancellationToken = default);
         Task<ApiResponse<SpeechTokenResponse>> GetTokenAsync(CancellationToken cancellationToken);
     }
 }

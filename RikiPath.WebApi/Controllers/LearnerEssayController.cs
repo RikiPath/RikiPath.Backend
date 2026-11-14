@@ -1,4 +1,5 @@
-using Microsoft.AspNetCore.Authorization;
+﻿using Microsoft.AspNetCore.Authorization;
+using RikiPath.Application.Services;
 using Microsoft.AspNetCore.Mvc;
 using RikiPath.Application.IServices;
 
@@ -6,13 +7,16 @@ namespace RikiPath.WebApi.Controllers;
 
 [ApiController]
 [Route("api/learner-essays")]
-public class LearnerEssayController(ILearnerEssayService essayService) : ControllerBase
+[Authorize(Roles = "Learner")]
+public class LearnerEssayController(ILearnerEssayService essayService, SubscriptionAccessService subscriptions) : ControllerBase
 {
     [HttpPost("scan")]
     public async Task<IActionResult> Scan(
         [FromForm] EssayImageRequest request,
         CancellationToken cancellationToken)
-        => Ok(await essayService.ScanAsync(request.Image, cancellationToken));
+        => (await subscriptions.GetAccessAsync(cancellationToken)).Writing
+            ? Ok(await essayService.ScanAsync(request.Image, cancellationToken))
+            : StatusCode(403, new { errorCode = "WRITING_PACKAGE_REQUIRED", errorMessage = "Bạn cần gói luyện viết." });
 
     [HttpGet]
     public async Task<IActionResult> GetAll(CancellationToken cancellationToken)
@@ -34,7 +38,9 @@ public class LearnerEssayController(ILearnerEssayService essayService) : Control
         int id,
         [FromForm] EssayImageRequest request,
         CancellationToken cancellationToken)
-        => Ok(await essayService.RescanAsync(id, request.Image, cancellationToken));
+        => (await subscriptions.GetAccessAsync(cancellationToken)).Writing
+            ? Ok(await essayService.RescanAsync(id, request.Image, cancellationToken))
+            : StatusCode(403, new { errorCode = "WRITING_PACKAGE_REQUIRED", errorMessage = "Bạn cần gói luyện viết." });
 
     [HttpDelete("{id:int}")]
     public async Task<IActionResult> Delete(int id, CancellationToken cancellationToken)

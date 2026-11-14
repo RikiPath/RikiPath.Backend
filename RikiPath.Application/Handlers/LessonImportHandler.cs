@@ -2,6 +2,7 @@
 using Microsoft.EntityFrameworkCore;
 using RikiPath.Application.Helpers;
 using RikiPath.Application.Responses.Content;
+using RikiPath.Domain.Entities;
 using RikiPath.Domain.Enums;
 
 namespace RikiPath.Application.Handlers
@@ -19,8 +20,7 @@ namespace RikiPath.Application.Handlers
                 .Include(l => l.LanguageSkill)
                 .Where(l => !l.IsDeleted)
                 .ToListAsync(cancellationToken);
-            var (existingByKey, ambiguousKeys) = ImportHandlerSupport.IndexByKey(
-                existingLessons, l => NaturalKey(l.Title, l.CertificateLevelId));
+            var existingByKey = existingLessons.ToLookup(lesson => (lesson.Title, lesson.CertificateLevelId));
 
             var (levelsByCode, ambiguousLevelCodes) = await ImportHandlerSupport.LoadLevelsAsync(unitOfWork, cancellationToken);
 
@@ -38,7 +38,7 @@ namespace RikiPath.Application.Handlers
 
             foreach (var row in rows)
             {
-                var diff = BuildRowDiff(row, existingByKey, ambiguousKeys, levelsByCode, ambiguousLevelCodes,
+                var diff = BuildRowDiff(row, existingByKey, levelsByCode, ambiguousLevelCodes,
                     skillsByName, ambiguousSkillNames, openRowKeys, seenInFile);
                 result.Rows.Add(diff);
                 ImportHandlerSupport.Tally(result, diff);
@@ -47,12 +47,9 @@ namespace RikiPath.Application.Handlers
             return result;
         }
 
-        private static string NaturalKey(string title, int certificateLevelId) => $"{title}|{certificateLevelId}";
-
         private static ImportRowDiffResponse BuildRowDiff(
             ExcelRow row,
-            Dictionary<string, Domain.Entities.Lesson> existingByKey,
-            HashSet<string> ambiguousKeys,
+            ILookup<(string Title, int CertificateLevelId), Lesson> existingByKey,
             Dictionary<string, int> levelsByCode,
             HashSet<string> ambiguousLevelCodes,
             Dictionary<string, Domain.Entities.LanguageSkill> skillsByName,
@@ -118,15 +115,16 @@ namespace RikiPath.Application.Handlers
             }
 
             var levelId = levelsByCode[levelCode!];
-            var key = NaturalKey(title!, levelId);
-            if (ambiguousKeys.Contains(key))
+            var matches = existingByKey[(title!, levelId)];
+            if (matches.Skip(1).Any())
             {
-                diff.Errors.Add($"Có nhiều bài học '{title}' ({levelCode}) trùng nhau trong hệ thống, cần dọn dữ liệu trước khi import.");
+                var ids = string.Join(", ", matches.Select(lesson => lesson.Id).Order().Select(id => $"#{id}"));
+                diff.Errors.Add($"Có nhiều bài học cùng tên '{title}' ở cấp {levelCode} trong hệ thống (ID {ids}). Hãy kiểm tra các bài trùng trước khi nhập dòng này.");
                 diff.Action = ImportRowAction.Error;
                 return diff;
             }
 
-            existingByKey.TryGetValue(key, out var existing);
+            var existing = matches.SingleOrDefault();
 
             // ---- Build payload (đã qua validate) ----
             var payload = new LessonImportPayloadResponse

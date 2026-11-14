@@ -30,7 +30,7 @@ public sealed class MentorPaymentFlowTests
     }
     private static MentorMeetingService Service(AppDbContext db, Mock<IPaymentGatewayClient> gateway, int id = 1, Role role = Role.Learner)
         => new(new UnitOfWork(db), gateway.Object, Claims(id, role), Settings, NullLogger<MentorMeetingService>.Instance);
-    private static async Task<int> Purchase(AppDbContext db, Mock<IPaymentGatewayClient> gateway)
+    private static async Task<int> Purchase(AppDbContext db, Mock<IPaymentGatewayClient> gateway, bool reserveSlot = false)
     {
         var mentor = new UserAccount { Id = 2, FirstName = "Mentor", Role = Role.Mentor, PasswordHash = [], PasswordSalt = [] };
         db.Users.AddRange(mentor, new UserAccount { Id = 1, FirstName = "Learner", Role = Role.Learner, PasswordHash = [], PasswordSalt = [] });
@@ -41,12 +41,32 @@ public sealed class MentorPaymentFlowTests
         gateway.Setup(x => x.CreatePaymentLinkAsync(It.IsAny<long>(), 1000, It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new PaymentLinkResult("https://pay.payos.vn/test-checkout", "test-payment-link", "test-qr"));
         var result = await Service(db, gateway).PurchaseAsync(new PurchaseMentorPlanRequest
-        { SubscriptionPlanId = plan.Id }, default);
+        { SubscriptionPlanId = plan.Id, MentorAvailabilityId = reserveSlot ? slot.Id : null }, default);
         Assert.True(result.IsSuccess, result.ErrorMessage);
         gateway.Verify(x => x.CreatePaymentLinkAsync(result.Result!.SubscriptionId, 1000, It.IsAny<string>(),
             It.Is<string>(url => url.Contains($"subscriptionId={result.Result.SubscriptionId}")),
             It.Is<string>(url => url.Contains($"subscriptionId={result.Result.SubscriptionId}")), It.IsAny<CancellationToken>()), Times.Once);
         return result.Result!.SubscriptionId;
+    }
+
+    [Theory]
+    [InlineData("PAID", MentorStatus.Assigned, 1)]
+    [InlineData("CANCELLED", MentorStatus.Cancelled, 0)]
+    public async Task Selecting_a_slot_before_checkout_holds_then_confirms_or_releases_it(
+        string remoteStatus, MentorStatus expectedBookingStatus, int expectedBookedCount)
+    {
+        await using var db = Context();
+        var gateway = new Mock<IPaymentGatewayClient>();
+        var id = await Purchase(db, gateway, reserveSlot: true);
+        Assert.Equal(MentorStatus.AwaitingPayment, (await db.MentorBookings.SingleAsync()).Status);
+        Assert.Equal(1, (await db.MentorAvailabilities.SingleAsync()).BookedCount);
+
+        gateway.Setup(x => x.GetPaymentInformationAsync(id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PaymentLinkInformation(id, 1000, remoteStatus == "PAID" ? 1000 : 0, remoteStatus, "test-payment-link"));
+        var result = await Service(db, gateway).SyncPurchaseAsync(id, default);
+        Assert.True(result.IsSuccess, result.ErrorMessage);
+        Assert.Equal(expectedBookingStatus, (await db.MentorBookings.SingleAsync()).Status);
+        Assert.Equal(expectedBookedCount, (await db.MentorAvailabilities.SingleAsync()).BookedCount);
     }
 
     [Fact]

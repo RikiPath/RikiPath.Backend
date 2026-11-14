@@ -1,5 +1,8 @@
-using System.Linq.Expressions;
+﻿using System.Linq.Expressions;
 using System.Net;
+using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Moq;
 using RikiPath.Application;
 using RikiPath.Application.IRepositories;
@@ -8,11 +11,76 @@ using RikiPath.Application.Requests.MockTests;
 using RikiPath.Application.Services;
 using RikiPath.Domain.Entities;
 using RikiPath.Domain.Enums;
+using RikiPath.Infrastructure;
 
 namespace RikiPath.Tests;
 
 public sealed class MockTestIntegrityTests
 {
+    [Fact]
+    public async Task Mock_attempt_resumes_saved_answers_and_history_excludes_placement()
+    {
+        var options = new DbContextOptionsBuilder<AppDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .ConfigureWarnings(warnings => warnings.Ignore(InMemoryEventId.TransactionIgnoredWarning)).Options;
+        await using var db = new AppDbContext(options);
+        var user = new UserAccount { Id = 900, Role = Role.Learner, PasswordHash = [], PasswordSalt = [] };
+        var level = new CertificateLevel { Id = 9001, Code = "N4", CertificateType = new CertificateType { Name = "JLPT" } };
+        var section = new MockTestSection { Title = "Nghe hiểu", LanguageSkill = new LanguageSkill { Name = "Listening" }, Questions = [] };
+        var choice = new MockQuestion
+        {
+            QuestionText = "どこですか。", QuestionType = "Listening", AudioUrl = "https://example.test/sample.mp3",
+            Options = [new() { OptionText = "駅", IsCorrect = true }, new() { OptionText = "学校", IsCorrect = false }],
+        };
+        var ordering = new MockQuestion
+        {
+            QuestionText = "Sắp xếp thành câu", QuestionType = "Ordering",
+            InteractionDataJson = "{\"tokens\":[\"です\",\"ここ\"]}", AnswerKeyJson = "[\"ここ\",\"です\"]",
+        };
+        section.Questions.AddRange([choice, ordering]);
+        var test = new MockTest { Title = "Đề N4", CertificateLevel = level, TimeLimitMinutes = 30, Sections = [section] };
+        var placement = new MockTestAttempt
+        {
+            UserAccount = user, AttemptKind = AttemptKind.Placement, StartedAt = DateTime.UtcNow,
+            IsCompleted = true, TotalScore = 50,
+        };
+        db.MockTests.Add(test);
+        db.MockTestAttempts.Add(placement);
+        await db.SaveChangesAsync();
+        var claims = new Mock<IClaimService>();
+        claims.Setup(service => service.GetUserClaim()).Returns(new ClaimDTO { Id = user.Id, Role = Role.Learner });
+        var service = new MockTestService(new UnitOfWork(db), claims.Object);
+
+        Assert.Equal(test.Id, Assert.Single((await service.GetTestsByLevelAsync(level.Id)).Result!).MockTestId);
+        var started = await service.StartAttemptAsync(test.Id);
+        Assert.True(started.IsSuccess, started.ErrorMessage);
+        var id = started.Result!.AttemptId;
+        Assert.DoesNotContain("answerKey", JsonSerializer.Serialize(started.Result, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+        Assert.Equal(AttemptKind.MockTest, (await db.MockTestAttempts.FindAsync(id))!.AttemptKind);
+        Assert.Equal((int)HttpStatusCode.NotFound, (await service.GetAttemptSnapshotAsync(placement.Id)).StatusCode);
+
+        var answers = new SubmitAttemptRequest { Answers =
+        [
+            new() { QuestionId = choice.Id, SelectedOptionId = choice.Options[0].Id },
+            new() { QuestionId = ordering.Id, Response = JsonSerializer.SerializeToElement(new[] { "ここ", "です" }) },
+        ] };
+        Assert.True((await service.SaveAttemptAnswersAsync(id, answers)).IsSuccess);
+        var reopened = await service.GetAttemptSnapshotAsync(id);
+        Assert.True(reopened.IsSuccess, reopened.ErrorMessage);
+        Assert.Equal(choice.Options[0].Id, reopened.Result!.Questions.Single(item => item.QuestionId == choice.Id).SelectedOptionId);
+        Assert.Equal("ここ", reopened.Result.Questions.Single(item => item.QuestionId == ordering.Id).Response!.Value[0].GetString());
+
+        var attempt = (await db.MockTestAttempts.FindAsync(id))!;
+        attempt.ExpiresAt = DateTime.UtcNow.AddSeconds(-1);
+        await db.SaveChangesAsync();
+        var late = new SubmitAttemptRequest { Answers = [new() { QuestionId = choice.Id, SelectedOptionId = choice.Options[1].Id }] };
+        Assert.Equal("MOCK_TEST_EXPIRED", (await service.SaveAttemptAnswersAsync(id, late)).ErrorCode);
+        var submitted = await service.SubmitAttemptAsync(id, late);
+        Assert.True(submitted.IsSuccess, submitted.ErrorMessage);
+        Assert.Equal(100, submitted.Result!.TotalScore);
+        Assert.Equal(id, Assert.Single((await service.GetHistoryAsync()).Result!).AttemptId);
+        Assert.Equal(placement.Id, (await new UnitOfWork(db).MockTestAttempts.GetLatestCompletedPlacementByUserAsync(user.Id))!.Id);
+    }
+
     [Fact]
     public async Task Start_valid_learner_creates_attempt()
     {
@@ -310,6 +378,34 @@ public sealed class MockTestIntegrityTests
             Times.Once);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Placement_resume_keeps_answers_unless_learner_requests_new_attempt(bool restart)
+    {
+        var fixture = CreateFixture();
+        fixture.ConfigureSubmission();
+        var levels = new Mock<ICertificateLevelRepository>();
+        levels.Setup(repo => repo.FindAsync(It.IsAny<Expression<Func<CertificateLevel, bool>>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([]);
+        fixture.UnitOfWork.SetupGet(unit => unit.CertificateLevels).Returns(levels.Object);
+        fixture.Attempt.AttemptKind = AttemptKind.Placement;
+        fixture.Attempt.ExpiresAt = DateTime.UtcNow.AddMinutes(20);
+        fixture.MockTestAttempts.Setup(repo => repo.FindAsync(
+            It.IsAny<Expression<Func<MockTestAttempt, bool>>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([fixture.Attempt]);
+
+        var result = await fixture.Service.StartPlacementTestAsync(
+            new RikiPath.Application.Requests.PlacementTests.StartPlacementTestRequest
+            { MockTestId = fixture.Test.Id, RestartExisting = restart });
+
+        Assert.True(result.IsSuccess);
+        fixture.MockTestAttempts.Verify(repo => repo.AddAsync(
+            It.IsAny<MockTestAttempt>(), It.IsAny<CancellationToken>()), restart ? Times.Once() : Times.Never());
+        if (restart) Assert.True(fixture.Attempt.ExpiresAt <= DateTime.UtcNow);
+        else Assert.True(result.Result!.IsResumed);
+    }
+
     private static Fixture CreateFixture()
     {
         var unitOfWork = new Mock<IUnitOfWork>();
@@ -534,6 +630,8 @@ public sealed class MockTestIntegrityTests
                 .Setup(repository => repository.GetByIdAsync(
                     Attempt.Id, It.IsAny<CancellationToken>()))
                 .ReturnsAsync(Attempt);
+            MockTestAnswers.Setup(repository => repository.GetByAttemptIdAsync(
+                Attempt.Id, It.IsAny<CancellationToken>())).ReturnsAsync(SubmissionSnapshots);
             MockTestSectionResults
                 .Setup(repository => repository.GetByAttemptIdAsync(
                     Attempt.Id, It.IsAny<CancellationToken>()))

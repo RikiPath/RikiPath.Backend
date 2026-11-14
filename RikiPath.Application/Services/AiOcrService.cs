@@ -4,13 +4,13 @@ using RikiPath.Application.IServices;
 
 namespace RikiPath.Application.Services
 {
-    public class GeminiOcrService : IGeminiOcrService
+    public class AiOcrService : IAiOcrService
     {
-        private readonly IGeminiOcrClient _geminiClient;
+        private readonly IAiOcrClient _ocrClient;
 
-        public GeminiOcrService(IGeminiOcrClient geminiClient)
+        public AiOcrService(IAiOcrClient ocrClient)
         {
-            _geminiClient = geminiClient;
+            _ocrClient = ocrClient;
         }
 
         public async Task<string> ScanJapaneseHandwritingAsync(IFormFile file)
@@ -30,7 +30,7 @@ namespace RikiPath.Application.Services
                   ""translation"": ""Dịch nghĩa tiếng Việt""
                 }";
 
-            return await _geminiClient.ScanHandwritingAsync(prompt, base64Image, file.ContentType);
+            return await _ocrClient.ScanHandwritingAsync(prompt, base64Image, file.ContentType) ?? string.Empty;
         }
     }
 }

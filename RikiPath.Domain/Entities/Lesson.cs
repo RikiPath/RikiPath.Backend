@@ -8,6 +8,9 @@ namespace RikiPath.Domain.Entities
         public string Title { get; set; }
         public string? Description { get; set; }
         public int SortOrder { get; set; }
+        public int? TopicId { get; set; }
+        public Topic? Topic { get; set; }
+        public List<HomeworkAssignmentLesson> HomeworkAssignmentLessons { get; set; } = new();
 
         public int CertificateLevelId { get; set; }
         public CertificateLevel CertificateLevel { get; set; }

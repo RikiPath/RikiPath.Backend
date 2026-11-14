@@ -1,4 +1,4 @@
-﻿using System.Net;
+using System.Net;
 using Microsoft.Extensions.Logging;
 using RikiPath.Application.IServices;
 using RikiPath.Application.Requests.PracticeExercises;
@@ -49,6 +49,7 @@ namespace RikiPath.Application.Services
                     cancellationToken);
                 var attempts = await unitOfWork.PracticeExerciseAttempts.FindAsync(
                     attempt => attempt.UserId == userId
+                               && attempt.HomeworkAssignmentId == null
                                && !attempt.IsDeleted
                                && exerciseIds.Contains(attempt.PracticeExerciseId),
                     cancellationToken);
@@ -131,6 +132,11 @@ namespace RikiPath.Application.Services
                     return ApiResponse<StartPracticeAttemptResponse>.NotFound(
                         "Không tìm thấy bài luyện tập.");
 
+                if (!await LessonPracticeProgress.HasStudiedAsync(unitOfWork, userId, exercise.LessonId, cancellationToken))
+                    return ApiResponse<StartPracticeAttemptResponse>.Fail(
+                        "Hãy đánh dấu đã học xong bài trước khi làm bài luyện tập.",
+                        HttpStatusCode.Conflict, "LESSON_STUDY_REQUIRED");
+
                 var questions = await unitOfWork.PracticeQuestions.FindAsync(
                     question => question.PracticeExerciseId == practiceExerciseId && !question.IsDeleted,
                     cancellationToken);
@@ -146,6 +152,7 @@ namespace RikiPath.Application.Services
                 // Nếu learner đang có lượt làm bài chưa hoàn thành thì tiếp tục lượt đó, không tạo lượt mới.
                 var openAttempts = await unitOfWork.PracticeExerciseAttempts.FindAsync(
                     attempt => attempt.UserId == userId
+                               && attempt.HomeworkAssignmentId == null
                                && attempt.PracticeExerciseId == practiceExerciseId
                                && !attempt.IsCompleted
                                && !attempt.IsDeleted,
@@ -247,7 +254,7 @@ namespace RikiPath.Application.Services
                 var attempt = await unitOfWork.PracticeExerciseAttempts.GetByIdAsync(
                     attemptId,
                     cancellationToken);
-                if (attempt is null || attempt.IsDeleted)
+                if (attempt is null || attempt.IsDeleted || attempt.HomeworkAssignmentId != null)
                     return ApiResponse<SubmitPracticeAttemptResponse>.NotFound(
                         "Không tìm thấy lượt làm bài.");
 

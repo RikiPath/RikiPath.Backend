@@ -3,6 +3,9 @@ using Microsoft.EntityFrameworkCore;
 using Moq;
 using RikiPath.Application.IServices;
 using RikiPath.Application.Requests.Lessons;
+using RikiPath.Application.Requests.PracticeExercises;
+using RikiPath.Application.Responses;
+using RikiPath.Application.Responses.LearningPaths;
 using RikiPath.Application.Services;
 using RikiPath.Domain.Entities;
 using RikiPath.Domain.Enums;
@@ -225,6 +228,59 @@ public sealed class LearningDiscoveryCompletionTests
         var row = await fixture.Context.LessonProgresses.SingleAsync();
         Assert.NotNull(row.LastWatchedAt);
         Assert.Equal(95, row.ProgressPercent);
+    }
+
+    [Fact]
+    public async Task Catalog_practice_requires_finished_study_and_passing_previous_exercise()
+    {
+        await using var fixture = await CreateFixtureAsync(userId: 7);
+        var level = await fixture.AddLevelAsync(11, "N5");
+        var skill = await fixture.AddSkillAsync(21, "Reading");
+        await fixture.AddLessonAsync(101, level, skill, 1, "First");
+        await fixture.AddLessonAsync(102, level, skill, 2, "Second");
+        fixture.Context.PracticeExercises.AddRange(new[] { (Id: 201, Lesson: 101), (Id: 202, Lesson: 102) }
+            .Select(item => new PracticeExercise
+            {
+                Id = item.Id, LessonId = item.Lesson, Title = "Practice", LanguageSkillId = skill.Id,
+                Questions = [new PracticeQuestion
+                {
+                    QuestionText = "Question",
+                    Options = [new PracticeQuestionOption { OptionText = "A", IsCorrect = true },
+                        new PracticeQuestionOption { OptionText = "B" }]
+                }]
+            }));
+        await fixture.Context.SaveChangesAsync();
+
+        var claims = new Mock<IClaimService>();
+        claims.Setup(item => item.GetUserClaim()).Returns(new ClaimDTO { Id = 7, Role = Role.Learner });
+        var paths = new Mock<ILearningPathService>();
+        paths.Setup(item => item.GetLatestLearningPathAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(ApiResponse<LearningPathResponse?>.Success(null));
+        var quiz = new PracticeQuizService(new UnitOfWork(fixture.Context), claims.Object, paths.Object);
+
+        var blocked = await quiz.StartAttemptAsync(201, default, fromCatalog: true);
+        Assert.Equal("LESSON_STUDY_REQUIRED", blocked.ErrorCode);
+        Assert.True((await fixture.Service.CompleteLessonAsync(101, default)).IsSuccess);
+        Assert.True((await fixture.Service.CompleteLessonAsync(102, default)).IsSuccess);
+        var first = await quiz.StartAttemptAsync(201, default, fromCatalog: true);
+        Assert.True(first.IsSuccess);
+        var next = await quiz.StartAttemptAsync(202, default, fromCatalog: true);
+        Assert.Equal("CATALOG_LESSON_LOCKED", next.ErrorCode);
+
+        var result = await quiz.SubmitAttemptAsync(first.Result!.AttemptId, new()
+        {
+            Answers = first.Result.Questions.Select(question =>
+                new PracticeExerciseAnswerRequest
+                {
+                    QuestionId = question.QuestionId,
+                    SelectedOptionId = question.Options.Single(option => option.OptionText == "A").OptionId,
+                }).ToList()
+        }, default);
+        Assert.True(result.Result?.Passed);
+        Assert.True((await quiz.StartAttemptAsync(202, default, fromCatalog: true)).IsSuccess);
+        var catalog = await fixture.Service.GetLearningDiscoveryAsync(level.Id, default);
+        Assert.True(catalog.Result!.Lessons[0].PracticePassed);
+        Assert.False(catalog.Result.Lessons[1].PracticePassed);
     }
 
     private static async Task<LearningFixture> CreateFixtureAsync(int userId)

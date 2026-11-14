@@ -11,6 +11,8 @@ public class PracticeExerciseAttemptConfig : IEntityTypeConfiguration<PracticeEx
         builder.HasKey(x => x.Id);
         builder.HasOne(x => x.UserAccount).WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
         builder.HasOne(x => x.PracticeExercise).WithMany(x => x.Attempts).HasForeignKey(x => x.PracticeExerciseId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne(x => x.HomeworkAssignment).WithMany().HasForeignKey(x => x.HomeworkAssignmentId).OnDelete(DeleteBehavior.Cascade);
+        builder.HasIndex(x => new { x.HomeworkAssignmentId, x.PracticeExerciseId }).IsUnique();
         builder.HasIndex(x => new { x.UserId, x.PracticeExerciseId, x.StartedAt });
     }
 }

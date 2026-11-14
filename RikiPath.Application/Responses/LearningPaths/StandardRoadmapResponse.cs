@@ -11,6 +11,15 @@ public class StandardRoadmapResponse
     public int CompletedLessons { get; set; }
     public int? NextLessonId { get; set; }
     public List<StandardRoadmapLessonResponse> Lessons { get; set; } = [];
+    public int? PlacementAttemptId { get; set; }
+    public string? ComparisonLevelCode { get; set; }
+    public List<StandardRoadmapSkillResponse> Skills { get; set; } = [];
+}
+
+public class StandardRoadmapSkillResponse
+{
+    public LearningPathSectionAssessmentResponse Assessment { get; set; } = new();
+    public List<string> UnavailableLevelCodes { get; set; } = [];
 }
 
 public class StandardRoadmapLessonResponse
@@ -20,4 +29,9 @@ public class StandardRoadmapLessonResponse
     public int SortOrder { get; set; }
     public int ProgressPercent { get; set; }
     public bool IsCompleted { get; set; }
+    public string? SkillCode { get; set; }
+    public string? LevelCode { get; set; }
+    public bool HasPracticeExercise { get; set; }
+    public bool PracticePassed { get; set; }
+    public bool IsLocked { get; set; }
 }

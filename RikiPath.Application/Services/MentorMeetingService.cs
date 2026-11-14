@@ -89,6 +89,8 @@ public sealed class MentorMeetingService(
     {
         if (request.SubscriptionPlanId <= 0)
             return ApiResponse<MentorMeetingPurchaseResponse>.Fail("SubscriptionPlanId phải lớn hơn 0.");
+        if (request.MentorAvailabilityId is <= 0 || request.Question?.Length > 2000)
+            return ApiResponse<MentorMeetingPurchaseResponse>.Fail("Khung giờ hoặc câu hỏi không hợp lệ.");
 
         try
         {
@@ -107,6 +109,17 @@ public sealed class MentorMeetingService(
             var now = DateTime.UtcNow;
             await ExpirePendingPaymentsAsync(cancellationToken);
             var expiresAt = now.AddMinutes(15);
+            MentorAvailability? slot = null;
+            if (request.MentorAvailabilityId is int slotId)
+            {
+                slot = await unitOfWork.MentorAvailabilities.GetAvailableSlotByIdAsync(slotId, now, cancellationToken);
+                if (slot is null || slot.CancelRequestedAt is not null)
+                    return ApiResponse<MentorMeetingPurchaseResponse>.Fail("Khung giờ vừa hết chỗ. Hãy chọn lịch khác.", HttpStatusCode.Conflict);
+                var duration = plan.MeetingSessionCount == 1 ? 14 : 35;
+                if (slot.EndTime > now.AddDays(duration))
+                    return ApiResponse<MentorMeetingPurchaseResponse>.Fail("Khung giờ nằm ngoài thời hạn của gói.", HttpStatusCode.Conflict);
+                if (slot.StartTime < expiresAt) expiresAt = slot.StartTime;
+            }
             var subscription = new UserSubscription
             {
                 UserId = claims.Id,
@@ -121,8 +134,30 @@ public sealed class MentorMeetingService(
                 PurchasedAt = now,
                 AiGradingQuota = plan.AiGradingQuota
             };
+            MentorBooking? hold = null;
+            if (slot is not null)
+            {
+                slot.BookedCount++;
+                subscription.MeetingSessionsUsed = 1;
+                hold = new MentorBooking
+                {
+                    UserSubscription = subscription,
+                    MentorAvailability = slot,
+                    Status = MentorStatus.AwaitingPayment,
+                    ScheduledAt = slot.StartTime,
+                    Question = request.Question?.Trim()
+                };
+                subscription.MentorBookings.Add(hold);
+            }
             await unitOfWork.UserSubscriptions.AddAsync(subscription, cancellationToken);
-            await unitOfWork.SaveChangesAsync(cancellationToken);
+            try
+            {
+                await unitOfWork.SaveChangesAsync(cancellationToken);
+            }
+            catch (DbUpdateConcurrencyException) when (slot is not null)
+            {
+                return ApiResponse<MentorMeetingPurchaseResponse>.Fail("Khung giờ vừa thay đổi. Hãy chọn lại lịch.", HttpStatusCode.Conflict);
+            }
 
             PaymentLinkResult checkout;
             try
@@ -146,6 +181,14 @@ public sealed class MentorMeetingService(
                 logger.LogError(ex, "PayOS checkout creation failed for subscription {SubscriptionId}.", subscription.Id);
                 subscription.PaymentStatus = PaymentStatus.Failed;
                 subscription.PaymentExpiresAt = null;
+                if (hold is not null && slot is not null)
+                {
+                    slot.BookedCount = Math.Max(0, slot.BookedCount - 1);
+                    hold.Status = MentorStatus.Cancelled;
+                    hold.MentorAvailability = null;
+                    hold.MentorAvailabilityId = null;
+                    subscription.MeetingSessionsUsed = 0;
+                }
                 unitOfWork.UserSubscriptions.Update(subscription);
                 await unitOfWork.SaveChangesAsync(cancellationToken);
                 return ApiResponse<MentorMeetingPurchaseResponse>.Fail("Không thể tạo liên kết thanh toán. Chưa cộng hoặc trừ lượt.", HttpStatusCode.BadGateway);
@@ -158,7 +201,7 @@ public sealed class MentorMeetingService(
             return ApiResponse<MentorMeetingPurchaseResponse>.Success(new MentorMeetingPurchaseResponse
             {
                 SubscriptionId = subscription.Id,
-                BookingId = null,
+                BookingId = hold?.Id,
                 OrderCode = subscription.Id,
                 PlanName = plan.Name,
                 MeetingSessionCount = plan.MeetingSessionCount,

@@ -18,9 +18,8 @@ public sealed class AdminDashboardService(IUnitOfWork unitOfWork, IClaimService 
         var totalUsers = await users.CountAsync(cancellationToken);
         var learners = await users.CountAsync(x => x.Role == Role.Learner, cancellationToken);
         var mentors = await users.CountAsync(x => x.Role == Role.Mentor, cancellationToken);
-        // ContentApprovalService uses Draft as the reviewable import queue.
         var pendingContent = await unitOfWork.ContentApprovalRequests.Query()
-            .CountAsync(x => !x.IsDeleted && x.Status == ContentApprovalStatus.Draft, cancellationToken);
+            .CountAsync(x => !x.IsDeleted && x.Status == ContentApprovalStatus.PendingReview, cancellationToken);
         var pendingMentorSchedules = await unitOfWork.MentorAvailabilities.Query()
             .CountAsync(x => !x.IsDeleted && !x.IsApproved && x.RejectedAt == null && x.StartTime > now, cancellationToken);
         var bookings = await unitOfWork.MentorBookings.Query().CountAsync(x => !x.IsDeleted, cancellationToken);

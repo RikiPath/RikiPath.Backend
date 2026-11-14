@@ -14,7 +14,8 @@ namespace RikiPath.WebApi.Hubs;
 /// Peer được định danh bằng ConnectionId; signaling (offer/answer/ice) gửi ĐÍCH DANH tới 1 peer.
 /// </summary>
 [Authorize]
-public sealed class MentorMeetingHub(IMentorMeetingAccessService meetingAccessService, IMeetingNoteService meetingNoteService) : Hub
+public sealed class MentorMeetingHub(IMentorMeetingAccessService meetingAccessService, IMeetingNoteService meetingNoteService,
+    ILogger<MentorMeetingHub> logger) : Hub
 {
     // Mesh: 6 người => mỗi máy giữ 5 kết nối và upload 5 luồng video. Lớp đông hơn cần SFU (LiveKit, mediasoup...).
     private const int MaxLearners = 5;
@@ -75,6 +76,22 @@ public sealed class MentorMeetingHub(IMentorMeetingAccessService meetingAccessSe
             .Where(x => x.Value.RoomId == roomId && x.Key != Context.ConnectionId)
             .Select(x => ToPeer(x.Key, x.Value))
             .ToList();
+
+        var presentLearners = isMentor
+            ? others.Where(peer => peer.Role == "Learner").Select(peer => peer.Id).Distinct().ToArray()
+            : others.Any(peer => peer.Id == meeting.Mentor.UserId && peer.Role == "Mentor") ? [userId] : [];
+        if (presentLearners.Length > 0)
+        {
+            try
+            {
+                await meetingAccessService.RecordAttendanceAsync(roomId, meeting.Mentor.UserId, presentLearners,
+                    CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Không thể ghi nhận tham gia phòng mentor {RoomId}.", roomId);
+            }
+        }
 
         return new JoinMeetingRoomResponse { Self = self, Participants = others };
     }

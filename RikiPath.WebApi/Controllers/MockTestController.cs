@@ -14,6 +14,62 @@ namespace RikiPath.WebApi.Controllers
     [Authorize(Roles = "Learner")]
     public class MockTestController(IMockTestService mockTestService) : ControllerBase
     {
+        [HttpGet("by-level/{certificateLevelId:int}")]
+        public async Task<IActionResult> ListMockTests(int certificateLevelId, CancellationToken ct)
+        {
+            var result = await mockTestService.GetTestsByLevelAsync(certificateLevelId, ct);
+            return StatusCode(result.StatusCode, result);
+        }
+
+        [HttpPost("{mockTestId:int}/start")]
+        public async Task<IActionResult> StartMockTest(int mockTestId, CancellationToken ct)
+        {
+            var result = await mockTestService.StartAttemptAsync(mockTestId, ct);
+            return StatusCode(result.StatusCode, result);
+        }
+
+        [HttpGet("attempts/{attemptId:int}/questions")]
+        public async Task<IActionResult> GetMockTestQuestions(int attemptId, CancellationToken ct)
+        {
+            var result = await mockTestService.GetAttemptSnapshotAsync(attemptId, ct);
+            return StatusCode(result.StatusCode, result);
+        }
+
+        [HttpPut("attempts/{attemptId:int}/answers")]
+        public async Task<IActionResult> SaveMockTestAnswers(int attemptId, SubmitAttemptRequest request, CancellationToken ct)
+        {
+            var result = await mockTestService.SaveAttemptAnswersAsync(attemptId, request, ct);
+            return StatusCode(result.StatusCode, result);
+        }
+
+        [HttpPost("attempts/{attemptId:int}/submit")]
+        public async Task<IActionResult> SubmitMockTest(int attemptId, SubmitAttemptRequest request, CancellationToken ct)
+        {
+            var result = await mockTestService.SubmitAttemptAsync(attemptId, request, ct);
+            return StatusCode(result.StatusCode, result);
+        }
+
+        [HttpGet("attempts/{attemptId:int}")]
+        public async Task<IActionResult> GetMockTestResult(int attemptId, CancellationToken ct)
+        {
+            var result = await mockTestService.GetAttemptResultAsync(attemptId, ct);
+            return StatusCode(result.StatusCode, result);
+        }
+
+        [HttpGet("attempts/{attemptId:int}/review")]
+        public async Task<IActionResult> ReviewMockTest(int attemptId, CancellationToken ct)
+        {
+            var result = await mockTestService.GetDetailedResultAsync(attemptId, ct);
+            return StatusCode(result.StatusCode, result);
+        }
+
+        [HttpGet("history")]
+        public async Task<IActionResult> MockTestHistory(CancellationToken ct)
+        {
+            var result = await mockTestService.GetHistoryAsync(ct);
+            return StatusCode(result.StatusCode, result);
+        }
+
         /// <summary>
         /// Lấy trạng thái bài đánh giá năng lực (placement) của học viên.
         /// </summary>

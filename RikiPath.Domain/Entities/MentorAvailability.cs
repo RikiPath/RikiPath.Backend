@@ -23,6 +23,7 @@ namespace RikiPath.Domain.Entities
         public DateTime EndTime { get; set; }
 
         public Guid RoomId { get; set; } = Guid.NewGuid();
+        public bool AttendanceTrackingEnabled { get; set; } = true;
 
         public int MaxLearners { get; set; } = DefaultMaxLearners;
 

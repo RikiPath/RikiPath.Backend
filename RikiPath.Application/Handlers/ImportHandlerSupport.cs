@@ -1,6 +1,7 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using RikiPath.Application.Helpers;
 using RikiPath.Application.Responses.Content;
+using RikiPath.Application.Services;
 using RikiPath.Domain.Enums;
 
 namespace RikiPath.Application.Handlers
@@ -77,6 +78,8 @@ namespace RikiPath.Application.Handlers
         {
             if (string.IsNullOrWhiteSpace(levelCode))
                 errors.Add("Thiếu cột Certificate Level Code.");
+            else if (levelCode is not ("N5" or "N4" or "N3" or "N2"))
+                errors.Add("Cấp độ phải từ N5 đến N2.");
             else if (ambiguousLevelCodes.Contains(levelCode))
                 errors.Add($"Certificate Level Code '{levelCode}' bị trùng ở nhiều loại chứng chỉ, không xác định được level.");
             else if (!levelsByCode.ContainsKey(levelCode))
@@ -125,8 +128,7 @@ namespace RikiPath.Application.Handlers
         {
             var v = Clean(raw);
             if (v is null) return null;
-            if (!Uri.TryCreate(v, UriKind.Absolute, out var uri)
-                || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+            if (!IsHttpUrl(v))
             {
                 errors.Add($"{rowPrefix}{label} phải là đường dẫn http/https hợp lệ.");
                 return null;
@@ -134,15 +136,54 @@ namespace RikiPath.Application.Handlers
             return v;
         }
 
+        public static string? ValidateMockListeningAudio(
+            string? questionType, string? audioUrl, string? skillName, string? sectionTitle, string? sectionCode)
+        {
+            var isListening = string.Equals(questionType?.Trim(), "Listening", StringComparison.OrdinalIgnoreCase)
+                || JlptSkillAssessmentPolicy.Classify(skillName) == JlptStudySkill.Listening
+                || JlptSkillAssessmentPolicy.Classify(sectionTitle) == JlptStudySkill.Listening
+                || JlptSkillAssessmentPolicy.Classify(sectionCode) == JlptStudySkill.Listening;
+            if (!isListening) return null;
+
+            var url = Clean(audioUrl);
+            if (url is null) return "Câu Nghe hiểu thiếu AudioUrl. Hãy tải file MP3 lên và điền đường dẫn.";
+            if (!IsHttpUrl(url)) return "AudioUrl của câu Nghe hiểu phải là đường dẫn http/https hợp lệ.";
+            return new Uri(url).AbsolutePath.EndsWith(".mp3", StringComparison.OrdinalIgnoreCase)
+                ? null : "AudioUrl của câu Nghe hiểu phải trỏ tới file .mp3.";
+        }
+
+        public static string? ValidateMockTestCoverage(string? levelCode,
+            IReadOnlyList<MockTestSectionPayloadResponse> sections, IReadOnlyDictionary<int, string> skillNames)
+        {
+            var level = levelCode?.Trim().ToUpperInvariant();
+            if (level is not ("N5" or "N4" or "N3" or "N2")) return null;
+
+            var covered = sections.Where(section => section.Questions is { Count: > 0 })
+                .Select(section => JlptSkillAssessmentPolicy.Classify(skillNames.GetValueOrDefault(section.LanguageSkillId)))
+                .ToHashSet();
+            var missing = Enum.GetValues<JlptStudySkill>().Where(skill => !covered.Contains(skill))
+                .Select(JlptSkillAssessmentPolicy.Label).ToList();
+            return missing.Count == 0 ? null : $"Đề JLPT {level} thiếu phần có câu hỏi: {string.Join(", ", missing)}.";
+        }
+
+        private static bool IsHttpUrl(string value) =>
+            Uri.TryCreate(value, UriKind.Absolute, out var uri) &&
+            (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
+
         /// <summary>
         /// Đọc Option1..4 + số thứ tự đáp án đúng. Cần >= 2 đáp án, không được bỏ trống giữa chừng
         /// (Option3 trống mà Option4 có), và đáp án đúng phải trỏ vào 1 đáp án có nội dung. Lỗi -> thêm vào errors và trả null.
         /// </summary>
         public static List<ImportOptionPayloadResponse>? ParseOptions(
-            ExcelRow row, IReadOnlyList<string> optionHeaders, string correctHeader, string rowPrefix, List<string> errors)
+            ExcelRow row, IReadOnlyList<string> optionHeaders, string correctHeader, string rowPrefix, List<string> errors, bool includeImages = false)
         {
             var before = errors.Count;
             var texts = optionHeaders.Select(h => Clean(row.Get(h))).ToList();
+
+            var images = optionHeaders.Select(header => includeImages
+                ? CheckUrl(row.Get(header + "ImageUrl"), header + "ImageUrl", rowPrefix, errors) : null).ToList();
+            for (var i = 0; i < texts.Count; i++)
+                if (images[i] is not null) texts[i] ??= string.Empty;
 
             var lastFilled = texts.FindLastIndex(t => t is not null);
             for (var i = 0; i < lastFilled; i++)
@@ -169,7 +210,7 @@ namespace RikiPath.Application.Handlers
             for (var i = 0; i < texts.Count; i++)
             {
                 if (texts[i] is null) continue;
-                list.Add(new ImportOptionPayloadResponse { SortOrder = i + 1, OptionText = texts[i]!, IsCorrect = i + 1 == correct });
+                list.Add(new ImportOptionPayloadResponse { SortOrder = i + 1, OptionText = texts[i]!, ImageUrl = images[i], IsCorrect = i + 1 == correct });
             }
             return list;
         }

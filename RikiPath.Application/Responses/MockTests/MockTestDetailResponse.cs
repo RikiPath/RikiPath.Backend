@@ -42,6 +42,7 @@ namespace RikiPath.Application.Responses.MockTests
     {
         public int OptionId { get; set; }
         public string OptionText { get; set; } = string.Empty;
+        public string? ImageUrl { get; set; }
         public int SortOrder { get; set; }
         // Cố ý KHÔNG có IsCorrect — tránh lộ đáp án.
     }

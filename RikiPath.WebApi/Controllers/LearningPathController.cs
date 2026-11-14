@@ -1,4 +1,5 @@
-using Microsoft.AspNetCore.Authorization;
+﻿using Microsoft.AspNetCore.Authorization;
+using RikiPath.Application.Services;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using RikiPath.Application.IServices;
@@ -9,7 +10,7 @@ namespace RikiPath.WebApi.Controllers
     [Route("api/[controller]")]
     [ApiController]
     [Authorize(Roles = "Learner")]
-    public class LearningPathController(ILearningPathService learningPathService) : ControllerBase
+    public class LearningPathController(ILearningPathService learningPathService, SubscriptionAccessService subscriptions) : ControllerBase
     {
         /// <summary>Lấy lộ trình học gần nhất đã được tạo cho Learner hiện tại.</summary>
         /// <remarks>Không tự gọi AI. Result là null khi người học chưa từng tạo lộ trình.</remarks>
@@ -56,7 +57,8 @@ namespace RikiPath.WebApi.Controllers
         [HttpPost("preview")]
         public async Task<IActionResult> Preview([FromBody] PreviewLearningPathRequest request, CancellationToken cancellationToken)
         {
-            var response = await learningPathService.PreviewLearningPathAsync(request, cancellationToken);
+            var response = await subscriptions.UseAiAsync("learning_path",
+                () => learningPathService.PreviewLearningPathAsync(request, cancellationToken), cancellationToken);
             return StatusCode((int)response.StatusCode, response);
         }
 
@@ -84,9 +86,9 @@ namespace RikiPath.WebApi.Controllers
         /// 
         /// Luồng xử lý: API gọi dịch vụ AI ngầm để sinh đề xuất dựa trên trình độ/mục tiêu của người học (theo ngày, tích hợp tùy chọn từ vựng, kanji, ngữ pháp), lưu vào CSDL và trả về kết quả.
         /// 
-        /// Lưu ý cho FE: Yêu cầu Bearer Token (Role = Learner). Quá trình gọi có thể mất từ 1-5s do xử lý AI; FE nên hiển thị trạng thái loading và hỗ trợ cancellationToken.
+        /// Lưu ý cho FE: Yêu cầu Bearer Token (Role = Learner). Thời gian xử lý phụ thuộc model và số đợt 30 ngày; FE cần hiển thị trạng thái đang tạo và hỗ trợ hủy yêu cầu.
         /// </remarks>
-        /// <param name="request">Object rỗng; Backend lấy mục tiêu và cấp độ bắt đầu từ hồ sơ đã lưu.</param>
+        /// <param name="request">Loại chứng chỉ/cấp độ, ngày thi, số phút cố định hoặc min/max và horizon; trường bỏ trống dùng hồ sơ hiện tại.</param>
         /// <param name="cancellationToken">Token hủy request (Optional).</param>
         /// <response code="200">Thành công: Trả về lộ trình học tập được thiết kế bởi AI.</response>
         /// <response code="400">Yêu cầu không hợp lệ: Thiếu thông tin profile hoặc định dạng JSON không đúng.</response>
@@ -99,9 +101,8 @@ namespace RikiPath.WebApi.Controllers
             [FromBody] GenerateLearningPathRequest request,
             CancellationToken cancellationToken)
         {
-            var response = await learningPathService.GenerateLearningPathAsync(
-                request,
-                cancellationToken);
+            var response = await subscriptions.UseAiAsync("learning_path",
+                () => learningPathService.GenerateLearningPathAsync(request, cancellationToken), cancellationToken);
 
             return StatusCode((int)response.StatusCode, response);
         }

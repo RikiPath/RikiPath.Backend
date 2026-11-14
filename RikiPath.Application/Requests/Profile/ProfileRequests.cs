@@ -9,8 +9,13 @@ namespace RikiPath.Application.Requests.Profile
     public class SetJlptGoalRequest
     {
         public int TargetJlptLevelId { get; set; }
+        public int? TargetCertificateLevelId { get; set; }
+        public int? CertificateTypeId { get; set; }
+        public string? DeclaredJlptCertificateCode { get; set; }
 
         /// <summary>Số phút học mong muốn mỗi ngày, dùng để tính streak/nhắc học.</summary>
+        public int? DailyStudyMinutesMin { get; set; }
+        public int? DailyStudyMinutesMax { get; set; }
         public int DailyStudyMinutes { get; set; }
 
         /// <summary>Ngày dự định thi, dùng để tạo lộ trình học. Phải sau ngày hiện tại.</summary>

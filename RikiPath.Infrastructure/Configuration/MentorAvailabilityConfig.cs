@@ -18,6 +18,7 @@ namespace RikiPath.Infrastructure.Configuration
             builder.HasIndex(x => new { x.MentorId, x.StartTime, x.EndTime });
 
             builder.Property(x => x.RoomId).IsRequired();
+            builder.Property(x => x.AttendanceTrackingEnabled).HasDefaultValue(true);
             builder.HasIndex(x => x.RoomId).IsUnique();
 
             builder.Property(x => x.MaxLearners).HasDefaultValue(MentorAvailability.DefaultMaxLearners);

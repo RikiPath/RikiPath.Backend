@@ -1,14 +1,16 @@
-using Microsoft.AspNetCore.Authorization;
+﻿using Microsoft.AspNetCore.Authorization;
+using RikiPath.Application.Services;
+using RikiPath.Domain.Enums;
 using Microsoft.AspNetCore.Mvc;
 using RikiPath.Application.IServices;
 using RikiPath.Application.Requests.Practice;
-using System.Security.Claims;
+
 
 namespace RikiPath.WebApi.Controllers
 {
     [Route("api/[controller]")]
     [ApiController]
-    public class PracticeSubmissionController(IPracticeSubmissionService practiceSubmissionService) : ControllerBase
+    public class PracticeSubmissionController(IPracticeSubmissionService practiceSubmissionService, SubscriptionAccessService subscriptions) : ControllerBase
     {
         /// <summary>
         /// Nộp bài luyện tập (bài tự luận hoặc ảnh) để lưu và (nếu có) yêu cầu chấm tự động.
@@ -27,11 +29,15 @@ namespace RikiPath.WebApi.Controllers
         /// <response code="422">Bị từ chối do giới hạn (ví dụ hết quota AI cho ngày hôm nay).</response>
         /// <response code="500">Lỗi server hoặc lỗi dịch vụ chấm (AI) bên thứ ba.</response>
         [HttpPost("submit")]
-        [Authorize(Roles = "Learner")]
+        [Authorize(Roles = "Learner,Mentor")]
         public async Task<IActionResult> Submit([FromBody] SubmitPracticeRequest request, CancellationToken cancellationToken)
         {
 
-            var result = await practiceSubmissionService.SubmitAsync(request, cancellationToken);
+            var result = request.GradeWithAi && (request.Type == SubmissionType.Writing ||
+                request.Type == SubmissionType.Speaking && !string.IsNullOrWhiteSpace(request.TextContent))
+                ? await subscriptions.UseAiAsync(request.Type == SubmissionType.Speaking ? "speaking" : "writing", () => practiceSubmissionService.SubmitAsync(request, cancellationToken),
+                    cancellationToken, value => value?.Grading is not null)
+                : await practiceSubmissionService.SubmitAsync(request, cancellationToken);
             return StatusCode((int)result.StatusCode, result);
         }
 
@@ -72,7 +78,7 @@ namespace RikiPath.WebApi.Controllers
         /// <response code="401">Chưa xác thực: Thiếu Bearer Token.</response>
         /// <response code="500">Lỗi server khi truy vấn lịch sử.</response>
         [HttpGet("my-history")]
-        [Authorize(Roles = "Learner")]
+        [Authorize(Roles = "Learner,Mentor")]
         public async Task<IActionResult> GetMyHistory(CancellationToken cancellationToken)
         {
 
@@ -98,11 +104,16 @@ namespace RikiPath.WebApi.Controllers
         /// <response code="429">Bị giới hạn: Regrade bị chặn do quota hoặc giới hạn tốc độ.</response>
         /// <response code="500">Lỗi server hoặc lỗi dịch vụ chấm (AI) bên thứ ba.</response>
         [HttpPost("{submissionId:int}/regrade")]
-        [Authorize(Roles = "Learner")]
+        [Authorize(Roles = "Learner,Mentor")]
         public async Task<IActionResult> Regrade(int submissionId, CancellationToken cancellationToken)
         {
 
-            var result = await practiceSubmissionService.RegradeAsync(submissionId, cancellationToken);
+            var submission = await practiceSubmissionService.GetByIdAsync(submissionId, cancellationToken);
+            if (!submission.IsSuccess)
+                return StatusCode(submission.StatusCode, submission);
+            var feature = submission.Result?.Type == SubmissionType.Speaking ? "speaking" : "writing";
+            var result = await subscriptions.UseAiAsync(feature, () => practiceSubmissionService.RegradeAsync(submissionId, cancellationToken),
+                cancellationToken, value => value?.Grading is not null);
             return StatusCode((int)result.StatusCode, result);
         }
     }

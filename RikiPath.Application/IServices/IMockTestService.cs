@@ -8,6 +8,15 @@ namespace RikiPath.Application.IServices
 {
     public interface IMockTestService
     {
+        Task<ApiResponse<List<TestSummaryResponse>>> GetTestsByLevelAsync(int certificationLevelId, CancellationToken cancellationToken = default);
+        Task<ApiResponse<StartAttemptResponse>> StartAttemptAsync(int practiceTestId, CancellationToken cancellationToken = default);
+        Task<ApiResponse<StartAttemptResponse>> GetAttemptSnapshotAsync(int attemptId, CancellationToken cancellationToken = default);
+        Task<ApiResponse<AttemptResultResponse>> SaveAttemptAnswersAsync(int attemptId, SubmitAttemptRequest request, CancellationToken cancellationToken = default);
+        Task<ApiResponse<AttemptResultResponse>> SubmitAttemptAsync(int attemptId, SubmitAttemptRequest request, CancellationToken cancellationToken = default);
+        Task<ApiResponse<AttemptResultResponse>> GetAttemptResultAsync(int attemptId, CancellationToken cancellationToken = default);
+        Task<ApiResponse<DetailedAttemptResultResponse>> GetDetailedResultAsync(int attemptId, CancellationToken cancellationToken = default);
+        Task<ApiResponse<List<MockTestHistoryItem>>> GetHistoryAsync(CancellationToken cancellationToken = default);
+
         Task<ApiResponse<PlacementTestStatusResponse>> GetStatusAsync(
             CancellationToken cancellationToken = default);
 

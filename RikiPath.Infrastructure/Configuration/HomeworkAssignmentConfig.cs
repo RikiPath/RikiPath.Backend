@@ -13,7 +13,7 @@ public class HomeworkAssignmentConfig : IEntityTypeConfiguration<HomeworkAssignm
         builder.Property(x => x.Status).IsRequired().HasMaxLength(30);
         builder.HasOne(x => x.Learner).WithMany().HasForeignKey(x => x.LearnerId).OnDelete(DeleteBehavior.Cascade);
         builder.HasOne(x => x.Mentor).WithMany().HasForeignKey(x => x.MentorId).OnDelete(DeleteBehavior.Restrict);
-        builder.HasOne(x => x.Lesson).WithMany().HasForeignKey(x => x.LessonId).OnDelete(DeleteBehavior.SetNull);
+        builder.HasOne(x => x.MentorBooking).WithMany().HasForeignKey(x => x.MentorBookingId).OnDelete(DeleteBehavior.Restrict);
         builder.HasIndex(x => new { x.LearnerId, x.DueAt });
     }
 }

@@ -403,6 +403,6 @@ public class ContentAuthorService(
         { Id = q.Id, QuestionText = q.QuestionText, Explanation = q.Explanation, SortOrder = q.SortOrder, Options = q.Options?.Where(o => !o.IsDeleted).OrderBy(o => o.SortOrder).Select(ToOption).ToList() ?? [] }).ToList()
     };
 
-    private static AuthorOptionDetails ToOption(MockQuestionOption o) => new() { Id = o.Id, OptionText = o.OptionText, IsCorrect = o.IsCorrect, SortOrder = o.SortOrder };
+    private static AuthorOptionDetails ToOption(MockQuestionOption o) => new() { Id = o.Id, OptionText = o.OptionText, ImageUrl = o.ImageUrl, IsCorrect = o.IsCorrect, SortOrder = o.SortOrder };
     private static AuthorOptionDetails ToOption(PracticeQuestionOption o) => new() { Id = o.Id, OptionText = o.OptionText, IsCorrect = o.IsCorrect, SortOrder = o.SortOrder };
 }

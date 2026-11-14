@@ -1,6 +1,6 @@
 ﻿namespace RikiPath.Application.IClients;
 
-public interface IGeminiOcrClient
+public interface IAiOcrClient
 {
     Task<string?> ScanHandwritingAsync(
         string prompt,

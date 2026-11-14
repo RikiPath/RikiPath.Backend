@@ -7,6 +7,9 @@ namespace RikiPath.Application.Responses.MockTests
         public int MockTestSectionId { get; set; }
         public string SectionTitle { get; set; } = string.Empty;
         public string LanguageSkillName { get; set; } = string.Empty;
+        public int? JlptLevelId { get; set; }
+        public string? JlptLevelName { get; set; }
+        public bool? HasAudioEvidence { get; set; }
         public int CorrectCount { get; set; }
         public int TotalCount { get; set; }
 

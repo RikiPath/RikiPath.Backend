@@ -21,6 +21,33 @@ namespace RikiPath.Application.Responses.LearningPaths
         public List<string> Strengths { get; set; } = new();
         public List<string> Weaknesses { get; set; } = new();
         public string Feasibility { get; set; } = string.Empty;
+        public int? PlacementAttemptId { get; set; }
+        public DateTime? PlacementSubmittedAt { get; set; }
+        public string Readiness { get; set; } = string.Empty;
+        public int DailyStudyMinutes { get; set; }
+        public int DailyStudyMinutesMin { get; set; }
+        public int DailyStudyMinutesMax { get; set; }
+        public int? CertificateTypeId { get; set; }
+        public string CertificateTypeName { get; set; } = "JLPT";
+        public int? TargetCertificateLevelId { get; set; }
+        public int TotalStudyDays { get; set; }
+        public DateTime? DetailedPlanEndDate { get; set; }
+        public int? SuggestedDailyStudyMinutes { get; set; }
+        public bool RequiresMoreDailyStudyTime { get; set; }
+        public List<LearningPathStudyTimeScenario> StudyTimeScenarios { get; set; } = new();
+        public string StudyTimeAdvice { get; set; } = string.Empty;
+        public string OfficialExamStructureNote { get; set; } = string.Empty;
+        public int? AvailableStudyDays { get; set; }
+        public DateTime? PlanningExamDate { get; set; }
+        public bool IsAlternativePlan { get; set; }
+        /// <summary>Exclusive study deadline: the first of three rest days before the planned exam.</summary>
+        public DateTime? StudyDeadline { get; set; }
+        public DateTime? LastStudyDate { get; set; }
+        public DateTime? RestStartDate { get; set; }
+        public List<LearningPathSectionAssessmentResponse> SectionAssessments { get; set; } = new();
+        public List<LearningPathPhaseResponse> Phases { get; set; } = new();
+        public List<string> ContentCoverageWarnings { get; set; } = new();
+        public string EstimationNote { get; set; } = "Thời lượng là ước tính lập kế hoạch từ bài đánh giá và thời gian học mỗi ngày, không phải cam kết đỗ hoặc xác suất đỗ JLPT.";
 
         /// <summary>true = ngày thi có vẻ khả thi; false = khuyến nghị dời lịch; null = chưa đặt ngày thi.</summary>
         public bool? IsExamDateRealistic { get; set; }

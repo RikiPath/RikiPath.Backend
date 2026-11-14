@@ -9,6 +9,7 @@ namespace RikiPath.WebApi.Controllers
     [Route("api/[controller]")]
     [ApiController]
     [Authorize(Roles = "Learner")]
+    [RequireSelfStudy]
     public class NotebookController(INotebookService notebookService) : ControllerBase
     {
         /// <summary>

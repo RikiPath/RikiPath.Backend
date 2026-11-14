@@ -12,28 +12,55 @@ namespace RikiPath.Application.Services;
 public class PracticeQuizService(
     IUnitOfWork unitOfWork,
     IClaimService claimService,
-    ILearningPathService learningPathService) : IPracticeQuizService
+    ILearningPathService learningPathService,
+    IStandardRoadmapService? standardRoadmapService = null) : IPracticeQuizService
 {
-    public const double MinimumPassingScorePercent = 70;
+    public const double MinimumPassingScorePercent = LessonPracticeProgress.PassingScore;
 
-    public async Task<ApiResponse<IReadOnlyList<PracticeExerciseSummaryResponse>>> GetLessonExercisesAsync(
+    public Task<ApiResponse<IReadOnlyList<PracticeExerciseSummaryResponse>>> GetLessonExercisesAsync(
         int lessonId, CancellationToken cancellationToken)
+        => LoadLessonExercisesAsync(lessonId, cancellationToken);
+
+    public Task<ApiResponse<IReadOnlyList<PracticeExerciseSummaryResponse>>> GetAssessmentRoadmapExercisesAsync(
+        int lessonId, CancellationToken cancellationToken)
+        => LoadLessonExercisesAsync(lessonId, cancellationToken, fromAssessmentRoadmap: true);
+
+    private async Task<ApiResponse<IReadOnlyList<PracticeExerciseSummaryResponse>>> LoadLessonExercisesAsync(
+        int lessonId, CancellationToken cancellationToken, bool fromAssessmentRoadmap = false)
     {
         if (lessonId <= 0)
             return ApiResponse<IReadOnlyList<PracticeExerciseSummaryResponse>>.Fail("LessonId không hợp lệ.");
 
         try
         {
+            if (fromAssessmentRoadmap)
+            {
+                var access = await CheckAssessmentRoadmapLessonAsync(lessonId, cancellationToken);
+                if (!access.IsSuccess)
+                    return ApiResponse<IReadOnlyList<PracticeExerciseSummaryResponse>>.Fail(
+                        access.ErrorMessage!, (HttpStatusCode)access.StatusCode, access.ErrorCode);
+            }
+
             var lesson = await unitOfWork.Lessons.GetLearnerVisibleByIdAsync(lessonId, cancellationToken);
             if (lesson is null)
                 return ApiResponse<IReadOnlyList<PracticeExerciseSummaryResponse>>.NotFound("Không tìm thấy lesson.");
 
-            var exercises = await unitOfWork.PracticeExercises.Query()
+            var userId = claimService.GetUserClaim().Id;
+            var source = fromAssessmentRoadmap
+                ? LessonPracticeProgress.ReadyExercises(unitOfWork)
+                : unitOfWork.PracticeExercises.Query();
+            var exercises = await source
                 .Where(exercise => !exercise.IsDeleted && exercise.LessonId == lessonId)
                 .OrderBy(exercise => exercise.SortOrder)
                 .ThenBy(exercise => exercise.Id)
                 .Select(exercise => new PracticeExerciseSummaryResponse
                 {
+                    Id = exercise.Id,
+                    MinimumPassingScorePercent = MinimumPassingScorePercent,
+                    Passed = unitOfWork.PracticeExerciseAttempts.Query().Any(attempt =>
+                        !attempt.IsDeleted && attempt.UserId == userId && attempt.HomeworkAssignmentId == null &&
+                        attempt.IsCompleted &&
+                        attempt.PracticeExerciseId == exercise.Id && attempt.ScorePercent >= MinimumPassingScorePercent),
                     LessonId = exercise.LessonId,
                     Title = exercise.Title,
                     Description = exercise.Description,
@@ -52,32 +79,110 @@ public class PracticeQuizService(
         }
     }
 
-    public async Task<ApiResponse<PracticeExerciseAttemptResponse>> StartAttemptAsync(
+    public Task<ApiResponse<PracticeExerciseAttemptResponse>> StartAttemptAsync(
+        int practiceExerciseId, CancellationToken cancellationToken, bool fromCatalog = false, string? skill = null)
+        => StartAsync(practiceExerciseId, null, cancellationToken, fromCatalog, skill);
+
+    public Task<ApiResponse<PracticeExerciseAttemptResponse>> StartHomeworkAttemptAsync(
+        int assignmentId, int exerciseId, CancellationToken cancellationToken)
+        => WithLearnerLockAsync(token => StartAsync(exerciseId, assignmentId, token), cancellationToken);
+
+    public Task<ApiResponse<PracticeExerciseAttemptResponse>> StartAssessmentRoadmapAttemptAsync(
         int practiceExerciseId, CancellationToken cancellationToken)
+        => StartAsync(practiceExerciseId, null, cancellationToken, fromAssessmentRoadmap: true);
+
+    private async Task<ApiResponse<PracticeExerciseAttemptResponse>> StartAsync(
+        int practiceExerciseId, int? assignmentId, CancellationToken cancellationToken, bool fromCatalog = false,
+        string? skill = null, bool fromAssessmentRoadmap = false)
     {
         try
         {
             var userId = claimService.GetUserClaim().Id;
+            if (assignmentId.HasValue && !await unitOfWork.HomeworkAssignments.Query().AnyAsync(assignment =>
+                    assignment.Id == assignmentId && assignment.LearnerId == userId && !assignment.IsDeleted &&
+                    assignment.Status == "Assigned" && assignment.Exercises.Any(link =>
+                        link.PracticeExerciseId == practiceExerciseId), cancellationToken))
+                return ApiResponse<PracticeExerciseAttemptResponse>.NotFound("Không tìm thấy bài luyện tập được giao.");
+
             var exercise = await unitOfWork.PracticeExercises.GetWithQuestionsAndOptionsAsync(
                 practiceExerciseId, cancellationToken);
-            if (exercise is null || exercise.IsDeleted ||
-                await unitOfWork.Lessons.GetLearnerVisibleByIdAsync(exercise.LessonId, cancellationToken) is null)
+            var lesson = exercise is null || exercise.IsDeleted ? null :
+                await unitOfWork.Lessons.GetLearnerVisibleByIdAsync(exercise.LessonId, cancellationToken);
+            if (exercise is null || lesson is null)
                 return ApiResponse<PracticeExerciseAttemptResponse>.NotFound("Không tìm thấy bài Practice Exercise.");
+
+            if (!assignmentId.HasValue &&
+                !await LessonPracticeProgress.HasStudiedAsync(unitOfWork, userId, lesson.Id, cancellationToken))
+                return ApiResponse<PracticeExerciseAttemptResponse>.Fail(
+                    "Hãy đánh dấu đã học xong bài trước khi làm bài luyện tập.",
+                    HttpStatusCode.Conflict, "LESSON_STUDY_REQUIRED");
+
+            if (fromAssessmentRoadmap)
+            {
+                var access = await CheckAssessmentRoadmapLessonAsync(lesson.Id, cancellationToken);
+                if (!access.IsSuccess)
+                    return ApiResponse<PracticeExerciseAttemptResponse>.Fail(
+                        access.ErrorMessage!, (HttpStatusCode)access.StatusCode, access.ErrorCode);
+            }
+            else if (!assignmentId.HasValue && fromCatalog)
+            {
+                if (skill is not null && (skill is not ("Reading" or "Listening") || lesson.LanguageSkill.Name != skill))
+                    return ApiResponse<PracticeExerciseAttemptResponse>.Fail("Kỹ năng ôn luyện không hợp lệ.");
+                var catalog = await unitOfWork.Lessons.GetLearnerVisibleByLevelAsync(
+                    lesson.CertificateLevelId, userId, cancellationToken);
+                var preceding = catalog.Where(item => skill is null || item.LanguageSkill.Name == skill)
+                    .TakeWhile(item => item.Id != lesson.Id).Select(item => item.Id).ToArray();
+                if (!await LessonPracticeProgress.AllClearedAsync(unitOfWork, userId, preceding, cancellationToken))
+                    return ApiResponse<PracticeExerciseAttemptResponse>.Fail(
+                        "Hãy hoàn thành bài học trước để mở bài luyện tập này.",
+                        HttpStatusCode.Conflict, "CATALOG_LESSON_LOCKED");
+            }
+            else if (!assignmentId.HasValue)
+            {
+                var path = await learningPathService.GetLatestLearningPathAsync(cancellationToken);
+                var schedules = path.Result?.DailySchedules.OrderBy(day => day.Day).ToList();
+                var lessonDay = schedules?.FirstOrDefault(day => day.IsStarted && !day.IsCompleted && day.LessonIds.Contains(lesson.Id))
+                    ?? schedules?.FirstOrDefault(day => day.LessonIds.Contains(lesson.Id));
+                if (lessonDay is not null)
+                {
+                    var preceding = lessonDay.LessonIds.TakeWhile(id => id != lesson.Id).Distinct().ToArray();
+                    if (schedules!.Any(day => day.Day < lessonDay.Day && !day.IsCompleted) || !lessonDay.IsStarted ||
+                        !await LessonPracticeProgress.AllClearedAsync(unitOfWork, userId, preceding, cancellationToken))
+                        return ApiResponse<PracticeExerciseAttemptResponse>.Fail(
+                            "Hãy hoàn thành bài học trước và bắt đầu ngày học này trước khi làm bài.",
+                            HttpStatusCode.Conflict, "LEARNING_PATH_LESSON_LOCKED");
+                }
+            }
 
             var questions = GetVisibleQuestions(exercise);
             if (questions.Count == 0 || questions.Any(question =>
-                    (question.Options ?? []).Count(option => !option.IsDeleted) < 2))
+                    (question.Options ?? []).Count(option => !option.IsDeleted) < 2 ||
+                    (fromAssessmentRoadmap &&
+                     (question.Options ?? []).Count(option => !option.IsDeleted && option.IsCorrect) != 1)))
                 return ApiResponse<PracticeExerciseAttemptResponse>.Fail(
                     "Bài Practice Exercise chưa có đủ câu hỏi và lựa chọn để làm.", HttpStatusCode.Conflict);
 
-            var attempt = new PracticeExerciseAttempt
+            var attempt = assignmentId.HasValue
+                ? await unitOfWork.PracticeExerciseAttempts.Query().SingleOrDefaultAsync(item =>
+                    !item.IsDeleted && item.HomeworkAssignmentId == assignmentId &&
+                    item.PracticeExerciseId == exercise.Id && item.UserId == userId, cancellationToken)
+                : null;
+            if (attempt?.IsCompleted == true)
+                return ApiResponse<PracticeExerciseAttemptResponse>.Fail("Bài luyện tập này đã được nộp.",
+                    HttpStatusCode.Conflict, "PRACTICE_ATTEMPT_ALREADY_SUBMITTED");
+
+            if (attempt is null)
             {
-                UserId = userId,
-                PracticeExerciseId = exercise.Id,
-                StartedAt = DateTime.UtcNow,
-            };
-            await unitOfWork.PracticeExerciseAttempts.AddAsync(attempt, cancellationToken);
-            await unitOfWork.SaveChangesAsync(cancellationToken);
+                attempt = new PracticeExerciseAttempt
+                {
+                    UserId = userId,
+                    PracticeExerciseId = exercise.Id,
+                    HomeworkAssignmentId = assignmentId,
+                    StartedAt = DateTime.UtcNow,
+                };
+                await unitOfWork.PracticeExerciseAttempts.AddAsync(attempt, cancellationToken);
+                await unitOfWork.SaveChangesAsync(cancellationToken);
+            }
 
             return ApiResponse<PracticeExerciseAttemptResponse>.Success(new PracticeExerciseAttemptResponse
             {
@@ -109,15 +214,33 @@ public class PracticeQuizService(
         }
     }
 
-    public async Task<ApiResponse<PracticeExerciseAttemptResultResponse>> SubmitAttemptAsync(
+    public Task<ApiResponse<PracticeExerciseAttemptResultResponse>> SubmitAttemptAsync(
         int attemptId, SubmitPracticeExerciseAttemptRequest request, CancellationToken cancellationToken)
+        => SubmitAsync(attemptId, null, request, cancellationToken);
+
+    public Task<ApiResponse<PracticeExerciseAttemptResultResponse>> SubmitAssessmentRoadmapAttemptAsync(
+        int attemptId, SubmitPracticeExerciseAttemptRequest request, CancellationToken cancellationToken)
+        => SubmitAsync(attemptId, null, request, cancellationToken, fromAssessmentRoadmap: true);
+
+    public Task<ApiResponse<PracticeExerciseAttemptResultResponse>> SubmitHomeworkAttemptAsync(
+        int assignmentId, int attemptId, SubmitPracticeExerciseAttemptRequest request, CancellationToken cancellationToken)
+        => WithLearnerLockAsync(token => SubmitAsync(attemptId, assignmentId, request, token), cancellationToken);
+
+    private async Task<ApiResponse<PracticeExerciseAttemptResultResponse>> SubmitAsync(
+        int attemptId, int? assignmentId, SubmitPracticeExerciseAttemptRequest request, CancellationToken cancellationToken,
+        bool fromAssessmentRoadmap = false)
     {
         try
         {
             var userId = claimService.GetUserClaim().Id;
             var attempt = await unitOfWork.PracticeExerciseAttempts.GetByIdAsync(attemptId, cancellationToken);
-            if (attempt is null || attempt.IsDeleted || attempt.UserId != userId)
+            if (attempt is null || attempt.IsDeleted || attempt.UserId != userId || attempt.HomeworkAssignmentId != assignmentId)
                 return ApiResponse<PracticeExerciseAttemptResultResponse>.NotFound("Không tìm thấy lượt làm bài.");
+            if (assignmentId.HasValue && !await unitOfWork.HomeworkAssignments.Query().AnyAsync(assignment =>
+                    assignment.Id == assignmentId && assignment.LearnerId == userId && !assignment.IsDeleted &&
+                    assignment.Status == "Assigned", cancellationToken))
+                return ApiResponse<PracticeExerciseAttemptResultResponse>.Fail("Bài tập đã đóng.",
+                    HttpStatusCode.Conflict, "HOMEWORK_CLOSED");
             if (attempt.IsCompleted)
                 return ApiResponse<PracticeExerciseAttemptResultResponse>.Fail(
                     "Lượt làm này đã được nộp. Hãy tạo lượt mới nếu muốn làm lại.",
@@ -128,6 +251,14 @@ public class PracticeQuizService(
             if (exercise is null || exercise.IsDeleted)
                 return ApiResponse<PracticeExerciseAttemptResultResponse>.NotFound("Không tìm thấy bài Practice Exercise.");
 
+            if (fromAssessmentRoadmap)
+            {
+                var access = await CheckAssessmentRoadmapLessonAsync(exercise.LessonId, cancellationToken);
+                if (!access.IsSuccess)
+                    return ApiResponse<PracticeExerciseAttemptResultResponse>.Fail(
+                        access.ErrorMessage!, (HttpStatusCode)access.StatusCode, access.ErrorCode);
+            }
+
             var questions = GetVisibleQuestions(exercise);
             if (questions.Count == 0)
                 return ApiResponse<PracticeExerciseAttemptResultResponse>.Fail("Bài tập không có câu hỏi.");
@@ -135,6 +266,9 @@ public class PracticeQuizService(
             var suppliedAnswers = request.Answers ?? [];
             if (suppliedAnswers.GroupBy(answer => answer.QuestionId).Any(group => group.Count() > 1))
                 return ApiResponse<PracticeExerciseAttemptResultResponse>.Fail("Không được gửi đáp án trùng câu hỏi.");
+            if (assignmentId.HasValue && (suppliedAnswers.Count != questions.Count ||
+                suppliedAnswers.Any(answer => !answer.SelectedOptionId.HasValue)))
+                return ApiResponse<PracticeExerciseAttemptResultResponse>.Fail("Hãy trả lời tất cả câu hỏi trước khi nộp.");
 
             var questionMap = questions.ToDictionary(question => question.Id);
             foreach (var answer in suppliedAnswers)
@@ -178,7 +312,7 @@ public class PracticeQuizService(
 
             var passed = scorePercent >= MinimumPassingScorePercent;
             var unlockedNextDay = false;
-            if (passed)
+            if (passed && !assignmentId.HasValue && !fromAssessmentRoadmap)
             {
                 var latestPath = await learningPathService.GetLatestLearningPathAsync(cancellationToken);
                 var activeDay = latestPath.Result?.DailySchedules.FirstOrDefault(day =>
@@ -210,6 +344,23 @@ public class PracticeQuizService(
             return ApiResponse<PracticeExerciseAttemptResultResponse>.Fail(
                 "Không thể nộp bài Practice Exercise.", HttpStatusCode.InternalServerError);
         }
+    }
+
+    private Task<ApiResponse> CheckAssessmentRoadmapLessonAsync(int lessonId, CancellationToken cancellationToken)
+        => (standardRoadmapService ?? new StandardRoadmapService(unitOfWork, claimService))
+            .CheckAssessmentLessonAsync(lessonId, cancellationToken);
+
+    private async Task<ApiResponse<T>> WithLearnerLockAsync<T>(
+        Func<CancellationToken, Task<ApiResponse<T>>> operation, CancellationToken cancellationToken)
+    {
+        var response = ApiResponse<T>.NotFound("Không tìm thấy người học.");
+        var userId = claimService.GetUserClaim().Id;
+        await unitOfWork.ExecuteInTransactionAsync(async token =>
+        {
+            if (await unitOfWork.UserAccounts.GetByIdForUpdateAsync(userId, token) is { IsDeleted: false })
+                response = await operation(token);
+        }, cancellationToken);
+        return response;
     }
 
     private static List<PracticeQuestion> GetVisibleQuestions(PracticeExercise exercise)

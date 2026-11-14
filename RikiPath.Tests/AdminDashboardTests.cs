@@ -28,8 +28,9 @@ public sealed class AdminDashboardTests
             new UserAccount { Id = 3, Role = Role.Mentor, PasswordHash = [], PasswordSalt = [] },
             new UserAccount { Id = 4, Role = Role.Mentor, IsDeleted = true, PasswordHash = [], PasswordSalt = [] });
         db.ContentApprovalRequests.AddRange(
+            new ContentApprovalRequest { Status = ContentApprovalStatus.PendingReview, SubmittedByUserId = 1 },
             new ContentApprovalRequest { Status = ContentApprovalStatus.Draft, SubmittedByUserId = 1 },
-            new ContentApprovalRequest { Status = ContentApprovalStatus.Draft, SubmittedByUserId = 1, IsDeleted = true },
+            new ContentApprovalRequest { Status = ContentApprovalStatus.PendingReview, SubmittedByUserId = 1, IsDeleted = true },
             new ContentApprovalRequest { Status = ContentApprovalStatus.Approved, SubmittedByUserId = 1 });
         db.MentorAvailabilities.AddRange(
             new MentorAvailability { MentorId = 3, StartTime = DateTime.UtcNow.AddDays(1), EndTime = DateTime.UtcNow.AddDays(1).AddHours(1) },

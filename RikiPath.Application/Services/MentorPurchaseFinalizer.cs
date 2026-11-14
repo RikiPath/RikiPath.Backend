@@ -9,6 +9,7 @@ internal static class MentorPurchaseFinalizer
     public static void MarkPaid(UserSubscription subscription, AppSettings settings, string? reference)
     {
         var now = DateTime.UtcNow;
+        var holdExpired = subscription.PaymentExpiresAt is { } expiresAt && expiresAt <= now;
         subscription.PaymentStatus = PaymentStatus.Paid;
         subscription.PaymentTransactionId = reference ?? subscription.PaymentTransactionId;
         subscription.StartDate = now;
@@ -18,6 +19,16 @@ internal static class MentorPurchaseFinalizer
         foreach (var booking in subscription.MentorBookings)
         {
             if (booking.Status != MentorStatus.AwaitingPayment) continue;
+            if (holdExpired || booking.MentorAvailability is null || booking.MentorAvailability.StartTime <= now)
+            {
+                if (booking.MentorAvailability is { } slot)
+                    slot.BookedCount = Math.Max(0, slot.BookedCount - 1);
+                booking.Status = MentorStatus.Cancelled;
+                booking.MentorAvailability = null;
+                booking.MentorAvailabilityId = null;
+                subscription.MeetingSessionsUsed = Math.Max(0, subscription.MeetingSessionsUsed - 1);
+                continue;
+            }
             booking.Status = MentorStatus.Assigned;
             if (booking.MentorAvailability is not null)
                 booking.MeetingLink = $"{settings.FrontendBaseUrl.TrimEnd('/')}/consultation-room/{booking.MentorAvailability.RoomId:D}/";

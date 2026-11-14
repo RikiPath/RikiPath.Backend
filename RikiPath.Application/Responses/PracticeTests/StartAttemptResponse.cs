@@ -1,10 +1,14 @@
-namespace RikiPath.Application.Responses.MockTests
+﻿namespace RikiPath.Application.Responses.MockTests
 {
     public class StartAttemptResponse
     {
         public int AttemptId { get; set; }
         public int MockTestId { get; set; }
+        public string Title { get; set; } = string.Empty;
+        public string JlptLevelName { get; set; } = string.Empty;
         public DateTime StartedAt { get; set; }
+        public DateTime ServerNow { get; set; }
+        public DateTime? ExpiresAt { get; set; }
         public int TimeLimitMinutes { get; set; }
         public int TotalPreviouslyWrongQuestions { get; set; }
         public List<int> PreviouslyWrongQuestionIds { get; set; } = [];
@@ -21,6 +25,8 @@ namespace RikiPath.Application.Responses.MockTests
         public string Content { get; set; } = string.Empty;
         public string QuestionType { get; set; } = "SingleChoice";
         public System.Text.Json.JsonElement? InteractionData { get; set; }
+        public int? SelectedOptionId { get; set; }
+        public System.Text.Json.JsonElement? Response { get; set; }
         public string? AudioUrl { get; set; }
         public string? ImageUrl { get; set; }
         public List<StartAttemptOptionResponse> Options { get; set; } = [];
@@ -29,6 +35,7 @@ namespace RikiPath.Application.Responses.MockTests
     public class StartAttemptOptionResponse
     {
         public int OptionId { get; set; }
+        public string? ImageUrl { get; set; }
         public string Content { get; set; } = string.Empty;
         public int Order { get; set; }
     }

@@ -43,7 +43,11 @@ namespace RikiPath.Application.Services
                     certificateLevelId,
                     userId,
                     cancellationToken);
-                var lessonResponses = lessons.Select(MapToSummary).ToList();
+                var lessonIds = lessons.Select(lesson => lesson.Id).ToArray();
+                var withExercises = await LessonPracticeProgress.WithExercisesAsync(unitOfWork, lessonIds, cancellationToken);
+                var passed = await LessonPracticeProgress.PassedAsync(unitOfWork, userId, lessonIds, cancellationToken);
+                var lessonResponses = lessons.Select(lesson => MapToSummary(
+                    lesson, withExercises.Contains(lesson.Id), passed.Contains(lesson.Id))).ToList();
                 var completedLessons = lessonResponses.Count(item => item.IsCompleted);
                 var overallProgress = lessonResponses.Count == 0
                     ? 0
@@ -252,12 +256,14 @@ namespace RikiPath.Application.Services
             }
         }
 
-        private static LearningLessonSummaryResponse MapToSummary(Lesson lesson)
+        private static LearningLessonSummaryResponse MapToSummary(Lesson lesson, bool hasPracticeExercise, bool practicePassed)
         {
             var progress = lesson.LessonProgresses?.SingleOrDefault();
             return new LearningLessonSummaryResponse
             {
                 LessonId = lesson.Id,
+                HasPracticeExercise = hasPracticeExercise,
+                PracticePassed = practicePassed,
                 Title = lesson.Title,
                 Description = lesson.Description,
                 SortOrder = lesson.SortOrder,
