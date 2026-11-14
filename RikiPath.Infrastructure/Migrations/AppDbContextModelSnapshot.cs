@@ -446,7 +446,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 1,
                             CertificateLevelId = 1,
                             Code = "N5_VOCAB",
-                            CreatedDate = new DateTime(2026, 11, 5, 7, 12, 34, 453, DateTimeKind.Utc).AddTicks(6122),
+                            CreatedDate = new DateTime(2026, 10, 31, 11, 13, 24, 991, DateTimeKind.Utc).AddTicks(5285),
                             Description = "Phần thi kiểm tra chữ Hán, cách đọc và từ vựng cấp độ N5",
                             IsDeleted = false,
                             MaxScore = 0,
@@ -459,7 +459,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 2,
                             CertificateLevelId = 1,
                             Code = "N5_GRAMMAR_READING",
-                            CreatedDate = new DateTime(2026, 11, 5, 7, 12, 34, 453, DateTimeKind.Utc).AddTicks(6127),
+                            CreatedDate = new DateTime(2026, 10, 31, 11, 13, 24, 991, DateTimeKind.Utc).AddTicks(5292),
                             Description = "Phần thi kiểm tra cấu trúc ngữ pháp và đọc hiểu đoạn văn ngắn cấp độ N5",
                             IsDeleted = false,
                             MaxScore = 0,
@@ -472,7 +472,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 3,
                             CertificateLevelId = 1,
                             Code = "N5_LISTENING",
-                            CreatedDate = new DateTime(2026, 11, 5, 7, 12, 34, 453, DateTimeKind.Utc).AddTicks(6129),
+                            CreatedDate = new DateTime(2026, 10, 31, 11, 13, 24, 991, DateTimeKind.Utc).AddTicks(5294),
                             Description = "Phần thi nghe hiểu tình huống giao tiếp hàng ngày cấp độ N5",
                             IsDeleted = false,
                             MaxScore = 0,
@@ -485,7 +485,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 4,
                             CertificateLevelId = 2,
                             Code = "N4_VOCAB",
-                            CreatedDate = new DateTime(2026, 11, 5, 7, 12, 34, 453, DateTimeKind.Utc).AddTicks(6130),
+                            CreatedDate = new DateTime(2026, 10, 31, 11, 13, 24, 991, DateTimeKind.Utc).AddTicks(5295),
                             Description = "Phần thi kiểm tra chữ Hán, cách đọc và từ vựng cấp độ N4",
                             IsDeleted = false,
                             MaxScore = 0,
@@ -498,7 +498,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 5,
                             CertificateLevelId = 2,
                             Code = "N4_GRAMMAR",
-                            CreatedDate = new DateTime(2026, 11, 5, 7, 12, 34, 453, DateTimeKind.Utc).AddTicks(6132),
+                            CreatedDate = new DateTime(2026, 10, 31, 11, 13, 24, 991, DateTimeKind.Utc).AddTicks(5296),
                             Description = "Phần thi kiểm tra cấu trúc ngữ pháp và sắp xếp câu cấp độ N4",
                             IsDeleted = false,
                             MaxScore = 0,
@@ -511,7 +511,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 6,
                             CertificateLevelId = 2,
                             Code = "N4_READING",
-                            CreatedDate = new DateTime(2026, 11, 5, 7, 12, 34, 453, DateTimeKind.Utc).AddTicks(6133),
+                            CreatedDate = new DateTime(2026, 10, 31, 11, 13, 24, 991, DateTimeKind.Utc).AddTicks(5297),
                             Description = "Phần thi đọc hiểu văn bản, thông báo và biểu mẫu cấp độ N4",
                             IsDeleted = false,
                             MaxScore = 0,
@@ -524,7 +524,7 @@ namespace RikiPath.Infrastructure.Migrations
                             Id = 7,
                             CertificateLevelId = 2,
                             Code = "N4_LISTENING",
-                            CreatedDate = new DateTime(2026, 11, 5, 7, 12, 34, 453, DateTimeKind.Utc).AddTicks(6134),
+                            CreatedDate = new DateTime(2026, 10, 31, 11, 13, 24, 991, DateTimeKind.Utc).AddTicks(5298),
                             Description = "Phần thi nghe hiểu hội thoại và tình huống thực tế cấp độ N4",
                             IsDeleted = false,
                             MaxScore = 0,
@@ -5353,11 +5353,6 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
 
-                    b.Property<bool>("IsPlacementAssessment")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("boolean")
-                        .HasDefaultValue(false);
-
                     b.Property<Guid?>("ModifiedBy")
                         .HasColumnType("uuid");
 
@@ -6729,6 +6724,12 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Property<DateTime?>("LastStudyDate")
                         .HasColumnType("timestamp without time zone");
 
+                    b.Property<int>("LearningGoalVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
                     b.Property<string>("LearningMode")
                         .IsRequired()
                         .HasMaxLength(20)
@@ -6765,6 +6766,9 @@ namespace RikiPath.Infrastructure.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("character varying(20)");
 
+                    b.Property<int?>("SelfDeclaredCertificateLevelId")
+                        .HasColumnType("integer");
+
                     b.Property<int?>("StartingCertificateLevelId")
                         .HasColumnType("integer");
 
@@ -6789,6 +6793,8 @@ namespace RikiPath.Infrastructure.Migrations
                     b.HasIndex("Email")
                         .IsUnique();
 
+                    b.HasIndex("SelfDeclaredCertificateLevelId");
+
                     b.HasIndex("StartingCertificateLevelId");
 
                     b.HasIndex("TargetCertificateLevelId");
@@ -6809,6 +6815,7 @@ namespace RikiPath.Infrastructure.Migrations
                             IsEmailVerified = true,
                             IsPhoneVerified = false,
                             LastName = "System",
+                            LearningGoalVersion = 0,
                             LearningMode = "Standard",
                             LongestStreak = 0,
                             PasswordHash = new byte[] { 91, 215, 217, 54, 239, 206, 181, 216, 143, 33, 82, 211, 9, 70, 197, 173, 197, 0, 72, 71, 59, 150, 46, 114, 96, 137, 52, 174, 137, 29, 196, 61, 50, 254, 249, 101, 114, 92, 149, 32, 55, 127, 205, 126, 216, 147, 197, 192, 248, 173, 158, 92, 104, 42, 195, 107, 150, 15, 3, 74, 103, 104, 3, 229 },
@@ -6830,6 +6837,7 @@ namespace RikiPath.Infrastructure.Migrations
                             IsEmailVerified = true,
                             IsPhoneVerified = false,
                             LastName = "One",
+                            LearningGoalVersion = 0,
                             LearningMode = "Standard",
                             LongestStreak = 0,
                             PasswordHash = new byte[] { 17, 253, 106, 25, 89, 176, 204, 31, 142, 252, 245, 31, 64, 101, 213, 135, 164, 116, 40, 46, 173, 175, 8, 0, 69, 101, 65, 4, 90, 25, 176, 223, 153, 237, 220, 94, 55, 133, 227, 181, 70, 97, 155, 122, 50, 139, 216, 136, 88, 52, 76, 98, 250, 64, 52, 71, 146, 221, 225, 137, 106, 6, 178, 239 },
@@ -6851,6 +6859,7 @@ namespace RikiPath.Infrastructure.Migrations
                             IsEmailVerified = true,
                             IsPhoneVerified = false,
                             LastName = "Two",
+                            LearningGoalVersion = 0,
                             LearningMode = "Standard",
                             LongestStreak = 0,
                             PasswordHash = new byte[] { 93, 130, 109, 171, 238, 187, 245, 15, 202, 89, 247, 220, 95, 192, 246, 138, 5, 75, 250, 28, 208, 28, 51, 79, 127, 28, 214, 237, 93, 221, 108, 26, 152, 66, 73, 65, 11, 147, 154, 102, 113, 49, 51, 24, 51, 197, 248, 254, 22, 98, 87, 249, 250, 104, 131, 74, 16, 18, 179, 200, 3, 3, 79, 47 },
@@ -6872,6 +6881,7 @@ namespace RikiPath.Infrastructure.Migrations
                             IsEmailVerified = true,
                             IsPhoneVerified = false,
                             LastName = "Author One",
+                            LearningGoalVersion = 0,
                             LearningMode = "Standard",
                             LongestStreak = 0,
                             PasswordHash = new byte[] { 168, 249, 82, 144, 178, 145, 94, 164, 34, 152, 2, 74, 204, 105, 84, 145, 96, 199, 153, 136, 110, 82, 114, 113, 22, 139, 117, 143, 50, 239, 197, 4, 51, 189, 137, 48, 175, 14, 104, 164, 218, 249, 148, 217, 33, 44, 202, 128, 237, 183, 110, 228, 185, 36, 209, 254, 183, 182, 55, 1, 78, 16, 234, 50 },
@@ -6893,6 +6903,7 @@ namespace RikiPath.Infrastructure.Migrations
                             IsEmailVerified = true,
                             IsPhoneVerified = false,
                             LastName = "Author Two",
+                            LearningGoalVersion = 0,
                             LearningMode = "Standard",
                             LongestStreak = 0,
                             PasswordHash = new byte[] { 189, 121, 9, 1, 230, 137, 43, 239, 79, 56, 195, 196, 66, 116, 42, 1, 137, 55, 54, 249, 55, 231, 79, 224, 182, 182, 199, 133, 100, 39, 138, 5, 223, 215, 48, 46, 60, 214, 49, 88, 42, 186, 232, 116, 237, 89, 55, 144, 4, 78, 215, 231, 237, 220, 96, 225, 202, 97, 61, 165, 246, 28, 126, 198 },
@@ -6914,6 +6925,7 @@ namespace RikiPath.Infrastructure.Migrations
                             IsEmailVerified = true,
                             IsPhoneVerified = false,
                             LastName = "Test Learner",
+                            LearningGoalVersion = 0,
                             LearningMode = "Standard",
                             LongestStreak = 0,
                             PasswordHash = new byte[] { 9, 206, 219, 58, 155, 234, 107, 145, 121, 174, 134, 51, 96, 253, 64, 216, 157, 114, 92, 36, 123, 206, 67, 217, 207, 166, 54, 71, 254, 251, 156, 200, 185, 110, 198, 135, 221, 146, 243, 40, 237, 229, 16, 133, 163, 161, 156, 79, 138, 103, 85, 25, 114, 81, 99, 182, 25, 73, 212, 198, 212, 192, 54, 129 },
@@ -6935,6 +6947,7 @@ namespace RikiPath.Infrastructure.Migrations
                             IsEmailVerified = true,
                             IsPhoneVerified = false,
                             LastName = "Nguyen",
+                            LearningGoalVersion = 0,
                             LearningMode = "Standard",
                             LongestStreak = 0,
                             PasswordHash = new byte[] { 217, 79, 50, 159, 85, 88, 67, 15, 23, 182, 103, 80, 220, 85, 86, 173, 204, 186, 57, 67, 183, 165, 253, 243, 150, 250, 150, 190, 122, 252, 55, 169, 85, 236, 69, 106, 19, 219, 244, 42, 239, 30, 189, 176, 52, 47, 30, 28, 125, 31, 162, 255, 61, 3, 238, 201, 168, 88, 161, 42, 216, 86, 172, 219 },
@@ -6956,6 +6969,7 @@ namespace RikiPath.Infrastructure.Migrations
                             IsEmailVerified = true,
                             IsPhoneVerified = false,
                             LastName = "Tran",
+                            LearningGoalVersion = 0,
                             LearningMode = "Standard",
                             LongestStreak = 0,
                             PasswordHash = new byte[] { 84, 97, 164, 196, 63, 151, 182, 39, 139, 242, 152, 22, 179, 33, 174, 113, 0, 236, 253, 114, 234, 242, 209, 76, 196, 162, 143, 195, 180, 3, 178, 193, 205, 230, 18, 114, 49, 151, 198, 217, 254, 21, 94, 176, 146, 214, 235, 122, 28, 241, 164, 161, 4, 161, 209, 38, 102, 179, 31, 107, 157, 25, 35, 63 },
@@ -6977,6 +6991,7 @@ namespace RikiPath.Infrastructure.Migrations
                             IsEmailVerified = true,
                             IsPhoneVerified = false,
                             LastName = "Pham",
+                            LearningGoalVersion = 0,
                             LearningMode = "Standard",
                             LongestStreak = 0,
                             PasswordHash = new byte[] { 42, 30, 236, 129, 234, 192, 63, 84, 148, 163, 154, 246, 107, 147, 189, 95, 33, 141, 196, 67, 181, 51, 157, 136, 93, 228, 237, 165, 164, 49, 4, 146, 87, 84, 9, 47, 28, 59, 33, 130, 37, 63, 43, 229, 8, 178, 123, 74, 61, 159, 235, 68, 217, 51, 225, 29, 201, 104, 44, 152, 53, 255, 199, 28 },
@@ -8748,6 +8763,11 @@ namespace RikiPath.Infrastructure.Migrations
                         .HasForeignKey("AssessedCertificateLevelId")
                         .OnDelete(DeleteBehavior.SetNull);
 
+                    b.HasOne("RikiPath.Domain.Entities.CertificateLevel", "SelfDeclaredCertificateLevel")
+                        .WithMany()
+                        .HasForeignKey("SelfDeclaredCertificateLevelId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("RikiPath.Domain.Entities.CertificateLevel", "StartingCertificateLevel")
                         .WithMany()
                         .HasForeignKey("StartingCertificateLevelId")
@@ -8759,6 +8779,8 @@ namespace RikiPath.Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.SetNull);
 
                     b.Navigation("AssessedCertificateLevel");
+
+                    b.Navigation("SelfDeclaredCertificateLevel");
 
                     b.Navigation("StartingCertificateLevel");
 

@@ -30,6 +30,11 @@ namespace RikiPath.Domain.Entities
         /// <summary>Only a valid completed Placement Test may set this value.</summary>
         public int? AssessedCertificateLevelId { get; set; }
         public CertificateLevel? AssessedCertificateLevel { get; set; }
+        /// <summary>Learner-reported JLPT certificate; not a verified assessment.</summary>
+        public int? SelfDeclaredCertificateLevelId { get; set; }
+        public CertificateLevel? SelfDeclaredCertificateLevel { get; set; }
+        /// <summary>Optimistic concurrency token for complete learning-goal writes.</summary>
+        public int LearningGoalVersion { get; set; }
         public PlacementDecision PlacementDecision { get; set; } = PlacementDecision.NotTaken;
         public LearningMode LearningMode { get; set; } = LearningMode.Standard;
         public DateTime? TargetExamDate { get; set; }

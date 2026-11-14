@@ -15,6 +15,7 @@ namespace RikiPath.Infrastructure.Configuration
             builder.Property(x => x.TargetCertificateLevelId).HasColumnName("TargetCertificationLevelId");
             builder.Property(x => x.PlacementDecision).HasConversion<string>().HasMaxLength(20);
             builder.Property(x => x.LearningMode).HasConversion<string>().HasMaxLength(20);
+            builder.Property(x => x.LearningGoalVersion).IsConcurrencyToken().HasDefaultValue(0);
 
             builder.HasIndex(x => x.Email).IsUnique();
 
@@ -52,6 +53,10 @@ namespace RikiPath.Infrastructure.Configuration
             builder.HasOne(x => x.AssessedCertificateLevel)
                 .WithMany()
                 .HasForeignKey(x => x.AssessedCertificateLevelId)
+                .OnDelete(DeleteBehavior.SetNull);
+            builder.HasOne(x => x.SelfDeclaredCertificateLevel)
+                .WithMany()
+                .HasForeignKey(x => x.SelfDeclaredCertificateLevelId)
                 .OnDelete(DeleteBehavior.SetNull);
 
             // ---- As a Learner ----
