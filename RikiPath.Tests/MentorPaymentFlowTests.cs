@@ -16,20 +16,6 @@ namespace RikiPath.Tests;
 
 public sealed class MentorPaymentFlowTests
 {
-    [Fact]
-    public async Task Short_consultation_cannot_overlap_a_long_course_session()
-    {
-        await using var db = Context(); var gateway = new Mock<IPaymentGatewayClient>();
-        var id = await Purchase(db, gateway);
-        var subscription = await db.UserSubscriptions.FindAsync(id); subscription!.PaymentStatus = PaymentStatus.Paid;
-        var slot = await db.MentorAvailabilities.SingleAsync();
-        db.StudyCourses.Add(new StudyCourse { Name = "Long course QA", LearnerId = 1, MentorId = 2, Status = "Active", PaymentStatus = "Paid",
-            SessionMinutes = 60, Sessions = [new() { Number = 1, ScheduledAt = slot.StartTime, Status = "Scheduled" }] });
-        await db.SaveChangesAsync();
-        var result = await BookingService(db).BookSlotAsync(new() { MentorAvailabilityId = slot.Id }, default);
-        Assert.False(result.IsSuccess); Assert.Equal(409, result.StatusCode);
-        Assert.Equal(0, await db.MentorBookings.CountAsync()); Assert.Equal(0, subscription.MeetingSessionsUsed);
-    }
     private static AppDbContext Context() => new(new DbContextOptionsBuilder<AppDbContext>()
         .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
     private static readonly AppSettings Settings = new()

@@ -36,10 +36,9 @@ namespace RikiPath.WebApi.Controllers
 
         /// <summary>Nhận dạng một chữ Kanji vẽ tay, không lưu ảnh hoặc bài viết.</summary>
         [HttpPost("recognize")]
-        [Consumes("multipart/form-data")]
         [RequestSizeLimit(1100000)]
         public async Task<IActionResult> Recognize(
-            IFormFile image, [FromServices] IKanjiRecognitionService recognition,
+            [FromForm] IFormFile image, [FromServices] IKanjiRecognitionService recognition,
             CancellationToken cancellationToken)
         {
             var result = await recognition.RecognizeAsync(image, cancellationToken);

@@ -13,8 +13,7 @@ public sealed class PaymentService(
     IUnitOfWork unitOfWork,
     IPaymentGatewayClient paymentGatewayClient,
     AppSettings appSettings,
-    IMentorCreditLedgerService creditLedgerService,
-    IStudyCourseService? studyCourses = null) : IPaymentService
+    IMentorCreditLedgerService creditLedgerService) : IPaymentService
 {
     public async Task<ApiResponse<bool>> HandlePayOsWebhookAsync(
     PayOsWebhookRequest webhook, CancellationToken ct)
@@ -33,7 +32,6 @@ public sealed class PaymentService(
             {
                 >= 900_000_000 => await HandlePlanPaymentAsync((int)(code - 900_000_000), callback, webhook, ct),
                 >= 800_000_000 => await HandleAiTopUpAsync((int)(code - 800_000_000), callback, webhook, ct),
-                >= 700_000_000 => await HandleCoursePaymentAsync((int)(code - 700_000_000), callback, webhook.Data.Reference, ct),
                 _ => await HandleMentorPaymentAsync((int)code, callback, webhook, ct) // code cũ của bạn
             };
         }
@@ -41,14 +39,6 @@ public sealed class PaymentService(
         {
             return ApiResponse<bool>.Fail($"Lỗi xử lý webhook PayOS: {ex.Message}");
         }
-    }
-
-    private async Task<ApiResponse<bool>> HandleCoursePaymentAsync(int id, PaymentCallbackResult callback, string? reference, CancellationToken ct)
-    {
-        if (studyCourses is null) return ApiResponse<bool>.Fail("Dịch vụ khóa học chưa sẵn sàng.");
-        var result = await studyCourses.ConfirmPaymentAsync(id, callback, reference, ct);
-        return result.IsSuccess ? ApiResponse<bool>.Success(true)
-            : ApiResponse<bool>.Fail(result.ErrorMessage ?? "Không xác nhận được thanh toán khóa học.", (System.Net.HttpStatusCode)result.StatusCode);
     }
 
     private async Task<ApiResponse<bool>> HandleAiTopUpAsync(

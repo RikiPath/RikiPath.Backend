@@ -10,8 +10,6 @@ namespace RikiPath.Infrastructure
     public class UnitOfWork : IUnitOfWork
     {
         private readonly AppDbContext _context;
-        public IStudyCourseRepository StudyCourses { get; }
-        public IGenericRepository<StudyCoursePlan> StudyCoursePlans { get; }
 
         // 1. Users & Core Auth
         public IUserAccountRepository UserAccounts { get; }
@@ -92,8 +90,6 @@ namespace RikiPath.Infrastructure
         public UnitOfWork(AppDbContext context)
         {
             _context = context ?? throw new ArgumentNullException(nameof(context));
-            StudyCourses = new StudyCourseRepository(_context);
-            StudyCoursePlans = new GenericRepository<StudyCoursePlan>(_context);
 
             // Initializing Repositories
             UserAccounts = new UserAccountRepository(_context);
