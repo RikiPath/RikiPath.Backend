@@ -7,6 +7,16 @@ namespace RikiPath.Application.IServices;
 
 public interface IStudyCourseService
 {
+    Task<ApiResponse<object>> ExamSchedulesAsync(CancellationToken ct);
+    Task<ApiResponse<object>> ImportExamSchedulesAsync(CancellationToken ct);
+    Task<ApiResponse<object>> ReviewExamScheduleAsync(int id, DateOnly date, string location, bool approve, string note, CancellationToken ct);
+    Task<ApiResponse<object>> ChangeRequestsAsync(CancellationToken ct);
+    Task<ApiResponse<object>> RequestChangeAsync(int id, RequestCourseChange r, CancellationToken ct);
+    Task<ApiResponse<object>> ReviewChangeAsync(int id, int requestId, ReviewCourseChange r, CancellationToken ct);
+    Task<ApiResponse<object>> CohortsAsync(CancellationToken ct);
+    Task<ApiResponse<object>> SaveCohortAsync(int? id, SaveStudyCohort request, CancellationToken ct);
+    Task<ApiResponse<object>> AvailableSlotsAsync(int id, CancellationToken ct);
+    Task<ApiResponse<object>> BookSlotAsync(int id, BookCourseSlot request, CancellationToken ct);
     Task<ApiResponse<object>> CatalogAsync(CancellationToken ct);
     Task<ApiResponse<object>> AdminCatalogAsync(CancellationToken ct);
     Task<ApiResponse<object>> MentorsAsync(CancellationToken ct);

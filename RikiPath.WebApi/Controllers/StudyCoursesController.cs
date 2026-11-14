@@ -10,6 +10,28 @@ namespace RikiPath.WebApi.Controllers;
 public sealed class StudyCoursesController(IStudyCourseService service) : ControllerBase
 {
     private IActionResult Result(ApiResponse<object> r) => StatusCode(r.StatusCode, r);
+    [HttpGet("exam-schedules")]
+    public async Task<IActionResult> ExamSchedules(CancellationToken ct) => Result(await service.ExamSchedulesAsync(ct));
+    [HttpPost("exam-schedules/import"), Authorize(Roles = "Admin")]
+    public async Task<IActionResult> ImportExams(CancellationToken ct) => Result(await service.ImportExamSchedulesAsync(ct));
+    [HttpPost("exam-schedules/{id:int}/review"), Authorize(Roles = "Admin")]
+    public async Task<IActionResult> ReviewExam(int id, ReviewJlptExam r, CancellationToken ct) => Result(await service.ReviewExamScheduleAsync(id, r.ExamDate, r.Location, r.Approve, r.Note, ct));
+    [HttpGet("change-requests")]
+    public async Task<IActionResult> ChangeRequests(CancellationToken ct) => Result(await service.ChangeRequestsAsync(ct));
+    [HttpPost("{id:int}/change-requests")]
+    public async Task<IActionResult> RequestChange(int id, RequestCourseChange r, CancellationToken ct) => Result(await service.RequestChangeAsync(id, r, ct));
+    [HttpPost("{id:int}/change-requests/{requestId:int}/review"), Authorize(Roles = "Admin")]
+    public async Task<IActionResult> ReviewChange(int id, int requestId, ReviewCourseChange r, CancellationToken ct) => Result(await service.ReviewChangeAsync(id, requestId, r, ct));
+    [HttpGet("cohorts")]
+    public async Task<IActionResult> Cohorts(CancellationToken ct) => Result(await service.CohortsAsync(ct));
+    [HttpPost("cohorts"), Authorize(Roles = "Admin")]
+    public async Task<IActionResult> CreateCohort(SaveStudyCohort r, CancellationToken ct) => Result(await service.SaveCohortAsync(null, r, ct));
+    [HttpPut("cohorts/{id:int}"), Authorize(Roles = "Admin")]
+    public async Task<IActionResult> UpdateCohort(int id, SaveStudyCohort r, CancellationToken ct) => Result(await service.SaveCohortAsync(id, r, ct));
+    [HttpGet("{id:int}/available-slots"), Authorize(Roles = "Learner")]
+    public async Task<IActionResult> AvailableSlots(int id, CancellationToken ct) => Result(await service.AvailableSlotsAsync(id, ct));
+    [HttpPost("{id:int}/book-slot"), Authorize(Roles = "Learner")]
+    public async Task<IActionResult> BookSlot(int id, BookCourseSlot r, CancellationToken ct) => Result(await service.BookSlotAsync(id, r, ct));
     [HttpGet("catalog")]
     public async Task<IActionResult> Catalog(CancellationToken ct) => Result(await service.CatalogAsync(ct));
     [HttpGet("admin-catalog"), Authorize(Roles = "Admin")]

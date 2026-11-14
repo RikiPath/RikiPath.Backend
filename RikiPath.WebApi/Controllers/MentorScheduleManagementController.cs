@@ -54,20 +54,20 @@ namespace RikiPath.WebApi.Controllers
         // Yêu cầu tài khoản Chuyên gia phải có hồ sơ ĐÃ ĐƯỢC PHÊ DUYỆT (Approved).
         [HttpPost("publish-slots")]
         [Authorize(Roles = "Mentor")]
-        public async Task<IActionResult> PublishSlots(
+        public IActionResult PublishSlots(
             [FromBody] PublishSlotsRequest request,
             CancellationToken cancellationToken)
-            => ToActionResult(await scheduleService.PublishSlotsAsync(request, cancellationToken));
+            => Conflict(new { ErrorMessage = "Luồng tự công bố đã được thay bằng đăng ký ngày/giờ rảnh và Admin duyệt tại /api/mentor/availability." });
 
         // // Hủy hoặc đóng một khung giờ làm việc tương lai chưa có học viên đặt lịch.
         [HttpDelete("slots/{slotId:int}")]
         [HttpPatch("slots/{slotId:int}/disable")]
         [Authorize(Roles = "Mentor,Admin")]
-        public async Task<IActionResult> DisableSlot(
+        public IActionResult DisableSlot(
             int slotId,
             [FromBody] DisableSlotRequest? request,
             CancellationToken cancellationToken)
-            => ToActionResult(await scheduleService.DisableSlotAsync(slotId, request, cancellationToken));
+            => Conflict(new { ErrorMessage = "Lịch đã duyệt phải gửi yêu cầu hủy/dời để Admin xử lý; không đóng trực tiếp bằng luồng cũ." });
 
         // // Dành cho Quản trị viên: Xem mẫu lịch làm việc và quy tắc ca của một Chuyên gia bất kỳ.
         [HttpGet("/api/admin/mentors/{mentorId:int}/schedule")]

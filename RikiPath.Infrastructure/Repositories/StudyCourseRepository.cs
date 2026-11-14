@@ -10,6 +10,9 @@ public sealed class StudyCourseRepository(AppDbContext context) : GenericReposit
         .FromSqlInterpolated($"SELECT * FROM \"StudyCourses\" WHERE \"Id\" = {id} FOR UPDATE")
         .SingleOrDefaultAsync(ct);
 
+    public async Task LockCohortAsync(int id, CancellationToken ct)
+        => await context.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({$"study-cohort:{id}"}, 0))", ct);
+
     public async Task LockPurchaseAsync(int learnerId, Guid key, CancellationToken ct)
         => await context.Database.ExecuteSqlInterpolatedAsync(
             $"SELECT pg_advisory_xact_lock(hashtextextended({$"course:{learnerId}:{key}"}, 0))", ct);

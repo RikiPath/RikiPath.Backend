@@ -2,6 +2,9 @@ namespace RikiPath.Domain.Entities;
 
 public sealed class StudyCoursePlan
 {
+    public string SessionType { get; set; } = "Individual";
+    public int Capacity { get; set; } = 1;
+    public DateTime? TargetExamDate { get; set; }
     public int Id { get; set; }
     public string Name { get; set; } = "";
     public int CertificateLevelId { get; set; }
@@ -18,6 +21,10 @@ public sealed class StudyCoursePlan
 
 public sealed class StudyCourse
 {
+    public int? CohortId { get; set; }
+    public StudyCohort? Cohort { get; set; }
+    public string SessionType { get; set; } = "Individual";
+    public DateTime? TargetExamDate { get; set; }
     public int Id { get; set; }
     public int LearnerId { get; set; }
     public Guid PurchaseKey { get; set; }
@@ -57,6 +64,8 @@ public sealed class StudyCourse
 
 public sealed class StudyCourseSession
 {
+    public int? AvailabilityId { get; set; }
+    public MentorAvailability? Availability { get; set; }
     public int Id { get; set; }
     public int CourseId { get; set; }
     public StudyCourse Course { get; set; } = null!;

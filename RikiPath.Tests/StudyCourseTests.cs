@@ -24,17 +24,17 @@ public sealed class CourseRetakePolicyTests
         for (var i = 1; i <= 10; i++)
         {
             c.Sessions.Add(new() { Number = i, Status = i <= 8 ? "Present" : "Absent" });
-            c.Homework.Add(new() { Id = i, Required = true, Passed = i <= 9, DueAt = DateTime.UtcNow.AddDays(-2), SubmittedAt = DateTime.UtcNow.AddDays(-3) });
+            c.Homework.Add(new() { Id = i, Required = true, Passed = i <= 9, DueAt = DateTime.UtcNow.AddDays(-2), SubmittedAt = i <= 9 ? DateTime.UtcNow.AddDays(-3) : DateTime.UtcNow });
         }
         return c;
     }
     [Fact] public void Exactly_90_percent_homework_and_20_percent_absence_pass() => Assert.True(CourseRetakePolicy.Evaluate(Eligible(), false).CanClaim);
-    [Fact] public void Below_90_percent_or_above_20_percent_fails()
+    [Fact] public void Below_90_percent_fails_but_absence_does_not_block()
     {
-        var c = Eligible(); c.Homework[0].Passed = false;
+        var c = Eligible(); c.Homework[0].SubmittedAt = c.Homework[0].DueAt.AddSeconds(1);
         Assert.False(CourseRetakePolicy.Evaluate(c, false).CanClaim);
         c = Eligible(); c.Sessions[0].Status = "ExcusedAbsent";
-        Assert.False(CourseRetakePolicy.Evaluate(c, false).CanClaim);
+        Assert.True(CourseRetakePolicy.Evaluate(c, false).CanClaim);
     }
     [Fact] public void Late_passing_homework_does_not_count_but_delayed_grading_does()
     {
@@ -56,7 +56,7 @@ public sealed class CourseRetakePolicyTests
     [Fact] public void No_rounding_up_of_eligibility()
     {
         var c = Eligible(); c.Sessions.RemoveAt(0); c.TotalSessions = 9;
-        Assert.False(CourseRetakePolicy.Evaluate(c, false).AttendanceMet); // 2/9 >20%
+        Assert.True(CourseRetakePolicy.Evaluate(c, false).AttendanceMet); // Attendance no longer gates retakes.
     }
     [Fact] public void Retake_cannot_chain_or_be_issued_twice()
     {
@@ -87,6 +87,10 @@ public sealed class StudyCourseServiceTests : IDisposable
         repo.Setup(x => x.LockAsync(It.IsAny<int>(), It.IsAny<CancellationToken>())).Returns((int id, CancellationToken ct) => db.Set<StudyCourse>().SingleOrDefaultAsync(x => x.Id == id, ct));
         repo.Setup(x => x.AddAsync(It.IsAny<StudyCourse>(), It.IsAny<CancellationToken>())).ReturnsAsync((StudyCourse c, CancellationToken _) => { db.Add(c); return c; });
         uow.SetupGet(x => x.StudyCoursePlans).Returns(new GenericRepository<StudyCoursePlan>(db));
+        uow.SetupGet(x => x.StudyCohorts).Returns(new GenericRepository<StudyCohort>(db));
+        uow.SetupGet(x => x.CourseScheduleRequests).Returns(new GenericRepository<CourseScheduleRequest>(db));
+        uow.SetupGet(x => x.UserAccounts).Returns(new UserAccountRepository(db));
+        uow.SetupGet(x => x.MentorBookings).Returns(new MentorBookingRepository(db));
         uow.SetupGet(x => x.CertificateLevels).Returns(new CertificateLevelRepository(db));
         uow.SetupGet(x => x.CertificateTypes).Returns(new CertificateTypeRepository(db));
         uow.SetupGet(x => x.MentorAvailabilities).Returns(new MentorAvailabilityRepository(db));
@@ -124,7 +128,7 @@ public sealed class StudyCourseServiceTests : IDisposable
         var id = c.RetakeRequests.Single().Id;
         Assert.False((await Service().ReviewRetakeAsync(c.Id, id, new(true, false, "Check"), default)).IsSuccess);
         c.Plan.Name = "Changed plan"; c.Plan.Price = 999;
-        Assert.True((await Service().ReviewRetakeAsync(c.Id, id, new(true, true, "JLPT verified"), default)).IsSuccess);
+        Assert.True((await Service().ReviewRetakeAsync(c.Id, id, new(true, true, "JLPT verified", OnTimeHomeworkEvidenceVerified: true), default)).IsSuccess);
         var free = await db.Set<StudyCourse>().SingleAsync(x => x.RetakeOfId == c.Id);
         Assert.Equal("Original", free.Name); Assert.Equal(c.CertificateLevelId, free.CertificateLevelId);
         Assert.Equal(0, free.Amount); Assert.Equal("Paid", free.PaymentStatus); Assert.Equal("Ready", free.Status);
@@ -192,6 +196,74 @@ public sealed class StudyCourseServiceTests : IDisposable
         await db.SaveChangesAsync();
         var result = await Service().ScheduleAsync(c.Id, new(4, start.AddDays(3), null), default);
         Assert.False(result.IsSuccess); Assert.Contains("đủ số buổi", result.ErrorMessage);
+    }
+
+    [Fact] public async Task Paid_individual_package_books_once_and_reuses_existing_room()
+    {
+        var c = await Seed(); c.Status = "Ready"; c.MentorId = null; c.Sessions.Clear();
+        actor = new() { Id = c.LearnerId, Role = Role.Learner };
+        var start = DateTime.UtcNow.AddDays(10);
+        var slot = new MentorAvailability { MentorId = 20, StartTime = start, EndTime = start.AddMinutes(60), IsApproved = true, MaxLearners = 1 };
+        db.Add(slot); await db.SaveChangesAsync();
+        Assert.True((await Service().BookSlotAsync(c.Id, new(slot.Id), default)).IsSuccess);
+        Assert.Equal(1, slot.BookedCount); Assert.Equal(20, c.MentorId);
+        Assert.Contains(slot.RoomId.ToString(), c.Sessions.Single().MeetingUrl);
+        Assert.False((await Service().BookSlotAsync(c.Id, new(slot.Id), default)).IsSuccess);
+        Assert.Single(c.Sessions);
+    }
+    [Fact] public async Task Group_last_seat_counts_holds_but_releases_expired_holds()
+    {
+        var original = await Seed(); var p = original.Plan; p.SessionType = "Group"; p.TotalSessions = 1;
+        var start = DateTime.UtcNow.AddDays(10);
+        var slot = new MentorAvailability { MentorId = 20, StartTime = start, EndTime = start.AddMinutes(60), IsApproved = true, MaxLearners = 2 };
+        var cohort = new StudyCohort { Plan = p, MentorId = 20, Name = "Group", Capacity = 2, Status = "Published", StartsAt = start, EndsAt = slot.EndTime,
+            Sessions = [new() { Number = 1, Availability = slot }] };
+        db.Add(cohort);
+        for (int i = 0; i < 2; i++) cohort.Enrollments.Add(new StudyCourse { LearnerId = 50 + i, Plan = p, PurchaseKey = Guid.NewGuid(), PaymentStatus = "Pending", PaymentExpiresAt = DateTime.UtcNow.AddMinutes(10) });
+        await db.SaveChangesAsync(); actor = new() { Id = 10, Role = Role.Learner };
+        gateway.Setup(x => x.CreatePaymentLinkAsync(It.IsAny<long>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PaymentLinkResult("https://pay.invalid/checkout", "test", ""));
+        Assert.False((await Service().PurchaseAsync(new(p.Id, Guid.NewGuid(), cohort.Id), default)).IsSuccess);
+        cohort.Enrollments[0].PaymentExpiresAt = DateTime.UtcNow.AddMinutes(-1); await db.SaveChangesAsync();
+        Assert.True((await Service().PurchaseAsync(new(p.Id, Guid.NewGuid(), cohort.Id), default)).IsSuccess);
+    }
+    [Fact] public async Task Late_paid_group_order_requires_review_when_seat_was_reused()
+    {
+        var c = await Seed(); c.PaymentStatus = "Pending"; c.Status = "PendingPayment"; c.Sessions.Clear();
+        var cohort = new StudyCohort { Plan = c.Plan, MentorId = 20, Name = "Full", Capacity = 1, Status = "Published",
+            StartsAt = DateTime.UtcNow.AddDays(1), EndsAt = DateTime.UtcNow.AddDays(2) };
+        c.Cohort = cohort; cohort.Enrollments.Add(new StudyCourse { LearnerId = 90, Plan = c.Plan, PaymentStatus = "Paid", PurchaseKey = Guid.NewGuid() });
+        db.Add(cohort); await db.SaveChangesAsync();
+        Assert.True((await Service().ConfirmPaymentAsync(c.Id, new(true, true, 700000000 + c.Id, c.Amount, ""), "paid", default)).IsSuccess);
+        Assert.Equal("Paid", c.PaymentStatus); Assert.Equal("PaymentReview", c.Status); Assert.Empty(c.Sessions);
+    }
+    [Fact] public async Task Learner_cannot_buy_group_after_start_or_create_class()
+    {
+        var c = await Seed(); c.Plan.SessionType = "Group"; actor = new() { Id = 10, Role = Role.Learner };
+        var cohort = new StudyCohort { Name = "Started", Plan = c.Plan, MentorId = 20, Capacity = 2, Status = "Published",
+            StartsAt = DateTime.UtcNow.AddMinutes(-1), EndsAt = DateTime.UtcNow.AddDays(1) };
+        db.Add(cohort); await db.SaveChangesAsync();
+        Assert.False((await Service().PurchaseAsync(new(c.PlanId, Guid.NewGuid(), cohort.Id), default)).IsSuccess);
+        Assert.Equal(403, (await Service().SaveCohortAsync(null, new(c.PlanId, "X", 20, 3, [], true), default)).StatusCode);
+    }
+    [Fact] public void Homework_grade_is_not_a_retake_requirement()
+    {
+        var c = CourseRetakePolicyTests.Eligible(); foreach (var h in c.Homework) h.Passed = false;
+        Assert.True(CourseRetakePolicy.Evaluate(c, false).CanClaim);
+    }
+
+    [Fact] public async Task Cancellation_requires_admin_review_and_can_restore_the_session_credit()
+    {
+        var c = await Seed(); c.Status = "Active"; c.Sessions.Clear();
+        c.Sessions.Add(new() { Number = 1, ScheduledAt = DateTime.UtcNow.AddDays(4) }); await db.SaveChangesAsync();
+        actor = new() { Id = c.LearnerId, Role = Role.Learner };
+        Assert.True((await Service().RequestChangeAsync(c.Id, new(c.Sessions[0].Id, "Cancel", "Change plans"), default)).IsSuccess);
+        var request = await db.CourseScheduleRequests.SingleAsync();
+        Assert.Equal(403, (await Service().ReviewChangeAsync(c.Id, request.Id, new(true, "approve", RestoreSessionCredit: true), default)).StatusCode);
+        actor = new() { Id = 7, Role = Role.Admin };
+        Assert.True((await Service().ReviewChangeAsync(c.Id, request.Id, new(true, "Approve credit", RestoreSessionCredit: true), default)).IsSuccess);
+        Assert.Equal("CancelledByMentor", c.Sessions.Single().Status);
+        Assert.False((await Service().ReviewChangeAsync(c.Id, request.Id, new(true, "Again"), default)).IsSuccess);
     }
     public void Dispose() => db.Dispose();
 }

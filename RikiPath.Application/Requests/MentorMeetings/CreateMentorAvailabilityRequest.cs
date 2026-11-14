@@ -4,6 +4,8 @@
     {
         public DateTime StartTime { get; set; }
         public DateTime EndTime { get; set; }
+        public DateOnly? RepeatUntil { get; set; }
+        public List<DayOfWeek>? Weekdays { get; set; }
     }
 
 }

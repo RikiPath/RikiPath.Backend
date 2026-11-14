@@ -66,8 +66,9 @@ public sealed class MentorAttendanceService : IMentorAttendanceService
             && b.UserSubscription.PaymentStatus == PaymentStatus.Paid
             && (b.Status == MentorStatus.Assigned || b.Status == MentorStatus.Accepted));
 
-        if (hasValidBooking)
-            return true;
+        if (hasValidBooking) return true;
+        if (await _context.StudyCourses.AnyAsync(c => c.LearnerId == userId && c.PaymentStatus == "Paid" && c.Status == "Active"
+            && c.Sessions.Any(s => s.AvailabilityId == slot.Id && s.Status == "Scheduled"), cancellationToken)) return true;
 
         // Quản trị viên (Admin) luôn có quyền giám sát
         var claim = _claimService.GetUserClaim();
@@ -113,15 +114,21 @@ public sealed class MentorAttendanceService : IMentorAttendanceService
                     && b.UserSubscription.UserId == userId
                     && (b.Status == MentorStatus.Assigned || b.Status == MentorStatus.Accepted));
 
-                if (booking is null)
+                if (booking is null && !await _context.StudyCourses.AnyAsync(c => c.LearnerId == userId && c.PaymentStatus == "Paid" && c.Status == "Active" && c.Sessions.Any(s => s.AvailabilityId == slot.Id && s.Status == "Scheduled"), cancellationToken))
                     return ApiResponse<MentorAttendanceResponse>.Fail("Bạn không có lịch hẹn hợp lệ cho phòng họp này.", HttpStatusCode.Forbidden);
 
-                var learnerAccount = booking.UserSubscription?.UserAccount;
+                var learnerAccount = booking?.UserSubscription?.UserAccount ?? await _context.Users.FindAsync([userId], cancellationToken);
                 participantName = learnerAccount != null ? $"{learnerAccount.FirstName} {learnerAccount.LastName}".Trim() : $"User #{userId}";
             }
 
+            int? courseSessionId = null;
             if (booking is null)
-                return ApiResponse<MentorAttendanceResponse>.Fail("Chưa có lịch hẹn nào được gắn với khung giờ này.", HttpStatusCode.Conflict);
+            {
+                courseSessionId = await _context.StudyCourses.Where(c => c.PaymentStatus == "Paid" && c.Status == "Active"
+                    && (isMentor || c.LearnerId == userId)).SelectMany(c => c.Sessions)
+                    .Where(s => s.AvailabilityId == slot.Id && s.Status == "Scheduled").Select(s => (int?)s.Id).FirstOrDefaultAsync(cancellationToken);
+                if (!courseSessionId.HasValue) return ApiResponse<MentorAttendanceResponse>.Fail("Chưa có buổi học hợp lệ cho phòng này.", HttpStatusCode.Conflict);
+            }
 
             // 1. Quản lý trạng thái hiện diện đa thiết bị trong bộ nhớ
             var userConnMap = UserConnections.GetOrAdd((roomId, userId), _ => new ConcurrentDictionary<string, byte>());
@@ -132,13 +139,14 @@ public sealed class MentorAttendanceService : IMentorAttendanceService
 
             // 2. Cập nhật hoặc khởi tạo bản ghi điểm danh trong Database (bảo đảm bền vững)
             var record = await _context.MentorAttendanceRecords
-                .FirstOrDefaultAsync(r => r.MentorBookingId == booking.Id && r.UserId == userId, cancellationToken);
+                .FirstOrDefaultAsync(r => r.RoomId == roomId && r.UserId == userId, cancellationToken);
 
             if (record is null)
             {
                 record = new MentorAttendanceRecord
                 {
-                    MentorBookingId = booking.Id,
+                    MentorBookingId = booking?.Id,
+                    CourseSessionId = courseSessionId,
                     RoomId = roomId,
                     UserId = userId,
                     Role = role,
@@ -491,6 +499,7 @@ public sealed class MentorAttendanceService : IMentorAttendanceService
         {
             Id = r.Id,
             MentorBookingId = r.MentorBookingId,
+            CourseSessionId = r.CourseSessionId,
             RoomId = r.RoomId,
             UserId = r.UserId,
             ParticipantName = name,

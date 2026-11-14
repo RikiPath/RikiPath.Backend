@@ -1,0 +1,29 @@
+namespace RikiPath.Domain.Entities;
+
+// The timetable belongs to the class; StudyCourse remains each learner's paid enrollment.
+public sealed class StudyCohort
+{
+    public int Id { get; set; }
+    public int PlanId { get; set; }
+    public StudyCoursePlan Plan { get; set; } = null!;
+    public string Name { get; set; } = "";
+    public int MentorId { get; set; }
+    public UserAccount Mentor { get; set; } = null!;
+    public DateTime StartsAt { get; set; }
+    public DateTime EndsAt { get; set; }
+    public int Capacity { get; set; }
+    public string Status { get; set; } = "Draft";
+    public int Revision { get; set; } = 1;
+    public List<StudyCohortSession> Sessions { get; set; } = [];
+    public List<StudyCourse> Enrollments { get; set; } = [];
+}
+
+public sealed class StudyCohortSession
+{
+    public int Id { get; set; }
+    public int CohortId { get; set; }
+    public StudyCohort Cohort { get; set; } = null!;
+    public int Number { get; set; }
+    public int AvailabilityId { get; set; }
+    public MentorAvailability Availability { get; set; } = null!;
+}

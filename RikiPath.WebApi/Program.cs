@@ -1,4 +1,5 @@
 using RikiPath.Infrastructure.Options;
+using Microsoft.AspNetCore.DataProtection;
 using DocumentFormat.OpenXml.Office2016.Drawing.ChartDrawing;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
@@ -111,6 +112,13 @@ internal class Program
         // 3. Infrastructure & Helpers
         builder.Services.AddHttpContextAccessor();
         builder.Services.AddHttpClient();
+        var calendarProtection = builder.Services.AddDataProtection().SetApplicationName("RikiPath.MentorCalendar");
+        var calendarKeysPath = builder.Configuration["GoogleCalendar:DataProtectionKeysPath"];
+        if (!string.IsNullOrWhiteSpace(calendarKeysPath)) calendarProtection.PersistKeysToFileSystem(new DirectoryInfo(calendarKeysPath));
+        builder.Services.AddHttpClient("MentorCalendar", c => c.Timeout = TimeSpan.FromSeconds(15));
+        builder.Services.AddScoped<IMentorCalendarService, MentorCalendarService>();
+        builder.Services.AddHostedService<MentorCalendarWorker>();
+        builder.Services.AddHttpClient<IJlptExamSource, RikiPath.Infrastructure.Services.JlptExamSource>(c => c.Timeout = TimeSpan.FromSeconds(15));
         builder.Services.AddMemoryCache();
 
         // 3b. Firebase Admin SDK — dùng để verify idToken do React (Firebase Phone Auth) gửi lên.

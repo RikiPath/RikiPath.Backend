@@ -9,6 +9,9 @@ namespace RikiPath.Infrastructure
 
         public DbSet<StudyCourse> StudyCourses { get; set; }
         public DbSet<StudyCoursePlan> StudyCoursePlans { get; set; }
+        public DbSet<StudyCohort> StudyCohorts { get; set; }
+        public DbSet<CourseScheduleRequest> CourseScheduleRequests { get; set; }
+        public DbSet<JlptExamSchedule> JlptExamSchedules { get; set; }
 
         // Users
         public DbSet<UserAccount> Users { get; set; }
@@ -201,6 +204,11 @@ namespace RikiPath.Infrastructure
             modelBuilder.ApplyConfiguration(new NotificationConfig());
             modelBuilder.ApplyConfiguration(new UserDeviceTokenConfig());
 
+            modelBuilder.ApplyConfiguration(new MentorCalendarConnectionConfig());
+            modelBuilder.ApplyConfiguration(new StudyCohortConfig());
+            modelBuilder.ApplyConfiguration(new StudyCohortSessionConfig());
+            modelBuilder.ApplyConfiguration(new JlptExamScheduleConfig());
+            modelBuilder.ApplyConfiguration(new CourseScheduleRequestConfig());
             modelBuilder.ApplyConfiguration(new StudyCourseConfig());
             modelBuilder.ApplyConfiguration(new StudyCoursePlanConfig());
             modelBuilder.ApplyConfiguration(new StudyCourseSessionConfig());

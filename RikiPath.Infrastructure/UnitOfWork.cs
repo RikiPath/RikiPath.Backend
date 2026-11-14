@@ -12,6 +12,9 @@ namespace RikiPath.Infrastructure
         private readonly AppDbContext _context;
         public IStudyCourseRepository StudyCourses { get; }
         public IGenericRepository<StudyCoursePlan> StudyCoursePlans { get; }
+        public IGenericRepository<StudyCohort> StudyCohorts { get; }
+        public IGenericRepository<CourseScheduleRequest> CourseScheduleRequests { get; }
+        public IGenericRepository<JlptExamSchedule> JlptExamSchedules { get; }
 
         // 1. Users & Core Auth
         public IUserAccountRepository UserAccounts { get; }
@@ -94,6 +97,9 @@ namespace RikiPath.Infrastructure
             _context = context ?? throw new ArgumentNullException(nameof(context));
             StudyCourses = new StudyCourseRepository(_context);
             StudyCoursePlans = new GenericRepository<StudyCoursePlan>(_context);
+            StudyCohorts = new GenericRepository<StudyCohort>(_context);
+            CourseScheduleRequests = new GenericRepository<CourseScheduleRequest>(_context);
+            JlptExamSchedules = new GenericRepository<JlptExamSchedule>(_context);
 
             // Initializing Repositories
             UserAccounts = new UserAccountRepository(_context);

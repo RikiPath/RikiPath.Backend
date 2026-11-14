@@ -2,6 +2,8 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using RikiPath.Application.IClients;
+using RikiPath.Application;
+using RikiPath.Application.IRepositories;
 using RikiPath.Application.IServices;
 using RikiPath.Application.Requests.MentorMeetings;
 using RikiPath.Application.Services;
@@ -37,15 +39,19 @@ public sealed class MentorAvailabilityApprovalTests
         await using var db = Context();
         await Seed(db);
         var uow = new UnitOfWork(db);
-        var meeting = new MentorMeetingService(uow, Mock.Of<IPaymentGatewayClient>(), Claims(Role.Mentor, 501),
+        var registrationUow = new Mock<IUnitOfWork>();
+        registrationUow.SetupGet(x => x.StudyCourses).Returns(Mock.Of<IStudyCourseRepository>());
+        registrationUow.SetupGet(x => x.MentorAvailabilities).Returns(uow.MentorAvailabilities);
+        registrationUow.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>())).Returns((CancellationToken ct) => db.SaveChangesAsync(ct));
+        registrationUow.Setup(x => x.ExecuteInTransactionAsync(It.IsAny<Func<CancellationToken, Task>>(), It.IsAny<CancellationToken>()))
+            .Returns((Func<CancellationToken, Task> fn, CancellationToken ct) => fn(ct));
+        var meeting = new MentorMeetingService(registrationUow.Object, Mock.Of<IPaymentGatewayClient>(), Claims(Role.Mentor, 501),
             new AppSettings(), NullLogger<MentorMeetingService>.Instance, Mock.Of<IMentorCreditLedgerService>());
         var start = DateTime.UtcNow.AddDays(1);
-        Assert.False((await meeting.CreateAvailabilityAsync(new CreateMentorAvailabilityRequest
-        { StartTime = start, EndTime = start.AddHours(1) }, default)).IsSuccess);
-        var legacySlot = new MentorAvailability { MentorId = 501, StartTime = start, EndTime = start.AddHours(1) };
-        db.MentorAvailabilities.Add(legacySlot); await db.SaveChangesAsync();
-        var created = RikiPath.Application.Responses.ApiResponse<RikiPath.Application.Responses.MentorMeetings.MentorAvailabilityResponse>.Success(
-            new() { Id = legacySlot.Id, IsApproved = false });
+        var registration = await meeting.CreateAvailabilityAsync(new CreateMentorAvailabilityRequest
+        { StartTime = start, EndTime = start.AddHours(1) }, default);
+        Assert.True(registration.IsSuccess);
+        var created = RikiPath.Application.Responses.ApiResponse<RikiPath.Application.Responses.MentorMeetings.MentorAvailabilityResponse>.Success(registration.Result!.Single());
         Assert.True(created.IsSuccess);
         Assert.False(created.Result!.IsApproved);
         Assert.False(created.Result.IsBooked);
