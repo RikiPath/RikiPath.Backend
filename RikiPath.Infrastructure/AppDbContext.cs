@@ -7,6 +7,9 @@ namespace RikiPath.Infrastructure
     public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(options)
     {
 
+        public DbSet<StudyCourse> StudyCourses { get; set; }
+        public DbSet<StudyCoursePlan> StudyCoursePlans { get; set; }
+
         // Users
         public DbSet<UserAccount> Users { get; set; }
 
@@ -197,6 +200,13 @@ namespace RikiPath.Infrastructure
 
             modelBuilder.ApplyConfiguration(new NotificationConfig());
             modelBuilder.ApplyConfiguration(new UserDeviceTokenConfig());
+
+            modelBuilder.ApplyConfiguration(new StudyCourseConfig());
+            modelBuilder.ApplyConfiguration(new StudyCoursePlanConfig());
+            modelBuilder.ApplyConfiguration(new StudyCourseSessionConfig());
+            modelBuilder.ApplyConfiguration(new StudyCourseHomeworkConfig());
+            modelBuilder.ApplyConfiguration(new CourseRetakeRequestConfig());
+            modelBuilder.ApplyConfiguration(new CourseAuditEntryConfig());
 
             // Additional configurations for completeness
             modelBuilder.ApplyConfiguration(new CertificateSectionConfig());
