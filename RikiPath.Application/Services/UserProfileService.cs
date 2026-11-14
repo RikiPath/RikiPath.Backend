@@ -6,6 +6,7 @@ using RikiPath.Application.Responses;
 using RikiPath.Application.Responses.Profile;
 using System.Net;
 using RikiPath.Domain.Enums;
+using Microsoft.EntityFrameworkCore;
 
 namespace RikiPath.Application.Services
 {
@@ -133,6 +134,7 @@ namespace RikiPath.Application.Services
 
                 user.TargetCertificateLevelId = certificationLevel.Id;
                 user.DailyStudyMinutes = request.DailyStudyMinutes;
+                user.LearningGoalVersion++;
                 if (request.ClearTargetExamDate)
                     user.TargetExamDate = null;
                 else if (request.TargetExamDate.HasValue)
@@ -173,6 +175,7 @@ namespace RikiPath.Application.Services
                 user.StartingCertificateLevelId = level.Id;
                 user.StartingCertificateLevel = level;
                 user.LearningMode = LearningMode.Standard;
+                user.LearningGoalVersion++;
                 unitOfWork.UserAccounts.Update(user);
                 await unitOfWork.SaveChangesAsync(cancellationToken);
                 return ApiResponse<UserProfileResponse>.Success(MapToResponse(user));
@@ -184,6 +187,103 @@ namespace RikiPath.Application.Services
                     errors: BuildDebugErrors(ex));
             }
         }
+
+        public async Task<ApiResponse<UserProfileResponse>> SetLearningGoalAsync(
+            SetLearningGoalRequest request, CancellationToken cancellationToken)
+        {
+            if (request.DailyStudyMinutes < 1 || request.DailyStudyMinutes > 1440)
+                return ApiResponse<UserProfileResponse>.Fail("Thời gian học mỗi ngày phải từ 1 đến 1.440 phút.");
+            if (request.HasJlptCertificate != request.CertifiedJlptLevelId.HasValue)
+                return ApiResponse<UserProfileResponse>.Fail("Vui lòng chọn cấp chứng chỉ JLPT đã đạt hoặc bỏ chọn chứng chỉ.");
+            if (request.ExpectedVersion < 0)
+                return ApiResponse<UserProfileResponse>.Fail("Phiên bản mục tiêu học tập không hợp lệ.");
+
+            var utcNow = BusinessDateHelper.EnsureUtc(UtcNowProvider());
+            if (request.TargetExamDate.HasValue &&
+                !BusinessDateHelper.IsFutureExamDate(request.TargetExamDate.Value, utcNow))
+                return ApiResponse<UserProfileResponse>.Fail("Ngày dự định thi phải sau hôm nay.");
+
+            try
+            {
+                var current = await unitOfWork.CertificateLevels.GetActiveJlptLevelByIdAsync(request.CurrentStudyLevelId, cancellationToken);
+                var target = await unitOfWork.CertificateLevels.GetActiveJlptLevelByIdAsync(request.TargetJlptLevelId, cancellationToken);
+                CertificateLevel? certified = null;
+                if (request.CertifiedJlptLevelId.HasValue)
+                    certified = await unitOfWork.CertificateLevels.GetActiveJlptLevelByIdAsync(request.CertifiedJlptLevelId.Value, cancellationToken);
+
+                if (current is null || JlptCurriculum.Rank(current.Code) == 0)
+                    return ApiResponse<UserProfileResponse>.Fail("Cấp độ đang học không khả dụng; hiện hỗ trợ N5–N3.");
+                if (target is null || !IsSupportedGoalLevel(target.Code))
+                    return ApiResponse<UserProfileResponse>.Fail("Mục tiêu JLPT phải thuộc N5–N2.");
+                if (request.HasJlptCertificate && (certified is null || !IsSupportedGoalLevel(certified.Code)))
+                    return ApiResponse<UserProfileResponse>.Fail("Cấp chứng chỉ JLPT phải thuộc N5–N2.");
+
+                var userId = claimService.GetUserClaim().Id;
+                UserProfileResponse? result = null;
+                ApiResponse<UserProfileResponse>? rejection = null;
+                await unitOfWork.ExecuteInTransactionAsync(async ct =>
+                {
+                    var user = await unitOfWork.UserAccounts.GetByIdForUpdateAsync(userId, ct);
+                    if (user is null)
+                    {
+                        rejection = ApiResponse<UserProfileResponse>.NotFound("Không tìm thấy người dùng.");
+                        return;
+                    }
+                    if (user.LearningGoalVersion != request.ExpectedVersion)
+                    {
+                        rejection = ApiResponse<UserProfileResponse>.Fail(
+                            "Mục tiêu đã được thay đổi ở nơi khác. Vui lòng tải lại hồ sơ.",
+                            HttpStatusCode.Conflict, errorCode: "GOAL_VERSION_CONFLICT");
+                        return;
+                    }
+
+                    var active = await unitOfWork.RecommendedLearningPaths.GetActiveByUserIdAsync(userId, ct);
+                    if (active is not null && active.TargetCertificateLevelId != target.Id)
+                    {
+                        rejection = ApiResponse<UserProfileResponse>.Fail(
+                            "Mục tiêu của lộ trình đang hoạt động chỉ có thể đổi qua xem trước và xác nhận.",
+                            HttpStatusCode.Conflict, errorCode: "PATH_PREVIEW_REQUIRED");
+                        return;
+                    }
+
+                    user.StartingCertificateLevelId = current.Id;
+                    user.TargetCertificateLevelId = target.Id;
+                    user.DailyStudyMinutes = request.DailyStudyMinutes;
+                    user.TargetExamDate = request.TargetExamDate.HasValue
+                        ? BusinessDateHelper.NormalizeExamDate(request.TargetExamDate.Value)
+                        : null;
+                    user.SelfDeclaredCertificateLevelId = certified?.Id;
+                    user.LearningGoalVersion++;
+                    unitOfWork.UserAccounts.Update(user);
+                    await unitOfWork.SaveChangesAsync(ct);
+                    result = MapToResponse(user, target);
+                    result.CurrentStudyLevelName = current.Code;
+                    result.StartingJlptLevelName = current.Code;
+                    result.CertifiedJlptLevelName = certified?.Code;
+                }, cancellationToken);
+
+                return rejection ?? ApiResponse<UserProfileResponse>.Success(result!);
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                return ApiResponse<UserProfileResponse>.Fail(
+                    "Mục tiêu đã được thay đổi ở nơi khác. Vui lòng tải lại hồ sơ.",
+                    HttpStatusCode.Conflict, errorCode: "GOAL_VERSION_CONFLICT");
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                return ApiResponse<UserProfileResponse>.Fail(
+                    "Không thể cập nhật mục tiêu học tập.", HttpStatusCode.InternalServerError,
+                    errors: BuildDebugErrors(ex));
+            }
+        }
+
+        private static bool IsSupportedGoalLevel(string? code) =>
+            code?.Trim().ToUpperInvariant() is "N5" or "N4" or "N3" or "N2";
 
         public async Task<ApiResponse<UserProfileResponse>> UpdateNotificationSettingsAsync(UpdateNotificationSettingsRequest request, CancellationToken cancellationToken)
         {
@@ -234,6 +334,10 @@ namespace RikiPath.Application.Services
                 _ => "NOT_TAKEN",
             },
             DailyStudyMinutes = user.DailyStudyMinutes,
+            LearningGoalVersion = user.LearningGoalVersion,
+            HasJlptCertificate = user.SelfDeclaredCertificateLevelId.HasValue,
+            CertifiedJlptLevelId = user.SelfDeclaredCertificateLevelId,
+            CertifiedJlptLevelName = user.SelfDeclaredCertificateLevel?.Code,
             TargetExamDate = user.TargetExamDate,
             EmailNotificationsEnabled = user.EmailNotificationsEnabled,
             SystemNotificationsEnabled = user.SystemNotificationsEnabled,

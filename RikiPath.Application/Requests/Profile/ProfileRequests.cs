@@ -25,6 +25,18 @@ namespace RikiPath.Application.Requests.Profile
         public bool Confirmed { get; set; }
     }
 
+    public class SetLearningGoalRequest
+    {
+        public int CurrentStudyLevelId { get; set; }
+        public int TargetJlptLevelId { get; set; }
+        public int DailyStudyMinutes { get; set; }
+        /// <summary>Complete-form semantics: null explicitly clears the planned date.</summary>
+        public DateTime? TargetExamDate { get; set; }
+        public bool HasJlptCertificate { get; set; }
+        public int? CertifiedJlptLevelId { get; set; }
+        public int ExpectedVersion { get; set; }
+    }
+
     public class UpdateNotificationSettingsRequest
     {
         public bool EmailNotificationsEnabled { get; set; }

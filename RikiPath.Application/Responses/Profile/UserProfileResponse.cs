@@ -45,6 +45,13 @@ namespace RikiPath.Application.Responses.Profile
 
         public int DailyStudyMinutes { get; set; }
 
+        public int LearningGoalVersion { get; set; }
+        public bool HasJlptCertificate { get; set; }
+        [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+        public int? CertifiedJlptLevelId { get; set; }
+        [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+        public string? CertifiedJlptLevelName { get; set; }
+
         [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
         public DateTime? TargetExamDate { get; set; }
 
