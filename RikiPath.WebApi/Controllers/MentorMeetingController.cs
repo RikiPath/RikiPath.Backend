@@ -16,6 +16,23 @@ public sealed class MentorMeetingController(IMentorMeetingService service) : Con
     public async Task<IActionResult> GetMentors(CancellationToken cancellationToken)
          => ToActionResult(await service.GetMentorsAsync(cancellationToken));
 
+    [HttpGet("recommendations")]
+    [Authorize(Roles = "Learner")]
+    public async Task<IActionResult> GetRecommendations(
+        [FromQuery, Microsoft.AspNetCore.Mvc.ModelBinding.BindRequired] DateTimeOffset from,
+        [FromQuery, Microsoft.AspNetCore.Mvc.ModelBinding.BindRequired] DateTimeOffset to, CancellationToken ct)
+        => ToActionResult(await service.GetRecommendationsAsync(from, to, ct));
+
+    [HttpGet("bookings/{bookingId:int}/rating")]
+    [Authorize(Roles = "Learner")]
+    public async Task<IActionResult> GetMyRating(int bookingId, CancellationToken ct)
+        => ToActionResult(await service.GetMyRatingAsync(bookingId, ct));
+
+    [HttpPut("bookings/{bookingId:int}/rating")]
+    [Authorize(Roles = "Learner")]
+    public async Task<IActionResult> RateMentor(int bookingId, RateMentorRequest request, CancellationToken ct)
+        => ToActionResult(await service.RateMentorAsync(bookingId, request.Rating, ct));
+
     /// <summary>Lấy danh sách các gói tư vấn 1-1 khả dụng.</summary>
     [HttpGet("plans")]
     [AllowAnonymous]

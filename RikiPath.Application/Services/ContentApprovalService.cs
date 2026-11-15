@@ -676,6 +676,8 @@ namespace RikiPath.Application.Services
             }
             lesson.Title = p.Title;
             lesson.Description = p.Description;
+            if (p.AudioUrl is not null)
+                lesson.AudioUrl = string.IsNullOrWhiteSpace(p.AudioUrl) ? null : p.AudioUrl;
             lesson.SortOrder = p.SortOrder;
             lesson.CertificateLevelId = p.CertificateLevelId;
             lesson.LanguageSkillId = p.LanguageSkillId;

@@ -14,6 +14,9 @@ public interface IMentorMeetingService
     Task<ApiResponse<bool>> DeleteAvailabilityAsync(int id, CancellationToken ct);
     #region Shared / General
     Task<ApiResponse<List<BookableMentorResponse>>> GetMentorsAsync(CancellationToken cancellationToken = default);
+    Task<ApiResponse<List<MentorRecommendationResponse>>> GetRecommendationsAsync(DateTimeOffset from, DateTimeOffset to, CancellationToken ct);
+    Task<ApiResponse<int>> GetMyRatingAsync(int bookingId, CancellationToken ct);
+    Task<ApiResponse<int>> RateMentorAsync(int bookingId, int rating, CancellationToken ct);
     Task<ApiResponse<List<MentorMeetingPlanResponse>>> GetPlansAsync(CancellationToken cancellationToken = default);
     Task<ApiResponse<List<MentorAvailabilityResponse>>> GetAvailableSlotsAsync(DateTime from, DateTime to, int? mentorId, CancellationToken cancellationToken = default);
     #endregion

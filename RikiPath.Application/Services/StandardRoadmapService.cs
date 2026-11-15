@@ -1,18 +1,19 @@
+using System.Data.Common;
 using System.Net;
+using Microsoft.Extensions.Logging;
+using RikiPath.Application.IRepositories;
 using RikiPath.Application.IServices;
 using RikiPath.Application.Responses;
 using RikiPath.Application.Responses.LearningPaths;
-using RikiPath.Domain.Entities;
 using RikiPath.Domain.Enums;
 
 namespace RikiPath.Application.Services;
 
 /// <summary>Deterministic, non-AI curriculum from owned profile and canonical lesson progress.</summary>
-public sealed class StandardRoadmapService(IUnitOfWork unitOfWork, IClaimService claimService)
+public sealed class StandardRoadmapService(IUnitOfWork unitOfWork, IClaimService claimService,
+    ILogger<StandardRoadmapService>? logger = null)
     : IStandardRoadmapService
 {
-    private const double ReviewScorePercent = 50;
-
     public async Task<ApiResponse<StandardRoadmapResponse>> GetAsync(CancellationToken cancellationToken)
     {
         try
@@ -118,14 +119,14 @@ public sealed class StandardRoadmapService(IUnitOfWork unitOfWork, IClaimService
                 }
             }
 
-            var studyLevels = starting.Id == target.Id ? new[] { target } : new[] { starting, target };
+            var studyLevels = starting.Id == target.Id ? new[] { target } : new[] { target, starting };
             var skills = assessments.ToDictionary(assessment => assessment.SkillCode,
                 assessment => new StandardRoadmapSkillResponse { Assessment = assessment });
-            var selected = new List<(Lesson Lesson, string SkillCode, string LevelCode)>();
+            var selected = new List<(AssessmentRoadmapLesson Lesson, string SkillCode, string LevelCode)>();
             foreach (var level in studyLevels)
             {
                 var levelCode = level.Code.Trim().ToUpperInvariant();
-                var lessons = await unitOfWork.Lessons.GetLearnerVisibleByLevelAsync(level.Id, userId, cancellationToken);
+                var lessons = await unitOfWork.Lessons.GetAssessmentRoadmapLessonsAsync(level.Id, userId, cancellationToken);
                 var levelSkills = new HashSet<string>();
                 foreach (var lesson in lessons)
                 {
@@ -137,8 +138,8 @@ public sealed class StandardRoadmapService(IUnitOfWork unitOfWork, IClaimService
                             Assessment = new LearningPathSectionAssessmentResponse
                             {
                                 SkillCode = skillCode,
-                                Skill = lesson.LanguageSkill.Name,
-                                SectionTitle = lesson.LanguageSkill.Name,
+                                Skill = lesson.LanguageSkillName,
+                                SectionTitle = lesson.LanguageSkillName,
                             }
                         });
                     }
@@ -155,43 +156,40 @@ public sealed class StandardRoadmapService(IUnitOfWork unitOfWork, IClaimService
 
             var ids = selected.Select(item => item.Lesson.Id).ToArray();
             var withExercises = await LessonPracticeProgress.WithReadyExercisesAsync(unitOfWork, ids, cancellationToken);
-            var passed = await LessonPracticeProgress.PassedAsync(unitOfWork, userId, ids, cancellationToken);
+            var passed = await LessonPracticeProgress.PassedAsync(
+                unitOfWork, userId, ids, cancellationToken, requireReadyExercise: true);
             var rows = new List<StandardRoadmapLessonResponse>();
-            var blockedSkills = new HashSet<string>();
+            var blockedLevels = new HashSet<string>();
             foreach (var (lesson, skillCode, levelCode) in selected)
             {
-                var progress = lesson.LessonProgresses?.OrderByDescending(item => item.IsCompleted)
-                    .ThenByDescending(item => item.ProgressPercent).FirstOrDefault();
-                var hasExercise = withExercises.Contains(lesson.Id);
+                var progress = lesson.Progress;
                 var practicePassed = passed.Contains(lesson.Id);
-                var completed = practicePassed || (!hasExercise && progress?.IsCompleted == true);
                 rows.Add(new StandardRoadmapLessonResponse
                 {
                     LessonId = lesson.Id,
                     Title = lesson.Title,
                     SortOrder = rows.Count + 1,
                     SkillCode = skillCode,
+                    LanguageSkillName = lesson.LanguageSkillName,
                     LevelCode = levelCode,
-                    HasPracticeExercise = hasExercise,
+                    KanjiCount = lesson.KanjiCount,
+                    VocabularyCount = lesson.VocabularyCount,
+                    GrammarCount = lesson.GrammarCount,
+                    HasPracticeExercise = withExercises.Contains(lesson.Id),
                     PracticePassed = practicePassed,
-                    IsCompleted = completed,
-                    IsLocked = !completed && blockedSkills.Contains(skillCode),
-                    ProgressPercent = completed ? 100 : Math.Clamp(progress?.ProgressPercent ?? 0, 0, 99),
+                    IsStudied = practicePassed || progress?.IsCompleted == true,
+                    IsCompleted = practicePassed,
+                    IsLocked = !practicePassed && blockedLevels.Contains(levelCode),
+                    ProgressPercent = practicePassed ? 100 : Math.Clamp(progress?.ProgressPercent ?? 0, 0, 99),
                 });
-                if (!completed) blockedSkills.Add(skillCode);
+                if (!practicePassed) blockedLevels.Add(levelCode);
             }
 
             foreach (var skill in skills.Values)
                 skill.Assessment.SuggestedStudySharePercent = rows.Count == 0 ? null :
                     Math.Round(rows.Count(row => row.SkillCode == skill.Assessment.SkillCode) * 100d / rows.Count, 1);
 
-            var scoreBySkill = assessments.ToDictionary(item => item.SkillCode,
-                item => EvidenceFor(item, targetCode)?.ScorePercent ?? ReviewScorePercent);
-            var nextLesson = rows.Where(row => !row.IsCompleted && !row.IsLocked)
-                .OrderByDescending(row => row.ProgressPercent > 0)
-                .ThenBy(row => scoreBySkill.GetValueOrDefault(row.SkillCode!, ReviewScorePercent))
-                .ThenBy(row => row.SortOrder)
-                .FirstOrDefault();
+            var nextLesson = rows.FirstOrDefault(row => row.LevelCode == targetCode && !row.IsCompleted && !row.IsLocked);
 
             return ApiResponse<StandardRoadmapResponse>.Success(new StandardRoadmapResponse
             {
@@ -209,8 +207,16 @@ public sealed class StandardRoadmapService(IUnitOfWork unitOfWork, IClaimService
             });
         }
         catch (OperationCanceledException) { throw; }
-        catch
+        catch (DbException exception) when (exception.SqlState is "42703" or "42P01")
         {
+            logger?.LogError(exception, "The database schema is incomplete for the self-study roadmap.");
+            return ApiResponse<StandardRoadmapResponse>.Fail(
+                "Cơ sở dữ liệu cần được cập nhật trước khi tải lộ trình tự học.",
+                HttpStatusCode.InternalServerError, "STUDY_SCHEMA_UPDATE_REQUIRED");
+        }
+        catch (Exception exception)
+        {
+            logger?.LogError(exception, "Failed to load the self-study roadmap from the assessment.");
             return ApiResponse<StandardRoadmapResponse>.Fail(
                 "Không thể tải lộ trình tự học theo bài đánh giá.", HttpStatusCode.InternalServerError);
         }
@@ -227,17 +233,13 @@ public sealed class StandardRoadmapService(IUnitOfWork unitOfWork, IClaimService
         if (lesson is null)
             return ApiResponse.NotFound("Bài này không thuộc lộ trình tự học hiện tại.");
         return lesson.IsLocked
-            ? ApiResponse.Fail("Hãy hoàn thành bài trước của kỹ năng này.", HttpStatusCode.Conflict, "SELF_STUDY_LESSON_LOCKED")
+            ? ApiResponse.Fail("Hãy đạt bài luyện tập của bài trước ở cấp này.", HttpStatusCode.Conflict, "SELF_STUDY_LESSON_LOCKED")
             : ApiResponse.Success();
     }
 
-    private static LearningPathSkillLevelEvidence? EvidenceFor(LearningPathSectionAssessmentResponse assessment, string? levelCode)
-        => assessment.LevelBreakdowns.FirstOrDefault(item => item.LevelCode == levelCode &&
-            item.TotalCount >= PlacementAssessmentModePolicy.MinimumQuestionsPerSkillAndLevel);
-
-    private static string LessonSkillCode(Lesson lesson)
+    private static string LessonSkillCode(AssessmentRoadmapLesson lesson)
     {
-        var name = lesson.LanguageSkill.Name;
+        var name = lesson.LanguageSkillName;
         if (name.Equals("Kanji", StringComparison.OrdinalIgnoreCase) ||
             name.Equals("Hán tự", StringComparison.OrdinalIgnoreCase))
             return "vocabulary";

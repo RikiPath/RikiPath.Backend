@@ -14,6 +14,7 @@ namespace RikiPath.Application.Responses.Lessons
     {
         public int LessonId { get; init; }
         public bool HasPracticeExercise { get; init; }
+        public bool HasAudio { get; init; }
         public bool PracticePassed { get; init; }
         public string Title { get; init; } = string.Empty;
         public string? Description { get; init; }

@@ -29,9 +29,14 @@ public class StandardRoadmapLessonResponse
     public int SortOrder { get; set; }
     public int ProgressPercent { get; set; }
     public bool IsCompleted { get; set; }
+    public bool IsStudied { get; set; }
     public string? SkillCode { get; set; }
+    public string? LanguageSkillName { get; set; }
     public string? LevelCode { get; set; }
     public bool HasPracticeExercise { get; set; }
     public bool PracticePassed { get; set; }
     public bool IsLocked { get; set; }
+    public int KanjiCount { get; set; }
+    public int VocabularyCount { get; set; }
+    public int GrammarCount { get; set; }
 }

@@ -68,6 +68,7 @@ namespace RikiPath.Application
 
         // 9. Paid Mentor 1-1 Service
         IMentorBookingRepository MentorBookings { get; }
+        IMentorReviewRepository MentorReviews { get; }
         IMentorChatMessageRepository MentorChatMessages { get; }
         INoteRepository Notes { get; }
         IMentorAvailabilityRepository MentorAvailabilities { get; }

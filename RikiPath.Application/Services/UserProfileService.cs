@@ -132,6 +132,10 @@ namespace RikiPath.Application.Services
                 if (request.TargetExamDate is { } requestedDate && !BusinessDateHelper.IsJlptExamMonth(requestedDate))
                     return ApiResponse<UserProfileResponse>.Fail(BusinessDateHelper.InvalidJlptExamMonthMessage,
                         HttpStatusCode.BadRequest, errorCode: BusinessDateHelper.InvalidJlptExamMonthCode);
+                if (request.TargetExamDate is { } jlptDate && !BusinessDateHelper.IsJlptExamDate(jlptDate))
+                    return ApiResponse<UserProfileResponse>.Fail(
+                        "Ngày thi JLPT phải là Chủ nhật đầu tiên của tháng 7 hoặc tháng 12.",
+                        HttpStatusCode.BadRequest, "JLPT_EXAM_DATE_INVALID");
 
                 // Đã chuyển đổi sang CertificateLevels
                 if (request.ClearTargetExamDate && request.TargetExamDate.HasValue)

@@ -74,6 +74,7 @@ namespace RikiPath.Infrastructure
 
         // 9. Paid Mentor 1-1 Service
         public IMentorBookingRepository MentorBookings { get; }
+        public IMentorReviewRepository MentorReviews { get; }
         public IMentorChatMessageRepository MentorChatMessages { get; }
         public INoteRepository Notes { get; }
         public IMentorAvailabilityRepository MentorAvailabilities { get; }
@@ -141,6 +142,7 @@ namespace RikiPath.Infrastructure
             RecommendedLearningPaths = new RecommendedLearningPathRepository(_context);
 
             MentorBookings = new MentorBookingRepository(_context);
+            MentorReviews = new MentorReviewRepository(_context);
             MentorChatMessages = new MentorChatMessageRepository(_context);
             Notes = new NoteRepository(_context);
             MentorAvailabilities = new MentorAvailabilityRepository(_context);

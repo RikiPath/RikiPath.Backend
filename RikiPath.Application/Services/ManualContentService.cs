@@ -65,13 +65,18 @@ public sealed class ManualContentService(IUnitOfWork uow, IClaimService claims, 
             return ApiResponse<JsonElement>.Success(input);
 
         var lesson = Read<LessonImportPayloadResponse>(input);
-        var topic = await uow.Lessons.Query()
+        var published = await uow.Lessons.Query()
             .Where(x => !x.IsDeleted && (item.TargetEntityId.HasValue
                 ? x.Id == item.TargetEntityId : x.Title == lesson.Title && x.CertificateLevelId == lesson.CertificateLevelId))
-            .Where(x => x.Topic != null && !x.Topic.IsDeleted)
-            .OrderBy(x => x.Id).Select(x => new { x.TopicId, x.Topic!.Title }).FirstOrDefaultAsync(ct);
-        lesson.TopicId = topic?.TopicId;
-        lesson.TopicTitle = topic?.Title;
+            .OrderBy(x => x.Id).Select(x => new
+            {
+                x.AudioUrl,
+                TopicId = x.Topic != null && !x.Topic.IsDeleted ? x.TopicId : null,
+                TopicTitle = x.Topic != null && !x.Topic.IsDeleted ? x.Topic.Title : null,
+            }).FirstOrDefaultAsync(ct);
+        lesson.TopicId = published?.TopicId;
+        lesson.TopicTitle = published?.TopicTitle;
+        lesson.AudioUrl = published?.AudioUrl;
         return ApiResponse<JsonElement>.Success(JsonSerializer.SerializeToElement(lesson));
     }
 
@@ -266,6 +271,8 @@ public sealed class ManualContentService(IUnitOfWork uow, IClaimService claims, 
             case ImportEntityType.Lesson:
                 var lesson = Read<LessonImportPayloadResponse>(input);
                 lesson.Title = Required(lesson.Title, "Tên bài học");
+                if (lesson.AudioUrl is not null)
+                    lesson.AudioUrl = MediaUrl(lesson.AudioUrl, "URL âm thanh") ?? string.Empty;
                 lesson.CertificateLevelCode = level.Code;
                 await RequireSkillAsync(lesson.LanguageSkillId, ct);
                 lesson.TopicTitle = lesson.TopicId is int topicId

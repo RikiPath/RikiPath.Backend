@@ -4,11 +4,15 @@ using RikiPath.Application.Responses.LearningPaths;
 
 namespace RikiPath.Application.Responses.PlacementTests
 {
+    public sealed record PlacementAttemptAllowance(int Limit, int Started, int Remaining, int? PendingSubmissionAttemptId);
+
     public class PlacementTestStatusResponse
     {
         public string AttemptType { get; set; } = "placement";
         public string PlacementDecision { get; set; } = "NOT_TAKEN";
         public bool HasActiveAttempt { get; set; }
+        public PlacementAttemptAllowance? AttemptAllowance { get; set; }
+        public bool CanStartNewAttempt { get; set; }
 
         [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
         public int? ActiveAttemptId { get; set; }

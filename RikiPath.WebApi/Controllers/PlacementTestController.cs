@@ -52,9 +52,9 @@ namespace RikiPath.WebApi.Controllers
         }
 
         /// <summary>
-        /// Bắt đầu mới hoặc tiếp tục lượt làm bài kiểm tra đánh giá năng lực đầu vào (Placement Test) theo mục tiêu hiện tại. Với mục tiêu N2, N3 hoặc N4, bắt đầu bài đúng cấp độ hoặc bài mini theo kết quả bài đầu.
+        /// Bắt đầu hoặc khôi phục bài đánh giá theo mục tiêu JLPT và ngày thi đã lưu.
         /// </summary>
-        /// <remarks>Gửi RetakeTargetAssessment = true để làm lại bài theo cấp mục tiêu khi đang được yêu cầu làm bài mini.</remarks>
+        /// <remarks>Tối đa hai lượt bắt đầu cho mỗi cấp. Gửi RetakeTargetAssessment = true để làm lượt thứ hai sau khi đã có kết quả.</remarks>
         [HttpPost("start")]
         public async Task<IActionResult> StartPlacementTest(
             [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] StartPlacementTestRequest? request,

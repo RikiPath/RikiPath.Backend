@@ -13,7 +13,7 @@ using RikiPath.Domain.Enums;
 namespace RikiPath.Application.Services;
 
 /// <summary>Owns Mentor Meeting validation, booking lifecycle, checkout orchestration, and response mapping.</summary>
-public sealed class MentorMeetingService(
+public sealed partial class MentorMeetingService(
     IUnitOfWork unitOfWork,
     IPaymentGatewayClient paymentGateway,
     IClaimService claimService,

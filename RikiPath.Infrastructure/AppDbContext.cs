@@ -62,6 +62,7 @@ namespace RikiPath.Infrastructure
 
         // Mentor 1-1 service
         public DbSet<MentorBooking> MentorBookings { get; set; }
+        public DbSet<MentorReview> MentorReviews { get; set; }
         public DbSet<MentorChatMessage> MentorChatMessages { get; set; }
         public DbSet<Note> Notes { get; set; }
         public DbSet<MentorAvailability> MentorAvailabilities { get; set; }
@@ -133,6 +134,7 @@ namespace RikiPath.Infrastructure
             modelBuilder.ApplyConfiguration(new GradingResultConfig());
 
             modelBuilder.ApplyConfiguration(new MentorBookingConfig());
+            modelBuilder.ApplyConfiguration(new MentorReviewConfig());
             modelBuilder.ApplyConfiguration(new MentorChatMessageConfig());
             modelBuilder.ApplyConfiguration(new NoteConfig());
             modelBuilder.ApplyConfiguration(new MentorAvailabilityConfig());

@@ -59,6 +59,7 @@ namespace RikiPath.Application.Handlers
         {
             var title = row.Get("LessonTitle");
             var description = row.Get("Description");
+            var audio = row.Get("AudioUrl");
             var levelCode = row.Get("Certificate Level Code");
             var skillName = row.Get("Language Skill Name");
             var sortOrderRaw = row.Get("Sort Order");
@@ -74,6 +75,7 @@ namespace RikiPath.Application.Handlers
                 {
                     ["lessonTitle"] = title,
                     ["description"] = description,
+                    ["audioUrl"] = audio,
                     ["certificateLevelCode"] = levelCode,
                     ["languageSkillName"] = skillName,
                     ["sortOrder"] = sortOrderRaw,
@@ -82,6 +84,7 @@ namespace RikiPath.Application.Handlers
 
             // ---- Validate ----
             if (string.IsNullOrWhiteSpace(title)) diff.Errors.Add("Thiếu cột LessonTitle.");
+            var audioUrl = ImportHandlerSupport.CheckUrl(audio, "AudioUrl", "", diff.Errors);
             ImportHandlerSupport.CheckLevel(levelCode, levelsByCode, ambiguousLevelCodes, diff.Errors);
 
             Domain.Entities.LanguageSkill? skill = null;
@@ -131,6 +134,7 @@ namespace RikiPath.Application.Handlers
             {
                 Title = title!,
                 Description = description,
+                AudioUrl = audioUrl,
                 // Không có cột Sort Order: giữ thứ tự cũ nếu bài đã có, bài mới lấy số dòng trong file.
                 SortOrder = sortOrder ?? existing?.SortOrder ?? row.RowNumber,
                 CertificateLevelCode = levelCode!,
@@ -150,6 +154,8 @@ namespace RikiPath.Application.Handlers
             var changed = new Dictionary<string, string>();
 
             ImportHandlerSupport.CompareField(changed, "description", existing.Description, payload.Description);
+            if (audioUrl is not null)
+                ImportHandlerSupport.CompareField(changed, "audioUrl", existing.AudioUrl, audioUrl);
             ImportHandlerSupport.CompareField(changed, "languageSkillName", existing.LanguageSkill?.Name, skill.Name);
             ImportHandlerSupport.CompareField(changed, "sortOrder", existing.SortOrder.ToString(), payload.SortOrder.ToString());
 

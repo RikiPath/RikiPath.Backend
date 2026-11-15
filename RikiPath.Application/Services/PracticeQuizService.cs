@@ -155,10 +155,7 @@ public class PracticeQuizService(
             }
 
             var questions = GetVisibleQuestions(exercise);
-            if (questions.Count == 0 || questions.Any(question =>
-                    (question.Options ?? []).Count(option => !option.IsDeleted) < 2 ||
-                    (fromAssessmentRoadmap &&
-                     (question.Options ?? []).Count(option => !option.IsDeleted && option.IsCorrect) != 1)))
+            if (!CanTakeExercise(questions, fromAssessmentRoadmap))
                 return ApiResponse<PracticeExerciseAttemptResponse>.Fail(
                     "Bài Practice Exercise chưa có đủ câu hỏi và lựa chọn để làm.", HttpStatusCode.Conflict);
 
@@ -262,11 +259,14 @@ public class PracticeQuizService(
             var questions = GetVisibleQuestions(exercise);
             if (questions.Count == 0)
                 return ApiResponse<PracticeExerciseAttemptResultResponse>.Fail("Bài tập không có câu hỏi.");
+            if (fromAssessmentRoadmap && !CanTakeExercise(questions, requireSingleCorrectOption: true))
+                return ApiResponse<PracticeExerciseAttemptResultResponse>.Fail(
+                    "Bài luyện tập chưa có bộ câu hỏi hợp lệ.", HttpStatusCode.Conflict);
 
             var suppliedAnswers = request.Answers ?? [];
             if (suppliedAnswers.GroupBy(answer => answer.QuestionId).Any(group => group.Count() > 1))
                 return ApiResponse<PracticeExerciseAttemptResultResponse>.Fail("Không được gửi đáp án trùng câu hỏi.");
-            if (assignmentId.HasValue && (suppliedAnswers.Count != questions.Count ||
+            if ((assignmentId.HasValue || fromAssessmentRoadmap) && (suppliedAnswers.Count != questions.Count ||
                 suppliedAnswers.Any(answer => !answer.SelectedOptionId.HasValue)))
                 return ApiResponse<PracticeExerciseAttemptResultResponse>.Fail("Hãy trả lời tất cả câu hỏi trước khi nộp.");
 
@@ -368,4 +368,10 @@ public class PracticeQuizService(
             .OrderBy(question => question.SortOrder)
             .ThenBy(question => question.Id)
             .ToList();
+
+    private static bool CanTakeExercise(List<PracticeQuestion> questions, bool requireSingleCorrectOption)
+        => questions.Count > 0 && questions.All(question =>
+            (question.Options ?? []).Count(option => !option.IsDeleted) >= 2 &&
+            (!requireSingleCorrectOption ||
+             (question.Options ?? []).Count(option => !option.IsDeleted && option.IsCorrect) == 1));
 }

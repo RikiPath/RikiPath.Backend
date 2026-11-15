@@ -47,6 +47,11 @@ namespace RikiPath.Application.Services
         public const string InvalidJlptExamMonthMessage = "Ngày dự định thi JLPT phải nằm trong tháng 7 hoặc tháng 12.";
 
         public static bool IsJlptExamMonth(DateTime date) => NormalizeExamDate(date).Month is 7 or 12;
+        public static bool IsJlptExamDate(DateTime date)
+        {
+            var day = NormalizeExamDate(date);
+            return IsJlptExamMonth(day) && day.Day <= 7 && day.DayOfWeek == DayOfWeek.Sunday;
+        }
 
         public static int GetDaysUntilExam(DateTime targetExamDate, DateTime utcNow)
             => (NormalizeExamDate(targetExamDate) - GetVietnamToday(utcNow)).Days;
@@ -74,6 +79,7 @@ namespace RikiPath.Application.Services
 
         private const int MinimumEligibleQuestionsPerLevel = 2;
         private const int DefaultQuestionsPerLevel = 12;
+        private const int TargetAttemptLimit = 2;
         private const string NotFoundAttemptMessage = "Không tìm thấy lượt làm bài đánh giá năng lực.";
 
         private static readonly string[] SupportedLevels = ["N5", "N4", "N3", "N2"];
@@ -102,7 +108,10 @@ namespace RikiPath.Application.Services
                 var targetId = GetAdaptiveGoalId(user);
                 var activeAttempt = FindCanonicalActiveAttempt(
                     placementAttempts, serverNow, targetId)?.Attempt;
-                var completedWithSnapshot = FindLatestCompletedAssessment(placementAttempts, targetId);
+                var completedWithSnapshot = FindLatestCompletedAssessment(placementAttempts, targetId, requireMatchingGoal: targetId.HasValue);
+                var allowance = targetId is int levelId
+                    ? await GetAttemptAllowanceAsync(userId, levelId, serverNow, cancellationToken)
+                    : null;
 
                 var latestCompleted = completedWithSnapshot.Attempt;
                 var recovered = completedWithSnapshot.Recovered;
@@ -124,6 +133,9 @@ namespace RikiPath.Application.Services
                 var hasValidExamDate = user.TargetExamDate is not { } examDate ||
                     (BusinessDateHelper.IsJlptExamMonth(examDate) &&
                      BusinessDateHelper.IsFutureExamDate(examDate, serverNow));
+                var canStart = allowance is { Remaining: > 0, PendingSubmissionAttemptId: null } &&
+                    user.TargetExamDate is { } scheduledExam && BusinessDateHelper.IsJlptExamDate(scheduledExam) &&
+                    BusinessDateHelper.IsFutureExamDate(scheduledExam, serverNow);
                 var isReadyForLearningPath =
                     (user.StartingCertificateLevelId ?? user.TargetCertificateLevelId).HasValue &&
                     user.TargetCertificateLevelId.HasValue &&
@@ -138,6 +150,8 @@ namespace RikiPath.Application.Services
                         ? "COMPLETED"
                         : user.PlacementDecision == PlacementDecision.Skipped ? "SKIPPED" : "NOT_TAKEN",
                     HasActiveAttempt = activeAttempt is not null,
+                    AttemptAllowance = allowance,
+                    CanStartNewAttempt = canStart,
                     ActiveAttemptId = activeAttempt?.Id,
                     ActiveAttemptExpiresAt = activeAttempt?.ExpiresAt is { } exp ? EnsureUtc(exp) : null,
                     HasCompletedPlacementTest = latestCompleted is not null,
@@ -383,15 +397,19 @@ namespace RikiPath.Application.Services
                         HttpStatusCode.OK);
                 }
 
-                var latestTarget = retakeTargetAssessment && adaptiveGoalId is int targetLevelId
-                    ? GetLatestTargetResult(attempts, targetLevelId) : null;
+                if (adaptiveGoalId is not int targetLevelId || goal?.TargetExamDate is not { } examDate ||
+                    !BusinessDateHelper.IsJlptExamDate(examDate) || !BusinessDateHelper.IsFutureExamDate(examDate, serverNow))
+                    return ApiResponse<PlacementAttemptSnapshotResponse>.Fail(
+                        "Hãy lưu cấp JLPT mục tiêu và ngày thi hợp lệ trước khi bắt đầu bài đánh giá.",
+                        HttpStatusCode.Conflict, errorCode: "PLACEMENT_GOAL_REQUIRED");
+
+                var allowance = await GetAttemptAllowanceAsync(userId, targetLevelId, serverNow, cancellationToken);
+                var latestTarget = GetLatestTargetResult(attempts, targetLevelId);
+                var unavailable = CheckStartAllowance(allowance, latestTarget, retakeTargetAssessment);
+                if (unavailable is not null) return unavailable;
                 var comparisonLevel = PlacementAssessmentModePolicy.ComparisonLevel(goalCode);
                 var shortQuestionLimit = PlacementAssessmentModePolicy.ShortAssessmentQuestionsPerSkillAndLevel(
                     goalCode, goal?.DeclaredJlptCertificateCode);
-                if (retakeTargetAssessment && (latestTarget is null || latestTarget.TotalScore >= 50))
-                    return ApiResponse<PlacementAttemptSnapshotResponse>.Fail(
-                        "Bạn có thể làm lại bài khi kết quả gần nhất ở cấp mục tiêu dưới 50%.",
-                        HttpStatusCode.Conflict, errorCode: "PLACEMENT_RETAKE_NOT_AVAILABLE");
                 var previousQuestionIds = latestTarget is not null && TryDeserializeSnapshot(
                     attempts.FirstOrDefault(attempt => attempt.Id == latestTarget.AttemptId)?.QuestionSnapshotJson,
                     out var previousSnapshot)
@@ -694,6 +712,19 @@ namespace RikiPath.Application.Services
                         await LockUserForPlacementStartAsync(userId, transactionCancellationToken);
 
                         var nowInTx = EnsureUtc(UtcNowProvider());
+                        var currentGoal = await unitOfWork.UserAccounts.Query().AsNoTracking()
+                            .Where(user => user.Id == userId && !user.IsDeleted)
+                            .Select(user => new { user.TargetCertificateLevelId, user.TargetExamDate, user.DeclaredJlptCertificateCode })
+                            .SingleOrDefaultAsync(transactionCancellationToken);
+                        if (currentGoal is null || currentGoal.TargetCertificateLevelId != targetLevelId ||
+                            currentGoal.TargetExamDate != examDate || currentGoal.DeclaredJlptCertificateCode != goal.DeclaredJlptCertificateCode ||
+                            !BusinessDateHelper.IsFutureExamDate(examDate, nowInTx))
+                        {
+                            response = ApiResponse<PlacementAttemptSnapshotResponse>.Fail(
+                                "Mục tiêu vừa thay đổi. Hãy tải lại thông tin đánh giá.",
+                                HttpStatusCode.Conflict, "PLACEMENT_STAGE_CHANGED", retryable: true);
+                            return;
+                        }
                         var allPlacementAttempts = await LoadUserPlacementAttemptsAsync(
                             userId,
                             transactionCancellationToken);
@@ -711,8 +742,12 @@ namespace RikiPath.Application.Services
                             return;
                         }
 
-                        if (latestTarget is not null &&
-                            GetLatestTargetResult(allPlacementAttempts, adaptiveGoalId!.Value)?.AttemptId != latestTarget.AttemptId)
+                        var currentAllowance = await GetAttemptAllowanceAsync(userId, targetLevelId, nowInTx, transactionCancellationToken);
+                        var currentResult = GetLatestTargetResult(allPlacementAttempts, targetLevelId);
+                        response = CheckStartAllowance(currentAllowance, currentResult, retakeTargetAssessment);
+                        if (response is not null) return;
+
+                        if (currentAllowance.Started != allowance.Started || currentResult?.AttemptId != latestTarget?.AttemptId)
                         {
                             response = ApiResponse<PlacementAttemptSnapshotResponse>.Fail(
                                 "Trạng thái bài đánh giá vừa thay đổi. Vui lòng bắt đầu lại.",
@@ -1744,8 +1779,10 @@ namespace RikiPath.Application.Services
             var targetCode = goal?.TargetCertificateLevel?.Code;
             if (string.IsNullOrWhiteSpace(targetCode) && goal?.TargetCertificateLevelId is int goalLevelId)
                 targetCode = (await unitOfWork.CertificateLevels.GetByIdAsync(goalLevelId, cancellationToken))?.Code;
+            var resultTargetCode = result.LevelBreakdowns.FirstOrDefault(
+                level => level.JlptLevelId == result.AssessmentTargetLevelId)?.JlptLevelName;
             result.SkillAssessments = JlptSkillAssessmentPolicy.Assess(result,
-                NormalizeLevelCode(result.ScreeningLevelName ?? targetCode),
+                NormalizeLevelCode(resultTargetCode ?? targetCode),
                 TryGetSkillEvidenceFromSnapshot(snapshotJson));
 
             if (result.IsMiniAssessment || result.AssessmentTargetLevelId is not int targetId)
@@ -1756,9 +1793,6 @@ namespace RikiPath.Application.Services
                 result.FollowUpUnavailableReason = "CURRENT_TARGET_MISMATCH";
                 return;
             }
-
-            if (result.ScreeningLevelName is null || result.TotalScore >= 50)
-                return;
 
             var attempts = await LoadUserPlacementAttemptsAsync(userId, cancellationToken);
             if (GetLatestTargetResult(attempts, targetId)?.AttemptId != result.AttemptId)
@@ -1772,7 +1806,54 @@ namespace RikiPath.Application.Services
                 return;
             }
 
-            result.CanRetake = true;
+            var allowance = await GetAttemptAllowanceAsync(userId, targetId, EnsureUtc(UtcNowProvider()), cancellationToken);
+            result.CanRetake = allowance.Remaining > 0 && !allowance.PendingSubmissionAttemptId.HasValue &&
+                goal.TargetExamDate is { } examDate && BusinessDateHelper.IsJlptExamDate(examDate) &&
+                BusinessDateHelper.IsFutureExamDate(examDate, UtcNowProvider());
+        }
+
+        private async Task<PlacementAttemptAllowance> GetAttemptAllowanceAsync(int userId, int levelId,
+            DateTime now, CancellationToken cancellationToken)
+        {
+            // Include replaced attempts so changing goals cannot reset an existing level's allowance.
+            var attempts = await unitOfWork.MockTestAttempts.Query().AsNoTracking()
+                .Where(attempt => attempt.UserId == userId && attempt.AttemptKind == AttemptKind.Placement)
+                .OrderByDescending(attempt => attempt.Id)
+                .Select(attempt => new { attempt.Id, attempt.IsDeleted, attempt.IsCompleted, attempt.ExpiresAt, attempt.QuestionSnapshotJson })
+                .ToListAsync(cancellationToken);
+            var started = 0;
+            int? pendingSubmissionId = null;
+            foreach (var attempt in attempts)
+            {
+                if (!TryDeserializeSnapshot(attempt.QuestionSnapshotJson, out var snapshot) ||
+                    snapshot.AssessmentTargetLevelId != levelId || snapshot.ParentAssessmentAttemptId.HasValue ||
+                    !HasValidSnapshotQuestions(snapshot.Questions)) continue;
+
+                started++;
+                if (pendingSubmissionId is null && !attempt.IsDeleted && !attempt.IsCompleted &&
+                    EnsureUtc(attempt.ExpiresAt ?? snapshot.ExpiresAt) <= now)
+                    pendingSubmissionId = attempt.Id;
+            }
+
+            return new PlacementAttemptAllowance(TargetAttemptLimit, started,
+                Math.Max(0, TargetAttemptLimit - started), pendingSubmissionId);
+        }
+
+        private static ApiResponse<PlacementAttemptSnapshotResponse>? CheckStartAllowance(
+            PlacementAttemptAllowance allowance, PlacementTestResultResponse? latest, bool retake)
+        {
+            if (allowance.PendingSubmissionAttemptId.HasValue)
+                return ApiResponse<PlacementAttemptSnapshotResponse>.Fail(
+                    "Hãy nộp lượt đã hết giờ để xem kết quả.", HttpStatusCode.Conflict, "PLACEMENT_PENDING_SUBMISSION");
+            if (allowance.Remaining == 0)
+                return ApiResponse<PlacementAttemptSnapshotResponse>.Fail(
+                    $"Bạn đã dùng hết {TargetAttemptLimit} lượt đánh giá ở cấp mục tiêu này.",
+                    HttpStatusCode.Conflict, "PLACEMENT_ATTEMPT_LIMIT_REACHED");
+            if (retake != (latest is not null))
+                return ApiResponse<PlacementAttemptSnapshotResponse>.Fail(
+                    "Hãy mở kết quả đánh giá hiện tại để tiếp tục.",
+                    HttpStatusCode.Conflict, "PLACEMENT_RETAKE_NOT_AVAILABLE");
+            return null;
         }
 
         private static PlacementTestResultResponse? GetLatestTargetResult(IEnumerable<MockTestAttempt> attempts, int targetId) =>
@@ -1780,7 +1861,7 @@ namespace RikiPath.Application.Services
                 .OrderByDescending(attempt => attempt.SubmittedAt ?? attempt.StartedAt)
                 .ThenByDescending(attempt => attempt.Id)
                 .Select(RecoverResultFromCompletedAttempt)
-                .FirstOrDefault(result => result?.ScreeningLevelName is not null && result.AssessmentTargetLevelId == targetId);
+                .FirstOrDefault(result => result is { IsMiniAssessment: false } && result.AssessmentTargetLevelId == targetId);
 
         private static int ComputeTimeLimitMinutes(int questionCount)
             => Math.Clamp(questionCount * 2, 10, 45);

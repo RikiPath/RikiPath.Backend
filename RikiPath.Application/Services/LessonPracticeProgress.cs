@@ -23,11 +23,12 @@ internal static class LessonPracticeProgress
     }
 
     public static async Task<HashSet<int>> PassedAsync(IUnitOfWork unit, int userId,
-        IReadOnlyCollection<int> lessonIds, CancellationToken ct)
+        IReadOnlyCollection<int> lessonIds, CancellationToken ct, bool requireReadyExercise = false)
     {
         if (lessonIds.Count == 0) return [];
+        var exercises = requireReadyExercise ? ReadyExercises(unit) : unit.PracticeExercises.Query();
         return (await unit.PracticeExerciseAttempts.Query()
-            .Join(unit.PracticeExercises.Query(), attempt => attempt.PracticeExerciseId,
+            .Join(exercises, attempt => attempt.PracticeExerciseId,
                 exercise => exercise.Id, (attempt, exercise) => new { attempt, exercise })
             .Where(row => !row.attempt.IsDeleted && !row.exercise.IsDeleted &&
                 row.attempt.UserId == userId && row.attempt.HomeworkAssignmentId == null && row.attempt.IsCompleted &&

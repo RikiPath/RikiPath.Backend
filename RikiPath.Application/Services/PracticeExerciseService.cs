@@ -300,7 +300,6 @@ namespace RikiPath.Application.Services
                 var submitted = request.Answers.ToDictionary(answer => answer.QuestionId);
                 var now = DateTime.UtcNow;
                 var newAnswers = new List<LearnerPracticeAnswer>();
-                var results = new List<PracticeAnswerResultResponse>();
                 var gradedCount = 0;
                 var correctCount = 0;
 
@@ -329,16 +328,6 @@ namespace RikiPath.Application.Services
                         IsCorrect = isCorrect,
                         CreatedDate = now,
                         IsDeleted = false,
-                    });
-
-                    results.Add(new PracticeAnswerResultResponse
-                    {
-                        QuestionId = question.Id,
-                        SelectedOptionId = answer?.SelectedOptionId,
-                        TextAnswer = textAnswer,
-                        CorrectOptionId = correctOptionId,
-                        IsCorrect = isCorrect,
-                        Explanation = question.Explanation,
                     });
                 }
 
@@ -372,7 +361,12 @@ namespace RikiPath.Application.Services
                     GradedQuestions = gradedCount,
                     TotalQuestions = questions.Count,
                     SubmittedAt = now,
-                    Results = results,
+                    Results = newAnswers.Select(answer => new PracticeSavedAnswerResponse
+                    {
+                        QuestionId = answer.PracticeQuestionId,
+                        SelectedOptionId = answer.SelectedOptionId,
+                        TextAnswer = answer.TextAnswer,
+                    }).ToList(),
                 });
             }
             catch (OperationCanceledException)

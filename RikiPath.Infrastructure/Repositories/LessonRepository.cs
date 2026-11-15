@@ -26,16 +26,8 @@ namespace RikiPath.Infrastructure.Repositories
             CancellationToken cancellationToken = default)
         {
             // Chỉ trả nội dung học đang khả dụng cho cấp độ JLPT của Learner.
-            return await _context.Lessons
-                .AsNoTracking()
-                .Where(lesson =>
-                    lesson.CertificateLevelId == certificateLevelId
-                    && !lesson.IsDeleted
-                    && !lesson.CertificateLevel.IsDeleted
-                    && !lesson.CertificateLevel.CertificateType.IsDeleted
-                    && lesson.CertificateLevel.CertificateType.IsActive
-                    && lesson.CertificateLevel.CertificateType.Name == "JLPT"
-                    && !lesson.LanguageSkill.IsDeleted)
+            return await LearnerVisibleLessons()
+                .Where(lesson => lesson.CertificateLevelId == certificateLevelId)
                 .Include(lesson => lesson.LanguageSkill)
                 .Include(lesson => lesson.LessonProgresses!
                     .Where(progress => progress.UserId == userId && !progress.IsDeleted))
@@ -45,12 +37,36 @@ namespace RikiPath.Infrastructure.Repositories
                 .ToListAsync(cancellationToken);
         }
 
+        public async Task<IReadOnlyList<AssessmentRoadmapLesson>> GetAssessmentRoadmapLessonsAsync(
+            int certificateLevelId,
+            int userId,
+            CancellationToken cancellationToken = default)
+        {
+            return await LearnerVisibleLessons()
+                .Where(lesson => lesson.CertificateLevelId == certificateLevelId)
+                .OrderBy(lesson => lesson.SortOrder)
+                .ThenBy(lesson => lesson.Id)
+                .Select(lesson => new AssessmentRoadmapLesson(
+                    lesson.Id,
+                    lesson.Title,
+                    lesson.LanguageSkillId,
+                    lesson.LanguageSkill.Name,
+                    lesson.LessonProgresses!
+                        .Where(progress => progress.UserId == userId && !progress.IsDeleted)
+                        .OrderByDescending(progress => progress.IsCompleted)
+                        .ThenByDescending(progress => progress.ProgressPercent)
+                        .FirstOrDefault(),
+                    lesson.LessonKanjis!.Count(link => !link.Kanji.IsDeleted),
+                    lesson.LessonVocabularies!.Count(link => !link.Vocabulary.IsDeleted),
+                    lesson.LessonGrammars!.Count(link => !link.GrammarPattern.IsDeleted)))
+                .ToListAsync(cancellationToken);
+        }
+
         public async Task<Lesson?> GetLearnerVisibleByIdAsync(
             int lessonId,
             CancellationToken cancellationToken = default)
         {
-            return await _context.Lessons
-                .AsNoTracking()
+            return await LearnerVisibleLessons()
                 .Include(lesson => lesson.CertificateLevel)
                     .ThenInclude(level => level.CertificateType)
                 .Include(lesson => lesson.LanguageSkill)
@@ -63,16 +79,18 @@ namespace RikiPath.Infrastructure.Repositories
                 .Include(lesson => lesson.LessonGrammars!
                     .Where(link => !link.GrammarPattern.IsDeleted))
                     .ThenInclude(link => link.GrammarPattern)
-                .FirstOrDefaultAsync(lesson =>
-                    lesson.Id == lessonId
-                    && !lesson.IsDeleted
-                    && !lesson.CertificateLevel.IsDeleted
-                    && !lesson.CertificateLevel.CertificateType.IsDeleted
-                    && lesson.CertificateLevel.CertificateType.IsActive
-                    && lesson.CertificateLevel.CertificateType.Name == "JLPT"
-                    && !lesson.LanguageSkill.IsDeleted,
-                    cancellationToken);
+                .AsSplitQuery()
+                .FirstOrDefaultAsync(lesson => lesson.Id == lessonId, cancellationToken);
         }
+
+        private IQueryable<Lesson> LearnerVisibleLessons() =>
+            _context.Lessons.AsNoTracking().Where(lesson =>
+                !lesson.IsDeleted
+                && !lesson.CertificateLevel.IsDeleted
+                && !lesson.CertificateLevel.CertificateType.IsDeleted
+                && lesson.CertificateLevel.CertificateType.IsActive
+                && lesson.CertificateLevel.CertificateType.Name == "JLPT"
+                && !lesson.LanguageSkill.IsDeleted);
 
         public async Task<(int Total, int Completed)> GetCompletionStatsAsync(int userId)
         {
