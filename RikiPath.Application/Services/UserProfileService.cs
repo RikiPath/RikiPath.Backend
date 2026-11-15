@@ -105,35 +105,72 @@ namespace RikiPath.Application.Services
             try
             {
                 var userId = claimService.GetUserClaim().Id;
-                if (request.DailyStudyMinutes < 0 || request.DailyStudyMinutes > 1440)
+                if (request.DailyStudyMinutes < 0 || request.DailyStudyMinutes > 480)
                     return ApiResponse<UserProfileResponse>.Fail("Thời gian học/ngày không hợp lệ.");
+
+                var hasRange = request.DailyStudyMinutesMin.HasValue || request.DailyStudyMinutesMax.HasValue;
+                if (hasRange && (!request.DailyStudyMinutesMin.HasValue || !request.DailyStudyMinutesMax.HasValue ||
+                    request.DailyStudyMinutesMin < 15 || request.DailyStudyMinutesMax > 480 ||
+                    request.DailyStudyMinutesMin > request.DailyStudyMinutesMax))
+                    return ApiResponse<UserProfileResponse>.Fail("Thời gian học phải từ 15 đến 480 phút, tối thiểu không lớn hơn tối đa.");
+
+                if (!hasRange && request.DailyStudyMinutes < 15)
+                    return ApiResponse<UserProfileResponse>.Fail("Thời gian học phải từ 15 đến 480 phút/ngày.");
+                // Accept the legacy client that repeats the minimum in DailyStudyMinutes.
+                if (hasRange && request.DailyStudyMinutes != 0 && request.DailyStudyMinutes != request.DailyStudyMinutesMin)
+                    return ApiResponse<UserProfileResponse>.Fail("Chọn số phút cố định hoặc khoảng thời gian; không gửi hai giá trị khác nhau.");
+                if (request.TargetCertificateLevelId.HasValue && request.TargetJlptLevelId != 0 &&
+                    request.TargetCertificateLevelId.Value != request.TargetJlptLevelId)
+                    return ApiResponse<UserProfileResponse>.Fail("Hai trường cấp độ mục tiêu không khớp nhau.");
+                var targetLevelId = request.TargetCertificateLevelId ?? request.TargetJlptLevelId;
+                if (targetLevelId <= 0)
+                    return ApiResponse<UserProfileResponse>.Fail("Vui lòng chọn cấp độ mục tiêu.");
 
                 var utcNow = BusinessDateHelper.EnsureUtc(UtcNowProvider());
                 if (request.TargetExamDate.HasValue
                     && !BusinessDateHelper.IsFutureExamDate(request.TargetExamDate.Value, utcNow))
                     return ApiResponse<UserProfileResponse>.Fail("Ngày dự định thi phải sau hôm nay.");
+                if (request.TargetExamDate is { } requestedDate && !BusinessDateHelper.IsJlptExamMonth(requestedDate))
+                    return ApiResponse<UserProfileResponse>.Fail(BusinessDateHelper.InvalidJlptExamMonthMessage,
+                        HttpStatusCode.BadRequest, errorCode: BusinessDateHelper.InvalidJlptExamMonthCode);
+                if (request.TargetExamDate is { } jlptDate && !BusinessDateHelper.IsJlptExamDate(jlptDate))
+                    return ApiResponse<UserProfileResponse>.Fail(
+                        "Ngày thi JLPT phải là Chủ nhật đầu tiên của tháng 7 hoặc tháng 12.",
+                        HttpStatusCode.BadRequest, "JLPT_EXAM_DATE_INVALID");
 
                 // Đã chuyển đổi sang CertificateLevels
                 if (request.ClearTargetExamDate && request.TargetExamDate.HasValue)
                     return ApiResponse<UserProfileResponse>.Fail("Không thể vừa đặt vừa xóa ngày thi.");
 
-                var certificationLevel = await unitOfWork.CertificateLevels.GetActiveJlptLevelByIdAsync(request.TargetJlptLevelId, cancellationToken);
+                var certificationLevel = await unitOfWork.CertificateLevels.GetActiveJlptLevelByIdAsync(targetLevelId, cancellationToken);
                 if (certificationLevel is null)
                     return ApiResponse<UserProfileResponse>.NotFound(
-                        $"Không tìm thấy cấp độ Id = {request.TargetJlptLevelId}.");
+                        $"Không tìm thấy cấp độ Id = {targetLevelId}.");
+
+                if (request.CertificateTypeId.HasValue && request.CertificateTypeId.Value != certificationLevel.CertificateTypeId)
+                    return ApiResponse<UserProfileResponse>.Fail("Cấp độ mục tiêu không thuộc loại chứng chỉ đã chọn.");
 
                 var user = await unitOfWork.UserAccounts.GetByIdAsync(userId, cancellationToken);
                 if (user is null)
                     return ApiResponse<UserProfileResponse>.NotFound("Không tìm thấy người dùng.");
 
-                var active = await unitOfWork.RecommendedLearningPaths.GetActiveByUserIdAsync(userId, cancellationToken);
-                if (active is not null && active.TargetCertificateLevelId != certificationLevel.Id)
-                    return ApiResponse<UserProfileResponse>.Fail(
-                        "Mục tiêu của lộ trình đang hoạt động chỉ có thể đổi qua xem trước và xác nhận.",
-                        HttpStatusCode.Conflict, errorCode: "PATH_PREVIEW_REQUIRED");
+                var targetCode = certificationLevel.Code.Trim().ToUpperInvariant();
+                if (request.DeclaredJlptCertificateCode is { } declared)
+                {
+                    var code = declared.Trim().ToUpperInvariant();
+                    if (!PlacementAssessmentModePolicy.IsValidDeclaration(targetCode, code))
+                        return ApiResponse<UserProfileResponse>.Fail(
+                            "Với mục tiêu N4, N3 hoặc N2, hãy chọn chứng chỉ đã có thấp hơn mục tiêu hoặc chọn NONE.",
+                            HttpStatusCode.BadRequest, errorCode: "INVALID_HELD_JLPT_CERTIFICATE");
+                    user.DeclaredJlptCertificateCode = code;
+                }
 
+                // Save the next learning goal independently; replacing an active path still uses preview/confirm.
                 user.TargetCertificateLevelId = certificationLevel.Id;
-                user.DailyStudyMinutes = request.DailyStudyMinutes;
+                user.DailyStudyMinutesMin = request.DailyStudyMinutesMin;
+                user.DailyStudyMinutesMax = request.DailyStudyMinutesMax;
+                // Dùng mức tối thiểu để ước tính kế hoạch bền vững, không giả định ngày nào cũng học tối đa.
+                user.DailyStudyMinutes = request.DailyStudyMinutesMin ?? request.DailyStudyMinutes;
                 user.LearningGoalVersion++;
                 if (request.ClearTargetExamDate)
                     user.TargetExamDate = null;
@@ -333,7 +370,11 @@ namespace RikiPath.Application.Services
                 PlacementDecision.Completed => "COMPLETED",
                 _ => "NOT_TAKEN",
             },
+            DeclaredJlptCertificateCode = user.DeclaredJlptCertificateCode,
             DailyStudyMinutes = user.DailyStudyMinutes,
+            DailyStudyMinutesMin = user.DailyStudyMinutesMin ?? user.DailyStudyMinutes,
+            DailyStudyMinutesMax = user.DailyStudyMinutesMax ?? user.DailyStudyMinutes,
+            TargetCertificateTypeId = level?.CertificateTypeId ?? user.TargetCertificateLevel?.CertificateTypeId,
             LearningGoalVersion = user.LearningGoalVersion,
             HasJlptCertificate = user.SelfDeclaredCertificateLevelId.HasValue,
             CertifiedJlptLevelId = user.SelfDeclaredCertificateLevelId,

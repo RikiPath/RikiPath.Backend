@@ -43,6 +43,16 @@ namespace RikiPath.Application.Services
             };
         }
 
+        public const string InvalidJlptExamMonthCode = "JLPT_EXAM_MONTH_INVALID";
+        public const string InvalidJlptExamMonthMessage = "Ngày dự định thi JLPT phải nằm trong tháng 7 hoặc tháng 12.";
+
+        public static bool IsJlptExamMonth(DateTime date) => NormalizeExamDate(date).Month is 7 or 12;
+        public static bool IsJlptExamDate(DateTime date)
+        {
+            var day = NormalizeExamDate(date);
+            return IsJlptExamMonth(day) && day.Day <= 7 && day.DayOfWeek == DayOfWeek.Sunday;
+        }
+
         public static int GetDaysUntilExam(DateTime targetExamDate, DateTime utcNow)
             => (NormalizeExamDate(targetExamDate) - GetVietnamToday(utcNow)).Days;
 
@@ -53,21 +63,27 @@ namespace RikiPath.Application.Services
     public class PracticeTestService(IUnitOfWork unitOfWork, IClaimService claimService) : IPracticeTestService
     {
         public const string AttemptTypePlacement = "placement";
+        // Published option IDs are positive. This choice is only emitted for Placement.
+        private const int NotStudiedOptionId = 0;
+        private const string NotStudiedResponseJson = "{\"kind\":\"not_studied\"}";
         public const string StatusInProgress = "inProgress";
         public const string StatusCompleted = "completed";
 
         public const string ErrorBankNotReady = "PLACEMENT_BANK_NOT_READY";
         public const string ErrorAttemptNotFound = "PLACEMENT_ATTEMPT_NOT_FOUND";
         public const string ErrorAttemptExpired = "PLACEMENT_ATTEMPT_EXPIRED";
+        public const string ErrorAttemptReplaced = "PLACEMENT_ATTEMPT_REPLACED";
         public const string ErrorAnswerInvalid = "PLACEMENT_ANSWER_INVALID";
         public const string ErrorAttemptNotReady = "PLACEMENT_ATTEMPT_NOT_READY";
         public const string ErrorAttemptNotCompleted = "PLACEMENT_ATTEMPT_NOT_COMPLETED";
 
         private const int MinimumEligibleQuestionsPerLevel = 2;
-        private const int DefaultQuestionsPerLevel = 5;
+        private const int DefaultQuestionsPerLevel = 12;
+        private const int TargetAttemptLimit = 2;
         private const string NotFoundAttemptMessage = "Không tìm thấy lượt làm bài đánh giá năng lực.";
 
-        private static readonly string[] SupportedLevels = ["N5", "N4", "N3"];
+        private static readonly string[] SupportedLevels = ["N5", "N4", "N3", "N2"];
+        private static readonly string[] RequiredLevels = ["N5", "N4", "N3"];
         private static readonly JsonSerializerOptions SnapshotJsonOptions = new(JsonSerializerDefaults.Web);
         private static readonly ConcurrentDictionary<int, SemaphoreSlim> UserStartLocks = new();
         private static readonly ConcurrentDictionary<int, SemaphoreSlim> AttemptSubmitLocks = new();
@@ -89,27 +105,18 @@ namespace RikiPath.Application.Services
                 var serverNow = EnsureUtc(UtcNowProvider());
                 var placementAttempts = await LoadUserPlacementAttemptsAsync(userId, cancellationToken);
 
-                var activeAttempt = placementAttempts
-                    .Where(a => !a.IsCompleted &&
-                                a.ExpiresAt.HasValue &&
-                                EnsureUtc(a.ExpiresAt.Value) > serverNow &&
-                                TryDeserializeSnapshot(a.QuestionSnapshotJson, out var doc) &&
-                                doc.Questions.Count > 0)
-                    .OrderByDescending(a => a.StartedAt)
-                    .ThenByDescending(a => a.Id)
-                    .FirstOrDefault();
-
-                var completedWithSnapshot = placementAttempts
-                    .Where(a => a.IsCompleted && a.TotalScore.HasValue)
-                    .OrderByDescending(a => a.SubmittedAt ?? a.StartedAt)
-                    .ThenByDescending(a => a.Id)
-                    .Select(a => (Attempt: a, Recovered: RecoverResultFromCompletedAttempt(a)))
-                    .FirstOrDefault(x => x.Recovered is not null);
+                var targetId = GetAdaptiveGoalId(user);
+                var activeAttempt = FindCanonicalActiveAttempt(
+                    placementAttempts, serverNow, targetId)?.Attempt;
+                var completedWithSnapshot = FindLatestCompletedAssessment(placementAttempts, targetId, requireMatchingGoal: targetId.HasValue);
+                var allowance = targetId is int levelId
+                    ? await GetAttemptAllowanceAsync(userId, levelId, serverNow, cancellationToken)
+                    : null;
 
                 var latestCompleted = completedWithSnapshot.Attempt;
                 var recovered = completedWithSnapshot.Recovered;
 
-                int? assessedLevelId = recovered?.AssessedJlptLevelId;
+                int? assessedLevelId = recovered is { AssessedJlptLevelId: > 0 } ? recovered.AssessedJlptLevelId : null;
                 string? assessedLevelName = recovered?.AssessedJlptLevelName;
                 int? recommendedLevelId = recovered?.RecommendedTargetJlptLevelId;
                 string? recommendedLevelName = recovered?.RecommendedTargetJlptLevelName;
@@ -123,12 +130,18 @@ namespace RikiPath.Application.Services
                     targetLevelName = targetLevel?.Code;
                 }
 
-                var hasValidExamDate = BusinessDateHelper.IsFutureExamDate(user.TargetExamDate, serverNow);
+                var hasValidExamDate = user.TargetExamDate is not { } examDate ||
+                    (BusinessDateHelper.IsJlptExamMonth(examDate) &&
+                     BusinessDateHelper.IsFutureExamDate(examDate, serverNow));
+                var canStart = allowance is { Remaining: > 0, PendingSubmissionAttemptId: null } &&
+                    user.TargetExamDate is { } scheduledExam && BusinessDateHelper.IsJlptExamDate(scheduledExam) &&
+                    BusinessDateHelper.IsFutureExamDate(scheduledExam, serverNow);
                 var isReadyForLearningPath =
                     (user.StartingCertificateLevelId ?? user.TargetCertificateLevelId).HasValue &&
                     user.TargetCertificateLevelId.HasValue &&
                     hasValidExamDate &&
-                    user.DailyStudyMinutes > 0;
+                    user.DailyStudyMinutes > 0 &&
+                    recovered is not null;
 
                 return ApiResponse<PlacementTestStatusResponse>.Success(new PlacementTestStatusResponse
                 {
@@ -137,6 +150,8 @@ namespace RikiPath.Application.Services
                         ? "COMPLETED"
                         : user.PlacementDecision == PlacementDecision.Skipped ? "SKIPPED" : "NOT_TAKEN",
                     HasActiveAttempt = activeAttempt is not null,
+                    AttemptAllowance = allowance,
+                    CanStartNewAttempt = canStart,
                     ActiveAttemptId = activeAttempt?.Id,
                     ActiveAttemptExpiresAt = activeAttempt?.ExpiresAt is { } exp ? EnsureUtc(exp) : null,
                     HasCompletedPlacementTest = latestCompleted is not null,
@@ -237,8 +252,11 @@ namespace RikiPath.Application.Services
                 ApiResponse<PlacementAnswersSavedResponse>? response = null;
                 await unitOfWork.ExecuteInTransactionAsync(async transactionCancellationToken =>
                 {
+                    await LockUserForPlacementStartAsync(userId, transactionCancellationToken);
                     var attempt = await LoadPlacementAttemptForSubmissionAsync(attemptId, transactionCancellationToken);
-                    if (attempt is null || attempt.UserId != userId || attempt.IsDeleted)
+                    var now = EnsureUtc(UtcNowProvider());
+                    if (attempt is null || attempt.UserId != userId ||
+                        (attempt.IsDeleted && !CanSubmitEarlyClosedAttempt(attempt, now)))
                     {
                         response = ApiResponse<PlacementAnswersSavedResponse>.NotFound(
                             NotFoundAttemptMessage, errorCode: ErrorAttemptNotFound, retryable: false);
@@ -267,7 +285,6 @@ namespace RikiPath.Application.Services
                         return;
                     }
 
-                    var now = EnsureUtc(UtcNowProvider());
                     var expiresAt = EnsureUtc(attempt.ExpiresAt ?? snapshotDoc.ExpiresAt);
                     if (now >= expiresAt)
                     {
@@ -290,7 +307,7 @@ namespace RikiPath.Application.Services
                     foreach (var answer in request.Answers)
                     {
                         if (!questionsById.TryGetValue(answer.QuestionId, out var question) ||
-                            (answer.SelectedOptionId.HasValue && !question.Options.Any(o => o.OptionId == answer.SelectedOptionId.Value)))
+                            !IsValidPlacementSelection(question, answer))
                         {
                             response = ApiResponse<PlacementAnswersSavedResponse>.Fail(
                                 $"Câu hỏi hoặc lựa chọn không thuộc lượt làm bài (QuestionId: {answer.QuestionId}).",
@@ -300,14 +317,14 @@ namespace RikiPath.Application.Services
                     }
 
                     foreach (var answer in request.Answers)
-                        questionsById[answer.QuestionId].SelectedOptionId = answer.SelectedOptionId;
+                        ApplyPlacementSelection(questionsById[answer.QuestionId], answer);
 
                     var answerRows = await unitOfWork.MockTestAnswers.GetByAttemptIdAsync(attemptId, transactionCancellationToken);
                     var answersByQuestionId = answerRows.ToDictionary(a => a.MockQuestionId);
                     foreach (var answer in request.Answers)
                     {
                         if (answersByQuestionId.TryGetValue(answer.QuestionId, out var row))
-                            row.SelectedOptionId = answer.SelectedOptionId;
+                            SetPersistedPlacementSelection(row, questionsById[answer.QuestionId]);
                     }
 
                     attempt.QuestionSnapshotJson = JsonSerializer.Serialize(snapshotDoc, SnapshotJsonOptions);
@@ -337,7 +354,7 @@ namespace RikiPath.Application.Services
 
         public Task<ApiResponse<PlacementAttemptSnapshotResponse>> StartPlacementTestAsync(
             CancellationToken cancellationToken = default)
-            => StartPlacementTestInternalAsync(DefaultQuestionsPerLevel, cancellationToken);
+            => StartPlacementTestInternalAsync(DefaultQuestionsPerLevel, retakeTargetAssessment: false, cancellationToken);
 
         public Task<ApiResponse<PlacementAttemptSnapshotResponse>> StartPlacementTestAsync(
             StartPlacementTestRequest? request,
@@ -346,11 +363,12 @@ namespace RikiPath.Application.Services
             var requestedQuestionsPerLevel = Math.Clamp(DefaultQuestionsPerLevel,
                 MinimumEligibleQuestionsPerLevel,
                 DefaultQuestionsPerLevel);
-            return StartPlacementTestInternalAsync(requestedQuestionsPerLevel, cancellationToken);
+            return StartPlacementTestInternalAsync(requestedQuestionsPerLevel, request?.RetakeTargetAssessment == true, cancellationToken);
         }
 
         private async Task<ApiResponse<PlacementAttemptSnapshotResponse>> StartPlacementTestInternalAsync(
             int questionsPerSupportedLevel,
+            bool retakeTargetAssessment,
             CancellationToken cancellationToken)
         {
             var userId = 0;
@@ -362,10 +380,12 @@ namespace RikiPath.Application.Services
                 await userLock.WaitAsync(cancellationToken);
 
                 var serverNow = EnsureUtc(UtcNowProvider());
-                var preExistingActive = await TryFindCanonicalActiveAttemptAsync(
-                    userId,
-                    serverNow,
-                    cancellationToken);
+                var goal = unitOfWork.UserAccounts is null ? null :
+                    await unitOfWork.UserAccounts.GetWithLearningGoalAsync(userId, cancellationToken);
+                var goalCode = NormalizeLevelCode(goal?.TargetCertificateLevel?.Code);
+                var adaptiveGoalId = GetAdaptiveGoalId(goal);
+                var attempts = await LoadUserPlacementAttemptsAsync(userId, cancellationToken);
+                var preExistingActive = FindCanonicalActiveAttempt(attempts, serverNow, adaptiveGoalId);
                 if (preExistingActive is not null)
                 {
                     return ApiResponse<PlacementAttemptSnapshotResponse>.Success(
@@ -377,14 +397,34 @@ namespace RikiPath.Application.Services
                         HttpStatusCode.OK);
                 }
 
+                if (adaptiveGoalId is not int targetLevelId || goal?.TargetExamDate is not { } examDate ||
+                    !BusinessDateHelper.IsJlptExamDate(examDate) || !BusinessDateHelper.IsFutureExamDate(examDate, serverNow))
+                    return ApiResponse<PlacementAttemptSnapshotResponse>.Fail(
+                        "Hãy lưu cấp JLPT mục tiêu và ngày thi hợp lệ trước khi bắt đầu bài đánh giá.",
+                        HttpStatusCode.Conflict, errorCode: "PLACEMENT_GOAL_REQUIRED");
+
+                var allowance = await GetAttemptAllowanceAsync(userId, targetLevelId, serverNow, cancellationToken);
+                var latestTarget = GetLatestTargetResult(attempts, targetLevelId);
+                var unavailable = CheckStartAllowance(allowance, latestTarget, retakeTargetAssessment);
+                if (unavailable is not null) return unavailable;
+                var comparisonLevel = PlacementAssessmentModePolicy.ComparisonLevel(goalCode);
+                var shortQuestionLimit = PlacementAssessmentModePolicy.ShortAssessmentQuestionsPerSkillAndLevel(
+                    goalCode, goal?.DeclaredJlptCertificateCode);
+                var previousQuestionIds = latestTarget is not null && TryDeserializeSnapshot(
+                    attempts.FirstOrDefault(attempt => attempt.Id == latestTarget.AttemptId)?.QuestionSnapshotJson,
+                    out var previousSnapshot)
+                    ? previousSnapshot.Questions.Select(question => question.QuestionId).ToHashSet()
+                    : [];
+
                 var tests = await unitOfWork.MockTests.GetAllWithSectionsAndQuestionsAsync(cancellationToken);
                 var allLevels = (await unitOfWork.CertificateLevels.GetAllAsync(cancellationToken))
-                    .Where(l => !l.IsDeleted && l.Id > 0 && !string.IsNullOrWhiteSpace(l.Code))
+                    .Where(l => !l.IsDeleted && l.Id > 0 && !string.IsNullOrWhiteSpace(l.Code) &&
+                        (!adaptiveGoalId.HasValue || l.CertificateTypeId == goal!.TargetCertificateLevel!.CertificateTypeId))
                     .ToList();
 
                 var supportedCatalogLevels = allLevels
                     .Select(l => (LevelId: l.Id, LevelCode: NormalizeLevelCode(l.Code), Rank: GetLevelRank(l.Code)))
-                    .Where(l => IsSupportedLevel(l.LevelCode))
+                    .Where(l => JlptCurriculum.Rank(l.LevelCode) > 0)
                     .GroupBy(l => l.LevelCode)
                     .Select(g => g.OrderBy(x => x.LevelId).First())
                     .OrderBy(l => l.Rank)
@@ -392,15 +432,19 @@ namespace RikiPath.Application.Services
 
                 var levelById = allLevels
                     .Select(l => (LevelId: l.Id, LevelCode: NormalizeLevelCode(l.Code), Rank: GetLevelRank(l.Code)))
-                    .Where(l => IsSupportedLevel(l.LevelCode))
+                    .Where(l => JlptCurriculum.Rank(l.LevelCode) > 0)
                     .ToDictionary(l => l.LevelId);
+                var comparisonLevelId = comparisonLevel is not null && supportedCatalogLevels.TryGetValue(comparisonLevel, out var lowerLevel)
+                    ? (int?)lowerLevel.LevelId : null;
 
                 var eligibleCandidates = new List<(
                     MockTest Test,
                     MockTestSection Section,
                     MockQuestion Question,
                     List<MockQuestionOption> ValidOptions,
-                    int CorrectOptionId,
+                    int? CorrectOptionId,
+                    string[]? OrderingTokens,
+                    string[]? OrderingAnswerKey,
                     int LevelId,
                     string LevelCode,
                     int LevelRank)>();
@@ -429,7 +473,8 @@ namespace RikiPath.Application.Services
                         resolvedLevelId = catLevel.LevelId;
                     }
 
-                    if (resolvedCode is null || !IsSupportedLevel(resolvedCode) || resolvedLevelId <= 0)
+                    if (resolvedCode is null || JlptCurriculum.Rank(resolvedCode) == 0 || resolvedLevelId <= 0 ||
+                        (adaptiveGoalId.HasValue && resolvedLevelId != adaptiveGoalId.Value && resolvedLevelId != comparisonLevelId))
                     {
                         continue;
                     }
@@ -447,6 +492,7 @@ namespace RikiPath.Application.Services
 
                     foreach (var section in orderedSections)
                     {
+                        if (JlptSkillAssessmentPolicy.Classify(section.LanguageSkill?.Name) is null) continue;
                         var orderedQuestions = (section.Questions ?? [])
                             .Where(q => q is not null && !q.IsDeleted && q.Id > 0)
                             .OrderBy(q => q.SortOrder)
@@ -454,8 +500,20 @@ namespace RikiPath.Application.Services
 
                         foreach (var question in orderedQuestions)
                         {
+                            // TODO: Require audio again after the placement question bank has listening recordings.
                             if (!HasUsablePrompt(question) || !seenQuestionIds.Add(question.Id))
                             {
+                                continue;
+                            }
+
+                            if (SentenceOrdering.IsType(question.QuestionType))
+                            {
+                                if (JlptSkillAssessmentPolicy.Classify(section.LanguageSkill?.Name) == JlptStudySkill.Grammar &&
+                                    SentenceOrdering.TryRead(question.InteractionDataJson, question.AnswerKeyJson, out var tokens, out var answerKey))
+                                {
+                                    eligibleCandidates.Add((test, section, question, [], null, tokens, answerKey,
+                                        resolvedLevelId, resolvedCode, levelRank));
+                                }
                                 continue;
                             }
 
@@ -463,7 +521,7 @@ namespace RikiPath.Application.Services
                                 .Where(o => o is not null &&
                                             !o.IsDeleted &&
                                             o.Id > 0 &&
-                                            !string.IsNullOrWhiteSpace(o.OptionText))
+                                            (!string.IsNullOrWhiteSpace(o.OptionText) || !string.IsNullOrWhiteSpace(o.ImageUrl)))
                                 .OrderBy(o => o.SortOrder)
                                 .ThenBy(o => o.Id)
                                 .ToList();
@@ -490,6 +548,8 @@ namespace RikiPath.Application.Services
                                 Question: question,
                                 ValidOptions: validOptions,
                                 CorrectOptionId: correctOptions[0].Id,
+                                OrderingTokens: null,
+                                OrderingAnswerKey: null,
                                 LevelId: resolvedLevelId,
                                 LevelCode: resolvedCode,
                                 LevelRank: levelRank));
@@ -501,24 +561,95 @@ namespace RikiPath.Application.Services
                     .GroupBy(c => c.LevelCode)
                     .ToDictionary(g => g.Key, g => g.ToList());
 
-                foreach (var requiredLevel in SupportedLevels)
+                var selectedQuestions = eligibleCandidates.GetRange(0, 0);
+                int? fullTestTimeLimit = null;
+                if (adaptiveGoalId.HasValue && comparisonLevel is not null)
                 {
-                    if (!groupedByLevel.TryGetValue(requiredLevel, out var levelQuestions) ||
-                        levelQuestions.Count < MinimumEligibleQuestionsPerLevel)
-                    {
+                    var groups = (from skill in Enum.GetValues<JlptStudySkill>()
+                                  from level in new[] { comparisonLevel, goalCode }
+                                  select new
+                                  {
+                                      Skill = skill,
+                                      Level = level,
+                                      Candidates = eligibleCandidates.Where(candidate => candidate.LevelCode == level &&
+                                          JlptSkillAssessmentPolicy.Classify(candidate.Section.LanguageSkill?.Name) == skill)
+                                          .OrderByDescending(candidate => skill == JlptStudySkill.Listening &&
+                                              !string.IsNullOrWhiteSpace(candidate.Question.AudioUrl))
+                                          .ThenBy(candidate => previousQuestionIds.Contains(candidate.Question.Id))
+                                          .ToList(),
+                                  }).ToList();
+                    var missing = groups.FirstOrDefault(group =>
+                        group.Candidates.Count < PlacementAssessmentModePolicy.MinimumQuestionsPerSkillAndLevel);
+                    if (missing is not null)
                         return ApiResponse<PlacementAttemptSnapshotResponse>.Fail(
-                            "Ngân hàng câu hỏi đánh giá năng lực chưa đủ câu hỏi hợp lệ cho các cấp độ N5, N4 và N3.",
-                            HttpStatusCode.Conflict,
-                            errorCode: ErrorBankNotReady,
-                            retryable: false);
+                            $"Ngân hàng đề cần ít nhất {PlacementAssessmentModePolicy.MinimumQuestionsPerSkillAndLevel} câu hợp lệ cho {JlptSkillAssessmentPolicy.Label(missing.Skill)} {missing.Level}.",
+                            HttpStatusCode.Conflict, errorCode: ErrorBankNotReady, retryable: false);
+
+                    var countPerGroup = Math.Min(shortQuestionLimit > 0 ? shortQuestionLimit : 5,
+                        groups.Min(group => group.Candidates.Count));
+                    foreach (var group in groups)
+                    {
+                        var ordering = group.Candidates.FindIndex(candidate => candidate.OrderingTokens is not null);
+                        if (ordering >= countPerGroup)
+                            group.Candidates[countPerGroup - 1] = group.Candidates[ordering];
+                        selectedQuestions.AddRange(group.Candidates.Take(countPerGroup));
                     }
+
+                    if (shortQuestionLimit > 0)
+                        fullTestTimeLimit = selectedQuestions.Count * 5 / 4;
+                }
+                else if (adaptiveGoalId.HasValue)
+                {
+                    var fullTest = eligibleCandidates
+                        .GroupBy(candidate => candidate.Test)
+                        .Select(group => new
+                        {
+                            Test = group.Key,
+                            Questions = group,
+                            Skills = group.GroupBy(candidate => JlptSkillAssessmentPolicy.Classify(candidate.Section.LanguageSkill?.Name)).ToList()
+                        })
+                        .Where(test => test.Skills.Count(skill => skill.Key.HasValue && skill.Count() >= 3) == Enum.GetValues<JlptStudySkill>().Length)
+                        .OrderBy(test => test.Questions.Count(candidate => previousQuestionIds.Contains(candidate.Question.Id)))
+                        .ThenByDescending(test => test.Questions.Count())
+                        .ThenBy(test => test.Test.Id)
+                        .FirstOrDefault();
+                    if (fullTest is null)
+                        return ApiResponse<PlacementAttemptSnapshotResponse>.Fail(
+                            $"Chưa có đề {goalCode} với ít nhất 3 câu hợp lệ cho mỗi kỹ năng: từ vựng, ngữ pháp, đọc hiểu và nghe hiểu.",
+                            HttpStatusCode.Conflict, errorCode: ErrorBankNotReady, retryable: false);
+
+                    selectedQuestions = fullTest.Questions.ToList();
+                    if (fullTest.Test.TimeLimitMinutes > 0)
+                        fullTestTimeLimit = fullTest.Test.TimeLimitMinutes;
+
+                }
+                else
+                {
+                    foreach (var requiredLevel in RequiredLevels)
+                    {
+                        if (!groupedByLevel.TryGetValue(requiredLevel, out var levelQuestions) ||
+                            levelQuestions.Count < MinimumEligibleQuestionsPerLevel)
+                        {
+                            return ApiResponse<PlacementAttemptSnapshotResponse>.Fail(
+                                "Ngân hàng câu hỏi đánh giá năng lực chưa đủ câu hỏi hợp lệ cho các cấp độ N5, N4 và N3.",
+                                HttpStatusCode.Conflict,
+                                errorCode: ErrorBankNotReady,
+                                retryable: false);
+                        }
+                    }
+
+                    selectedQuestions = SupportedLevels
+                        .Where(levelCode => groupedByLevel.TryGetValue(levelCode, out var candidates) && candidates.Count >= MinimumEligibleQuestionsPerLevel)
+                        .SelectMany(levelCode => groupedByLevel[levelCode]
+                            .Where(candidate => JlptSkillAssessmentPolicy.Classify(candidate.Section.LanguageSkill?.Name) is not null)
+                            .GroupBy(candidate => JlptSkillAssessmentPolicy.Classify(candidate.Section.LanguageSkill?.Name))
+                            .SelectMany(group => group.Select((candidate, index) => new { Candidate = candidate, Index = index }))
+                            .OrderBy(x => x.Index).ThenBy(x => x.Candidate.Section.LanguageSkillId)
+                            .Take(questionsPerSupportedLevel).Select(x => x.Candidate))
+                        .ToList();
                 }
 
-                var selectedQuestions = SupportedLevels
-                    .SelectMany(levelCode => groupedByLevel[levelCode].Take(questionsPerSupportedLevel))
-                    .ToList();
-
-                var timeLimitMinutes = ComputeTimeLimitMinutes(selectedQuestions.Count);
+                var timeLimitMinutes = fullTestTimeLimit ?? ComputeTimeLimitMinutes(selectedQuestions.Count);
 
                 var startedAt = EnsureUtc(UtcNowProvider());
                 var expiresAt = EnsureUtc(startedAt.AddMinutes(timeLimitMinutes));
@@ -526,10 +657,13 @@ namespace RikiPath.Application.Services
                 var snapshotDoc = new PlacementAttemptSnapshotDocument
                 {
                     SchemaVersion = 2,
+                    AssessmentTargetLevelId = adaptiveGoalId,
+                    IsShortenedAssessment = shortQuestionLimit > 0,
                     TimeLimitMinutes = timeLimitMinutes,
                     StartedAt = startedAt,
                     ExpiresAt = expiresAt,
                     CatalogLevels = supportedCatalogLevels.Values
+                        .Where(level => !adaptiveGoalId.HasValue || selectedQuestions.Any(question => question.LevelId == level.LevelId))
                         .OrderBy(l => l.Rank)
                         .Select(l => new PlacementSnapshotLevelCatalogItem
                         {
@@ -553,12 +687,15 @@ namespace RikiPath.Application.Services
                         AudioUrl = item.Question.AudioUrl,
                         ImageUrl = item.Question.ImageUrl,
                         CorrectOptionId = item.CorrectOptionId,
+                        OrderingTokens = item.OrderingTokens,
+                        OrderingAnswerKey = item.OrderingAnswerKey,
                         SelectedOptionId = null,
                         IsCorrect = false,
                         Options = item.ValidOptions.Select(opt => new PlacementSnapshotOptionItem
                         {
                             OptionId = opt.Id,
                             Content = opt.OptionText,
+                            ImageUrl = opt.ImageUrl,
                             Order = opt.SortOrder,
                             IsCorrect = opt.IsCorrect,
                         }).ToList(),
@@ -575,11 +712,24 @@ namespace RikiPath.Application.Services
                         await LockUserForPlacementStartAsync(userId, transactionCancellationToken);
 
                         var nowInTx = EnsureUtc(UtcNowProvider());
+                        var currentGoal = await unitOfWork.UserAccounts.Query().AsNoTracking()
+                            .Where(user => user.Id == userId && !user.IsDeleted)
+                            .Select(user => new { user.TargetCertificateLevelId, user.TargetExamDate, user.DeclaredJlptCertificateCode })
+                            .SingleOrDefaultAsync(transactionCancellationToken);
+                        if (currentGoal is null || currentGoal.TargetCertificateLevelId != targetLevelId ||
+                            currentGoal.TargetExamDate != examDate || currentGoal.DeclaredJlptCertificateCode != goal.DeclaredJlptCertificateCode ||
+                            !BusinessDateHelper.IsFutureExamDate(examDate, nowInTx))
+                        {
+                            response = ApiResponse<PlacementAttemptSnapshotResponse>.Fail(
+                                "Mục tiêu vừa thay đổi. Hãy tải lại thông tin đánh giá.",
+                                HttpStatusCode.Conflict, "PLACEMENT_STAGE_CHANGED", retryable: true);
+                            return;
+                        }
                         var allPlacementAttempts = await LoadUserPlacementAttemptsAsync(
                             userId,
                             transactionCancellationToken);
 
-                        var activeAfterLock = FindCanonicalActiveAttempt(allPlacementAttempts, nowInTx);
+                        var activeAfterLock = FindCanonicalActiveAttempt(allPlacementAttempts, nowInTx, adaptiveGoalId);
                         if (activeAfterLock is not null)
                         {
                             response = ApiResponse<PlacementAttemptSnapshotResponse>.Success(
@@ -592,6 +742,19 @@ namespace RikiPath.Application.Services
                             return;
                         }
 
+                        var currentAllowance = await GetAttemptAllowanceAsync(userId, targetLevelId, nowInTx, transactionCancellationToken);
+                        var currentResult = GetLatestTargetResult(allPlacementAttempts, targetLevelId);
+                        response = CheckStartAllowance(currentAllowance, currentResult, retakeTargetAssessment);
+                        if (response is not null) return;
+
+                        if (currentAllowance.Started != allowance.Started || currentResult?.AttemptId != latestTarget?.AttemptId)
+                        {
+                            response = ApiResponse<PlacementAttemptSnapshotResponse>.Fail(
+                                "Trạng thái bài đánh giá vừa thay đổi. Vui lòng bắt đầu lại.",
+                                HttpStatusCode.Conflict, errorCode: "PLACEMENT_STAGE_CHANGED", retryable: true);
+                            return;
+                        }
+
                         var staleOpenAttempts = allPlacementAttempts
                             .Where(a => !a.IsCompleted && !a.IsDeleted)
                             .ToList();
@@ -601,7 +764,8 @@ namespace RikiPath.Application.Services
                             {
                                 if (TryDeserializeSnapshot(stale.QuestionSnapshotJson, out var staleDoc))
                                 {
-                                    staleDoc.IsSupersededExpired = true;
+                                    staleDoc.IsReplaced = staleDoc.ParentAssessmentAttemptId.HasValue || staleDoc.IsComprehensiveAssessment;
+                                    staleDoc.IsSupersededExpired = !staleDoc.IsReplaced;
                                     stale.QuestionSnapshotJson = JsonSerializer.Serialize(staleDoc, SnapshotJsonOptions);
                                 }
                                 stale.IsDeleted = true;
@@ -698,6 +862,7 @@ namespace RikiPath.Application.Services
                 {
                     await unitOfWork.ExecuteInTransactionAsync(async transactionCancellationToken =>
                     {
+                        await LockUserForPlacementStartAsync(userId, transactionCancellationToken);
                         var attempt = await LoadPlacementAttemptForSubmissionAsync(
                             attemptId,
                             transactionCancellationToken);
@@ -713,8 +878,20 @@ namespace RikiPath.Application.Services
                             return;
                         }
 
-                        if (attempt.IsDeleted)
+                        var serverNow = EnsureUtc(UtcNowProvider());
+                        // Starting another goal releases the single active slot. A full attempt
+                        // closed this way can still be submitted before its original deadline.
+                        var recoverEarlyClosure = CanSubmitEarlyClosedAttempt(attempt, serverNow);
+                        if (attempt.IsDeleted && !recoverEarlyClosure)
                         {
+                            if (TryDeserializeSnapshot(attempt.QuestionSnapshotJson, out var closedSnapshot) &&
+                                closedSnapshot.IsReplaced)
+                            {
+                                response = ApiResponse<PlacementTestResultResponse>.Fail(
+                                    "Lượt mini đã được thay bằng bài đánh giá mới. Hãy mở lượt đang làm.",
+                                    HttpStatusCode.Conflict, errorCode: ErrorAttemptReplaced, retryable: false);
+                                return;
+                            }
                             if (IsSupersededExpiredAttempt(attempt))
                             {
                                 response = ApiResponse<PlacementTestResultResponse>.Fail(
@@ -745,6 +922,7 @@ namespace RikiPath.Application.Services
                                 return;
                             }
 
+                            await PopulatePlacementResultDetailsAsync(canonicalCompleted, userId, attempt.QuestionSnapshotJson, transactionCancellationToken);
                             response = ApiResponse<PlacementTestResultResponse>.Success(
                                 canonicalCompleted,
                                 HttpStatusCode.OK);
@@ -762,7 +940,6 @@ namespace RikiPath.Application.Services
                             return;
                         }
 
-                        var serverNow = EnsureUtc(UtcNowProvider());
                         var expiresAt = EnsureUtc(attempt.ExpiresAt ?? snapshotDoc.ExpiresAt);
                         var isExpired = serverNow >= expiresAt;
 
@@ -821,8 +998,7 @@ namespace RikiPath.Application.Services
                         foreach (var submittedAnswer in request.Answers)
                         {
                             var frozenQuestion = snapshotQuestionsById[submittedAnswer.QuestionId];
-                            if (submittedAnswer.SelectedOptionId is not null &&
-                                !frozenQuestion.Options.Any(o => o.OptionId == submittedAnswer.SelectedOptionId.Value))
+                            if (!IsValidPlacementSelection(frozenQuestion, submittedAnswer))
                             {
                                 response = ApiResponse<PlacementTestResultResponse>.Fail(
                                     $"Lựa chọn không thuộc câu hỏi {submittedAnswer.QuestionId}.",
@@ -836,13 +1012,13 @@ namespace RikiPath.Application.Services
                         if (!isExpired)
                         {
                             foreach (var submittedAnswer in request.Answers)
-                            {
-                                var frozenQuestion = snapshotQuestionsById[submittedAnswer.QuestionId];
-                                frozenQuestion.SelectedOptionId = submittedAnswer.SelectedOptionId;
-                                frozenQuestion.IsCorrect = submittedAnswer.SelectedOptionId.HasValue &&
-                                    submittedAnswer.SelectedOptionId.Value == frozenQuestion.CorrectOptionId;
-                            }
+                                ApplyPlacementSelection(snapshotQuestionsById[submittedAnswer.QuestionId], submittedAnswer);
                         }
+
+                        foreach (var question in snapshotDoc.Questions)
+                            question.IsCorrect = question.OrderingAnswerKey is { } answerKey
+                                ? question.OrderingResponse is { } sequence && sequence.SequenceEqual(answerKey)
+                                : question.CorrectOptionId.HasValue && question.SelectedOptionId == question.CorrectOptionId;
 
                         var existingAnswerRows = await unitOfWork.MockTestAnswers.GetByAttemptIdAsync(
                             attemptId,
@@ -854,7 +1030,7 @@ namespace RikiPath.Application.Services
                             {
                                 if (answerRowsByQuestionId.TryGetValue(frozenQuestion.QuestionId, out var answerRow))
                                 {
-                                    answerRow.SelectedOptionId = frozenQuestion.SelectedOptionId;
+                                    SetPersistedPlacementSelection(answerRow, frozenQuestion);
                                     answerRow.IsCorrect = frozenQuestion.IsCorrect;
                                 }
                             }
@@ -876,6 +1052,10 @@ namespace RikiPath.Application.Services
                             snapshotDoc.CatalogLevels,
                             sectionResults.OverallScore);
 
+                        var isTargetAssessment = snapshotDoc.AssessmentTargetLevelId.HasValue &&
+                            !snapshotDoc.ParentAssessmentAttemptId.HasValue && !snapshotDoc.IsComprehensiveAssessment;
+                        var targetLevel = evaluation.LevelBreakdowns
+                            .FirstOrDefault(level => level.JlptLevelId == snapshotDoc.AssessmentTargetLevelId);
                         var canonicalResult = new PlacementTestResultResponse
                         {
                             AttemptId = attempt.Id,
@@ -885,13 +1065,18 @@ namespace RikiPath.Application.Services
                             DurationSeconds = Math.Max(0, (int)(
                                 (isExpired ? expiresAt : serverNow) - EnsureUtc(attempt.StartedAt)).TotalSeconds),
                             SubmittedAt = serverNow,
+                            AssessmentTargetLevelId = snapshotDoc.AssessmentTargetLevelId,
+                            IsComprehensiveAssessment = snapshotDoc.IsComprehensiveAssessment,
+                            IsShortenedAssessment = snapshotDoc.IsShortenedAssessment,
+                            ParentAssessmentAttemptId = snapshotDoc.ParentAssessmentAttemptId,
                             TotalScore = sectionResults.OverallScore,
                             CorrectCount = snapshotDoc.Questions.Count(q => q.IsCorrect),
+                            NotStudiedCount = snapshotDoc.Questions.Count(q => q.SelectedOptionId == NotStudiedOptionId),
                             TotalQuestions = snapshotDoc.Questions.Count,
-                            AssessedJlptLevelId = evaluation.AssessedLevelId,
-                            AssessedJlptLevelName = evaluation.AssessedLevelName,
-                            RecommendedTargetJlptLevelId = evaluation.RecommendedTargetLevelId,
-                            RecommendedTargetJlptLevelName = evaluation.RecommendedTargetLevelName,
+                            AssessedJlptLevelId = isTargetAssessment || snapshotDoc.IsComprehensiveAssessment ? 0 : evaluation.AssessedLevelId,
+                            AssessedJlptLevelName = isTargetAssessment || snapshotDoc.IsComprehensiveAssessment ? string.Empty : evaluation.AssessedLevelName,
+                            RecommendedTargetJlptLevelId = targetLevel?.JlptLevelId ?? evaluation.RecommendedTargetLevelId,
+                            RecommendedTargetJlptLevelName = targetLevel?.JlptLevelName ?? evaluation.RecommendedTargetLevelName,
                             WrongQuestionIds = snapshotDoc.Questions
                                 .Where(q => !q.IsCorrect)
                                 .Select(q => q.QuestionId)
@@ -902,6 +1087,10 @@ namespace RikiPath.Application.Services
                         };
 
                         snapshotDoc.CompletedResult = canonicalResult;
+                        if (recoverEarlyClosure)
+                        {
+                            attempt.IsDeleted = false;
+                        }
                         attempt.SubmittedAt = serverNow;
                         attempt.IsCompleted = true;
                         attempt.TotalScore = sectionResults.OverallScore;
@@ -912,15 +1101,19 @@ namespace RikiPath.Application.Services
                         // it never changes the learner's chosen starting level, goal, or active path.
                         var learner = await unitOfWork.UserAccounts.GetByIdForUpdateAsync(
                             userId, transactionCancellationToken);
-                        if (learner is not null)
+                        if (learner is not null && !snapshotDoc.ParentAssessmentAttemptId.HasValue &&
+                            (snapshotDoc.AssessmentTargetLevelId is null ||
+                             snapshotDoc.AssessmentTargetLevelId == learner.TargetCertificateLevelId))
                         {
-                            learner.AssessedCertificateLevelId = evaluation.AssessedLevelId;
+                            if (!isTargetAssessment && !snapshotDoc.IsComprehensiveAssessment)
+                                learner.AssessedCertificateLevelId = evaluation.AssessedLevelId;
                             learner.PlacementDecision = PlacementDecision.Completed;
                             unitOfWork.UserAccounts.Update(learner);
                         }
 
                         await unitOfWork.SaveChangesAsync(transactionCancellationToken);
 
+                        await PopulatePlacementResultDetailsAsync(canonicalResult, userId, attempt.QuestionSnapshotJson, transactionCancellationToken);
                         response = ApiResponse<PlacementTestResultResponse>.Success(
                             canonicalResult,
                             HttpStatusCode.OK);
@@ -938,6 +1131,7 @@ namespace RikiPath.Application.Services
                         var canonicalCompleted = RecoverResultFromCompletedAttempt(latestAttempt);
                         if (canonicalCompleted is not null)
                         {
+                            await PopulatePlacementResultDetailsAsync(canonicalCompleted, userId, latestAttempt.QuestionSnapshotJson, cancellationToken);
                             return ApiResponse<PlacementTestResultResponse>.Success(
                                 canonicalCompleted,
                                 HttpStatusCode.OK);
@@ -992,6 +1186,11 @@ namespace RikiPath.Application.Services
 
                 if (!attempt.IsCompleted)
                 {
+                    if (attempt.ExpiresAt is { } expiresAt && EnsureUtc(expiresAt) <= EnsureUtc(UtcNowProvider()))
+                        return ApiResponse<PlacementTestResultResponse>.Fail(
+                            "Lượt làm bài đã hết thời gian và cần được nộp.",
+                            HttpStatusCode.Conflict, errorCode: ErrorAttemptExpired, retryable: false);
+
                     return ApiResponse<PlacementTestResultResponse>.Fail(
                         "Lượt làm bài này chưa được nộp/chấm điểm.",
                         HttpStatusCode.Conflict,
@@ -1009,6 +1208,7 @@ namespace RikiPath.Application.Services
                         retryable: false);
                 }
 
+                await PopulatePlacementResultDetailsAsync(canonicalResult, userId, attempt.QuestionSnapshotJson, cancellationToken);
                 return ApiResponse<PlacementTestResultResponse>.Success(canonicalResult);
             }
             catch (Exception)
@@ -1059,13 +1259,21 @@ namespace RikiPath.Application.Services
                 CancellationToken cancellationToken)
         {
             var attempts = await LoadUserPlacementAttemptsAsync(userId, cancellationToken);
-            return FindCanonicalActiveAttempt(attempts, serverNowUtc);
+            var goal = unitOfWork.UserAccounts is null ? null :
+                await unitOfWork.UserAccounts.GetWithLearningGoalAsync(userId, cancellationToken);
+            return FindCanonicalActiveAttempt(attempts, serverNowUtc, GetAdaptiveGoalId(goal));
         }
+
+        private static int? GetAdaptiveGoalId(UserAccount? user)
+            => NormalizeLevelCode(user?.TargetCertificateLevel?.Code) is "N2" or "N3" or "N4" or "N5"
+                ? user?.TargetCertificateLevelId
+                : null;
 
         private static (MockTestAttempt Attempt, PlacementAttemptSnapshotDocument Snapshot)?
             FindCanonicalActiveAttempt(
                 IEnumerable<MockTestAttempt> placementAttempts,
-                DateTime serverNowUtc)
+                DateTime serverNowUtc,
+                int? adaptiveGoalId)
         {
             foreach (var candidate in placementAttempts
                 .Where(a => !a.IsDeleted &&
@@ -1077,6 +1285,9 @@ namespace RikiPath.Application.Services
                 .ThenByDescending(a => a.Id))
             {
                 if (TryDeserializeSnapshot(candidate.QuestionSnapshotJson, out var snapshotDoc) &&
+                    snapshotDoc.AssessmentTargetLevelId == adaptiveGoalId &&
+                    !snapshotDoc.IsComprehensiveAssessment &&
+                    !snapshotDoc.ParentAssessmentAttemptId.HasValue &&
                     HasValidSnapshotQuestions(snapshotDoc.Questions))
                 {
                     return (candidate, snapshotDoc);
@@ -1155,6 +1366,12 @@ namespace RikiPath.Application.Services
                TryDeserializeSnapshot(attempt.QuestionSnapshotJson, out var snapshotDoc) &&
                snapshotDoc.IsSupersededExpired;
 
+        private static bool CanSubmitEarlyClosedAttempt(MockTestAttempt attempt, DateTime now)
+            => IsSupersededExpiredAttempt(attempt) &&
+               attempt.ExpiresAt is { } expiry && EnsureUtc(expiry) > now &&
+               TryDeserializeSnapshot(attempt.QuestionSnapshotJson, out var snapshot) &&
+               !snapshot.ParentAssessmentAttemptId.HasValue;
+
         private static PlacementTestResultResponse? RecoverResultFromCompletedAttempt(MockTestAttempt attempt)
         {
             var cached = TryGetCompletedResultFromSnapshot(attempt.QuestionSnapshotJson);
@@ -1177,6 +1394,18 @@ namespace RikiPath.Application.Services
             return cached;
         }
 
+        internal static (MockTestAttempt? Attempt, PlacementTestResultResponse? Recovered) FindLatestCompletedAssessment(
+            IEnumerable<MockTestAttempt> attempts, int? targetId, bool requireMatchingGoal = false) =>
+            attempts.Where(attempt => attempt.IsCompleted && attempt.TotalScore.HasValue)
+                .Select(attempt => (Attempt: (MockTestAttempt?)attempt, Recovered: RecoverResultFromCompletedAttempt(attempt)))
+                .Where(item => item.Recovered is { IsMiniAssessment: false } result &&
+                    (result.AssessmentTargetLevelId == targetId ||
+                     (!requireMatchingGoal && result.AssessmentTargetLevelId is null)))
+                .OrderByDescending(item => item.Recovered!.ScreeningLevelName is not null)
+                .ThenByDescending(item => item.Attempt!.SubmittedAt ?? item.Attempt.StartedAt)
+                .ThenByDescending(item => item.Attempt!.Id)
+                .FirstOrDefault();
+
         internal static PlacementTestResultResponse? TryGetCompletedResultFromSnapshot(string? snapshotJson)
         {
             if (!TryDeserializeSnapshot(snapshotJson, out var snapshotDoc) ||
@@ -1186,7 +1415,22 @@ namespace RikiPath.Application.Services
                 return null;
             }
 
+            // Older low results stored no recommendation while waiting for a mini assessment.
+            if (completedResult.ScreeningLevelName is { } targetLevel)
+            {
+                completedResult.RecommendedTargetJlptLevelId = completedResult.AssessmentTargetLevelId!.Value;
+                completedResult.RecommendedTargetJlptLevelName = targetLevel;
+            }
             return completedResult;
+        }
+
+        internal static List<SectionResultItem>? TryGetSkillEvidenceFromSnapshot(string? snapshotJson)
+        {
+            if (!TryDeserializeSnapshot(snapshotJson, out var snapshot) ||
+                snapshot.CompletedResult is not { } completed || !IsValidCompletedResultSnapshot(completed) ||
+                snapshot.Questions.Count == 0) return null;
+            return BuildSectionResultsFromSnapshot(0, snapshot.Questions.Where(q =>
+                JlptSkillAssessmentPolicy.Classify(q.LanguageSkillName) != JlptStudySkill.Listening || !string.IsNullOrWhiteSpace(q.AudioUrl)).ToList()).Responses;
         }
 
         private static bool IsValidCompletedResultSnapshot(PlacementTestResultResponse result)
@@ -1195,10 +1439,10 @@ namespace RikiPath.Application.Services
                result.CorrectCount <= result.TotalQuestions &&
                result.TotalScore >= 0 &&
                result.TotalScore <= 100 &&
-               result.AssessedJlptLevelId > 0 &&
-               IsSupportedLevel(result.AssessedJlptLevelName) &&
-               result.RecommendedTargetJlptLevelId > 0 &&
-               IsSupportedLevel(result.RecommendedTargetJlptLevelName) &&
+               ((result.AssessmentTargetLevelId.HasValue && !result.IsMiniAssessment) ||
+                (result.AssessedJlptLevelId > 0 && IsSupportedLevel(result.AssessedJlptLevelName))) &&
+               (result.ScreeningLevelName is not null ||
+                (result.RecommendedTargetJlptLevelId > 0 && IsSupportedLevel(result.RecommendedTargetJlptLevelName))) &&
                result.LevelBreakdowns is { Count: > 0 } &&
                result.Sections is { Count: > 0 };
 
@@ -1209,6 +1453,33 @@ namespace RikiPath.Application.Services
                    q.QuestionId > 0 &&
                    q.JlptLevelId > 0 &&
                    IsSupportedLevel(q.JlptLevelName));
+
+        private static bool IsValidPlacementSelection(PlacementSnapshotQuestionItem question, AnswerSubmissionItem answer)
+        {
+            if (answer.SelectedOptionId == NotStudiedOptionId) return answer.Response is null;
+            if (question.OrderingTokens is not { } tokens)
+                return answer.Response is null && (answer.SelectedOptionId is null ||
+                    question.Options.Any(option => option.OptionId == answer.SelectedOptionId.Value));
+            return answer.SelectedOptionId is null && (answer.Response is null ||
+                (SentenceOrdering.TryReadSequence(answer.Response, out var sequence) &&
+                    SentenceOrdering.IsSubsequenceOfChoices(tokens, sequence)));
+        }
+
+        private static void ApplyPlacementSelection(PlacementSnapshotQuestionItem question, AnswerSubmissionItem answer)
+        {
+            question.SelectedOptionId = answer.SelectedOptionId;
+            question.OrderingResponse = answer.Response is not null &&
+                SentenceOrdering.TryReadSequence(answer.Response, out var sequence) && sequence.Length > 0
+                ? sequence : null;
+        }
+
+        private static void SetPersistedPlacementSelection(MockTestAnswer row, PlacementSnapshotQuestionItem question)
+        {
+            var notStudied = question.SelectedOptionId == NotStudiedOptionId;
+            row.SelectedOptionId = notStudied ? null : question.SelectedOptionId;
+            row.ResponseJson = notStudied ? NotStudiedResponseJson :
+                question.OrderingResponse is { } sequence ? JsonSerializer.Serialize(sequence) : null;
+        }
 
         private static PlacementAttemptSnapshotResponse BuildSnapshotResponse(
             MockTestAttempt attempt,
@@ -1229,6 +1500,9 @@ namespace RikiPath.Application.Services
                 ExpiresAt = expiresAt,
                 ServerNow = EnsureUtc(serverNowUtc),
                 TimeLimitMinutes = snapshotDoc.TimeLimitMinutes,
+                ParentAssessmentAttemptId = snapshotDoc.ParentAssessmentAttemptId,
+                IsComprehensiveAssessment = snapshotDoc.IsComprehensiveAssessment,
+                IsShortenedAssessment = snapshotDoc.IsShortenedAssessment,
                 TotalQuestions = snapshotDoc.Questions.Count,
                 Questions = snapshotDoc.Questions
                     .OrderBy(q => q.Order)
@@ -1247,6 +1521,10 @@ namespace RikiPath.Application.Services
                         AudioUrl = q.AudioUrl,
                         ImageUrl = q.ImageUrl,
                         SelectedOptionId = q.SelectedOptionId,
+                        QuestionType = q.OrderingTokens is null ? "SingleChoice" : SentenceOrdering.QuestionType,
+                        InteractionData = q.OrderingTokens is { } tokens
+                            ? JsonSerializer.SerializeToElement(new { tokens }) : null,
+                        Response = q.OrderingResponse is { } sequence ? JsonSerializer.SerializeToElement(sequence) : null,
                         Options = q.Options
                             .OrderBy(o => o.Order)
                             .ThenBy(o => o.OptionId)
@@ -1254,7 +1532,14 @@ namespace RikiPath.Application.Services
                             {
                                 OptionId = o.OptionId,
                                 Content = o.Content,
+                                ImageUrl = o.ImageUrl,
                                 Order = o.Order,
+                            })
+                            .Append(new PlacementTestOptionResponse
+                            {
+                                OptionId = NotStudiedOptionId,
+                                Content = "Tôi chưa học, tôi không biết",
+                                Order = q.Options.Select(o => o.Order).DefaultIfEmpty().Max() + 1,
                             })
                             .ToList(),
                     })
@@ -1299,7 +1584,7 @@ namespace RikiPath.Application.Services
             var knownLevels = (catalogLevels ?? [])
                 .Select(l => (LevelId: l.JlptLevelId, LevelCode: NormalizeLevelCode(l.JlptLevelName), Rank: GetLevelRank(l.JlptLevelName)))
                 .Concat(breakdowns.Select(b => (LevelId: b.JlptLevelId, LevelCode: b.JlptLevelName, Rank: GetLevelRank(b.JlptLevelName))))
-                .Where(x => x.Rank >= 1 && x.Rank <= 3)
+                .Where(x => x.Rank >= 1 && x.Rank <= 4)
                 .GroupBy(x => x.LevelCode)
                 .Select(g => g.First())
                 .OrderBy(x => x.Rank)
@@ -1393,7 +1678,9 @@ namespace RikiPath.Application.Services
                     q.MockTestSectionId,
                     q.SectionTitle,
                     q.SectionOrder,
-                    q.LanguageSkillName))
+                    q.LanguageSkillName,
+                    q.JlptLevelId,
+                    q.JlptLevelName))
                 .OrderBy(g => g.Key.SectionOrder)
                 .ThenBy(g => g.Key.MockTestSectionId)
                 .Select(g =>
@@ -1405,6 +1692,9 @@ namespace RikiPath.Application.Services
                         SectionId: g.Key.MockTestSectionId,
                         SectionTitle: g.Key.SectionTitle,
                         LanguageSkillName: g.Key.LanguageSkillName,
+                        JlptLevelId: g.Key.JlptLevelId,
+                        JlptLevelName: g.Key.JlptLevelName,
+                        HasAudioEvidence: g.All(q => !string.IsNullOrWhiteSpace(q.AudioUrl)),
                         Correct: correct,
                         Total: total,
                         Score: score);
@@ -1428,6 +1718,9 @@ namespace RikiPath.Application.Services
                 MockTestSectionId = g.SectionId,
                 SectionTitle = g.SectionTitle,
                 LanguageSkillName = g.LanguageSkillName,
+                JlptLevelId = g.JlptLevelId,
+                JlptLevelName = g.JlptLevelName,
+                HasAudioEvidence = g.HasAudioEvidence,
                 CorrectCount = g.Correct,
                 TotalCount = g.Total,
                 Score = g.Score,
@@ -1476,8 +1769,99 @@ namespace RikiPath.Application.Services
         private static bool IsSupportedLevel(string? levelCode)
         {
             var normalized = NormalizeLevelCode(levelCode);
-            return normalized is "N5" or "N4" or "N3";
+            return normalized is "N5" or "N4" or "N3" or "N2" or "N1";
         }
+
+        private async Task PopulatePlacementResultDetailsAsync(
+            PlacementTestResultResponse result, int userId, string? snapshotJson, CancellationToken cancellationToken)
+        {
+            var goal = await unitOfWork.UserAccounts.GetWithLearningGoalAsync(userId, cancellationToken);
+            var targetCode = goal?.TargetCertificateLevel?.Code;
+            if (string.IsNullOrWhiteSpace(targetCode) && goal?.TargetCertificateLevelId is int goalLevelId)
+                targetCode = (await unitOfWork.CertificateLevels.GetByIdAsync(goalLevelId, cancellationToken))?.Code;
+            var resultTargetCode = result.LevelBreakdowns.FirstOrDefault(
+                level => level.JlptLevelId == result.AssessmentTargetLevelId)?.JlptLevelName;
+            result.SkillAssessments = JlptSkillAssessmentPolicy.Assess(result,
+                NormalizeLevelCode(resultTargetCode ?? targetCode),
+                TryGetSkillEvidenceFromSnapshot(snapshotJson));
+
+            if (result.IsMiniAssessment || result.AssessmentTargetLevelId is not int targetId)
+                return;
+
+            if (goal?.TargetCertificateLevelId != targetId)
+            {
+                result.FollowUpUnavailableReason = "CURRENT_TARGET_MISMATCH";
+                return;
+            }
+
+            var attempts = await LoadUserPlacementAttemptsAsync(userId, cancellationToken);
+            if (GetLatestTargetResult(attempts, targetId)?.AttemptId != result.AttemptId)
+            {
+                return;
+            }
+
+            if (FindCanonicalActiveAttempt(attempts, EnsureUtc(UtcNowProvider()), targetId) is not null)
+            {
+                result.FollowUpUnavailableReason = "TARGET_ASSESSMENT_IN_PROGRESS";
+                return;
+            }
+
+            var allowance = await GetAttemptAllowanceAsync(userId, targetId, EnsureUtc(UtcNowProvider()), cancellationToken);
+            result.CanRetake = allowance.Remaining > 0 && !allowance.PendingSubmissionAttemptId.HasValue &&
+                goal.TargetExamDate is { } examDate && BusinessDateHelper.IsJlptExamDate(examDate) &&
+                BusinessDateHelper.IsFutureExamDate(examDate, UtcNowProvider());
+        }
+
+        private async Task<PlacementAttemptAllowance> GetAttemptAllowanceAsync(int userId, int levelId,
+            DateTime now, CancellationToken cancellationToken)
+        {
+            // Include replaced attempts so changing goals cannot reset an existing level's allowance.
+            var attempts = await unitOfWork.MockTestAttempts.Query().AsNoTracking()
+                .Where(attempt => attempt.UserId == userId && attempt.AttemptKind == AttemptKind.Placement)
+                .OrderByDescending(attempt => attempt.Id)
+                .Select(attempt => new { attempt.Id, attempt.IsDeleted, attempt.IsCompleted, attempt.ExpiresAt, attempt.QuestionSnapshotJson })
+                .ToListAsync(cancellationToken);
+            var started = 0;
+            int? pendingSubmissionId = null;
+            foreach (var attempt in attempts)
+            {
+                if (!TryDeserializeSnapshot(attempt.QuestionSnapshotJson, out var snapshot) ||
+                    snapshot.AssessmentTargetLevelId != levelId || snapshot.ParentAssessmentAttemptId.HasValue ||
+                    !HasValidSnapshotQuestions(snapshot.Questions)) continue;
+
+                started++;
+                if (pendingSubmissionId is null && !attempt.IsDeleted && !attempt.IsCompleted &&
+                    EnsureUtc(attempt.ExpiresAt ?? snapshot.ExpiresAt) <= now)
+                    pendingSubmissionId = attempt.Id;
+            }
+
+            return new PlacementAttemptAllowance(TargetAttemptLimit, started,
+                Math.Max(0, TargetAttemptLimit - started), pendingSubmissionId);
+        }
+
+        private static ApiResponse<PlacementAttemptSnapshotResponse>? CheckStartAllowance(
+            PlacementAttemptAllowance allowance, PlacementTestResultResponse? latest, bool retake)
+        {
+            if (allowance.PendingSubmissionAttemptId.HasValue)
+                return ApiResponse<PlacementAttemptSnapshotResponse>.Fail(
+                    "Hãy nộp lượt đã hết giờ để xem kết quả.", HttpStatusCode.Conflict, "PLACEMENT_PENDING_SUBMISSION");
+            if (allowance.Remaining == 0)
+                return ApiResponse<PlacementAttemptSnapshotResponse>.Fail(
+                    $"Bạn đã dùng hết {TargetAttemptLimit} lượt đánh giá ở cấp mục tiêu này.",
+                    HttpStatusCode.Conflict, "PLACEMENT_ATTEMPT_LIMIT_REACHED");
+            if (retake != (latest is not null))
+                return ApiResponse<PlacementAttemptSnapshotResponse>.Fail(
+                    "Hãy mở kết quả đánh giá hiện tại để tiếp tục.",
+                    HttpStatusCode.Conflict, "PLACEMENT_RETAKE_NOT_AVAILABLE");
+            return null;
+        }
+
+        private static PlacementTestResultResponse? GetLatestTargetResult(IEnumerable<MockTestAttempt> attempts, int targetId) =>
+            attempts.Where(attempt => attempt.IsCompleted)
+                .OrderByDescending(attempt => attempt.SubmittedAt ?? attempt.StartedAt)
+                .ThenByDescending(attempt => attempt.Id)
+                .Select(RecoverResultFromCompletedAttempt)
+                .FirstOrDefault(result => result is { IsMiniAssessment: false } && result.AssessmentTargetLevelId == targetId);
 
         private static int ComputeTimeLimitMinutes(int questionCount)
             => Math.Clamp(questionCount * 2, 10, 45);
@@ -1552,10 +1936,15 @@ namespace RikiPath.Application.Services
         internal sealed class PlacementAttemptSnapshotDocument
         {
             public int SchemaVersion { get; set; } = 2;
+            public bool IsComprehensiveAssessment { get; set; }
+            public bool IsShortenedAssessment { get; set; }
+            public int? AssessmentTargetLevelId { get; set; }
+            public int? ParentAssessmentAttemptId { get; set; }
             public int TimeLimitMinutes { get; set; }
             public DateTime StartedAt { get; set; }
             public DateTime ExpiresAt { get; set; }
             public bool IsSupersededExpired { get; set; }
+            public bool IsReplaced { get; set; }
             public List<PlacementSnapshotLevelCatalogItem> CatalogLevels { get; set; } = [];
             public List<PlacementSnapshotQuestionItem> Questions { get; set; } = [];
             public PlacementTestResultResponse? CompletedResult { get; set; }
@@ -1582,7 +1971,10 @@ namespace RikiPath.Application.Services
             public string Content { get; set; } = string.Empty;
             public string? AudioUrl { get; set; }
             public string? ImageUrl { get; set; }
-            public int CorrectOptionId { get; set; }
+            public int? CorrectOptionId { get; set; }
+            public string[]? OrderingTokens { get; set; }
+            public string[]? OrderingAnswerKey { get; set; }
+            public string[]? OrderingResponse { get; set; }
             public int? SelectedOptionId { get; set; }
             public bool IsCorrect { get; set; }
             public List<PlacementSnapshotOptionItem> Options { get; set; } = [];
@@ -1590,6 +1982,7 @@ namespace RikiPath.Application.Services
 
         internal sealed class PlacementSnapshotOptionItem
         {
+            public string? ImageUrl { get; set; }
             public int OptionId { get; set; }
             public string Content { get; set; } = string.Empty;
             public int Order { get; set; }

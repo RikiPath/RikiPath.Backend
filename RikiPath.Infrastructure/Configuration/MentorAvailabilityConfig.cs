@@ -29,6 +29,7 @@ namespace RikiPath.Infrastructure.Configuration
             builder.HasIndex(x => x.GenerationKey).IsUnique().HasFilter("\"GenerationKey\" IS NOT NULL");
 
             builder.Property(x => x.RoomId).IsRequired();
+            builder.Property(x => x.AttendanceTrackingEnabled).HasDefaultValue(true);
             builder.HasIndex(x => x.RoomId).IsUnique();
 
             builder.Property(x => x.MaxLearners).HasDefaultValue(MentorAvailability.DefaultMaxLearners);

@@ -9,7 +9,7 @@ namespace RikiPath.Infrastructure.Repositories
     {
         public async Task<UserAccount?> GetByEmailAsync(string email)
         {
-            var normalizedEmail = email.Trim().ToLower();
+            var normalizedEmail = email.Trim().ToLowerInvariant();
             return await _context.Users.FirstOrDefaultAsync(x => x.Email == normalizedEmail);
         }
 

@@ -87,6 +87,7 @@ public sealed class LearningPathPersistenceTests
             .Options;
         await using var context = new AppDbContext(options);
 
+        var utcNow = new DateTime(2026, 12, 1, 0, 0, 0, DateTimeKind.Utc);
         var certType = new CertificateType { Id = 71, Name = "JLPT", IsActive = true, SortOrder = 1 };
         var levelN4 = new CertificateLevel
         {
@@ -106,7 +107,7 @@ public sealed class LearningPathPersistenceTests
             TargetCertificateLevelId = levelN4.Id,
             TargetCertificateLevel = levelN4,
             DailyStudyMinutes = 45,
-            TargetExamDate = DateTime.UtcNow.Date.AddDays(5),
+            TargetExamDate = utcNow.Date.AddDays(5),
         };
         var skill = new LanguageSkill
         {
@@ -173,25 +174,23 @@ public sealed class LearningPathPersistenceTests
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync((int _, string prompt, CancellationToken _) =>
             {
-                // Phản hồi giả lập tuân theo số ngày mà hợp đồng prompt hiện hành yêu cầu.
-                var days = int.Parse(System.Text.RegularExpressions.Regex.Match(
-                    prompt, @"Lập đúng (\d+) ngày").Groups[1].Value);
-                var schedules = Enumerable.Range(1, days).Select(day => new
+                var match = System.Text.RegularExpressions.Regex.Match(prompt, @"Lập đúng (\d+) ngày");
+                var expectedDays = int.Parse(match.Groups[1].Value);
+                var schedules = Enumerable.Range(1, expectedDays).Select(day => new
                 {
                     day,
                     title = $"Ngày {day}",
-                    focus = "Ôn tập ngữ pháp",
+                    focus = "Ôn ngữ pháp",
                     lessonIds = new[] { 4401 },
                 });
                 return JsonSerializer.Serialize(new
                 {
                     summary = "Lộ trình N4",
+                    skillFeedback = new[] { "vocabulary", "grammar", "reading", "listening" }.Select(skill => new { skillCode = skill, comment = "Nhận xét theo dữ liệu đã cung cấp.", recommendation = "Ôn tập đều và bổ sung đánh giá còn thiếu." }),
                     strengths = new[] { "Từ vựng" },
                     weaknesses = new[] { "Ngữ pháp" },
                     feasibility = "Khả thi",
                     focusTopics = new[] { "N4" },
-                    isExamDateRealistic = true,
-                    recommendedStudyDays = days,
                     dailySchedules = schedules,
                 });
             });
@@ -200,7 +199,7 @@ public sealed class LearningPathPersistenceTests
             new UnitOfWork(context),
             ai.Object,
             claims.Object,
-            Mock.Of<ILogger<LearningPathService>>());
+            Mock.Of<ILogger<LearningPathService>>()) { UtcNowProvider = () => utcNow };
 
         var rejected = await service.GenerateLearningPathAsync(
             new GenerateLearningPathRequest(),
@@ -220,13 +219,9 @@ public sealed class LearningPathPersistenceTests
             StartedAt = DateTime.UtcNow.AddMinutes(-15),
             SubmittedAt = DateTime.UtcNow.AddMinutes(-2),
             IsCompleted = true,
-            TotalScore = 70.0,
+            TotalScore = 30.0,
         };
         context.MockTestAttempts.Add(placementAttempt);
-        await context.SaveChangesAsync();
-
-        // Adjust exam date so daysUntilExam == 5 in Vietnam time (UTC+7)
-        user.TargetExamDate = DateTime.UtcNow.AddHours(7).Date.AddDays(5);
         await context.SaveChangesAsync();
 
         var rejectedWithoutSnapshot = await service.GenerateLearningPathAsync(
@@ -248,9 +243,14 @@ public sealed class LearningPathPersistenceTests
             new GenerateLearningPathRequest(),
             CancellationToken.None);
 
-        Assert.True(generated.IsSuccess,
-            $"HTTP {generated.StatusCode}: {generated.ErrorCode} {generated.ErrorMessage}");
+        Assert.True(generated.IsSuccess);
         Assert.Equal(generated.Result!.PlanDurationDays, generated.Result.DailySchedules.Count);
+        Assert.Equal(2, generated.Result.AvailableStudyDays);
+        Assert.True(generated.Result.IsAlternativePlan);
+        Assert.False(generated.Result.IsExamDateRealistic);
+        Assert.Equal(placementAttempt.Id, generated.Result.PlacementAttemptId);
+        Assert.Equal(generated.Result.PlanningExamDate!.Value.AddDays(-4), generated.Result.LastStudyDate);
+        Assert.All(generated.Result.DailySchedules, day => Assert.True(day.Date < generated.Result.RestStartDate));
         Assert.Equal(levelN4.Id, user.TargetCertificateLevelId);
 
         // An active AI path is never replaced by another generate call. A new
@@ -294,23 +294,20 @@ public sealed class LearningPathPersistenceTests
             Status = "completed",
             StartedAt = startedAt,
             SubmittedAt = submittedAt,
-            TotalScore = 70,
-            CorrectCount = 7,
+            AssessmentTargetLevelId = jlptLevelId,
+            TotalScore = 30,
+            CorrectCount = 3,
             TotalQuestions = 10,
-            AssessedJlptLevelId = jlptLevelId,
-            AssessedJlptLevelName = "N4",
-            RecommendedTargetJlptLevelId = jlptLevelId,
-            RecommendedTargetJlptLevelName = "N4",
-            WrongQuestionIds = [1, 2, 3],
+            WrongQuestionIds = [4, 5, 6, 7, 8, 9, 10],
             LevelBreakdowns =
             [
                 new PlacementLevelBreakdownItem
                 {
                     JlptLevelId = jlptLevelId,
                     JlptLevelName = "N4",
-                    CorrectCount = 7,
+                    CorrectCount = 3,
                     TotalCount = 10,
-                    ScorePercent = 70,
+                    ScorePercent = 30,
                 },
             ],
             Sections =
@@ -320,16 +317,18 @@ public sealed class LearningPathPersistenceTests
                     MockTestSectionId = 40,
                     SectionTitle = "N4 Grammar",
                     LanguageSkillName = "Grammar",
-                    CorrectCount = 7,
+                    CorrectCount = 3,
                     TotalCount = 10,
-                    Score = 70,
-                    ScorePercent = 70,
+                    Score = 30,
+                    ScorePercent = 30,
                 },
             ],
         };
 
-        return JsonSerializer.Serialize(
-            new { schemaVersion = 2, completedResult },
-            new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        var json = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        var legacyResult = JsonSerializer.SerializeToNode(completedResult, json)!.AsObject();
+        legacyResult["requiresMiniAssessment"] = true;
+        legacyResult["miniAssessmentLevels"] = JsonSerializer.SerializeToNode(new[] { "N5" }, json);
+        return JsonSerializer.Serialize(new { schemaVersion = 2, completedResult = legacyResult }, json);
     }
 }

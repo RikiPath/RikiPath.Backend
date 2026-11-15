@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using RikiPath.Application.IClients;
 using RikiPath.Application.IServices;
@@ -9,9 +10,19 @@ using System.Net;
 
 namespace RikiPath.Application.Services
 {
-    public class SpeechToTextService(IAzureSpeechClient azureSpeechClient, AppSettings appSettings, ILogger<SpeechToTextService> logger, ITranscribeSpeechClient transcribeClient) : ISpeechToTextService
+    public class SpeechToTextService(IAzureSpeechClient azureSpeechClient, AppSettings appSettings, ILogger<SpeechToTextService> logger, ITranscribeSpeechClient transcribeClient, ISpeechRecognitionClient? speechClient = null) : ISpeechToTextService
     {
         private const int TokenLifetimeSeconds = 600;
+
+        public async Task<string> ConvertAudioToTextAsync(IFormFile audioFile, CancellationToken cancellationToken = default)
+        {
+            if (audioFile.Length == 0 || audioFile.Length > 25 * 1024 * 1024)
+                throw new ArgumentException("File audio phải có dữ liệu và không vượt quá 25MB.");
+            await using var stream = audioFile.OpenReadStream();
+            return await (speechClient ?? throw new InvalidOperationException("OpenAI speech is not registered."))
+                .TranscribeAsync(stream, audioFile.FileName, cancellationToken);
+        }
+
 
         public async Task<ApiResponse<SpeechStreamingSessionResponse>> CreateStreamingSessionAsync(CancellationToken cancellationToken)
         {

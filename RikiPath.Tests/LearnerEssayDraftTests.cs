@@ -19,7 +19,7 @@ public sealed class LearnerEssayDraftTests
     private readonly Mock<ILearnerEssayRepository> essays = new();
     private readonly Mock<IClaimService> claims = new();
     private readonly Mock<IFileStorageService> storage = new();
-    private readonly Mock<IGeminiOcrClient> ocr = new();
+    private readonly Mock<IAiOcrClient> ocr = new();
 
     public LearnerEssayDraftTests()
     {
@@ -149,7 +149,7 @@ public sealed class LearnerEssayDraftTests
             .ReturnsAsync(ApiResponse<EssayDetailResponse>.Created(new() { Id = 42 }));
         service.Setup(x => x.GetByIdAsync(999, It.IsAny<CancellationToken>()))
             .ReturnsAsync(ApiResponse<EssayDetailResponse>.NotFound());
-        var controller = new LearnerEssayController(service.Object);
+        var controller = new LearnerEssayController(service.Object, null!);
         Assert.Equal(201, Assert.IsType<ObjectResult>(await controller.Create(new() { ContentText = "Text" }, default)).StatusCode);
         Assert.Equal(404, Assert.IsType<ObjectResult>(await controller.GetById(999, default)).StatusCode);
     }

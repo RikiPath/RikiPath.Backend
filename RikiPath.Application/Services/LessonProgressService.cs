@@ -4,10 +4,13 @@ using RikiPath.Application.Requests.Lessons;
 using RikiPath.Application.Responses;
 using RikiPath.Application.Responses.Lessons;
 using System.Net;
+using System.Data.Common;
+using Microsoft.Extensions.Logging;
 
 namespace RikiPath.Application.Services
 {
-    public class LessonProgressService(IUnitOfWork unitOfWork, IClaimService claimService) : ILessonProgressService
+    public class LessonProgressService(IUnitOfWork unitOfWork, IClaimService claimService,
+        ILogger<LessonProgressService>? logger = null) : ILessonProgressService
     {
         private const int AutoCompleteThresholdPercent = 95;
 
@@ -43,7 +46,11 @@ namespace RikiPath.Application.Services
                     certificateLevelId,
                     userId,
                     cancellationToken);
-                var lessonResponses = lessons.Select(MapToSummary).ToList();
+                var lessonIds = lessons.Select(lesson => lesson.Id).ToArray();
+                var withExercises = await LessonPracticeProgress.WithExercisesAsync(unitOfWork, lessonIds, cancellationToken);
+                var passed = await LessonPracticeProgress.PassedAsync(unitOfWork, userId, lessonIds, cancellationToken);
+                var lessonResponses = lessons.Select(lesson => MapToSummary(
+                    lesson, withExercises.Contains(lesson.Id), passed.Contains(lesson.Id))).ToList();
                 var completedLessons = lessonResponses.Count(item => item.IsCompleted);
                 var overallProgress = lessonResponses.Count == 0
                     ? 0
@@ -99,8 +106,16 @@ namespace RikiPath.Application.Services
             {
                 throw;
             }
-            catch
+            catch (DbException exception) when (exception.SqlState is "42703" or "42P01")
             {
+                logger?.LogError(exception, "The database schema is incomplete for lesson {LessonId}.", lessonId);
+                return ApiResponse<LessonDetailResponse>.Fail(
+                    "Cơ sở dữ liệu cần được cập nhật trước khi mở bài học này.",
+                    HttpStatusCode.InternalServerError, "LESSON_SCHEMA_UPDATE_REQUIRED");
+            }
+            catch (Exception exception)
+            {
+                logger?.LogError(exception, "Failed to load lesson {LessonId}.", lessonId);
                 return ApiResponse<LessonDetailResponse>.Fail(
                     "Không thể tải chi tiết bài học.",
                     HttpStatusCode.InternalServerError);
@@ -252,14 +267,17 @@ namespace RikiPath.Application.Services
             }
         }
 
-        private static LearningLessonSummaryResponse MapToSummary(Lesson lesson)
+        private static LearningLessonSummaryResponse MapToSummary(Lesson lesson, bool hasPracticeExercise, bool practicePassed)
         {
             var progress = lesson.LessonProgresses?.SingleOrDefault();
             return new LearningLessonSummaryResponse
             {
                 LessonId = lesson.Id,
+                HasPracticeExercise = hasPracticeExercise,
+                PracticePassed = practicePassed,
                 Title = lesson.Title,
                 Description = lesson.Description,
+                HasAudio = !string.IsNullOrWhiteSpace(lesson.AudioUrl),
                 SortOrder = lesson.SortOrder,
                 LanguageSkillId = lesson.LanguageSkillId,
                 LanguageSkillName = lesson.LanguageSkill.Name,
@@ -281,6 +299,7 @@ namespace RikiPath.Application.Services
             LanguageSkillName = lesson.LanguageSkill.Name,
             Title = lesson.Title,
             Content = lesson.Description ?? string.Empty,
+            AudioUrl = lesson.AudioUrl,
             AttachmentUrl = null,
             OrderIndex = lesson.SortOrder,
             ProgressPercent = progress?.ProgressPercent ?? 0,

@@ -8,6 +8,8 @@ public class PracticeExerciseAttempt : Base
     public UserAccount UserAccount { get; set; } = null!;
     public int PracticeExerciseId { get; set; }
     public PracticeExercise PracticeExercise { get; set; } = null!;
+    public int? HomeworkAssignmentId { get; set; }
+    public HomeworkAssignment? HomeworkAssignment { get; set; }
     public DateTime StartedAt { get; set; }
     public DateTime? SubmittedAt { get; set; }
     public double? ScorePercent { get; set; }

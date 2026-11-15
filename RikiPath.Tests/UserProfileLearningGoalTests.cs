@@ -20,6 +20,122 @@ namespace RikiPath.Tests;
 
 public sealed class UserProfileLearningGoalTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Changing_saved_goal_with_active_path_preserves_existing_path(bool useRange)
+    {
+        await using var context = CreateContext();
+        var type = new CertificateType { Id = 71, Name = "JLPT", IsActive = true };
+        var oldLevel = new CertificateLevel { Id = 71005, CertificateTypeId = 71, CertificateType = type, Code = "N5" };
+        var newLevel = new CertificateLevel { Id = 71002, CertificateTypeId = 71, CertificateType = type, Code = "N2" };
+        context.CertificateTypes.Add(type);
+        context.CertificateLevels.AddRange(oldLevel, newLevel);
+        context.Users.Add(new UserAccount { Id = 7001, Email = "goal-change@example.test", PasswordHash = [], PasswordSalt = [], Role = Role.Learner, TargetCertificateLevelId = oldLevel.Id, DailyStudyMinutes = 30 });
+        var path = new RecommendedLearningPath { Id = 9001, UserId = 7001, TargetCertificateLevelId = oldLevel.Id, Status = LearningPathStatus.Active, SuggestionJson = "{original}", Summary = "Original", Version = 1 };
+        context.RecommendedLearningPaths.Add(path);
+        await context.SaveChangesAsync();
+        var service = CreateService(context, 7001, utcNow: new DateTime(2026, 11, 1, 0, 0, 0, DateTimeKind.Utc));
+        var date = new DateTime(2026, 12, 6);
+        var response = await service.SetJlptGoalAsync(new SetJlptGoalRequest {
+            CertificateTypeId = 71, TargetCertificateLevelId = newLevel.Id,
+            DailyStudyMinutes = useRange ? 0 : 45,
+            DailyStudyMinutesMin = useRange ? 15 : null,
+            DailyStudyMinutesMax = useRange ? 60 : null,
+            TargetExamDate = date
+        }, CancellationToken.None);
+        Assert.True(response.IsSuccess, response.ErrorMessage);
+        context.ChangeTracker.Clear();
+        var user = await context.Users.SingleAsync(u => u.Id == 7001);
+        Assert.Equal(newLevel.Id, user.TargetCertificateLevelId);
+        Assert.Equal(useRange ? 15 : 45, user.DailyStudyMinutes);
+        Assert.Equal(useRange ? 15 : (int?)null, user.DailyStudyMinutesMin);
+        Assert.Equal(useRange ? 60 : (int?)null, user.DailyStudyMinutesMax);
+        Assert.Equal(date, user.TargetExamDate);
+        var savedPath = await context.RecommendedLearningPaths.SingleAsync();
+        Assert.Equal(LearningPathStatus.Active, savedPath.Status);
+        Assert.Equal(oldLevel.Id, savedPath.TargetCertificateLevelId);
+        Assert.Equal("{original}", savedPath.SuggestionJson);
+        var invalidType = await service.SetJlptGoalAsync(new SetJlptGoalRequest {
+            CertificateTypeId = 999, TargetCertificateLevelId = oldLevel.Id, DailyStudyMinutes = 30
+        }, CancellationToken.None);
+        Assert.Equal(400, invalidType.StatusCode);
+        Assert.Equal(newLevel.Id, (await context.Users.SingleAsync(u => u.Id == 7001)).TargetCertificateLevelId);
+        var invalidMonth = await service.SetJlptGoalAsync(new SetJlptGoalRequest
+        {
+            TargetCertificateLevelId = newLevel.Id, DailyStudyMinutes = 30,
+            TargetExamDate = new DateTime(date.Year + 1, 8, 1),
+        }, default);
+        Assert.Equal("JLPT_EXAM_MONTH_INVALID", invalidMonth.ErrorCode);
+        Assert.Equal(date, (await context.Users.SingleAsync(u => u.Id == 7001)).TargetExamDate);
+    }
+
+    [Theory]
+    [InlineData("N2", "N3", true)]
+    [InlineData("N3", "N4", true)]
+    [InlineData("N3", "N3", false)]
+    [InlineData("N2", "NONE", true)]
+    [InlineData("N4", "N5", true)]
+    [InlineData("N4", "NONE", true)]
+    [InlineData("N4", "N4", false)]
+    [InlineData("N5", "N5", false)]
+    public async Task Goal_persists_only_allowed_certificate_declarations(string goal, string held, bool accepted)
+    {
+        await using var context = CreateContext();
+        var level = new CertificateLevel
+        {
+            Id = 71000, Code = goal,
+            CertificateType = new CertificateType { Id = 71, Name = "JLPT", IsActive = true }
+        };
+        context.CertificateLevels.Add(level);
+        context.Users.Add(new UserAccount
+        {
+            Id = 7, Email = "certificate@example.test", PasswordHash = [], PasswordSalt = [], Role = Role.Learner
+        });
+        await context.SaveChangesAsync();
+        var result = await CreateService(context, 7).SetJlptGoalAsync(new SetJlptGoalRequest
+        {
+            TargetCertificateLevelId = level.Id, DailyStudyMinutes = 30, DeclaredJlptCertificateCode = held,
+        }, default);
+        Assert.Equal(accepted, result.IsSuccess);
+        if (accepted) Assert.Equal(held, result.Result!.DeclaredJlptCertificateCode);
+        else Assert.Equal("INVALID_HELD_JLPT_CERTIFICATE", result.ErrorCode);
+    }
+
+    [Fact]
+    public async Task Held_certificate_remains_in_profile_after_switching_to_a_goal_without_a_declaration()
+    {
+        await using var context = CreateContext();
+        var type = new CertificateType { Id = 71, Name = "JLPT", IsActive = true };
+        context.CertificateLevels.AddRange(
+            new CertificateLevel { Id = 71002, Code = "N2", CertificateType = type },
+            new CertificateLevel { Id = 71004, Code = "N4", CertificateType = type });
+        context.Users.Add(new UserAccount
+        {
+            Id = 7, Email = "held-certificate@example.test", PasswordHash = [], PasswordSalt = [], Role = Role.Learner
+        });
+        await context.SaveChangesAsync();
+        var service = CreateService(context, 7);
+        var initial = await service.SetJlptGoalAsync(new SetJlptGoalRequest
+        {
+            TargetCertificateLevelId = 71002, DailyStudyMinutes = 30, DeclaredJlptCertificateCode = "N3",
+        }, default);
+        Assert.True(initial.IsSuccess, initial.ErrorMessage);
+
+        context.ChangeTracker.Clear();
+        var updated = await service.SetJlptGoalAsync(new SetJlptGoalRequest
+        {
+            TargetCertificateLevelId = 71004, DailyStudyMinutes = 30,
+        }, default);
+        Assert.True(updated.IsSuccess, updated.ErrorMessage);
+        context.ChangeTracker.Clear();
+
+        var profile = await service.GetProfileAsync(default);
+        Assert.True(profile.IsSuccess, profile.ErrorMessage);
+        Assert.Equal("N3", profile.Result!.DeclaredJlptCertificateCode);
+        Assert.Equal("N3", (await context.Users.SingleAsync(x => x.Id == 7)).DeclaredJlptCertificateCode);
+    }
+
     [Fact]
     public async Task Set_goal_persists_target_exam_date_and_profile_returns_it()
     {
@@ -51,13 +167,15 @@ public sealed class UserProfileLearningGoalTests
         context.CertificateLevels.Add(level);
         await context.SaveChangesAsync();
 
-        var service = CreateService(context, userId: 7001);
-        var targetExamDate = DateTime.UtcNow.AddHours(7).Date.AddMonths(6);
+        var service = CreateService(context, userId: 7001, utcNow: new DateTime(2026, 11, 1, 0, 0, 0, DateTimeKind.Utc));
+        var targetExamDate = new DateTime(2026, 12, 6);
 
         var update = await service.SetJlptGoalAsync(new SetJlptGoalRequest
         {
             TargetJlptLevelId = level.Id,
             DailyStudyMinutes = 45,
+            DailyStudyMinutesMin = 45,
+            DailyStudyMinutesMax = 90,
             TargetExamDate = targetExamDate,
         }, CancellationToken.None);
         context.ChangeTracker.Clear();
@@ -69,7 +187,28 @@ public sealed class UserProfileLearningGoalTests
         Assert.Equal(level.Id, profile.Result!.TargetJlptLevelId);
         Assert.Equal("N5", profile.Result.TargetJlptLevelName);
         Assert.Equal(45, profile.Result.DailyStudyMinutes);
+        Assert.Equal(45, profile.Result.DailyStudyMinutesMin);
+        Assert.Equal(90, profile.Result.DailyStudyMinutesMax);
+        Assert.Equal(71, profile.Result.TargetCertificateTypeId);
         Assert.Equal(targetExamDate, profile.Result.TargetExamDate);
+    }
+
+    [Theory]
+    [InlineData(60, 30)]
+    [InlineData(14, 30)]
+    [InlineData(30, 481)]
+    [InlineData(null, 60)]
+    public async Task Set_goal_rejects_invalid_study_range(int? minimum, int? maximum)
+    {
+        await using var context = CreateContext();
+        var service = CreateService(context, userId: 7001);
+        var response = await service.SetJlptGoalAsync(new SetJlptGoalRequest
+        {
+            TargetJlptLevelId = 71005, DailyStudyMinutes = 30,
+            DailyStudyMinutesMin = minimum, DailyStudyMinutesMax = maximum,
+        }, CancellationToken.None);
+        Assert.False(response.IsSuccess);
+        Assert.Equal(400, response.StatusCode);
     }
 
     [Fact]
@@ -151,7 +290,14 @@ public sealed class UserProfileLearningGoalTests
 
         context.CertificateTypes.Add(certType);
         context.CertificateLevels.AddRange(levelN5, levelN4, levelN3);
-        context.LanguageSkills.Add(skill);
+        var assessmentSkills = new[]
+        {
+            skill,
+            new LanguageSkill { Id = 2, Name = "Vocabulary" },
+            new LanguageSkill { Id = 3, Name = "Reading" },
+            new LanguageSkill { Id = 4, Name = "Listening" },
+        };
+        context.LanguageSkills.AddRange(assessmentSkills);
         context.Lessons.Add(new Lesson
         {
             Id = 5501,
@@ -162,13 +308,19 @@ public sealed class UserProfileLearningGoalTests
             LanguageSkill = skill,
             SortOrder = 1,
         });
-        context.MockTests.AddRange(
-            CreateMiniTest(105, levelN5, skill, 50, 501, 502),
-            CreateMiniTest(104, levelN4, skill, 40, 401, 402),
-            CreateMiniTest(103, levelN3, skill, 30, 301, 302));
+        context.MockTests.Add(new MockTest
+        {
+            Title = "Đánh giá N5",
+            TimeLimitMinutes = 20,
+            CertificateLevel = levelN5,
+            Sections = assessmentSkills.Select(CreatePlacementSection).ToList(),
+        });
         context.Users.Add(new UserAccount
         {
             Id = 7004,
+            TargetCertificateLevelId = levelN5.Id,
+            DailyStudyMinutes = 45,
+            TargetExamDate = new DateTime(2026, 12, 6),
             Email = "tz-boundary@example.test",
             PasswordHash = [],
             PasswordSalt = [],
@@ -176,9 +328,9 @@ public sealed class UserProfileLearningGoalTests
         });
         await context.SaveChangesAsync();
 
-        // 1) 2026-10-26T16:59:59Z == 2026-10-26 23:59:59 ICT (Vietnam date is still Oct 26).
-        // Exam date 2026-10-27 is 1 day ahead in Vietnam time -> valid in Goal, Status, and LearningPath.
-        var beforeVnMidnightUtc = new DateTime(2026, 10, 26, 16, 59, 59, DateTimeKind.Utc);
+        // 1) 2026-12-05T16:59:59Z == 2026-12-05 23:59:59 ICT (Vietnam date is still Dec 5).
+        // Exam date 2026-12-06 is 1 day ahead in Vietnam time -> valid in Goal, Status, and LearningPath.
+        var beforeVnMidnightUtc = new DateTime(2026, 12, 5, 16, 59, 59, DateTimeKind.Utc);
         var currentClock = beforeVnMidnightUtc;
 
         var claims = new Mock<IClaimService>();
@@ -197,24 +349,15 @@ public sealed class UserProfileLearningGoalTests
             .Setup(c => c.GenerateLearningPathJsonAsync(7004, It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((int _, string prompt, CancellationToken _) =>
             {
-                var days = int.Parse(System.Text.RegularExpressions.Regex.Match(
-                    prompt, @"Lập đúng (\d+) ngày").Groups[1].Value);
+                var days = int.Parse(System.Text.RegularExpressions.Regex.Match(prompt, @"Lập đúng (\d+) ngày").Groups[1].Value);
                 return JsonSerializer.Serialize(new
                 {
-                    summary = "Lộ trình ôn tập JLPT",
-                    strengths = new[] { "Từ vựng" },
-                    weaknesses = new[] { "Ngữ pháp" },
-                    feasibility = "Khả thi",
+                    summary = "Lộ trình theo ngày hợp lệ ở múi giờ Việt Nam",
+                    skillFeedback = new[] { "vocabulary", "grammar", "reading", "listening" }.Select(skill => new
+                    { skillCode = skill, comment = "Nhận xét theo dữ liệu đã cung cấp.", recommendation = "Bổ sung đánh giá còn thiếu." }),
                     focusTopics = new[] { "N5" },
-                    isExamDateRealistic = true,
-                    recommendedStudyDays = days,
                     dailySchedules = Enumerable.Range(1, days).Select(day => new
-                    {
-                        day,
-                        title = $"Ngày {day}",
-                        focus = "Ôn tập ngữ pháp",
-                        lessonIds = new[] { 5501 },
-                    }),
+                    { day, title = "Ôn tập nền tảng", focus = "Ôn ngữ pháp", lessonIds = new[] { 5501 } })
                 });
             });
         var learningPathService = new LearningPathService(
@@ -227,29 +370,19 @@ public sealed class UserProfileLearningGoalTests
         };
 
         var start = await placementService.StartPlacementTestAsync(CancellationToken.None);
+        Assert.True(start.IsSuccess, start.ErrorMessage);
         var submit = await placementService.SubmitPlacementTestAsync(
             start.Result!.AttemptId,
-            new SubmitPlacementTestRequest
-            {
-                Answers =
-                [
-                    new AnswerSubmissionItem { QuestionId = 501, SelectedOptionId = 5011 },
-                    new AnswerSubmissionItem { QuestionId = 502, SelectedOptionId = 5021 },
-                    new AnswerSubmissionItem { QuestionId = 401, SelectedOptionId = 4011 },
-                    new AnswerSubmissionItem { QuestionId = 402, SelectedOptionId = 4021 },
-                    new AnswerSubmissionItem { QuestionId = 301, SelectedOptionId = 3011 },
-                    new AnswerSubmissionItem { QuestionId = 302, SelectedOptionId = 3021 },
-                ],
-            },
+            new SubmitPlacementTestRequest { Answers = [] },
             CancellationToken.None);
         Assert.True(submit.IsSuccess);
 
-        var oct27Date = new DateTime(2026, 10, 27);
+        var examDate = new DateTime(2026, 12, 6);
         var goalBeforeRollover = await profileService.SetJlptGoalAsync(new SetJlptGoalRequest
         {
             TargetJlptLevelId = levelN5.Id,
             DailyStudyMinutes = 45,
-            TargetExamDate = oct27Date,
+            TargetExamDate = examDate,
         }, CancellationToken.None);
         Assert.True(goalBeforeRollover.IsSuccess);
 
@@ -259,18 +392,17 @@ public sealed class UserProfileLearningGoalTests
         var pathBeforeRollover = await learningPathService.GenerateLearningPathAsync(
             new GenerateLearningPathRequest(),
             CancellationToken.None);
-        Assert.True(pathBeforeRollover.IsSuccess,
-            $"HTTP {pathBeforeRollover.StatusCode}: {pathBeforeRollover.ErrorCode} {pathBeforeRollover.ErrorMessage}");
+        Assert.True(pathBeforeRollover.IsSuccess);
 
-        // 2) 1 second later: 2026-10-26T17:00:00Z == 2026-10-27 00:00:00 ICT (Vietnam date rolled over to Oct 27, while UTC is still Oct 26!).
-        // Exam date 2026-10-27 must now be rejected by SetJlptGoal, mark IsReadyForLearningPath=false in Status, and be rejected by LearningPath!
-        currentClock = new DateTime(2026, 10, 26, 17, 0, 0, DateTimeKind.Utc);
+        // 2) 1 second later: 2026-12-05T17:00:00Z == 2026-12-06 00:00:00 ICT (Vietnam date rolled over to Dec 6, while UTC is still Dec 5!).
+        // Exam date 2026-12-06 must now be rejected by SetJlptGoal, mark IsReadyForLearningPath=false in Status, and be rejected by LearningPath!
+        currentClock = new DateTime(2026, 12, 5, 17, 0, 0, DateTimeKind.Utc);
 
         var goalAtVnRollover = await profileService.SetJlptGoalAsync(new SetJlptGoalRequest
         {
             TargetJlptLevelId = levelN5.Id,
             DailyStudyMinutes = 45,
-            TargetExamDate = oct27Date,
+            TargetExamDate = examDate,
         }, CancellationToken.None);
         Assert.False(goalAtVnRollover.IsSuccess);
         Assert.Equal((int)HttpStatusCode.BadRequest, goalAtVnRollover.StatusCode);
@@ -287,95 +419,57 @@ public sealed class UserProfileLearningGoalTests
         Assert.Equal((int)HttpStatusCode.Conflict, pathAtVnRollover.StatusCode);
         Assert.Equal("PATH_PREVIEW_REQUIRED", pathAtVnRollover.ErrorCode);
 
-        // 3) At UTC midnight 2026-10-27T00:00:00Z (2026-10-27 07:00:00 ICT), Oct 27 is still rejected and Oct 28 is accepted by all three.
-        currentClock = new DateTime(2026, 10, 27, 0, 0, 0, DateTimeKind.Utc);
-        var oct28Date = new DateTime(2026, 10, 28);
+        // 3) At UTC midnight 2026-12-06T00:00:00Z (2026-12-06 07:00:00 ICT), Dec 6 is still rejected and Jul 4 is accepted by all three.
+        currentClock = new DateTime(2026, 12, 6, 0, 0, 0, DateTimeKind.Utc);
+        var nextExamDate = new DateTime(2027, 7, 4);
 
-        var goalOct28 = await profileService.SetJlptGoalAsync(new SetJlptGoalRequest
+        var goalNextExam = await profileService.SetJlptGoalAsync(new SetJlptGoalRequest
         {
             TargetJlptLevelId = levelN5.Id,
             DailyStudyMinutes = 45,
-            TargetExamDate = oct28Date,
+            TargetExamDate = nextExamDate,
         }, CancellationToken.None);
-        Assert.True(goalOct28.IsSuccess);
+        Assert.True(goalNextExam.IsSuccess);
 
-        var statusOct28 = await placementService.GetStatusAsync(CancellationToken.None);
-        Assert.True(statusOct28.Result!.IsReadyForLearningPath);
+        var statusNextExam = await placementService.GetStatusAsync(CancellationToken.None);
+        Assert.True(statusNextExam.Result!.IsReadyForLearningPath);
 
         // An active path exists, so changing the target date must use the existing
         // preview/confirmation replacement flow instead of silently regenerating it.
-        var pathOct28 = await learningPathService.PreviewLearningPathAsync(
+        var pathNextExam = await learningPathService.PreviewLearningPathAsync(
             new PreviewLearningPathRequest
             {
                 StartingJlptLevelId = levelN5.Id,
                 TargetJlptLevelId = levelN5.Id,
             },
             CancellationToken.None);
-        Assert.True(pathOct28.IsSuccess,
-            $"Expected a valid target date to allow preview, got HTTP {pathOct28.StatusCode}, code '{pathOct28.ErrorCode}', message '{pathOct28.ErrorMessage}'.");
+        Assert.True(pathNextExam.IsSuccess,
+            $"Expected a valid target date to allow preview, got HTTP {pathNextExam.StatusCode}, code '{pathNextExam.ErrorCode}', message '{pathNextExam.ErrorMessage}'.");
     }
 
-    private static MockTest CreateMiniTest(
-        int testId,
-        CertificateLevel level,
-        LanguageSkill skill,
-        int sectionId,
-        int q1Id,
-        int q2Id)
+    private static MockTestSection CreatePlacementSection(LanguageSkill skill, int index)
     {
-        var test = new MockTest
+        var questions = Enumerable.Range(1, 5).Select(questionNumber => new MockQuestion
         {
-            Id = testId,
-            Title = $"Test {level.Code}",
-            Description = $"Test {level.Code}",
-            TimeLimitMinutes = 20,
-            CertificateLevelId = level.Id,
-            CertificateLevel = level,
+            QuestionText = $"Q{questionNumber}",
+            SortOrder = questionNumber,
+            AudioUrl = skill.Name == "Listening" ? "https://example.invalid/audio.mp3" : null,
+            Options =
+            [
+                new MockQuestionOption { OptionText = "A", IsCorrect = true, SortOrder = 1 },
+                new MockQuestionOption { OptionText = "B", IsCorrect = false, SortOrder = 2 },
+            ],
+        }).ToList();
+        return new MockTestSection
+        {
+            LanguageSkill = skill,
+            Title = skill.Name,
+            SortOrder = index + 1,
+            Questions = questions,
         };
-        test.Sections =
-        [
-            new MockTestSection
-            {
-                Id = sectionId,
-                MockTestId = testId,
-                MockTest = test,
-                LanguageSkillId = skill.Id,
-                LanguageSkill = skill,
-                Title = $"{level.Code} Section",
-                SortOrder = 1,
-                Questions =
-                [
-                    new MockQuestion
-                    {
-                        Id = q1Id,
-                        MockTestSectionId = sectionId,
-                        QuestionText = $"Q{q1Id}",
-                        SortOrder = 1,
-                        Options =
-                        [
-                            new MockQuestionOption { Id = q1Id * 10 + 1, MockQuestionId = q1Id, OptionText = "A", IsCorrect = true, SortOrder = 1 },
-                            new MockQuestionOption { Id = q1Id * 10 + 2, MockQuestionId = q1Id, OptionText = "B", IsCorrect = false, SortOrder = 2 },
-                        ],
-                    },
-                    new MockQuestion
-                    {
-                        Id = q2Id,
-                        MockTestSectionId = sectionId,
-                        QuestionText = $"Q{q2Id}",
-                        SortOrder = 2,
-                        Options =
-                        [
-                            new MockQuestionOption { Id = q2Id * 10 + 1, MockQuestionId = q2Id, OptionText = "A", IsCorrect = true, SortOrder = 1 },
-                            new MockQuestionOption { Id = q2Id * 10 + 2, MockQuestionId = q2Id, OptionText = "B", IsCorrect = false, SortOrder = 2 },
-                        ],
-                    },
-                ],
-            },
-        ];
-        return test;
     }
 
-    private static UserProfileService CreateService(AppDbContext context, int userId)
+    private static UserProfileService CreateService(AppDbContext context, int userId, DateTime? utcNow = null)
     {
         var claims = new Mock<IClaimService>();
         claims.Setup(item => item.GetUserClaim())
@@ -383,7 +477,10 @@ public sealed class UserProfileLearningGoalTests
         return new UserProfileService(
             new UnitOfWork(context),
             Mock.Of<IFileStorageService>(),
-            claims.Object);
+            claims.Object)
+        {
+            UtcNowProvider = () => utcNow ?? DateTime.UtcNow,
+        };
     }
 
     private static AppDbContext CreateContext()

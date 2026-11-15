@@ -12,6 +12,7 @@ namespace RikiPath.Domain.Entities
         public string? Email { get; set; }
         public string? PhoneNumber { get; set; }
         public string? FirebaseUid { get; set; }
+        public string? GoogleSubject { get; set; }
         public bool IsPhoneVerified { get; set; } = false;
         public bool IsEmailVerified { get; set; } = false;
         public Role Role { get; set; }
@@ -19,10 +20,13 @@ namespace RikiPath.Domain.Entities
 
         public bool SystemNotificationsEnabled { get; set; } = true;
         public bool EmailNotificationsEnabled { get; set; } = true;
+        public int? DailyStudyMinutesMin { get; set; }
+        public int? DailyStudyMinutesMax { get; set; }
         public int DailyStudyMinutes { get; set; } = 30;
 
         /// <summary>Which certification level the learner is currently targeting — e.g. "JLPT N4".</summary>
         public int? TargetCertificateLevelId { get; set; }
+        public string? DeclaredJlptCertificateCode { get; set; }
         public CertificateLevel? TargetCertificateLevel { get; set; }
         /// <summary>Self-selected starting level; never inferred from an assessment.</summary>
         public int? StartingCertificateLevelId { get; set; }

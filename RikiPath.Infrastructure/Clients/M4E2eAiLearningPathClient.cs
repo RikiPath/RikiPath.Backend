@@ -13,10 +13,10 @@ namespace RikiPath.Infrastructure.Clients;
 public sealed class M4E2eAiLearningPathClient : IAiLearningPathClient
 {
     private static readonly Regex DayCountPattern = new(
-        @"ĐÚNG\s+(?<days>\d+)\s+NGÀY liên tục",
+        @"(?:ĐÚNG|Lập đúng)\s+(?<days>\d+)\s+NGÀY",
         RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
     private static readonly Regex LessonIdPattern = new(
-        @"(?m)^-\s+id=(?<id>\d+)\s+\|",
+        @"(?m)^\s*(?:-\s*)?id=(?<id>\d+)\s+\|",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     public Task<string> GenerateLearningPathJsonAsync(
@@ -58,6 +58,8 @@ public sealed class M4E2eAiLearningPathClient : IAiLearningPathClient
         var response = new
         {
             summary = "[M4E2E TEST STUB — NOT REAL AI OUTPUT] Deterministic integration-test response.",
+            skillFeedback = new[] { "vocabulary", "grammar", "reading", "listening" }.Select(skill => new
+            { skillCode = skill, comment = "Dữ liệu mô phỏng, không phải nhận xét AI thật.", recommendation = "Chỉ dùng để kiểm thử." }),
             strengths = new[] { "M4E2E test data" },
             weaknesses = new[] { "Not assessed by an AI model" },
             feasibility = "Test-only deterministic response; no model was called.",

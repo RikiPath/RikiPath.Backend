@@ -19,6 +19,7 @@ namespace RikiPath.Domain.Entities
 
         public string? MeetingLink { get; set; }
         public DateTime? CompletedAt { get; set; }
+        public DateTime? AttendedAt { get; set; }
 
         // Bản chụp thù lao nullable để giữ nguyên mọi booking lịch sử.
         public int? CompensationLevelId { get; set; }

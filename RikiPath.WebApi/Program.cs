@@ -44,12 +44,12 @@ internal class Program
         if (!payOsSection.Exists()) payOsSection = configuration.GetSection("PayOsSettings");
         if (!payOsSection.Exists()) payOsSection = configuration.GetSection("PayOs");
         appSettings.PayOs = payOsSection.Get<PayOsSettings>() ?? appSettings.PayOs ?? new PayOsSettings();
+        appSettings.GoogleAuth = configuration.GetSection("GoogleAuth").Get<GoogleAuthSettings>()
+                                ?? appSettings.GoogleAuth;
         builder.Services.AddSingleton(appSettings);
 
         builder.Services.Configure<PayOsSettings>(payOsSection);
         builder.Services.Configure<AiSettings>(configuration.GetSection("Ai"));
-        builder.Services.Configure<AwsSettings>(configuration.GetSection("AWS"));
-        builder.Services.Configure<OpenRouterSettings>(configuration.GetSection("OpenRouter"));
         builder.Services.AddOptions<AmazonTranscribeSettings>()
             .Bind(configuration.GetSection("AmazonTranscribe"))
             .Validate(settings => settings.Language == "ja-JP" && settings.SampleRate == 16000,
@@ -248,7 +248,7 @@ internal class Program
             builder.Services.AddScoped<IFileStorageService, LocalQaFileStorageService>();
         }
 
-        var manuallyRegisteredClientInterfaces = new[] { typeof(IPaymentGatewayClient), typeof(IAiLearningPathClient), typeof(IAiGradingClient), typeof(IGeminiOcrClient) };
+        var manuallyRegisteredClientInterfaces = new[] { typeof(IPaymentGatewayClient), typeof(IAiLearningPathClient), typeof(IAiGradingClient), typeof(IAiOcrClient), typeof(IAiContentAuthoringClient), typeof(IAiEssayGradingClient), typeof(IAiContentReviewClient), typeof(ISpeechRecognitionClient) };
 
         if (Type.GetType("RikiPath.Infrastructure.Clients.PayOsClient, RikiPath.Infrastructure") != null)
         {
@@ -260,71 +260,14 @@ internal class Program
             });
         }
 
-        if (Type.GetType("RikiPath.Infrastructure.Clients.AiLearningPathClient, RikiPath.Infrastructure") != null)
+        builder.Services.AddOpenAiFeatures(configuration);
+        builder.Services.AddScoped<RikiPath.Application.Services.SubscriptionAccessService>();
+        builder.Services.AddScoped<RikiPath.Application.Services.ManualContentService>();
+        builder.Services.AddScoped<RikiPath.Application.Services.HomeworkService>();
+        if (builder.Environment.IsEnvironment("M4E2E"))
         {
-            if (builder.Environment.IsEnvironment("M4E2E"))
-            {
-                // M4E2E must never fall through to an external AI provider.
-                builder.Services.AddSingleton<IAiLearningPathClient, M4E2eAiLearningPathClient>();
-            }
-            else
-            {
-                var explicitlyConfiguredProvider = configuration["Ai:LearningPathProvider"] ??
-                                                   configuration["AppSettings:Ai:LearningPathProvider"];
-                var openRouterApiKey = configuration["OPENROUTER_API_KEY"] ??
-                                       configuration["OpenRouter:ApiKey"];
-                var learningPathProvider = explicitlyConfiguredProvider ??
-                                           (!string.IsNullOrWhiteSpace(openRouterApiKey)
-                                               ? "OpenRouter"
-                                               : appSettings?.Ai?.LearningPathProvider ?? "OpenRouter");
-                if (string.Equals(learningPathProvider, "OpenRouter", StringComparison.OrdinalIgnoreCase))
-                {
-                    builder.Services.AddHttpClient<IAiLearningPathClient, OpenRouterAiLearningPathClient>(client =>
-                        client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json")));
-                }
-                else if (string.Equals(learningPathProvider, "Gemini", StringComparison.OrdinalIgnoreCase))
-                {
-                    builder.Services.AddHttpClient<IAiLearningPathClient, AiLearningPathClient>(client =>
-                    {
-                        var baseUrl = appSettings?.Ai?.BaseUrl;
-                        if (!string.IsNullOrEmpty(baseUrl)) client.BaseAddress = new Uri(baseUrl);
-                        client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-
-                        var apiKey = appSettings?.Ai?.ApiKey;
-                        if (!string.IsNullOrWhiteSpace(apiKey))
-                            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
-                    });
-                }
-                else if (string.Equals(learningPathProvider, "Bedrock", StringComparison.OrdinalIgnoreCase))
-                {
-                    builder.Services.AddHttpClient<IAiLearningPathClient, BedrockAiLearningPathClient>(client =>
-                        client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json")));
-                }
-                else
-                {
-                    throw new InvalidOperationException(
-                        $"Ai:LearningPathProvider '{learningPathProvider}' không được hỗ trợ. Dùng OpenRouter, Bedrock hoặc Gemini.");
-                }
-            }
-        }
-
-        if (Type.GetType("RikiPath.Infrastructure.Clients.AiGradingClient, RikiPath.Infrastructure") != null)
-        {
-            builder.Services.AddHttpClient<IAiGradingClient, AiGradingClient>(client =>
-            {
-                var baseUrl = appSettings?.Ai?.BaseUrl;
-                if (!string.IsNullOrEmpty(baseUrl)) client.BaseAddress = new Uri(baseUrl);
-                client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-
-                var apiKey = appSettings?.Ai?.ApiKey;
-                if (!string.IsNullOrWhiteSpace(apiKey))
-                    client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
-            });
-        }
-
-        if (Type.GetType("RikiPath.Infrastructure.Clients.GeminiOcrClient, RikiPath.Infrastructure") != null)
-        {
-            builder.Services.AddHttpClient<IGeminiOcrClient, GeminiOcrClient>();
+            // End-to-end fixtures must not call an external AI provider.
+            builder.Services.AddSingleton<IAiLearningPathClient, M4E2eAiLearningPathClient>();
         }
 
         var clientInterfaces = applicationAssembly.GetTypes()

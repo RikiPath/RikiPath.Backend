@@ -1,4 +1,5 @@
-﻿using Microsoft.EntityFrameworkCore;
+using RikiPath.Application.Services;
+using Microsoft.EntityFrameworkCore;
 using RikiPath.Application.Helpers;
 using RikiPath.Application.Responses.Content;
 using RikiPath.Domain.Enums;
@@ -85,12 +86,13 @@ namespace RikiPath.Application.Handlers
             Dictionary<int, string> SectionCodeById,
             HashSet<string> OpenRowKeys);
 
-        private sealed class SectionBuilder(string code, string title, int sortOrder, int firstRow)
+        private sealed class SectionBuilder(string code, string title, int sortOrder, int firstRow, string? explicitSkill)
         {
             public string Code { get; } = code;
             public string Title { get; } = title;
             public int SortOrder { get; } = sortOrder;
             public int FirstRow { get; } = firstRow;
+            public string? ExplicitSkill { get; } = explicitSkill;
             public List<MockQuestionPayloadResponse> Questions { get; } = [];
         }
 
@@ -137,7 +139,7 @@ namespace RikiPath.Application.Handlers
                     ["certificateLevelCode"] = levelCode,
                     ["isPlacementAssessment"] = isPlacement.ToString().ToLowerInvariant(),
                     ["rows"] = $"{group.Min(r => r.RowNumber)}–{group.Max(r => r.RowNumber)} ({group.Count} dòng)",
-                    ["questionCount"] = group.Count(row => ImportHandlerSupport.Clean(row.Get("QuestionText")) is not null).ToString(),
+                    ["questionCount"] = group.Count(row => row.Has("QuestionText") || row.Has("ImageUrl")).ToString(),
                     ["questionTypes"] = string.Join(", ", group
                         .Select(row => ImportHandlerSupport.Clean(row.Get("QuestionType")) ?? "SingleChoice")
                         .GroupBy(type => type, StringComparer.OrdinalIgnoreCase)
@@ -207,7 +209,7 @@ namespace RikiPath.Application.Handlers
                     seenSortOrders[sortOrder] = row.RowNumber;
 
                 var text = ImportHandlerSupport.Clean(row.Get("QuestionText"));
-                if (text is null) errors.Add($"{rp}Thiếu cột QuestionText.");
+                if (text is null && string.IsNullOrWhiteSpace(row.Get("ImageUrl"))) errors.Add($"{rp}Thiếu cột QuestionText.");
 
                 var questionType = ImportHandlerSupport.Clean(row.Get("QuestionType")) ?? "SingleChoice";
                 var supportedQuestionTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
@@ -220,30 +222,46 @@ namespace RikiPath.Application.Handlers
                 JsonElement? interactionData = ParseJsonCell(row.Get("InteractionDataJson"), "InteractionDataJson", rp, errors);
                 JsonElement? answerKey = ParseJsonCell(row.Get("AnswerKeyJson"), "AnswerKeyJson", rp, errors);
 
-                var audio = ImportHandlerSupport.CheckUrl(row.Get("AudioUrl"), "AudioUrl", rp, errors);
+                var rawAudio = row.Get("AudioUrl");
+                var certificateSection = sectionCode is null ? null : certByCode.GetValueOrDefault(sectionCode);
+                var splitCombinedSection = certificateSection?.Code.Equals("N5_GRAMMAR_READING", StringComparison.OrdinalIgnoreCase) == true;
+                var rowSkill = ImportHandlerSupport.Clean(row.Get("Language Skill Name"))?.ToUpperInvariant();
+                var combinedSkill = splitCombinedSection ? (rowSkill ?? (questionType == "Reading" ? "READING" : "GRAMMAR")) : null;
+                if (splitCombinedSection && combinedSkill is not ("GRAMMAR" or "READING"))
+                    errors.Add($"{rp}Phần '{sectionCode}' chỉ nhận kỹ năng Grammar hoặc Reading.");
+                var skillName = combinedSkill ?? (sectionCode is null ? null : explicitSkills.GetValueOrDefault(sectionCode)?.FirstOrDefault()
+                    ?? InferSkillName(certificateSection?.Name ?? string.Empty) ?? InferSkillName(sectionCode));
+                var audioError = ImportHandlerSupport.ValidateMockListeningAudio(
+                    questionType, rawAudio, skillName, certificateSection?.Name, sectionCode);
+                errors.AddRange(row.MediaImportErrors.Select(error => rp + error));
+                if (audioError is not null) errors.Add(rp + audioError);
+                var audio = audioError is null ? ImportHandlerSupport.CheckUrl(rawAudio, "AudioUrl", rp, errors) : null;
                 var image = ImportHandlerSupport.CheckUrl(row.Get("ImageUrl"), "ImageUrl", rp, errors);
                 var options = questionType.Equals("SingleChoice", StringComparison.OrdinalIgnoreCase)
                     || questionType.Equals("Listening", StringComparison.OrdinalIgnoreCase)
                     || questionType.Equals("Reading", StringComparison.OrdinalIgnoreCase)
-                    ? ImportHandlerSupport.ParseOptions(row, OptionHeaders, "CorrectOptionNumber", rp, errors)
+                    ? ImportHandlerSupport.ParseOptions(row, OptionHeaders, "CorrectOptionNumber", rp, errors, includeImages: true)
                     : questionType.Equals("MultipleChoice", StringComparison.OrdinalIgnoreCase)
                         ? ParseMultipleChoiceOptions(row, rp, errors)
                         : ParseStructuredQuestion(questionType, interactionData, answerKey, rp, errors);
 
-                if (errors.Count > before || sectionCode is null || text is null || options is null) continue;
+                if (errors.Count > before || sectionCode is null || (text is null && image is null) || options is null) continue;
 
                 if (certByCode.GetValueOrDefault(sectionCode) is not { } certSection) continue; // lỗi đã ghi ở bước trên
 
-                if (!sectionByCode.TryGetValue(sectionCode, out var section))
+                var sectionKey = combinedSkill is null ? sectionCode : sectionCode + "|" + combinedSkill;
+                if (!sectionByCode.TryGetValue(sectionKey, out var section))
                 {
-                    section = new SectionBuilder(certSection.Code, SectionTitleOf(certSection), sections.Count + 1, row.RowNumber);
-                    sectionByCode[sectionCode] = section;
+                    var sectionTitle = combinedSkill is null ? SectionTitleOf(certSection)
+                        : combinedSkill == "READING" ? "Đọc hiểu" : "Ngữ pháp";
+                    section = new SectionBuilder(certSection.Code, sectionTitle, sections.Count + 1, row.RowNumber, combinedSkill);
+                    sectionByCode[sectionKey] = section;
                     sections.Add(section);
                 }
                 section.Questions.Add(new MockQuestionPayloadResponse
                 {
                     SortOrder = sortOrder,
-                    QuestionText = text,
+                    QuestionText = text ?? string.Empty,
                     QuestionType = questionType,
                     InteractionData = interactionData,
                     AnswerKey = answerKey,
@@ -270,6 +288,9 @@ namespace RikiPath.Application.Handlers
                     Questions = s.Questions.OrderBy(q => q.SortOrder).ToList(),
                 });
             }
+
+            var coverageError = ImportHandlerSupport.ValidateMockTestCoverage(levelCode, sectionPayloads, ctx.SkillNameById);
+            if (coverageError is not null) errors.Add(P(first) + coverageError);
 
             if (errors.Count > 0)
             {
@@ -326,7 +347,7 @@ namespace RikiPath.Application.Handlers
                 if (s.Questions is null) continue;
                 foreach (var q in s.Questions.Where(q => !q.IsDeleted))
                 {
-                    var opts = (q.Options ?? []).Where(o => !o.IsDeleted).OrderBy(o => o.SortOrder).Select(o => (o.OptionText, o.IsCorrect));
+                    var opts = (q.Options ?? []).Where(o => !o.IsDeleted).OrderBy(o => o.SortOrder).Select(o => ($"{o.OptionText}\u001e{o.ImageUrl}", o.IsCorrect));
                     oldQuestions[q.SortOrder] = ImportHandlerSupport.QuestionSignature(
                         s.Title, $"{q.QuestionType}|{q.InteractionDataJson}|{q.AnswerKeyJson}|{q.QuestionText}", q.Explanation, q.AudioUrl, q.ImageUrl, opts);
                 }
@@ -337,7 +358,7 @@ namespace RikiPath.Application.Handlers
                 foreach (var q in s.Questions)
                     newQuestions[q.SortOrder] = ImportHandlerSupport.QuestionSignature(
                         s.Title, $"{q.QuestionType}|{q.InteractionData?.GetRawText()}|{q.AnswerKey?.GetRawText()}|{q.QuestionText}", q.Explanation, q.AudioUrl, q.ImageUrl,
-                        q.Options.Select(o => (o.OptionText, o.IsCorrect)));
+                        q.Options.Select(o => ($"{o.OptionText}\u001e{o.ImageUrl}", o.IsCorrect)));
 
             var questionSummary = ImportHandlerSupport.QuestionDiffSummary(oldQuestions, newQuestions);
             if (questionSummary is not null) changed["questions"] = questionSummary;
@@ -383,7 +404,10 @@ namespace RikiPath.Application.Handlers
             ExcelRow row, string rowPrefix, List<string> errors)
         {
             var initialErrorCount = errors.Count;
-            var values = OptionHeaders.Select(header => ImportHandlerSupport.Clean(row.Get(header))).ToList();
+            var images = OptionHeaders.Select(header =>
+                ImportHandlerSupport.CheckUrl(row.Get(header + "ImageUrl"), header + "ImageUrl", rowPrefix, errors)).ToList();
+            var values = OptionHeaders.Select((header, index) =>
+                ImportHandlerSupport.Clean(row.Get(header)) ?? (images[index] is null ? null : string.Empty)).ToList();
             if (values.Count(value => value is not null) < 2)
                 errors.Add($"{rowPrefix}MultipleChoice cần ít nhất 2 lựa chọn trong Option1..Option4.");
             var lastFilled = values.FindLastIndex(value => value is not null);
@@ -414,6 +438,7 @@ namespace RikiPath.Application.Handlers
                 {
                     SortOrder = item.index + 1,
                     OptionText = item.value!,
+                    ImageUrl = images[item.index],
                     IsCorrect = correct.Contains(item.index + 1)
                 }).ToList();
         }
@@ -438,17 +463,9 @@ namespace RikiPath.Application.Handlers
             if (answerKey is { ValueKind: JsonValueKind.Array } keyArray && keyArray.GetArrayLength() == 0)
                 errors.Add($"{rowPrefix}AnswerKeyJson không được là array rỗng.");
 
-            if (questionType.Equals("Ordering", StringComparison.OrdinalIgnoreCase)
-                && interactionData is { ValueKind: JsonValueKind.Object } orderingData
-                && orderingData.TryGetProperty("tokens", out var tokens))
-            {
-                if (tokens.ValueKind != JsonValueKind.Array || tokens.GetArrayLength() == 0)
-                    errors.Add($"{rowPrefix}Ordering cần InteractionDataJson.tokens là array có phần tử.");
-                else if (answerKey is null || answerKey.Value.ValueKind != JsonValueKind.Array)
-                    errors.Add($"{rowPrefix}Ordering cần AnswerKeyJson là array đúng thứ tự.");
-                else if (tokens.GetArrayLength() != answerKey.Value.GetArrayLength())
-                    errors.Add($"{rowPrefix}Ordering: số token phải bằng số phần tử trong AnswerKeyJson.");
-            }
+            if (SentenceOrdering.IsType(questionType) &&
+                !SentenceOrdering.TryRead(interactionData, answerKey, out _, out _))
+                errors.Add(rowPrefix + SentenceOrdering.InvalidContentMessage);
             return errors.Count == initialErrorCount ? [] : null;
         }
 
@@ -456,7 +473,9 @@ namespace RikiPath.Application.Handlers
             SectionBuilder section, Dictionary<string, HashSet<string>> explicitSkills, DiffContext ctx, List<string> errors)
         {
             var prefix = $"Dòng {section.FirstRow}: Phần '{section.Title}': ";
-            explicitSkills.TryGetValue(section.Code, out var names);
+            var names = section.ExplicitSkill is { } skillName
+                ? new HashSet<string>(StringComparer.OrdinalIgnoreCase) { skillName }
+                : explicitSkills.GetValueOrDefault(section.Code);
 
             if (names is { Count: > 1 })
             {

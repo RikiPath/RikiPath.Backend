@@ -28,6 +28,7 @@ namespace RikiPath.WebApi.Controllers
         /// <response code="404">Cấp độ JLPT không khả dụng.</response>
         /// <response code="500">Không thể truy vấn nội dung học.</response>
         [HttpGet("lessons")]
+        [RequireSelfStudy]
         [ProducesResponseType(typeof(ApiResponse<LearningDiscoveryResponse>), StatusCodes.Status200OK)]
         [ProducesResponseType(typeof(ApiResponse<LearningDiscoveryResponse>), StatusCodes.Status400BadRequest)]
         [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -60,6 +61,7 @@ namespace RikiPath.WebApi.Controllers
         /// <response code="404">Không tìm thấy lesson này.</response>
         /// <response code="500">Lỗi server khi truy vấn dữ liệu.</response>
         [HttpGet("lessons/{lessonId:int}")]
+        [RequireSelfStudy]
         [ProducesResponseType(typeof(ApiResponse<LessonDetailResponse>), StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status401Unauthorized)]
         [ProducesResponseType(StatusCodes.Status403Forbidden)]

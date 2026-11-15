@@ -3,8 +3,12 @@ namespace RikiPath.Application.Responses.LearningPaths
     public class DailyScheduleResponse
     {
         public int Day { get; set; }
+        public DateTime? Date { get; set; }
         public string Title { get; set; } = string.Empty;
         public string Focus { get; set; } = string.Empty;
+        public int CoreStudyMinutes { get; set; }
+        public int OptionalStudyMinutes { get; set; }
+        public List<string> Skills { get; set; } = new();
 
         /// <summary>Id bài học trong hệ thống (để frontend mở đúng bài).</summary>
         public List<int> LessonIds { get; set; } = new();

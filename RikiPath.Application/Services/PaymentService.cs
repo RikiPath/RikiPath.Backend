@@ -149,26 +149,17 @@ public sealed class PaymentService(
         if (sub.PaymentStatus != PaymentStatus.Pending)
             return ApiResponse<bool>.Success(true, message: "Đơn đã được xử lý trước đó.");
 
+        if (!string.IsNullOrWhiteSpace(sub.PaymentTransactionId) &&
+            !string.Equals(sub.PaymentTransactionId, webhook.Data.PaymentLinkId, StringComparison.Ordinal))
+            return ApiResponse<bool>.Fail("Mã liên kết thanh toán không khớp với đơn hàng.");
+
         if (!callback.IsSuccess)
         {
             sub.PaymentStatus = PaymentStatus.Failed;
         }
         else
         {
-            var now = DateTime.UtcNow;
-
-            // Gia hạn: nếu đang còn hạn thì cộng nối tiếp từ EndDate, không phải từ "now"
-            var currentEnd = await unitOfWork.UserSubscriptions
-                .GetActiveEndDateAsync(sub.UserId, now, ct); // DateTime? của gói Paid còn hạn xa nhất
-
-            var start = currentEnd is not null && currentEnd > now ? currentEnd.Value : now;
-
-            sub.PaymentStatus = PaymentStatus.Paid;
-            sub.PaymentTransactionId = webhook.Data.Reference;
-            sub.StartDate = start;
-            sub.EndDate = start.AddDays(sub.SubscriptionPlan.DurationDays);
-            sub.AiGradingQuota = sub.SubscriptionPlan.AiGradingQuota;   // 3.000 / 6.500 / 10.000 / 2.000 điểm
-            sub.AiGradingUsedCount = 0;
+            SubscriptionAccessService.Activate(sub, webhook.Data.Reference);
         }
 
         await unitOfWork.SaveChangesAsync(ct);

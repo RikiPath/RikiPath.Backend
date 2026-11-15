@@ -8,9 +8,9 @@
 //    [ApiController]
 //    public class OcrController : ControllerBase
 //    {
-//        private readonly IGeminiOcrService _ocrService;
+//        private readonly IAiOcrService _ocrService;
 
-//        public OcrController(IGeminiOcrService ocrService)
+//        public OcrController(IAiOcrService ocrService)
 //        {
 //            _ocrService = ocrService;
 //        }

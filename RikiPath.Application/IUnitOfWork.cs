@@ -19,6 +19,7 @@ namespace RikiPath.Application
 
         // 3. Lessons & Learning Progress
         ILessonRepository Lessons { get; }
+        ITopicRepository Topics { get; }
         ILessonProgressRepository LessonProgresses { get; }
 
         // 4. Content Banks
@@ -69,6 +70,7 @@ namespace RikiPath.Application
 
         // 9. Paid Mentor 1-1 Service
         IMentorBookingRepository MentorBookings { get; }
+        IMentorReviewRepository MentorReviews { get; }
         IMentorChatMessageRepository MentorChatMessages { get; }
         INoteRepository Notes { get; }
         IMentorAvailabilityRepository MentorAvailabilities { get; }
@@ -93,6 +95,8 @@ namespace RikiPath.Application
         Task ExecuteInTransactionAsync(
             Func<CancellationToken, Task> operation,
             CancellationToken cancellationToken = default);
+        Task ExecuteLessonTopicApprovalAsync(Func<CancellationToken, Task> operation, CancellationToken cancellationToken);
+        Task ExecuteContentAuthorWriteAsync(int authorId, Func<CancellationToken, Task> operation, CancellationToken cancellationToken);
         Task<T> ExecuteScalarAsync<T>(string sql);
         Task ExecuteRawSqlAsync(string sql);
     }

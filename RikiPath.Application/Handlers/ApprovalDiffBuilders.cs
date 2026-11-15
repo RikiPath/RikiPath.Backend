@@ -226,6 +226,7 @@ namespace RikiPath.Application.Handlers
                     if (prop.Name.EndsWith("Id", StringComparison.Ordinal)) continue;
 
                     var key = char.ToLowerInvariant(prop.Name[0]) + prop.Name[1..];
+                    if (key == "topicTitle" && prop.Value.ValueKind == JsonValueKind.Null) continue;
                     var newValue = prop.Value.ValueKind switch
                     {
                         JsonValueKind.Null => null,
@@ -253,7 +254,7 @@ namespace RikiPath.Application.Handlers
                     result.Fields.Add(new ApprovalFieldDiffResponse
                     {
                         Field = key,
-                        Label = key,
+                        Label = key == "topicTitle" ? "Chủ đề" : key,
                         OldValue = oldValue,
                         NewValue = newValue,
                         IsChanged = changed,

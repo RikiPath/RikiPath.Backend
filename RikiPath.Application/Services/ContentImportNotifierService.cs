@@ -30,7 +30,7 @@ namespace RikiPath.Application.Services
                     Message = $"Có {requestCount} nội dung mới trong lô '{batchName}' đang chờ bạn kiểm duyệt.",
                     Type = "CONTENT_APPROVAL_PENDING",
                     IsRead = false,
-                    LinkUrl = "/admin/content-approvals", // Link dẫn Admin đến trang duyệt
+                    LinkUrl = "/admin/content-review",
                     CreatedDate = DateTime.UtcNow
                 }).ToList();
 

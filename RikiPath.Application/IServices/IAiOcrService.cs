@@ -2,7 +2,7 @@
 
 namespace RikiPath.Application.IServices
 {
-    public interface IGeminiOcrService
+    public interface IAiOcrService
     {
         Task<string> ScanJapaneseHandwritingAsync(IFormFile file);
     }

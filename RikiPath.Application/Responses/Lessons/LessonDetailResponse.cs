@@ -10,6 +10,7 @@ namespace RikiPath.Application.Responses.Lessons
         public string LanguageSkillName { get; set; } = string.Empty;
         public string Title { get; set; } = string.Empty;
         public string Content { get; set; } = string.Empty;
+        public string? AudioUrl { get; set; }
         public string? VideoUrl { get; set; }
         public string? AttachmentUrl { get; set; }
         public int OrderIndex { get; set; }

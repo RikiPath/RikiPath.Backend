@@ -101,18 +101,20 @@ namespace RikiPath.WebApi.Controllers
         /// <response code="400">Dữ liệu không hợp lệ.</response>
         /// <response code="401">Email hoặc mật khẩu sai.</response>
         /// <response code="500">Lỗi server khi xác thực.</response>
-        [HttpPost("google")]
-        public async Task<IActionResult> LoginWithGoogle([FromBody] GoogleLoginRequest request, CancellationToken cancellationToken)
-        {
-            var result = await authService.LoginWithGoogleAsync(request, cancellationToken);
-            return StatusCode((int)result.StatusCode, result);
-        }
-
         [HttpPost("login")]
         public async Task<IActionResult> Login([FromBody] LoginRequest request, CancellationToken cancellationToken)
         {
             var result = await authService.LoginAsync(request, cancellationToken);
             return StatusCode((int)result.StatusCode, result);
+        }
+
+        [AllowAnonymous]
+        [HttpPost("google")]
+        [Consumes("application/json")]
+        public async Task<IActionResult> ContinueWithGoogle([FromBody] GoogleAuthRequest request, CancellationToken cancellationToken)
+        {
+            var result = await authService.ContinueWithGoogleAsync(request, cancellationToken);
+            return StatusCode(result.StatusCode, result);
         }
 
         /// <summary>

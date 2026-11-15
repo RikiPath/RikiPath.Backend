@@ -5,10 +5,13 @@ namespace RikiPath.Application.Responses.Content
     {
         public string Title { get; set; } = string.Empty;
         public string? Description { get; set; }
+        public string? AudioUrl { get; set; }
         public int SortOrder { get; set; }
 
         public string CertificateLevelCode { get; set; } = string.Empty;
         public int CertificateLevelId { get; set; }
         public int LanguageSkillId { get; set; }
+        public int? TopicId { get; set; }
+        public string? TopicTitle { get; set; }
     }
 }

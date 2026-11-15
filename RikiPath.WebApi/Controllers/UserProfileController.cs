@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Authorization;
+﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using RikiPath.Application.IServices;
 using Microsoft.AspNetCore.Http;
@@ -82,10 +82,10 @@ namespace RikiPath.WebApi.Controllers
         /// </summary>
         /// <remarks>
         /// - Màn hình sử dụng: Profile -> JLPT Goal setting.
-        /// - Luồng xử lý: Lưu mục tiêu JLPT vào profile và có thể kích hoạt tính năng tạo learning path.
-        /// - Lưu ý cho FE: Yêu cầu Bearer Token. Field JlptLevelId là Required.
+        /// - Luồng xử lý: Lưu mục tiêu vào profile cho lần lập lộ trình tiếp theo; không thay đổi lộ trình đang hoạt động.
+        /// - Lưu ý cho FE: Yêu cầu Bearer Token. Gửi TargetCertificateLevelId (hoặc TargetJlptLevelId cũ), CertificateTypeId và thời gian cố định hoặc khoảng 15–480 phút.
         /// </remarks>
-        /// <param name="request">SetJlptGoalRequest: TargetJlptLevelId và DailyStudyMinutes; TargetExamDate (tùy chọn, phải sau hôm nay) để tạo lộ trình học.</param>
+        /// <param name="request">SetJlptGoalRequest: CertificateTypeId, TargetCertificateLevelId; DailyStudyMinutes hoặc DailyStudyMinutesMin/Max; TargetExamDate (tùy chọn, sau hôm nay). ClearTargetExamDate để xóa ngày thi.</param>
         /// <param name="cancellationToken">Token hủy request (Optional).</param>
         /// <response code="200">Thành công: Mục tiêu JLPT được lưu.</response>
         /// <response code="400">Dữ liệu không hợp lệ.</response>

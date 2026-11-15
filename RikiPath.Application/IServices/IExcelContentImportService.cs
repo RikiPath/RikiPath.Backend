@@ -1,4 +1,4 @@
-using RikiPath.Application.Requests.Content;
+﻿using RikiPath.Application.Requests.Content;
 using RikiPath.Application.Responses;
 using RikiPath.Application.Responses.Content;
 using RikiPath.Domain.Enums;
@@ -12,9 +12,14 @@ namespace RikiPath.Application.IServices
         /// mà file có); onlyType có giá trị -> Single upload (chỉ đọc đúng 1 sheet tương ứng, bỏ qua sheet khác dù file có).
         /// </summary>
         Task<ApiResponse<ImportPreviewResponse>> PreviewAsync(
-            Stream fileStream, string fileName, ImportEntityType? onlyType, CancellationToken cancellationToken);
+            Stream fileStream, string fileName, ImportEntityType? onlyType, CancellationToken cancellationToken,
+            Func<string, CancellationToken, Task<string>>? uploadLocalAudio = null,
+            Func<string, CancellationToken, Task<string>>? uploadLocalImage = null);
 
-        /// <summary>Step 2 + 3 - Tạo bản nháp (ContentApprovalRequest) cho các dòng New/Modified đã được xác nhận, rồi báo Admin.</summary>
+        ApiResponse<WorkbookPreviewResponse> PreviewWorkbook(Stream fileStream, string fileName, CancellationToken cancellationToken);
+        ApiResponse<byte[]> EditWorkbook(Stream fileStream, IReadOnlyList<WorkbookCellEdit> edits, CancellationToken cancellationToken);
+
+        /// <summary>Lưu các dòng New/Modified thành bản nháp của tác giả.</summary>
         Task<ApiResponse<ImportConfirmResponse>> ConfirmAsync(
             ConfirmImportRequest request, int actorUserId, CancellationToken cancellationToken);
     }

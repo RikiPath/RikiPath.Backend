@@ -72,6 +72,7 @@ public class AuthorPracticeQuestionDetails
 
 public class AuthorOptionDetails
 {
+    public string? ImageUrl { get; set; }
     public int Id { get; set; }
     public string OptionText { get; set; } = string.Empty;
     public bool IsCorrect { get; set; }

@@ -23,6 +23,7 @@ namespace RikiPath.Infrastructure
         public DbSet<LanguageSkill> LanguageSkills { get; set; }
 
         // Content
+        public DbSet<Topic> Topics { get; set; }
         public DbSet<Lesson> Lessons { get; set; }
         public DbSet<LessonProgress> LessonProgresses { get; set; }
 
@@ -57,6 +58,7 @@ namespace RikiPath.Infrastructure
         public DbSet<PracticeQuestionOption> PracticeQuestionOptions { get; set; }
         public DbSet<LearnerPracticeAnswer> LearnerPracticeAnswers { get; set; }
         public DbSet<HomeworkAssignment> HomeworkAssignments { get; set; }
+        public DbSet<HomeworkAssignmentLesson> HomeworkAssignmentLessons { get; set; }
         public DbSet<HomeworkSubmission> HomeworkSubmissions { get; set; }
 
         // AI learning path & AI grading
@@ -124,6 +126,9 @@ namespace RikiPath.Infrastructure
             modelBuilder.ApplyConfiguration(new LanguageSkillConfig());
 
             modelBuilder.ApplyConfiguration(new LessonConfig());
+            modelBuilder.ApplyConfiguration(new TopicConfig());
+            modelBuilder.ApplyConfiguration(new HomeworkAssignmentLessonConfig());
+            modelBuilder.ApplyConfiguration(new HomeworkAssignmentExerciseConfig());
             modelBuilder.ApplyConfiguration(new LessonProgressConfig());
 
             modelBuilder.ApplyConfiguration(new KanjiConfig());

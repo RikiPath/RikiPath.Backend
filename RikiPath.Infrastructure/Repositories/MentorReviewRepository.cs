@@ -1,0 +1,7 @@
+using RikiPath.Application.IRepositories;
+using RikiPath.Domain.Entities;
+
+namespace RikiPath.Infrastructure.Repositories;
+
+public sealed class MentorReviewRepository(AppDbContext context)
+    : GenericRepository<MentorReview>(context), IMentorReviewRepository { }

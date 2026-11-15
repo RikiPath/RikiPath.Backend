@@ -20,6 +20,7 @@ namespace RikiPath.Infrastructure.Repositories
             => await _context.MockTestSectionResults
                 .Include(x => x.MockTestSection)
                     .ThenInclude(s => s.LanguageSkill)
+                .Include(x => x.MockTestSection).ThenInclude(s => s.MockTest).ThenInclude(t => t.CertificateLevel)
                 .Where(x => !x.IsDeleted && x.MockTestAttemptId == practiceTestAttemptId)
                 .OrderBy(x => x.MockTestSection.SortOrder)
                 .ToListAsync(cancellationToken);

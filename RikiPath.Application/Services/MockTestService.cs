@@ -1,5 +1,6 @@
-using RikiPath.Domain.Entities;
+﻿using RikiPath.Domain.Entities;
 using RikiPath.Domain.Enums;
+using Microsoft.EntityFrameworkCore;
 using RikiPath.Application.IServices;
 using RikiPath.Application.Requests.MockTests;
 using RikiPath.Application.Requests.PlacementTests;
@@ -16,11 +17,19 @@ namespace RikiPath.Application.Services
     {
         private const string StatusInProgress = "in_progress";
         private const string StatusCompleted = "completed";
+        private static readonly JsonSerializerOptions MockSnapshotJson = new(JsonSerializerDefaults.Web);
+
+        private static bool IsSingleChoiceQuestion(string type) =>
+            type.Equals("SingleChoice", StringComparison.OrdinalIgnoreCase) ||
+            type.Equals("Reading", StringComparison.OrdinalIgnoreCase) ||
+            type.Equals("Listening", StringComparison.OrdinalIgnoreCase);
 
         private sealed class MockAttemptSnapshot
         {
             public MockAttemptSnapshot() { }
             public int MockTestId { get; set; }
+            public string? Title { get; set; }
+            public List<int> PreviouslyWrongQuestionIds { get; set; } = [];
             public List<MockQuestionSnapshot> Questions { get; set; } = [];
         }
 
@@ -36,8 +45,13 @@ namespace RikiPath.Application.Services
         private static MockAttemptSnapshot? ReadMockSnapshot(MockTestAttempt attempt)
         {
             if (string.IsNullOrWhiteSpace(attempt.QuestionSnapshotJson)) return null;
-            var snapshot = JsonSerializer.Deserialize<MockAttemptSnapshot>(attempt.QuestionSnapshotJson);
-            if (snapshot?.Questions.Count > 0) return snapshot;
+            var snapshot = JsonSerializer.Deserialize<MockAttemptSnapshot>(attempt.QuestionSnapshotJson, MockSnapshotJson);
+            if (snapshot?.Questions is { Count: > 0 } && snapshot.Questions.All(question => question.Prompt.QuestionId > 0))
+                return snapshot;
+            // Older attempts stored the client response directly, without an answer key.
+            if (JsonSerializer.Deserialize<StartAttemptResponse>(attempt.QuestionSnapshotJson, MockSnapshotJson)
+                is { AttemptId: > 0, Questions.Count: > 0 } legacy && legacy.AttemptId == attempt.Id)
+                return null;
             throw new JsonException("Dữ liệu đề thi đã lưu không hợp lệ.");
         }
 
@@ -55,7 +69,7 @@ namespace RikiPath.Application.Services
         private static bool IsFrozenAnswerCorrect(
             MockQuestionSnapshot question, int? selectedOptionId, JsonElement? response)
         {
-            if (question.Prompt.QuestionType.Equals("SingleChoice", StringComparison.OrdinalIgnoreCase))
+            if (IsSingleChoiceQuestion(question.Prompt.QuestionType))
                 return selectedOptionId.HasValue && question.CorrectOptionIds.Contains(selectedOptionId.Value);
             if (question.Prompt.QuestionType.Equals("MultipleChoice", StringComparison.OrdinalIgnoreCase))
             {
@@ -173,6 +187,7 @@ namespace RikiPath.Application.Services
                                         {
                                             OptionId = option.Id,
                                             OptionText = option.OptionText,
+                                            ImageUrl = option.ImageUrl,
                                             SortOrder = option.SortOrder,
                                         })
                                         .ToList(),
@@ -197,7 +212,8 @@ namespace RikiPath.Application.Services
             {
                 var userId = claimService.GetUserClaim().Id;
                 var test = await unitOfWork.MockTests.GetWithSectionsAndQuestionsAsync(practiceTestId, cancellationToken);
-                if (test is null || test.IsDeleted)
+                if (test is null || test.IsDeleted ||
+                    (test.CertificateLevel is { } level && (level.IsDeleted || JlptCurriculum.Rank(level.Code) == 0)))
                     return ApiResponse<StartAttemptResponse>.NotFound(
                         $"Không tìm thấy MockTest có Id = {practiceTestId}.");
 
@@ -240,6 +256,7 @@ namespace RikiPath.Application.Services
                             {
                                 OptionId = option.Id,
                                 Content = option.OptionText,
+                                ImageUrl = option.ImageUrl,
                                 Order = option.SortOrder,
                             }).ToList(),
                     },
@@ -296,11 +313,14 @@ namespace RikiPath.Application.Services
                     var attempt = new MockTestAttempt
                     {
                         UserId = userId,
+                        AttemptKind = AttemptKind.MockTest,
                         StartedAt = startedAt,
-                        ExpiresAt = startedAt.AddMinutes(test.TimeLimitMinutes),
+                        ExpiresAt = test.TimeLimitMinutes > 0 ? startedAt.AddMinutes(test.TimeLimitMinutes) : null,
                         QuestionSnapshotJson = JsonSerializer.Serialize(new MockAttemptSnapshot
                         {
                             MockTestId = practiceTestId,
+                            Title = test.Title,
+                            PreviouslyWrongQuestionIds = previouslyWrongQuestionIds,
                             Questions = frozenQuestions,
                         }),
                         SubmittedAt = null,
@@ -320,18 +340,22 @@ namespace RikiPath.Application.Services
                         IsCorrect = false,
                     });
                     await unitOfWork.MockTestAnswers.AddRangeAsync(snapshots, transactionCancellationToken);
-                    await unitOfWork.SaveChangesAsync(transactionCancellationToken);
-
-                    response = ApiResponse<StartAttemptResponse>.Created(new StartAttemptResponse
+                    var snapshot = new StartAttemptResponse
                     {
                         AttemptId = attempt.Id,
                         MockTestId = practiceTestId,
+                        Title = test.Title,
+                        JlptLevelName = test.CertificateLevel?.Code ?? string.Empty,
                         StartedAt = attempt.StartedAt,
+                        ServerNow = DateTime.UtcNow,
+                        ExpiresAt = attempt.ExpiresAt,
                         TimeLimitMinutes = test.TimeLimitMinutes,
                         TotalPreviouslyWrongQuestions = previouslyWrongQuestionIds.Count,
                         PreviouslyWrongQuestionIds = previouslyWrongQuestionIds,
                         Questions = frozenQuestions.Select(question => question.Prompt).ToList(),
-                    });
+                    };
+                    await unitOfWork.SaveChangesAsync(transactionCancellationToken);
+                    response = ApiResponse<StartAttemptResponse>.Created(snapshot);
                 }, cancellationToken);
 
                 return response!;
@@ -343,12 +367,70 @@ namespace RikiPath.Application.Services
             }
         }
 
-        public async Task<ApiResponse<AttemptResultResponse>> SubmitAttemptAsync(int attemptId, SubmitAttemptRequest request, CancellationToken cancellationToken = default)
+        public async Task<ApiResponse<StartAttemptResponse>> GetAttemptSnapshotAsync(int attemptId, CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                var attempt = await unitOfWork.MockTestAttempts.GetByIdAsync(attemptId, cancellationToken);
+                if (attempt is null || attempt.IsDeleted || attempt.AttemptKind != AttemptKind.MockTest)
+                    return ApiResponse<StartAttemptResponse>.NotFound("Không tìm thấy lượt thi thử.");
+                if (attempt.UserId != claimService.GetUserClaim().Id)
+                    return ApiResponse<StartAttemptResponse>.Fail("Bạn không có quyền xem lượt thi này.", HttpStatusCode.Forbidden);
+                if (attempt.IsCompleted)
+                    return ApiResponse<StartAttemptResponse>.Fail("Lượt thi đã được nộp.", HttpStatusCode.Conflict, errorCode: "MOCK_TEST_COMPLETED");
+
+                var answers = await unitOfWork.MockTestAnswers.GetByAttemptIdAsync(attemptId, cancellationToken);
+                var frozen = ReadMockSnapshot(attempt);
+                var snapshot = frozen is not null && answers.Count > 0
+                    ? new StartAttemptResponse
+                    {
+                        AttemptId = attempt.Id,
+                        MockTestId = frozen.MockTestId,
+                        Title = frozen.Title ?? answers[0].MockQuestion.MockTestSection.MockTest.Title,
+                        JlptLevelName = answers[0].MockQuestion.MockTestSection.MockTest.CertificateLevel?.Code ?? string.Empty,
+                        StartedAt = attempt.StartedAt,
+                        TimeLimitMinutes = attempt.ExpiresAt is { } expiry
+                            ? (int)Math.Ceiling((expiry - attempt.StartedAt).TotalMinutes)
+                            : answers[0].MockQuestion.MockTestSection.MockTest.TimeLimitMinutes,
+                        PreviouslyWrongQuestionIds = frozen.PreviouslyWrongQuestionIds,
+                        TotalPreviouslyWrongQuestions = frozen.PreviouslyWrongQuestionIds.Count,
+                        Questions = frozen.Questions.Select(question => question.Prompt).ToList(),
+                    }
+                    : attempt.QuestionSnapshotJson is { Length: > 0 } json
+                        ? JsonSerializer.Deserialize<StartAttemptResponse>(json, MockSnapshotJson) : null;
+                if (snapshot is null || snapshot.AttemptId != attemptId || snapshot.Questions.Count == 0)
+                    return ApiResponse<StartAttemptResponse>.Fail("Lượt thi này cần được mở lại từ danh sách đề.", HttpStatusCode.Conflict);
+
+                var byQuestion = answers.ToDictionary(answer => answer.MockQuestionId);
+                snapshot.ServerNow = DateTime.UtcNow;
+                if (attempt.ExpiresAt is { } expiresAt) snapshot.ExpiresAt = BusinessDateHelper.EnsureUtc(expiresAt);
+                foreach (var question in snapshot.Questions)
+                {
+                    var answer = byQuestion[question.QuestionId];
+                    question.SelectedOptionId = answer.SelectedOptionId;
+                    question.Response = ParseJsonElement(answer.ResponseJson);
+                }
+                return ApiResponse<StartAttemptResponse>.Success(snapshot);
+            }
+            catch (Exception)
+            {
+                return ApiResponse<StartAttemptResponse>.Fail("Không thể tải lượt thi thử.", HttpStatusCode.InternalServerError);
+            }
+        }
+
+        public Task<ApiResponse<AttemptResultResponse>> SaveAttemptAnswersAsync(int attemptId, SubmitAttemptRequest request, CancellationToken cancellationToken = default) =>
+            StoreAttemptAnswersAsync(attemptId, request, submit: false, cancellationToken);
+
+        public Task<ApiResponse<AttemptResultResponse>> SubmitAttemptAsync(int attemptId, SubmitAttemptRequest request, CancellationToken cancellationToken = default) =>
+            StoreAttemptAnswersAsync(attemptId, request, submit: true, cancellationToken);
+
+        private async Task<ApiResponse<AttemptResultResponse>> StoreAttemptAnswersAsync(
+            int attemptId, SubmitAttemptRequest request, bool submit, CancellationToken cancellationToken)
         {
             try
             {
                 var userId = claimService.GetUserClaim().Id;
-                if (request.Answers is null || request.Answers.Count == 0)
+                if (request.Answers is null || (!submit && request.Answers.Count == 0))
                     return ApiResponse<AttemptResultResponse>.Fail(
                         "Danh sách câu trả lời không được để trống.", HttpStatusCode.BadRequest);
 
@@ -388,7 +470,7 @@ namespace RikiPath.Application.Services
                     if (attempt.IsCompleted)
                     {
                         response = ApiResponse<AttemptResultResponse>.Fail(
-                            "Lượt làm bài này đã được nộp trước đó.", HttpStatusCode.BadRequest);
+                            "Lượt làm bài này đã được nộp trước đó.", HttpStatusCode.BadRequest, errorCode: "MOCK_TEST_COMPLETED");
                         return;
                     }
 
@@ -415,18 +497,22 @@ namespace RikiPath.Application.Services
 
                     var mockTest = snapshotAnswers[0].MockQuestion.MockTestSection.MockTest;
                     var frozenQuestionsById = ReadFrozenQuestions(attempt, snapshotAnswers);
-                    // Thời gian làm bài lấy từ StartedAt phía server, không tin đồng hồ hoặc elapsed time từ client.
-                    if ((attempt.ExpiresAt.HasValue || mockTest.TimeLimitMinutes > 0) &&
-                        DateTime.UtcNow > (attempt.ExpiresAt ?? attempt.StartedAt.AddMinutes(mockTest.TimeLimitMinutes)))
+                    var now = DateTime.UtcNow;
+                    var deadline = attempt.ExpiresAt is { } expiresAt ? BusinessDateHelper.EnsureUtc(expiresAt)
+                        : mockTest.TimeLimitMinutes > 0 ? BusinessDateHelper.EnsureUtc(attempt.StartedAt).AddMinutes(mockTest.TimeLimitMinutes) : (DateTime?)null;
+                    var expired = deadline.HasValue && now >= deadline.Value;
+                    if (expired && (!submit || !attempt.ExpiresAt.HasValue))
                     {
                         response = ApiResponse<AttemptResultResponse>.Fail(
-                            "Lượt làm bài đã hết thời gian.", HttpStatusCode.BadRequest);
+                            "Lượt làm bài đã hết thời gian.", HttpStatusCode.BadRequest, errorCode: "MOCK_TEST_EXPIRED");
                         return;
                     }
 
+                    // At expiry, grade the answers already saved before the server deadline.
+                    var submittedAnswers = expired ? [] : request.Answers;
                     var snapshotsByQuestionId = snapshotAnswers.ToDictionary(
                         answer => answer.MockQuestionId);
-                    var invalidQuestionIds = request.Answers
+                    var invalidQuestionIds = submittedAnswers
                         .Select(answer => answer.QuestionId)
                         .Where(questionId => !snapshotsByQuestionId.ContainsKey(questionId))
                         .OrderBy(questionId => questionId)
@@ -440,7 +526,7 @@ namespace RikiPath.Application.Services
                         return;
                     }
 
-                    foreach (var submittedAnswer in request.Answers)
+                    foreach (var submittedAnswer in submittedAnswers)
                     {
                         var question = snapshotsByQuestionId[submittedAnswer.QuestionId].MockQuestion;
                         var frozenQuestion = frozenQuestionsById is not null &&
@@ -449,7 +535,7 @@ namespace RikiPath.Application.Services
                         var questionType = frozenQuestion?.Prompt.QuestionType ?? question.QuestionType;
                         var validOptionIds = frozenQuestion?.Prompt.Options.Select(option => option.OptionId).ToHashSet() ??
                             (question.Options ?? []).Where(option => !option.IsDeleted).Select(option => option.Id).ToHashSet();
-                        if (questionType.Equals("SingleChoice", StringComparison.OrdinalIgnoreCase))
+                        if (IsSingleChoiceQuestion(questionType))
                         {
                             if (submittedAnswer.Response.HasValue)
                             {
@@ -460,7 +546,8 @@ namespace RikiPath.Application.Services
                         }
                         else if (questionType.Equals("MultipleChoice", StringComparison.OrdinalIgnoreCase))
                         {
-                            if (submittedAnswer.Response is not { ValueKind: JsonValueKind.Array })
+                            if (submittedAnswer.SelectedOptionId is not null ||
+                                submittedAnswer.Response is not { ValueKind: JsonValueKind.Array })
                             {
                                 response = ApiResponse<AttemptResultResponse>.Fail(
                                     $"Câu hỏi {submittedAnswer.QuestionId} yêu cầu danh sách OptionId.", HttpStatusCode.BadRequest);
@@ -484,10 +571,7 @@ namespace RikiPath.Application.Services
                         }
                     }
 
-                    var correctByQuestion = snapshotAnswers.ToDictionary(
-                        answer => answer.MockQuestionId,
-                        _ => false);
-                    foreach (var submittedAnswer in request.Answers)
+                    foreach (var submittedAnswer in submittedAnswers)
                     {
                         var snapshot = snapshotsByQuestionId[submittedAnswer.QuestionId];
                         var question = snapshot.MockQuestion;
@@ -502,13 +586,23 @@ namespace RikiPath.Application.Services
                         snapshot.ResponseJson = submittedAnswer.Response?.GetRawText();
                         snapshot.IsCorrect = frozenQuestion is not null
                             ? IsFrozenAnswerCorrect(frozenQuestion, submittedAnswer.SelectedOptionId, submittedAnswer.Response)
-                            : question.QuestionType.Equals("SingleChoice", StringComparison.OrdinalIgnoreCase)
+                            : IsSingleChoiceQuestion(question.QuestionType)
                             ? selectedOption?.IsCorrect == true
                             : question.QuestionType.Equals("MultipleChoice", StringComparison.OrdinalIgnoreCase)
                                 ? IsMultipleChoiceCorrect(question, submittedAnswer.Response)
                                 : IsStructuredResponseCorrect(question, submittedAnswer.Response);
-                        correctByQuestion[submittedAnswer.QuestionId] = snapshot.IsCorrect;
                     }
+                    if (!submit)
+                    {
+                        await unitOfWork.SaveChangesAsync(transactionCancellationToken);
+                        response = ApiResponse<AttemptResultResponse>.Success(new AttemptResultResponse
+                        {
+                            AttemptId = attempt.Id, MockTestId = mockTest.Id, Status = StatusInProgress,
+                        });
+                        return;
+                    }
+
+                    var correctByQuestion = snapshotAnswers.ToDictionary(answer => answer.MockQuestionId, answer => answer.IsCorrect);
                     var questions = snapshotAnswers.Select(answer => answer.MockQuestion).ToList();
                     var sections = BuildSectionResults(attemptId, questions, correctByQuestion);
                     await unitOfWork.MockTestSectionResults.AddRangeAsync(
@@ -639,11 +733,12 @@ namespace RikiPath.Application.Services
                 foreach (var attempt in attempts.Where(item => !item.IsCompleted && !item.IsDeleted))
                 {
                     var answers = await unitOfWork.MockTestAnswers.GetByAttemptIdAsync(attempt.Id, cancellationToken);
+                    if (answers.Count == 0) continue;
                     var frozenQuestions = ReadFrozenQuestions(attempt, answers);
                     var frozen = frozenQuestions is null ? null : ReadMockSnapshot(attempt);
-                    if (answers.Count == 0 || (frozen is not null
+                    if (frozen is not null
                             ? frozen.MockTestId != practiceTestId
-                            : answers.Any(answer => answer.MockQuestion.MockTestSection.MockTestId != practiceTestId)))
+                            : answers.Any(answer => answer.MockQuestion.MockTestSection.MockTestId != practiceTestId))
                         continue;
 
                     var test = answers[0].MockQuestion.MockTestSection.MockTest;
@@ -651,7 +746,13 @@ namespace RikiPath.Application.Services
                     {
                         AttemptId = attempt.Id,
                         MockTestId = practiceTestId,
-                        StartedAt = attempt.StartedAt,
+                        Title = frozen?.Title ?? test.Title,
+                        JlptLevelName = test.CertificateLevel?.Code ?? string.Empty,
+                        StartedAt = BusinessDateHelper.EnsureUtc(attempt.StartedAt),
+                        ServerNow = DateTime.UtcNow,
+                        ExpiresAt = attempt.ExpiresAt is { } expiry ? BusinessDateHelper.EnsureUtc(expiry) : null,
+                        PreviouslyWrongQuestionIds = frozen?.PreviouslyWrongQuestionIds ?? [],
+                        TotalPreviouslyWrongQuestions = frozen?.PreviouslyWrongQuestionIds.Count ?? 0,
                         TimeLimitMinutes = attempt.ExpiresAt.HasValue
                             ? (int)Math.Ceiling((attempt.ExpiresAt.Value - attempt.StartedAt).TotalMinutes)
                             : test.TimeLimitMinutes,
@@ -689,6 +790,7 @@ namespace RikiPath.Application.Services
                                     {
                                         OptionId = option.Id,
                                         Content = option.OptionText,
+                                        ImageUrl = option.ImageUrl,
                                         Order = option.SortOrder,
                                     }).ToList(),
                             };
@@ -861,15 +963,12 @@ namespace RikiPath.Application.Services
             {
                 var tests = await unitOfWork.MockTests.GetByLevelAsync(certificationLevelId);
 
-                var result = tests.Select(t => new TestSummaryResponse
+                var result = tests.Where(t => t.CertificateLevel is { IsDeleted: false } level && JlptCurriculum.Rank(level.Code) > 0)
+                    .OrderBy(t => t.Title).ThenBy(t => t.Id).Select(t => new TestSummaryResponse
                 {
                     MockTestId = t.Id,
                     Title = t.Title,
-                    Description = t.Description,
-                    // NOTE: property response vẫn tên "JlptLevelName" (từ trước khi đổi model) - giữ tên
-                    // field để không vỡ FE, nhưng lấy giá trị từ CertificateLevel.Code (không còn Name).
-                    // Nên đổi tên field này thành CertificateLevelName trong Responses/MockTests
-                    // khi bạn tiện cập nhật FE.
+                    Description = t.Description ?? string.Empty,
                     JlptLevelName = t.CertificateLevel?.Code ?? string.Empty,
                     TimeLimitMinutes = t.TimeLimitMinutes,
                 }).ToList();
@@ -880,6 +979,38 @@ namespace RikiPath.Application.Services
             {
                 return ApiResponse<List<TestSummaryResponse>>.Fail(
                     "Không thể tải danh sách đề thi.", HttpStatusCode.InternalServerError);
+            }
+        }
+
+        public async Task<ApiResponse<List<MockTestHistoryItem>>> GetHistoryAsync(CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                var userId = claimService.GetUserClaim().Id;
+                var attempts = await unitOfWork.MockTestAttempts.Query().AsNoTracking()
+                    .Where(attempt => attempt.UserId == userId && attempt.AttemptKind == AttemptKind.MockTest &&
+                        attempt.IsCompleted && !attempt.IsDeleted && attempt.TotalScore.HasValue)
+                    .OrderByDescending(attempt => attempt.SubmittedAt ?? attempt.StartedAt).ThenByDescending(attempt => attempt.Id)
+                    .Select(attempt => new
+                    {
+                        attempt.Id,
+                        Date = attempt.SubmittedAt ?? attempt.StartedAt,
+                        Score = attempt.TotalScore!.Value,
+                        Test = attempt.SectionResults!.OrderBy(section => section.MockTestSectionId)
+                            .Select(section => new
+                            {
+                                Id = section.MockTestSection.MockTestId,
+                                section.MockTestSection.MockTest.Title,
+                                Level = section.MockTestSection.MockTest.CertificateLevel.Code,
+                            }).FirstOrDefault(),
+                    }).ToListAsync(cancellationToken);
+                return ApiResponse<List<MockTestHistoryItem>>.Success(attempts.Where(attempt => attempt.Test is not null)
+                    .Select(attempt => new MockTestHistoryItem(attempt.Id, attempt.Test!.Id, attempt.Test.Title,
+                        attempt.Test.Level, BusinessDateHelper.EnsureUtc(attempt.Date), attempt.Score)).ToList());
+            }
+            catch (Exception)
+            {
+                return ApiResponse<List<MockTestHistoryItem>>.Fail("Không thể tải lịch sử thi thử.", HttpStatusCode.InternalServerError);
             }
         }
 
@@ -937,6 +1068,7 @@ namespace RikiPath.Application.Services
                                         {
                                             OptionId = option.Id,
                                             OptionText = option.OptionText,
+                                            ImageUrl = option.ImageUrl,
                                             SortOrder = option.SortOrder,
                                         })
                                         .ToList(),
@@ -1002,6 +1134,7 @@ namespace RikiPath.Application.Services
                             {
                                 OptionId = option.OptionId,
                                 OptionText = option.Content,
+                                ImageUrl = option.ImageUrl,
                                 IsCorrect = frozenOptions.CorrectOptionIds.Contains(option.OptionId),
                             }).ToList()
                             : (a.MockQuestion.Options ?? [])
@@ -1010,6 +1143,7 @@ namespace RikiPath.Application.Services
                                 {
                                     OptionId = option.Id,
                                     OptionText = option.OptionText,
+                                    ImageUrl = option.ImageUrl,
                                     IsCorrect = option.IsCorrect,
                                 }).ToList(),
                 }).ToList();
@@ -1109,6 +1243,7 @@ namespace RikiPath.Application.Services
                         {
                             OptionId = o.Id,
                             OptionText = o.OptionText,
+                            ImageUrl = o.ImageUrl,
                             IsCorrect = o.IsCorrect,
                         }).ToList(),
                     };
@@ -1342,13 +1477,17 @@ namespace RikiPath.Application.Services
                     if (existing is not null)
                     {
                         var existingAnswers = await unitOfWork.MockTestAnswers.GetByAttemptIdAsync(existing.Id, ct);
-                        if (existingAnswers.Count > 0 && !IsExpired(existing, existingAnswers))
+                        if (!request.RestartExisting && existingAnswers.Count > 0 &&
+                            existingAnswers.All(answer => answer.MockQuestion.MockTestSection.MockTestId == request.MockTestId) &&
+                            !IsExpired(existing, existingAnswers))
                         {
                             response = ApiResponse<PlacementAttemptSnapshotResponse>.Success(
                                 await BuildSnapshotAsync(existing, existingAnswers, isResumed: true, ct));
                             return;
                         }
-                        // Attempt cũ đã hết giờ: KHÔNG xóa, giữ lại làm lịch sử số lần làm bài.
+                        // Giữ lịch sử lượt cũ; kết thúc thời gian để không khôi phục nhầm sau khi đổi đề.
+                        existing.ExpiresAt = DateTime.UtcNow;
+                        unitOfWork.MockTestAttempts.Update(existing);
                     }
 
                     var now = DateTime.UtcNow;
@@ -1654,7 +1793,7 @@ namespace RikiPath.Application.Services
         }
 
         private static DateTime ExpiresAt(MockTestAttempt attempt, IEnumerable<MockTestAnswer> answers) =>
-            attempt.StartedAt.AddMinutes(GetTimeLimitMinutes(answers));
+            attempt.ExpiresAt ?? attempt.StartedAt.AddMinutes(GetTimeLimitMinutes(answers));
 
         private static bool IsExpired(MockTestAttempt attempt, IEnumerable<MockTestAnswer> answers) =>
             DateTime.UtcNow > ExpiresAt(attempt, answers);
@@ -1697,7 +1836,7 @@ namespace RikiPath.Application.Services
                 Status = "inProgress",
                 IsResumed = isResumed,
                 StartedAt = attempt.StartedAt,
-                ExpiresAt = attempt.StartedAt.AddMinutes(limit),
+                ExpiresAt = ExpiresAt(attempt, answers),
                 ServerNow = DateTime.UtcNow,
                 TimeLimitMinutes = limit,
                 TotalQuestions = ordered.Count,
@@ -1727,6 +1866,7 @@ namespace RikiPath.Application.Services
                             {
                                 OptionId = o.Id,
                                 Content = o.OptionText,
+                                ImageUrl = o.ImageUrl,
                                 Order = o.SortOrder,
                             }).ToList(),
                     };

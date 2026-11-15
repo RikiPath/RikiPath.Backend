@@ -1,5 +1,6 @@
 using System.Text.Json;
 using ClosedXML.Excel;
+using Microsoft.EntityFrameworkCore;
 using RikiPath.Application.Handlers;
 using RikiPath.Application.Helpers;
 using RikiPath.Application.IServices;
@@ -18,11 +19,42 @@ namespace RikiPath.Application.Services
     /// </summary>
     public sealed class ExcelContentImportService(
         IUnitOfWork unitOfWork,
-        IEnumerable<ISheetImportHandler> handlers,
-        IContentApprovalNotifierService notifier) : IExcelContentImportService
+        IEnumerable<ISheetImportHandler> handlers) : IExcelContentImportService
     {
+        public ApiResponse<WorkbookPreviewResponse> PreviewWorkbook(Stream fileStream, string fileName, CancellationToken cancellationToken)
+        {
+            try
+            {
+                return ApiResponse<WorkbookPreviewResponse>.Success(
+                    ExcelSheetReader.ReadWorkbookPreview(fileStream, fileName, cancellationToken));
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception)
+            {
+                return ApiResponse<WorkbookPreviewResponse>.Fail("Không đọc được file .xlsx. Hãy kiểm tra file rồi thử lại.");
+            }
+        }
+
+        public ApiResponse<byte[]> EditWorkbook(Stream fileStream, IReadOnlyList<WorkbookCellEdit> edits, CancellationToken cancellationToken)
+        {
+            if (edits.Count == 0)
+                return ApiResponse<byte[]>.Fail("Chưa có ô Excel nào được sửa.");
+            try
+            {
+                return ApiResponse<byte[]>.Success(ExcelSheetReader.ApplyWorkbookEdits(fileStream, edits, cancellationToken));
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (ArgumentException ex) { return ApiResponse<byte[]>.Fail(ex.Message); }
+            catch (Exception)
+            {
+                return ApiResponse<byte[]>.Fail("Không thể tạo bản Excel đã sửa. Hãy kiểm tra file rồi thử lại.");
+            }
+        }
+
         public async Task<ApiResponse<ImportPreviewResponse>> PreviewAsync(
-            Stream fileStream, string fileName, ImportEntityType? onlyType, CancellationToken cancellationToken)
+            Stream fileStream, string fileName, ImportEntityType? onlyType, CancellationToken cancellationToken,
+            Func<string, CancellationToken, Task<string>>? uploadLocalAudio = null,
+            Func<string, CancellationToken, Task<string>>? uploadLocalImage = null)
         {
             try
             {
@@ -80,6 +112,34 @@ namespace RikiPath.Application.Services
                     var rows = ToExcelRows(ExcelSheetReader.ReadRows(sheet));
                     if (rows.Count == 0) continue;
 
+                    if (handler.EntityType == ImportEntityType.MockTest && (uploadLocalAudio is not null || uploadLocalImage is not null))
+                    {
+                        var uploaded = new Dictionary<(bool IsAudio, string Path), string>();
+                        var mediaColumns = new[] { "AudioUrl", "ImageUrl", "Option1ImageUrl", "Option2ImageUrl", "Option3ImageUrl", "Option4ImageUrl" };
+                        foreach (var row in rows)
+                        foreach (var column in mediaColumns)
+                        {
+                            var isAudio = column == "AudioUrl";
+                            var upload = isAudio ? uploadLocalAudio : uploadLocalImage;
+                            var path = row.Get(column)?.Trim();
+                            if (upload is null || string.IsNullOrEmpty(path) || !Path.IsPathFullyQualified(path)) continue;
+                            try
+                            {
+                                var key = (isAudio, path);
+                                if (!uploaded.TryGetValue(key, out var url))
+                                {
+                                    url = await upload(path, cancellationToken);
+                                    uploaded.Add(key, url);
+                                }
+                                row.Fields[ExcelSheetReader.Normalize(column)] = url;
+                            }
+                            catch (InvalidDataException ex)
+                            {
+                                row.MediaImportErrors.Add($"{column}: {ex.Message}");
+                            }
+                        }
+                    }
+
                     var sheetResult = handler is IWorkbookLessonAwareImportHandler lessonAwareHandler
                         ? await lessonAwareHandler.BuildDiffAsync(rows, workbookLessons, cancellationToken)
                         : await handler.BuildDiffAsync(rows, cancellationToken);
@@ -115,92 +175,130 @@ namespace RikiPath.Application.Services
         public async Task<ApiResponse<ImportConfirmResponse>> ConfirmAsync(
             ConfirmImportRequest request, int actorUserId, CancellationToken cancellationToken)
         {
+            var batchId = request.BatchId ?? Guid.NewGuid();
+            var response = ApiResponse<ImportConfirmResponse>.Fail("Không thể lưu bản nháp.");
             try
             {
-                if (request.Rows.Count == 0)
-                    return ApiResponse<ImportConfirmResponse>.Fail("Không có dòng nào được gửi lên để xác nhận.");
-
-                var batchId = Guid.NewGuid();
-                var now = DateTime.UtcNow;
-                var drafts = new List<ContentApprovalRequest>();
-
-                // Từ lúc xem trước đến lúc xác nhận, người khác có thể vừa import cùng nội dung -> nạp lại các bản nháp đang mở
-                // để không tạo trùng bản nháp cho Admin.
-                var openKeysByType = new Dictionary<ImportEntityType, HashSet<string>>();
-                foreach (var type in request.Rows.Select(r => r.EntityType).Distinct())
-                    openKeysByType[type] = await ImportHandlerSupport.LoadOpenRowKeysAsync(unitOfWork, type, cancellationToken);
-                var seen = new HashSet<(ImportEntityType, string)>();
-
-                foreach (var row in request.Rows)
-                {
-                    // Phòng thủ: chỉ nhận New/Modified có payload, dù FE đáng lẽ đã lọc trước khi gửi.
-                    if (row.Action is not (ImportRowAction.New or ImportRowAction.Modified)) continue;
-                    if (string.IsNullOrWhiteSpace(row.PayloadJson) || string.IsNullOrWhiteSpace(row.RowKey)) continue;
-                    if (row.EntityType == ImportEntityType.MockTest)
-                    {
-                        var validationError = ValidateMockTestPayload(row.PayloadJson);
-                        if (validationError is not null)
-                            return ApiResponse<ImportConfirmResponse>.Fail(
-                                $"Dòng {row.SourceRowNumber}: {validationError}");
-                    }
-                    if (openKeysByType[row.EntityType].Contains(row.RowKey)) continue;
-                    if (!seen.Add((row.EntityType, row.RowKey))) continue;
-
-                    drafts.Add(new ContentApprovalRequest
-                    {
-                        BatchId = batchId,
-                        EntityType = row.EntityType,
-                        Action = row.Action,
-                        TargetEntityId = row.TargetEntityId,
-                        RowKey = row.RowKey,
-                        SourceRowNumber = row.SourceRowNumber,
-                        SourceFileName = request.SourceFileName ?? string.Empty,
-                        PayloadJson = row.PayloadJson,
-                        // Admin xem được "đổi gì" (vd "Bài 1 (N5) → Bài 2 (N5)") khi duyệt.
-                        DiffSummaryJson = row.ChangedFields is { Count: > 0 } ? JsonSerializer.Serialize(row.ChangedFields) : null,
-                        Status = ContentApprovalStatus.Draft,
-                        SubmittedByUserId = actorUserId,
-                        SubmittedAt = now,
-                    });
-                }
-
-                if (drafts.Count == 0)
-                    return ApiResponse<ImportConfirmResponse>.Fail(
-                        "Không có dòng hợp lệ (New/Modified kèm dữ liệu) nào để tạo bản nháp.");
-
-                await unitOfWork.ContentApprovalRequests.AddRangeAsync(drafts);
-                await unitOfWork.SaveChangesAsync(cancellationToken);
-
-                // Bản nháp đã lưu xong: gửi thông báo lỗi thì không được báo "thất bại" (author bấm lại sẽ tạo trùng).
-                try
-                {
-                    // Đặt tên lô dữ liệu hiển thị trong thông báo (VD: tên file Excel hoặc BatchId)
-                    var batchName = string.IsNullOrWhiteSpace(request.SourceFileName)
-                        ? $"Lô {batchId.ToString()[..8]}"
-                        : request.SourceFileName;
-
-                    await notifier.NotifyAdminsOnRequestCreatedAsync(drafts.Count, batchName, cancellationToken);
-                }
-                catch (Exception)
-                {
-                    // Best-effort: Bỏ qua lỗi gửi thông báo để không làm crash luồng import
-                    /* TODO: ghi log nếu có ILogger */
-                }
-
-                return ApiResponse<ImportConfirmResponse>.Success(new ImportConfirmResponse
-                {
-                    BatchId = batchId,
-                    DraftsCreatedCount = drafts.Count,
-                    SkippedCount = request.Rows.Count - drafts.Count,
-                });
+                await unitOfWork.ExecuteContentAuthorWriteAsync(actorUserId, async token =>
+                    response = await SaveDraftsAsync(request, actorUserId, batchId, token), cancellationToken);
+                return response;
             }
+            catch (OperationCanceledException) { throw; }
             catch (Exception ex)
             {
-                return ApiResponse<ImportConfirmResponse>.Fail("Lỗi khi tạo bản nháp: " + ex.Message);
+                return ApiResponse<ImportConfirmResponse>.Fail("Lỗi khi lưu bản nháp: " + ex.Message);
             }
         }
 
-        private static string? ValidateMockTestPayload(string payloadJson)
+        private async Task<ApiResponse<ImportConfirmResponse>> SaveDraftsAsync(ConfirmImportRequest request, int actorUserId,
+            Guid batchId, CancellationToken cancellationToken)
+        {
+            if (batchId == Guid.Empty || request.Rows is not { Count: > 0 })
+                return ApiResponse<ImportConfirmResponse>.Fail("Không có dòng hợp lệ để lưu bản nháp.");
+            var sourceFileName = string.IsNullOrWhiteSpace(request.SourceFileName)
+                ? "Import Excel.xlsx" : Path.GetFileName(request.SourceFileName.Trim());
+            if (sourceFileName.Length > 260)
+                return ApiResponse<ImportConfirmResponse>.Fail("Tên file Excel quá dài.");
+
+            var existingBatch = await unitOfWork.ContentApprovalRequests.Query()
+                .Where(item => !item.IsDeleted && item.BatchId == batchId)
+                .GroupBy(item => item.SubmittedByUserId)
+                .Select(group => new { AuthorId = group.Key, Count = group.Count() })
+                .ToListAsync(cancellationToken);
+            if (existingBatch.Count != 0)
+            {
+                var existing = existingBatch.SingleOrDefault(item => item.AuthorId == actorUserId);
+                if (existing is null)
+                    return ApiResponse<ImportConfirmResponse>.Fail("Mã lô import đã được sử dụng.");
+                return ApiResponse<ImportConfirmResponse>.Success(new ImportConfirmResponse
+                {
+                    BatchId = batchId,
+                    DraftsCreatedCount = existing.Count,
+                    SkippedCount = Math.Max(0, request.Rows.Count - existing.Count),
+                });
+            }
+            var now = DateTime.UtcNow;
+            var drafts = new List<ContentApprovalRequest>();
+
+            var types = request.Rows.Select(row => row.EntityType).Distinct().ToArray();
+            var openRows = await unitOfWork.ContentApprovalRequests.Query()
+                .Where(item => !item.IsDeleted && item.SubmittedByUserId == actorUserId && types.Contains(item.EntityType) &&
+                    (item.Status == ContentApprovalStatus.Draft || item.Status == ContentApprovalStatus.PendingReview))
+                .Select(item => new { item.EntityType, item.RowKey, item.PayloadJson, item.TargetEntityId }).ToListAsync(cancellationToken);
+            var seen = openRows.Select(item => (item.EntityType, item.RowKey,
+                item.EntityType == ImportEntityType.PracticeExercise ? ManualContentService.ReadListInfo(item.PayloadJson)?.CertificateLevelId : null))
+                .ToHashSet();
+            var skillNames = types.Contains(ImportEntityType.MockTest)
+                ? (await unitOfWork.LanguageSkills.GetAllAsync(cancellationToken)).ToDictionary(skill => skill.Id, skill => skill.Name)
+                : new Dictionary<int, string>();
+            var levelCodes = await unitOfWork.CertificateLevels.Query()
+                .Where(level => !level.IsDeleted && !level.CertificateType.IsDeleted &&
+                    level.CertificateType.IsActive && level.CertificateType.Name == "JLPT")
+                .ToDictionaryAsync(level => level.Id, level => level.Code, cancellationToken);
+            var seenTargets = openRows.Where(item => item.TargetEntityId.HasValue)
+                .Select(item => (item.EntityType, item.TargetEntityId!.Value)).ToHashSet();
+
+            foreach (var row in request.Rows)
+            {
+                // Phòng thủ: chỉ nhận New/Modified có payload, dù FE đáng lẽ đã lọc trước khi gửi.
+                if (row.Action is not (ImportRowAction.New or ImportRowAction.Modified)) continue;
+                if (string.IsNullOrWhiteSpace(row.PayloadJson) || string.IsNullOrWhiteSpace(row.RowKey)) continue;
+                if (row.RowKey.Length > 500 || !Enum.IsDefined(row.EntityType))
+                    return ApiResponse<ImportConfirmResponse>.Fail($"Dòng {row.SourceRowNumber}: thông tin học liệu không hợp lệ.");
+                if (row.EntityType == ImportEntityType.MockTest)
+                {
+                    var validationError = ValidateMockTestPayload(row.PayloadJson, skillNames, levelCodes);
+                    if (validationError is not null)
+                        return ApiResponse<ImportConfirmResponse>.Fail(
+                            $"Dòng {row.SourceRowNumber}: {validationError}");
+                }
+                var info = ManualContentService.ReadListInfo(row.PayloadJson);
+                if (info?.CertificateLevelId is not int levelId || !levelCodes.TryGetValue(levelId, out var levelCode)
+                    || levelCode is not ("N5" or "N4" or "N3" or "N2"))
+                    return ApiResponse<ImportConfirmResponse>.Fail($"Dòng {row.SourceRowNumber}: hãy chọn cấp độ từ N5 đến N2.");
+                if (!seen.Add((row.EntityType, row.RowKey, row.EntityType == ImportEntityType.PracticeExercise ? levelId : null))) continue;
+                if (row.Action == ImportRowAction.Modified)
+                {
+                    if (row.TargetEntityId is not > 0)
+                        return ApiResponse<ImportConfirmResponse>.Fail($"Dòng {row.SourceRowNumber}: thiếu học liệu gốc để cập nhật.");
+                    if (!seenTargets.Add((row.EntityType, row.TargetEntityId.Value))) continue;
+                }
+
+                drafts.Add(new ContentApprovalRequest
+                {
+                    BatchId = batchId,
+                    EntityType = row.EntityType,
+                    Action = row.Action,
+                    TargetEntityId = row.Action == ImportRowAction.Modified ? row.TargetEntityId : null,
+                    RowKey = row.RowKey,
+                    SourceRowNumber = row.SourceRowNumber,
+                    SourceFileName = sourceFileName,
+                    PayloadJson = row.PayloadJson,
+                    // Admin xem được "đổi gì" (vd "Bài 1 (N5) → Bài 2 (N5)") khi duyệt.
+                    DiffSummaryJson = row.ChangedFields is { Count: > 0 } ? JsonSerializer.Serialize(row.ChangedFields) : null,
+                    Status = ContentApprovalStatus.Draft,
+                    SubmittedByUserId = actorUserId,
+                    SubmittedAt = now,
+                });
+            }
+
+            if (drafts.Count == 0)
+                return ApiResponse<ImportConfirmResponse>.Fail(
+                    "Không có nội dung mới để lưu. Hãy kiểm tra các bản nháp hoặc nội dung đang chờ duyệt của bạn.");
+
+            await unitOfWork.ContentApprovalRequests.AddRangeAsync(drafts, cancellationToken);
+            await unitOfWork.SaveChangesAsync(cancellationToken);
+
+            return ApiResponse<ImportConfirmResponse>.Success(new ImportConfirmResponse
+            {
+                BatchId = batchId,
+                DraftsCreatedCount = drafts.Count,
+                SkippedCount = request.Rows.Count - drafts.Count,
+            });
+        }
+
+        internal static string? ValidateMockTestPayload(string payloadJson, IReadOnlyDictionary<int, string> skillNames,
+            IReadOnlyDictionary<int, string> levelCodes)
         {
             MockTestImportPayloadResponse? payload;
             try
@@ -210,9 +308,15 @@ namespace RikiPath.Application.Services
             }
             catch (JsonException ex) { return $"Payload MockTest không hợp lệ: {ex.Message}"; }
             if (payload is null || payload.Sections.Count == 0) return "MockTest phải có ít nhất một section.";
-            foreach (var question in payload.Sections.SelectMany(section => section.Questions))
+            foreach (var section in payload.Sections)
+            foreach (var question in section.Questions)
             {
                 var type = string.IsNullOrWhiteSpace(question.QuestionType) ? "SingleChoice" : question.QuestionType;
+                var audioError = ImportHandlerSupport.ValidateMockListeningAudio(type, question.AudioUrl,
+                    skillNames.GetValueOrDefault(section.LanguageSkillId) ?? section.LanguageSkillName,
+                    section.Title, section.CertificateSectionCode);
+                if (audioError is not null)
+                    return $"Phần '{section.Title}', câu số {question.SortOrder}: {audioError}";
                 if (type.Equals("SingleChoice", StringComparison.OrdinalIgnoreCase)
                     || type.Equals("Listening", StringComparison.OrdinalIgnoreCase)
                     || type.Equals("Reading", StringComparison.OrdinalIgnoreCase))
@@ -230,10 +334,14 @@ namespace RikiPath.Application.Services
                 {
                     if (question.Options.Count != 0 || question.InteractionData is null || question.AnswerKey is null)
                         return $"Câu '{question.QuestionText}' dạng {type} cần InteractionDataJson và AnswerKeyJson, không dùng các cột Option.";
+                    if (SentenceOrdering.IsType(type) && !SentenceOrdering.TryRead(question.InteractionData, question.AnswerKey, out _, out _))
+                        return $"Câu '{question.QuestionText}': {SentenceOrdering.InvalidContentMessage}";
                 }
                 else return $"QuestionType '{type}' không được hỗ trợ.";
             }
-            return null;
+            if (!levelCodes.TryGetValue(payload.CertificateLevelId, out var levelCode))
+                return "Cấp độ của đề thi không tồn tại hoặc đã bị xóa.";
+            return ImportHandlerSupport.ValidateMockTestCoverage(levelCode, payload.Sections, skillNames);
         }
     }
 }

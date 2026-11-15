@@ -13,14 +13,16 @@ namespace RikiPath.Domain
         public PayOsPayoutSettings PayOsPayout { get; set; } = new();
         public MentorBankSecuritySettings MentorBankSecurity { get; set; } = new();
         public SupabaseSettings Supabase { get; set; }
-        public AiSettings Ai { get; set; }
-        public AzureSpeechSettings AzureSpeechSettings { get; set; }
-        public GeminiSettings Gemini { get; set; }
-        public AwsSettings AWS { get; set; } = new();
-        public OpenRouterSettings OpenRouter { get; set; } = new();
+        public AiSettings Ai { get; set; } = new();
+        public GoogleAuthSettings GoogleAuth { get; set; } = new();
         public string FrontendBaseUrl { get; set; }
         public GoogleAuthSettings Google { get; set; } = new();
+        public AzureSpeechSettings AzureSpeechSettings { get; set; } = new();
         public QaPaymentSimulatorSettings QaPaymentSimulator { get; set; } = new();
+    }
+    public class GoogleAuthSettings
+    {
+        public string? ClientId { get; set; }
     }
     public class ConnectionStrings
     {
@@ -50,11 +52,6 @@ namespace RikiPath.Domain
         public string Password { get; set; }
         public string FromName { get; set; }
         public string FromEmail { get; set; }
-    }
-
-    public class GoogleAuthSettings
-    {
-        public string ClientId { get; set; } = string.Empty;
     }
 
     public class PayOsSettings
@@ -94,19 +91,6 @@ namespace RikiPath.Domain
 
     public class AiSettings
     {
-        public string BaseUrl { get; set; } = string.Empty;
-        public string ApiKey { get; set; } = string.Empty;
-
-        // Model dùng để chấm bài viết/kanji - nên dùng model mạnh hơn vì sai lệch ở đây ảnh hưởng
-        // trực tiếp tới điểm học viên. Mặc định openai/gpt-oss-120b.
-        public string GradingModel { get; set; } = "openai/gpt-oss-120b";
-
-        // Model dùng để gợi ý lộ trình học - có thể dùng model nhẹ/rẻ hơn (vd "openai/gpt-oss-20b")
-        // vì yêu cầu suy luận thấp hơn chấm điểm. Đổi trực tiếp trong appsettings.json, không cần
-        // build lại và không cần sửa code.
-        public string LearningPathModel { get; set; } = "openai/gpt-oss-120b";
-        public string LearningPathProvider { get; set; } = "OpenRouter";
-
         public AiRateLimitSettings RateLimit { get; set; } = new();
     }
 
@@ -120,38 +104,10 @@ namespace RikiPath.Domain
         public int MaxTokensPerUserPerDay { get; set; } = 50000;
     }
 
-    public class GeminiSettings
-    {
-        public List<string> ApiKey { get; set; } = new();
-        public string BaseUrl { get; set; } = string.Empty;
-
-        // Hàm tiện ích lấy danh sách key không bị rỗng
-        public List<string> GetValidKeys()
-        {
-            return ApiKey?.Where(k => !string.IsNullOrWhiteSpace(k)).ToList() ?? new List<string>();
-        }
-
-    }
-
     public sealed class QaPaymentSimulatorSettings
     {
         public bool Enabled { get; set; }
         public string AllowedDatabaseName { get; set; } = string.Empty;
-    }
-
-    public class AwsSettings
-    {
-        public string ApiKey { get; set; } = string.Empty;
-        public string Region { get; set; } = "ap-southeast-1";
-        public string LearningPathModelId { get; set; } = "anthropic.claude-haiku-4-5-20251001-v1:0";
-    }
-
-    public class OpenRouterSettings
-    {
-        public string ApiKey { get; set; } = string.Empty;
-        public string BaseUrl { get; set; } = "https://openrouter.ai/api/v1";
-        public string Model { get; set; } = string.Empty;
-        public string AppName { get; set; } = "RikiPath";
     }
 
     public class AzureSpeechSettings

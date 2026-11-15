@@ -2,6 +2,7 @@
 using Microsoft.EntityFrameworkCore;
 using RikiPath.Application.Helpers;
 using RikiPath.Application.Responses.Content;
+using RikiPath.Domain.Entities;
 using RikiPath.Domain.Enums;
 
 namespace RikiPath.Application.Handlers
@@ -19,8 +20,7 @@ namespace RikiPath.Application.Handlers
                 .Include(l => l.LanguageSkill)
                 .Where(l => !l.IsDeleted)
                 .ToListAsync(cancellationToken);
-            var (existingByKey, ambiguousKeys) = ImportHandlerSupport.IndexByKey(
-                existingLessons, l => NaturalKey(l.Title, l.CertificateLevelId));
+            var existingByKey = existingLessons.ToLookup(lesson => (lesson.Title, lesson.CertificateLevelId));
 
             var (levelsByCode, ambiguousLevelCodes) = await ImportHandlerSupport.LoadLevelsAsync(unitOfWork, cancellationToken);
 
@@ -38,7 +38,7 @@ namespace RikiPath.Application.Handlers
 
             foreach (var row in rows)
             {
-                var diff = BuildRowDiff(row, existingByKey, ambiguousKeys, levelsByCode, ambiguousLevelCodes,
+                var diff = BuildRowDiff(row, existingByKey, levelsByCode, ambiguousLevelCodes,
                     skillsByName, ambiguousSkillNames, openRowKeys, seenInFile);
                 result.Rows.Add(diff);
                 ImportHandlerSupport.Tally(result, diff);
@@ -47,12 +47,9 @@ namespace RikiPath.Application.Handlers
             return result;
         }
 
-        private static string NaturalKey(string title, int certificateLevelId) => $"{title}|{certificateLevelId}";
-
         private static ImportRowDiffResponse BuildRowDiff(
             ExcelRow row,
-            Dictionary<string, Domain.Entities.Lesson> existingByKey,
-            HashSet<string> ambiguousKeys,
+            ILookup<(string Title, int CertificateLevelId), Lesson> existingByKey,
             Dictionary<string, int> levelsByCode,
             HashSet<string> ambiguousLevelCodes,
             Dictionary<string, Domain.Entities.LanguageSkill> skillsByName,
@@ -62,6 +59,7 @@ namespace RikiPath.Application.Handlers
         {
             var title = row.Get("LessonTitle");
             var description = row.Get("Description");
+            var audio = row.Get("AudioUrl");
             var levelCode = row.Get("Certificate Level Code");
             var skillName = row.Get("Language Skill Name");
             var sortOrderRaw = row.Get("Sort Order");
@@ -77,6 +75,7 @@ namespace RikiPath.Application.Handlers
                 {
                     ["lessonTitle"] = title,
                     ["description"] = description,
+                    ["audioUrl"] = audio,
                     ["certificateLevelCode"] = levelCode,
                     ["languageSkillName"] = skillName,
                     ["sortOrder"] = sortOrderRaw,
@@ -85,6 +84,7 @@ namespace RikiPath.Application.Handlers
 
             // ---- Validate ----
             if (string.IsNullOrWhiteSpace(title)) diff.Errors.Add("Thiếu cột LessonTitle.");
+            var audioUrl = ImportHandlerSupport.CheckUrl(audio, "AudioUrl", "", diff.Errors);
             ImportHandlerSupport.CheckLevel(levelCode, levelsByCode, ambiguousLevelCodes, diff.Errors);
 
             Domain.Entities.LanguageSkill? skill = null;
@@ -118,21 +118,23 @@ namespace RikiPath.Application.Handlers
             }
 
             var levelId = levelsByCode[levelCode!];
-            var key = NaturalKey(title!, levelId);
-            if (ambiguousKeys.Contains(key))
+            var matches = existingByKey[(title!, levelId)];
+            if (matches.Skip(1).Any())
             {
-                diff.Errors.Add($"Có nhiều bài học '{title}' ({levelCode}) trùng nhau trong hệ thống, cần dọn dữ liệu trước khi import.");
+                var ids = string.Join(", ", matches.Select(lesson => lesson.Id).Order().Select(id => $"#{id}"));
+                diff.Errors.Add($"Có nhiều bài học cùng tên '{title}' ở cấp {levelCode} trong hệ thống (ID {ids}). Hãy kiểm tra các bài trùng trước khi nhập dòng này.");
                 diff.Action = ImportRowAction.Error;
                 return diff;
             }
 
-            existingByKey.TryGetValue(key, out var existing);
+            var existing = matches.SingleOrDefault();
 
             // ---- Build payload (đã qua validate) ----
             var payload = new LessonImportPayloadResponse
             {
                 Title = title!,
                 Description = description,
+                AudioUrl = audioUrl,
                 // Không có cột Sort Order: giữ thứ tự cũ nếu bài đã có, bài mới lấy số dòng trong file.
                 SortOrder = sortOrder ?? existing?.SortOrder ?? row.RowNumber,
                 CertificateLevelCode = levelCode!,
@@ -152,6 +154,8 @@ namespace RikiPath.Application.Handlers
             var changed = new Dictionary<string, string>();
 
             ImportHandlerSupport.CompareField(changed, "description", existing.Description, payload.Description);
+            if (audioUrl is not null)
+                ImportHandlerSupport.CompareField(changed, "audioUrl", existing.AudioUrl, audioUrl);
             ImportHandlerSupport.CompareField(changed, "languageSkillName", existing.LanguageSkill?.Name, skill.Name);
             ImportHandlerSupport.CompareField(changed, "sortOrder", existing.SortOrder.ToString(), payload.SortOrder.ToString());
 

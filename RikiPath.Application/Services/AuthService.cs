@@ -12,16 +12,18 @@ using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Logging;
 
 namespace RikiPath.Application.Services
 {
-    public class AuthService(
+    public partial class AuthService(
         IUnitOfWork unitOfWork,
         AppSettings appSettings,
         IEmailService emailService,
         IFirebaseAuthService firebaseAuthService,
         IMemoryCache memoryCache,
-        IClaimService claimService) : IAuthService
+        IClaimService claimService,
+        ILogger<AuthService>? logger = null) : IAuthService
     {
         private const int VerificationCodeLifetimeMinutes = 30;
         private const int ResendCooldownSeconds = 60;
@@ -31,7 +33,8 @@ namespace RikiPath.Application.Services
         {
             try
             {
-                var existingUser = await unitOfWork.UserAccounts.GetByEmailAsync(request.Email);
+                var email = request.Email.Trim().ToLowerInvariant();
+                var existingUser = await unitOfWork.UserAccounts.GetByEmailAsync(email);
                 if (existingUser is not null)
                     return ApiResponse<RegisterResponse>.Fail("Email này đã được đăng ký.");
 
@@ -39,7 +42,7 @@ namespace RikiPath.Application.Services
 
                 var user = new UserAccount
                 {
-                    Email = request.Email,
+                    Email = email,
                     PasswordHash = hash,
                     PasswordSalt = salt,
                     FirstName = request.FirstName,
@@ -235,7 +238,7 @@ namespace RikiPath.Application.Services
             try
             {
                 var user = await unitOfWork.UserAccounts.GetByEmailAsync(request.Email);
-                if (user is null || !VerifyPasswordHash(request.Password, user.PasswordHash, user.PasswordSalt))
+                if (user is null || user.IsDeleted || !VerifyPasswordHash(request.Password, user.PasswordHash, user.PasswordSalt))
                     return ApiResponse<LoginResponse>.Fail("Email hoặc mật khẩu không đúng.");
 
                 if (!user.IsEmailVerified)
@@ -259,60 +262,6 @@ namespace RikiPath.Application.Services
             }
         }
 
-        public async Task<ApiResponse<LoginResponse>> LoginWithGoogleAsync(GoogleLoginRequest request, CancellationToken cancellationToken)
-        {
-            try
-            {
-                var clientId = appSettings.Google?.ClientId;
-                if (string.IsNullOrWhiteSpace(clientId))
-                    return ApiResponse<LoginResponse>.Fail("Server chưa cấu hình Google Client ID.");
-
-                var identity = await VerifyGoogleIdTokenAsync(request.IdToken, clientId, cancellationToken);
-                if (identity is null)
-                    return ApiResponse<LoginResponse>.Fail("Phiên Google không hợp lệ hoặc đã hết hạn.");
-                if (!identity.EmailVerified || string.IsNullOrWhiteSpace(identity.Email))
-                    return ApiResponse<LoginResponse>.Fail("Google chưa xác thực email này.");
-
-                var email = identity.Email.Trim().ToLowerInvariant();
-                var user = await unitOfWork.UserAccounts.GetByEmailAsync(email);
-                if (user is null)
-                {
-                    var (hash, salt) = CreatePasswordHash(Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)));
-                    user = new UserAccount
-                    {
-                        Email = email,
-                        FirstName = identity.GivenName,
-                        LastName = identity.FamilyName,
-                        PasswordHash = hash,
-                        PasswordSalt = salt,
-                        Role = Role.Learner,
-                        IsEmailVerified = true,
-                    };
-                    await unitOfWork.UserAccounts.AddAsync(user, cancellationToken);
-                }
-                else if (!user.IsEmailVerified)
-                {
-                    user.IsEmailVerified = true;
-                    unitOfWork.UserAccounts.Update(user);
-                }
-
-                await unitOfWork.SaveChangesAsync(cancellationToken);
-
-                return ApiResponse<LoginResponse>.Success(new LoginResponse
-                {
-                    AccessToken = CreateToken(user),
-                    UserId = user.Id,
-                    Email = user.Email,
-                    FullName = $"{user.FirstName} {user.LastName}".Trim(),
-                    Role = user.Role.ToString(),
-                });
-            }
-            catch (Exception ex)
-            {
-                return ApiResponse<LoginResponse>.Fail(
-                    "Đăng nhập Google thất bại.", System.Net.HttpStatusCode.InternalServerError, errors: BuildDebugErrors(ex));
-            }
-        }
 
         public async Task<ApiResponse<LoginResponse>> LoginWithFirebasePhoneAsync(FirebasePhoneAuthRequest request, CancellationToken cancellationToken)
         {
@@ -365,10 +314,11 @@ namespace RikiPath.Application.Services
                 if (user is null)
                     return ApiResponse.NotFound("Không tìm thấy người dùng.");
 
-                if (await unitOfWork.UserAccounts.GetByEmailAsync(request.NewEmail) is not null)
+                var newEmail = request.NewEmail.Trim().ToLowerInvariant();
+                if (await unitOfWork.UserAccounts.GetByEmailAsync(newEmail) is not null)
                     return ApiResponse.Fail("Email mới đã được sử dụng bởi tài khoản khác.");
 
-                user.Email = request.NewEmail;
+                user.Email = newEmail;
                 user.IsEmailVerified = false;
                 unitOfWork.UserAccounts.Update(user);
 
@@ -452,69 +402,6 @@ namespace RikiPath.Application.Services
             }
         }
 
-        private sealed record GoogleIdentity(string Email, bool EmailVerified, string? GivenName, string? FamilyName);
-
-        private async Task<GoogleIdentity?> VerifyGoogleIdTokenAsync(string idToken, string clientId, CancellationToken cancellationToken)
-        {
-            var keys = await GetGoogleSigningKeysAsync(cancellationToken, forceRefresh: false);
-            try
-            {
-                return ReadGoogleIdentity(idToken, clientId, keys);
-            }
-            catch (SecurityTokenSignatureKeyNotFoundException)
-            {
-                keys = await GetGoogleSigningKeysAsync(cancellationToken, forceRefresh: true);
-                return ReadGoogleIdentity(idToken, clientId, keys);
-            }
-            catch (SecurityTokenException)
-            {
-                return null;
-            }
-        }
-
-        private static GoogleIdentity ReadGoogleIdentity(string idToken, string clientId, IEnumerable<SecurityKey> keys)
-        {
-            var handler = new JwtSecurityTokenHandler { MapInboundClaims = false };
-            var principal = handler.ValidateToken(idToken, new TokenValidationParameters
-            {
-                ValidateIssuer = true,
-                ValidIssuers = ["accounts.google.com", "https://accounts.google.com"],
-                ValidateAudience = true,
-                ValidAudience = clientId,
-                ValidateLifetime = true,
-                IssuerSigningKeys = keys,
-            }, out _);
-
-            var email = principal.FindFirst("email")?.Value ?? string.Empty;
-            var verified = principal.FindFirst("email_verified")?.Value;
-            var given = principal.FindFirst("given_name")?.Value;
-            var family = principal.FindFirst("family_name")?.Value;
-            if (string.IsNullOrWhiteSpace(given) && string.IsNullOrWhiteSpace(family))
-            {
-                var name = principal.FindFirst("name")?.Value?.Trim();
-                if (!string.IsNullOrWhiteSpace(name))
-                {
-                    var parts = name.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
-                    given = parts.ElementAtOrDefault(0);
-                    family = parts.ElementAtOrDefault(1);
-                }
-            }
-
-            return new GoogleIdentity(email, string.Equals(verified, "true", StringComparison.OrdinalIgnoreCase), given, family);
-        }
-
-        private async Task<IEnumerable<SecurityKey>> GetGoogleSigningKeysAsync(CancellationToken cancellationToken, bool forceRefresh)
-        {
-            const string cacheKey = "google-oauth-certs";
-            if (!forceRefresh && memoryCache.TryGetValue(cacheKey, out IEnumerable<SecurityKey>? cached) && cached is not null)
-                return cached;
-
-            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
-            var json = await http.GetStringAsync("https://www.googleapis.com/oauth2/v3/certs", cancellationToken);
-            var keys = new JsonWebKeySet(json).GetSigningKeys();
-            memoryCache.Set(cacheKey, keys, TimeSpan.FromHours(6));
-            return keys;
-        }
 
         private string CreateToken(UserAccount user)
         {
@@ -546,9 +433,10 @@ namespace RikiPath.Application.Services
 
         private static bool VerifyPasswordHash(string password, byte[] passwordHash, byte[] passwordSalt)
         {
+            if (passwordHash is not { Length: 64 } || passwordSalt is not { Length: > 0 }) return false;
             using var hmac = new HMACSHA512(passwordSalt);
             var computedHash = hmac.ComputeHash(Encoding.UTF8.GetBytes(password));
-            return computedHash.SequenceEqual(passwordHash);
+            return CryptographicOperations.FixedTimeEquals(computedHash, passwordHash);
         }
 
         private static string GenerateVerificationCode() => Random.Shared.Next(100000, 999999).ToString();

@@ -1,4 +1,5 @@
-using Microsoft.AspNetCore.Authorization;
+﻿using Microsoft.AspNetCore.Authorization;
+using RikiPath.Application.Services;
 using Microsoft.AspNetCore.Mvc;
 using RikiPath.Application.IServices;
 using RikiPath.Application.Responses;
@@ -8,7 +9,7 @@ namespace RikiPath.WebApi.Controllers;
 [ApiController]
 [Route("api/learner-essays")]
 [Authorize(Roles = "Learner")]
-public class LearnerEssayController(ILearnerEssayService essayService) : ControllerBase
+public class LearnerEssayController(ILearnerEssayService essayService, SubscriptionAccessService subscriptions) : ControllerBase
 {
     [HttpPost]
     [Consumes("multipart/form-data")]
@@ -24,7 +25,9 @@ public class LearnerEssayController(ILearnerEssayService essayService) : Control
     public async Task<IActionResult> Scan(
         [FromForm] EssayImageRequest request,
         CancellationToken cancellationToken)
-        => Respond(await essayService.ScanAsync(request.Image, cancellationToken));
+        => (await subscriptions.GetAccessAsync(cancellationToken)).Writing
+            ? Respond(await essayService.ScanAsync(request.Image, cancellationToken))
+            : StatusCode(403, new { errorCode = "WRITING_PACKAGE_REQUIRED", errorMessage = "Bạn cần gói luyện viết." });
 
     [HttpGet]
     public async Task<IActionResult> GetAll(CancellationToken cancellationToken)
@@ -46,7 +49,9 @@ public class LearnerEssayController(ILearnerEssayService essayService) : Control
         int id,
         [FromForm] EssayImageRequest request,
         CancellationToken cancellationToken)
-        => Respond(await essayService.RescanAsync(id, request.Image, cancellationToken));
+        => (await subscriptions.GetAccessAsync(cancellationToken)).Writing
+            ? Respond(await essayService.RescanAsync(id, request.Image, cancellationToken))
+            : StatusCode(403, new { errorCode = "WRITING_PACKAGE_REQUIRED", errorMessage = "Bạn cần gói luyện viết." });
 
     [HttpDelete("{id:int}")]
     public async Task<IActionResult> Delete(int id, CancellationToken cancellationToken)

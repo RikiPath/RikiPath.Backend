@@ -38,6 +38,7 @@ namespace RikiPath.Application.Responses.Practice
         public int SubmissionId { get; set; }
         public SubmissionType Type { get; set; }
         public DateTime SubmittedAt { get; set; }
+        public string? Transcript { get; set; }
 
         /// <summary>null nếu loại bài này chưa hỗ trợ chấm tự động, hoặc AI chấm thất bại.</summary>
         public GradingResultResponse? Grading { get; set; }

@@ -78,6 +78,23 @@ namespace RikiPath.Application.Services
             {
                 var authorId = claimService.GetUserClaim().Id;
                 var createdCount = 0;
+                var mockTestRows = sheetDiffs.Where(sheet => sheet.EntityType == ImportEntityType.MockTest)
+                    .SelectMany(sheet => sheet.Rows)
+                    .Where(row => row.Action is ImportRowAction.New or ImportRowAction.Modified)
+                    .ToList();
+                if (mockTestRows.Count > 0)
+                {
+                    var skillNames = (await unitOfWork.LanguageSkills.GetAllAsync(cancellationToken))
+                        .ToDictionary(skill => skill.Id, skill => skill.Name);
+                    var levelCodes = (await unitOfWork.CertificateLevels.GetAllAsync(cancellationToken))
+                        .Where(level => !level.IsDeleted).ToDictionary(level => level.Id, level => level.Code);
+                    foreach (var row in mockTestRows)
+                    {
+                        var error = ExcelContentImportService.ValidateMockTestPayload(row.PayloadJson ?? "{}", skillNames, levelCodes);
+                        if (error is not null)
+                            return ApiResponse<int>.Fail($"Dòng {row.SourceRowNumber}: {error}");
+                    }
+                }
 
                 foreach (var sheet in sheetDiffs)
                 {
@@ -120,7 +137,7 @@ namespace RikiPath.Application.Services
             {
                 var query = unitOfWork.ContentApprovalRequests.Query()
                     .Include(r => r.SubmittedBy)
-                    .Where(r => !r.IsDeleted && (r.Status == ContentApprovalStatus.Draft || r.Status == ContentApprovalStatus.PendingReview));
+                    .Where(r => !r.IsDeleted && r.Status == ContentApprovalStatus.PendingReview);
 
                 if (entityType.HasValue)
                     query = query.Where(r => r.EntityType == entityType.Value);
@@ -198,7 +215,7 @@ namespace RikiPath.Application.Services
             var lessonKeys = lessons.Values.Select(p => LessonKey(p.Title, p.CertificateLevelCode)).ToHashSet(StringComparer.OrdinalIgnoreCase);
             var relatedRequests = await unitOfWork.ContentApprovalRequests.Query()
                 .Where(r => !r.IsDeleted && (r.Status == ContentApprovalStatus.Approved
-                    || r.Status == ContentApprovalStatus.Draft || r.Status == ContentApprovalStatus.PendingReview)
+                    || r.Status == ContentApprovalStatus.PendingReview)
                     && (r.EntityType == ImportEntityType.Kanji || r.EntityType == ImportEntityType.Grammar
                         || r.EntityType == ImportEntityType.Vocabulary || r.EntityType == ImportEntityType.PracticeExercise))
                 .ToListAsync(cancellationToken);
@@ -241,10 +258,13 @@ namespace RikiPath.Application.Services
 
             // Include current DB relations as already approved items, plus in-flight import requests.
             var lessonRequestByKey = lessons.ToDictionary(x => x.Key, x => LessonKey(x.Value.Title, x.Value.CertificateLevelCode));
+            var authors = requests.ToDictionary(x => x.Id, x => x.SubmittedByUserId);
             foreach (var response in responses.Where(x => x.EntityType == ImportEntityType.Lesson))
             {
                 if (!lessonRequestByKey.TryGetValue(response.RequestId, out var key)) continue;
-                response.RelatedLessonContent = related.Where(x => x.LessonKey == key).Select(x =>
+                response.RelatedLessonContent = related.Where(x => x.LessonKey == key &&
+                    (x.Request.Status == ContentApprovalStatus.Approved ||
+                     x.Request.SubmittedByUserId == authors[response.RequestId])).Select(x =>
                 {
                     var diff = relatedDiffs.GetValueOrDefault(x.Request.Id) ?? new ApprovalDiffResult();
                     return new PendingLessonContentResponse
@@ -322,12 +342,11 @@ namespace RikiPath.Application.Services
             {
                 var req = await unitOfWork.ContentApprovalRequests.GetByIdAsync(requestId, cancellationToken);
 
-                if (req is null || !IsReviewable(req.Status))
+                if (req is null || req.IsDeleted || !IsReviewable(req.Status))
                     return ApiResponse<bool>.Fail("Yêu cầu không tồn tại hoặc đã được xử lý.");
 
                 await ApplyReviewAsync(req, request.Approve, request.ReviewNote, cancellationToken);
 
-                unitOfWork.ContentApprovalRequests.Update(req);
                 await unitOfWork.SaveChangesAsync(cancellationToken);
                 await NotifyAuthorsAsync([req], cancellationToken);
 
@@ -347,13 +366,14 @@ namespace RikiPath.Application.Services
             try
             {
                 var lessonRequest = await unitOfWork.ContentApprovalRequests.GetByIdAsync(lessonRequestId, cancellationToken);
-                if (lessonRequest is null || lessonRequest.EntityType != ImportEntityType.Lesson || !IsReviewable(lessonRequest.Status))
+                if (lessonRequest is null || lessonRequest.IsDeleted || lessonRequest.EntityType != ImportEntityType.Lesson || !IsReviewable(lessonRequest.Status))
                     return ApiResponse<BulkReviewResponse>.Fail("Yêu cầu Lesson không tồn tại hoặc đã được xử lý.");
 
                 var payload = JsonSerializer.Deserialize<LessonImportPayloadResponse>(lessonRequest.PayloadJson, JsonOptions)
                     ?? throw new InvalidOperationException("Payload Lesson rỗng.");
                 var requests = await unitOfWork.ContentApprovalRequests.Query()
-                    .Where(r => !r.IsDeleted && (r.Status == ContentApprovalStatus.Draft || r.Status == ContentApprovalStatus.PendingReview))
+                    .Where(r => !r.IsDeleted && r.Status == ContentApprovalStatus.PendingReview &&
+                        r.SubmittedByUserId == lessonRequest.SubmittedByUserId)
                     .ToListAsync(cancellationToken);
 
                 var group = new List<ContentApprovalRequest> { lessonRequest };
@@ -376,7 +396,6 @@ namespace RikiPath.Application.Services
                 if (request.Approve)
                 {
                     await ApplyReviewAsync(lessonRequest, true, request.ReviewNote, cancellationToken);
-                    unitOfWork.ContentApprovalRequests.Update(lessonRequest);
                     await unitOfWork.SaveChangesAsync(cancellationToken);
                 }
                 else
@@ -421,7 +440,7 @@ namespace RikiPath.Application.Services
                 try
                 {
                     var req = await unitOfWork.ContentApprovalRequests.GetByIdAsync(item.RequestId, cancellationToken);
-                    if (req is null || !IsReviewable(req.Status))
+                    if (req is null || req.IsDeleted || !IsReviewable(req.Status))
                     {
                         result.Failures.Add(new BulkReviewItemResult
                         {
@@ -494,7 +513,7 @@ namespace RikiPath.Application.Services
         }
 
         private static bool IsReviewable(ContentApprovalStatus status) =>
-            status is ContentApprovalStatus.Draft or ContentApprovalStatus.PendingReview;
+            status == ContentApprovalStatus.PendingReview;
 
         private async Task ApplyReviewAsync(
             ContentApprovalRequest req, bool approve, string? reviewNote, CancellationToken cancellationToken)
@@ -511,7 +530,13 @@ namespace RikiPath.Application.Services
             switch (req.EntityType)
             {
                 case ImportEntityType.Lesson:
-                    await ApplyLessonApprovalAsync(req, cancellationToken);
+                    var lesson = ReadLessonPayload(req);
+                    if (lesson.TopicId.HasValue || lesson.TopicTitle is not null)
+                    {
+                        await ApplyLessonTopicApprovalAsync(req, reviewNote, cancellationToken);
+                        return;
+                    }
+                    await ApplyLessonApprovalAsync(req, lesson, cancellationToken);
                     break;
                 case ImportEntityType.PracticeExercise:
                     await ApplyPracticeExerciseApprovalAsync(req, cancellationToken);
@@ -532,9 +557,14 @@ namespace RikiPath.Application.Services
                     throw new NotSupportedException($"Chưa hỗ trợ phê duyệt tự động cho loại {req.EntityType}.");
             }
 
-            req.Status = ContentApprovalStatus.Approved;
-            req.ReviewNote = reviewNote;
-            req.ReviewedAt = DateTime.UtcNow;
+            MarkApproved(req, reviewNote);
+        }
+
+        private static void MarkApproved(ContentApprovalRequest request, string? reviewNote)
+        {
+            request.Status = ContentApprovalStatus.Approved;
+            request.ReviewNote = reviewNote;
+            request.ReviewedAt = DateTime.UtcNow;
         }
 
         #region Helper Methods Thực thi lưu Entity + ContentLevelMapping
@@ -562,6 +592,8 @@ namespace RikiPath.Application.Services
                 vocab = await unitOfWork.Vocabularies.GetByIdAsync(req.TargetEntityId!.Value, cancellationToken)
                     ?? throw new InvalidOperationException("Không tìm thấy từ vựng gốc.");
 
+                vocab.Word = p.Word;
+                vocab.Reading = p.Reading;
                 vocab.Meaning = p.Meaning;
                 vocab.ExampleSentence = p.ExampleSentence;
                 vocab.ExampleSentenceMeaning = p.ExampleSentenceMeaning;
@@ -606,7 +638,9 @@ namespace RikiPath.Application.Services
                     SinoVietnamese = p.SinoVietnamese,
                     OnYomi = p.OnYomi,
                     KunYomi = p.KunYomi,
-                    StrokeCount = p.StrokeCount
+                    StrokeCount = p.StrokeCount,
+                    StrokeOrderImageUrl = p.StrokeOrderImageUrl,
+                    AudioUrl = p.AudioUrl
                 };
                 await unitOfWork.Kanjis.AddAsync(kanji, cancellationToken);
             }
@@ -615,11 +649,14 @@ namespace RikiPath.Application.Services
                 kanji = await unitOfWork.Kanjis.GetByIdAsync(req.TargetEntityId!.Value, cancellationToken)
                     ?? throw new InvalidOperationException("Không tìm thấy Kanji gốc.");
 
+                kanji.Character = p.Character;
                 kanji.Meaning = p.Meaning;
                 kanji.SinoVietnamese = p.SinoVietnamese;
                 kanji.OnYomi = p.OnYomi;
                 kanji.KunYomi = p.KunYomi;
                 kanji.StrokeCount = p.StrokeCount;
+                if (p.StrokeOrderImageUrl is not null) kanji.StrokeOrderImageUrl = p.StrokeOrderImageUrl;
+                if (p.AudioUrl is not null) kanji.AudioUrl = p.AudioUrl;
 
                 unitOfWork.Kanjis.Update(kanji);
             }
@@ -646,29 +683,78 @@ namespace RikiPath.Application.Services
         private async Task<Lesson?> FindLessonAsync(string title, int levelId, CancellationToken cancellationToken) =>
             await unitOfWork.Lessons.FirstOrDefaultAsync(l => !l.IsDeleted && l.Title == title && l.CertificateLevelId == levelId, cancellationToken);
 
-        private async Task ApplyLessonApprovalAsync(ContentApprovalRequest req, CancellationToken cancellationToken)
-        {
-            var p = JsonSerializer.Deserialize<LessonImportPayloadResponse>(req.PayloadJson, JsonOptions)
+        private static LessonImportPayloadResponse ReadLessonPayload(ContentApprovalRequest request) =>
+            JsonSerializer.Deserialize<LessonImportPayloadResponse>(request.PayloadJson, JsonOptions)
                 ?? throw new InvalidOperationException("Payload Lesson rỗng.");
-            Lesson lesson;
-            if (req.Action == ImportRowAction.New)
+
+        private async Task ApplyLessonTopicApprovalAsync(ContentApprovalRequest request, string? reviewNote, CancellationToken ct)
+        {
+            // In batch review, earlier items may have staged changes before this separate transaction.
+            await unitOfWork.SaveChangesAsync(ct);
+            var id = request.Id;
+            var status = request.Status;
+            var payloadJson = request.PayloadJson;
+            await unitOfWork.ExecuteLessonTopicApprovalAsync(async token =>
             {
-                lesson = new Lesson { Title = p.Title, Description = p.Description, SortOrder = p.SortOrder, CertificateLevelId = p.CertificateLevelId, LanguageSkillId = p.LanguageSkillId };
-                await unitOfWork.Lessons.AddAsync(lesson, cancellationToken);
-            }
-            else
+                if (!await unitOfWork.ContentApprovalRequests.Query().AnyAsync(x => x.Id == id
+                    && !x.IsDeleted && x.Status == status && x.PayloadJson == payloadJson, token))
+                    throw new InvalidOperationException("Yêu cầu bài học đã thay đổi hoặc đã được xử lý. Hãy tải lại.");
+
+                var current = await unitOfWork.ContentApprovalRequests.GetByIdAsync(id, token)
+                    ?? throw new InvalidOperationException("Không tìm thấy yêu cầu bài học.");
+                await ApplyLessonApprovalAsync(current, ReadLessonPayload(current), token);
+                MarkApproved(current, reviewNote);
+                await unitOfWork.SaveChangesAsync(token);
+            }, ct);
+        }
+
+        private async Task ApplyLessonApprovalAsync(ContentApprovalRequest req, LessonImportPayloadResponse p, CancellationToken cancellationToken)
+        {
+            var isNew = req.Action == ImportRowAction.New;
+            var lesson = isNew ? new Lesson() : await unitOfWork.Lessons.GetByIdAsync(req.TargetEntityId!.Value, cancellationToken)
+                ?? throw new InvalidOperationException("Không tìm thấy Lesson gốc.");
+            var hasTopicUpdate = p.TopicId.HasValue || p.TopicTitle is not null;
+            if (hasTopicUpdate)
             {
-                lesson = await unitOfWork.Lessons.GetByIdAsync(req.TargetEntityId!.Value, cancellationToken)
-                    ?? throw new InvalidOperationException("Không tìm thấy Lesson gốc.");
-                lesson.Title = p.Title;
-                lesson.Description = p.Description;
-                lesson.SortOrder = p.SortOrder;
-                lesson.CertificateLevelId = p.CertificateLevelId;
-                lesson.LanguageSkillId = p.LanguageSkillId;
-                unitOfWork.Lessons.Update(lesson);
+                var topic = await ResolveLessonTopicAsync(p, cancellationToken);
+                lesson.Topic = topic;
+                if (topic is null) lesson.TopicId = null;
             }
+            lesson.Title = p.Title;
+            lesson.Description = p.Description;
+            if (p.AudioUrl is not null)
+                lesson.AudioUrl = string.IsNullOrWhiteSpace(p.AudioUrl) ? null : p.AudioUrl;
+            lesson.SortOrder = p.SortOrder;
+            lesson.CertificateLevelId = p.CertificateLevelId;
+            lesson.LanguageSkillId = p.LanguageSkillId;
+            if (isNew) await unitOfWork.Lessons.AddAsync(lesson, cancellationToken);
+
             await unitOfWork.SaveChangesAsync(cancellationToken);
+            req.TargetEntityId = lesson.Id;
+            if (hasTopicUpdate)
+            {
+                p.TopicId = lesson.TopicId;
+                p.TopicTitle = lesson.Topic?.Title ?? string.Empty;
+                req.PayloadJson = JsonSerializer.Serialize(p);
+            }
             await LinkPendingLessonContentAsync(lesson, req, p, cancellationToken);
+        }
+
+        private async Task<Topic?> ResolveLessonTopicAsync(LessonImportPayloadResponse payload, CancellationToken ct)
+        {
+            var topics = unitOfWork.Topics.Query().Where(x => !x.IsDeleted);
+            if (payload.TopicId is int id)
+                return await topics.SingleOrDefaultAsync(x => x.Id == id, ct)
+                    ?? throw new InvalidOperationException("Chủ đề đã chọn không còn tồn tại.");
+
+            var title = ManualContentService.NormalizeTopicTitle(payload.TopicTitle);
+            if (string.IsNullOrEmpty(title)) return null;
+
+            var names = await topics.OrderBy(x => x.Id).Select(x => new { x.Id, x.Title }).ToListAsync(ct);
+            var match = names.Find(x => string.Equals(x.Title.Trim().Normalize(), title, StringComparison.OrdinalIgnoreCase));
+            return match is not null
+                ? await topics.SingleAsync(x => x.Id == match.Id, ct)
+                : await unitOfWork.Topics.AddAsync(new Topic { Title = title }, ct);
         }
 
         private async Task ApplyPracticeExerciseApprovalAsync(ContentApprovalRequest req, CancellationToken cancellationToken)
@@ -726,7 +812,8 @@ namespace RikiPath.Application.Services
         {
             var pending = await unitOfWork.ContentApprovalRequests.Query()
                 .Where(r => !r.IsDeleted
-                    && (r.Status == ContentApprovalStatus.Draft || r.Status == ContentApprovalStatus.PendingReview || r.Status == ContentApprovalStatus.Approved)
+                    && (r.Status == ContentApprovalStatus.Approved ||
+                        (r.Status == ContentApprovalStatus.PendingReview && r.SubmittedByUserId == lessonRequest.SubmittedByUserId))
                     && r.Id != lessonRequest.Id
                     && (r.EntityType == ImportEntityType.Kanji || r.EntityType == ImportEntityType.Grammar
                         || r.EntityType == ImportEntityType.Vocabulary || r.EntityType == ImportEntityType.PracticeExercise))
@@ -879,6 +966,7 @@ namespace RikiPath.Application.Services
                 grammar = await unitOfWork.GrammarPatterns.GetByIdAsync(req.TargetEntityId!.Value, cancellationToken)
                     ?? throw new InvalidOperationException("Không tìm thấy Ngữ pháp gốc.");
 
+                grammar.Title = p.Title;
                 grammar.Structure = p.Structure;
                 grammar.UsageNotes = p.UsageNotes;
                 grammar.ExampleSentence = p.ExampleSentence;
@@ -918,6 +1006,8 @@ namespace RikiPath.Application.Services
                 if (p.Sections is not { Count: > 0 })
                     throw new InvalidOperationException("Đề thi chưa có phần (section) nào.");
 
+                var skillNames = (await unitOfWork.LanguageSkills.GetAllAsync(cancellationToken))
+                    .ToDictionary(skill => skill.Id, skill => skill.Name);
                 foreach (var s in p.Sections)
                 {
                     if (req.Action == ImportRowAction.New)
@@ -931,6 +1021,10 @@ namespace RikiPath.Application.Services
                     foreach (var q in s.Questions)
                     {
                         var type = NormalizeMockQuestionType(q.QuestionType);
+                        var audioError = ImportHandlerSupport.ValidateMockListeningAudio(type, q.AudioUrl,
+                            skillNames.GetValueOrDefault(s.LanguageSkillId) ?? s.LanguageSkillName, s.Title, s.CertificateSectionCode);
+                        if (audioError is not null)
+                            throw new InvalidOperationException($"Phần '{s.Title}', câu số {q.SortOrder}: {audioError}");
                         if (type is "SingleChoice" or "Listening" or "Reading")
                         {
                             if (q.Options.Count < 2)
@@ -952,6 +1046,12 @@ namespace RikiPath.Application.Services
                         }
                     }
                 }
+                var level = await unitOfWork.CertificateLevels.GetByIdAsync(p.CertificateLevelId, cancellationToken);
+                if (level is null || level.IsDeleted)
+                    throw new InvalidOperationException("Cấp độ của đề thi không tồn tại hoặc đã bị xóa.");
+                var coverageError = ImportHandlerSupport.ValidateMockTestCoverage(level.Code, p.Sections, skillNames);
+                if (coverageError is not null)
+                    throw new InvalidOperationException(coverageError);
             }
 
             if (req.Action == ImportRowAction.New)
@@ -1008,6 +1108,7 @@ namespace RikiPath.Application.Services
                             Options = q.Options.Select(o => new MockQuestionOption
                             {
                                 OptionText = o.OptionText,
+                                ImageUrl = o.ImageUrl,
                                 IsCorrect = o.IsCorrect,
                                 SortOrder = o.SortOrder
                             }).ToList()
@@ -1069,6 +1170,7 @@ namespace RikiPath.Application.Services
                             Options = question.Options.Select(option => new MockQuestionOption
                             {
                                 OptionText = option.OptionText,
+                                ImageUrl = option.ImageUrl,
                                 IsCorrect = option.IsCorrect,
                                 SortOrder = option.SortOrder
                             }).ToList()
