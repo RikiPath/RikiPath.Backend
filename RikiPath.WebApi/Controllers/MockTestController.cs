@@ -21,13 +21,6 @@ namespace RikiPath.WebApi.Controllers
             return StatusCode(result.StatusCode, result);
         }
 
-        [HttpPost("{mockTestId:int}/start")]
-        public async Task<IActionResult> StartMockTest(int mockTestId, CancellationToken ct)
-        {
-            var result = await mockTestService.StartAttemptAsync(mockTestId, ct);
-            return StatusCode(result.StatusCode, result);
-        }
-
         [HttpGet("attempts/{attemptId:int}/questions")]
         public async Task<IActionResult> GetMockTestQuestions(int attemptId, CancellationToken ct)
         {
@@ -39,20 +32,6 @@ namespace RikiPath.WebApi.Controllers
         public async Task<IActionResult> SaveMockTestAnswers(int attemptId, SubmitAttemptRequest request, CancellationToken ct)
         {
             var result = await mockTestService.SaveAttemptAnswersAsync(attemptId, request, ct);
-            return StatusCode(result.StatusCode, result);
-        }
-
-        [HttpPost("attempts/{attemptId:int}/submit")]
-        public async Task<IActionResult> SubmitMockTest(int attemptId, SubmitAttemptRequest request, CancellationToken ct)
-        {
-            var result = await mockTestService.SubmitAttemptAsync(attemptId, request, ct);
-            return StatusCode(result.StatusCode, result);
-        }
-
-        [HttpGet("attempts/{attemptId:int}")]
-        public async Task<IActionResult> GetMockTestResult(int attemptId, CancellationToken ct)
-        {
-            var result = await mockTestService.GetAttemptResultAsync(attemptId, ct);
             return StatusCode(result.StatusCode, result);
         }
 
@@ -308,6 +287,160 @@ namespace RikiPath.WebApi.Controllers
         public async Task<IActionResult> GetPlacementTestResult(int attemptId, CancellationToken cancellationToken)
         {
             var result = await mockTestService.GetPlacementTestResultAsync(attemptId, cancellationToken);
+            return StatusCode((int)result.StatusCode, result);
+        }
+
+        /// <summary>
+        /// Bắt đầu một lần làm bài kiểm tra (practice test / mock test) cho user.
+        /// </summary>
+        /// <param name="practiceTestId">ID practice test (Required).</param>
+        /// <param name="cancellationToken">Token hủy request (Optional).</param>
+        [HttpPost("{practiceTestId:int}/start")]
+        [ProducesResponseType(typeof(ApiResponse<StartAttemptResponse>), StatusCodes.Status201Created)]
+        [ProducesResponseType(typeof(ApiResponse<StartAttemptResponse>), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ApiResponse<StartAttemptResponse>), StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(typeof(ApiResponse<StartAttemptResponse>), StatusCodes.Status404NotFound)]
+        [ProducesResponseType(typeof(ApiResponse<StartAttemptResponse>), StatusCodes.Status500InternalServerError)]
+        public async Task<IActionResult> StartAttempt(int practiceTestId, CancellationToken cancellationToken)
+        {
+            var result = await mockTestService.StartAttemptAsync(practiceTestId, cancellationToken);
+            return StatusCode((int)result.StatusCode, result);
+        }
+
+        /// <summary>Khôi phục lượt thi thử đang làm của học viên cho đề đã chọn.</summary>
+        [HttpGet("{practiceTestId:int}/active")]
+        [ProducesResponseType(typeof(ApiResponse<StartAttemptResponse?>), StatusCodes.Status200OK)]
+        public async Task<IActionResult> GetActiveMockAttempt(int practiceTestId, CancellationToken cancellationToken)
+        {
+            var result = await mockTestService.GetActiveMockAttemptAsync(practiceTestId, cancellationToken);
+            return StatusCode((int)result.StatusCode, result);
+        }
+
+        /// <summary>
+        /// Nộp kết quả một lần làm bài (submit attempt).
+        /// </summary>
+        /// <param name="attemptId">ID attempt (Required).</param>
+        /// <param name="request">SubmitAttemptRequest: Answers (Required).</param>
+        /// <param name="cancellationToken">Token hủy request (Optional).</param>
+        [HttpPost("attempts/{attemptId:int}/submit")]
+        [ProducesResponseType(typeof(ApiResponse<AttemptResultResponse>), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ApiResponse<AttemptResultResponse>), StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(typeof(ApiResponse<AttemptResultResponse>), StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(typeof(ApiResponse<AttemptResultResponse>), StatusCodes.Status404NotFound)]
+        [ProducesResponseType(typeof(ApiResponse<AttemptResultResponse>), StatusCodes.Status409Conflict)]
+        [ProducesResponseType(typeof(ApiResponse<AttemptResultResponse>), StatusCodes.Status500InternalServerError)]
+        public async Task<IActionResult> SubmitAttempt(
+            int attemptId,
+            [FromBody] SubmitAttemptRequest request,
+            CancellationToken cancellationToken)
+        {
+            var result = await mockTestService.SubmitAttemptAsync(attemptId, request, cancellationToken);
+            return StatusCode((int)result.StatusCode, result);
+        }
+
+        /// <summary>Lưu đáp án của một câu trong lượt thi thử đang làm.</summary>
+        [HttpPut("attempts/{attemptId:int}/answer")]
+        [ProducesResponseType(typeof(ApiResponse<bool>), StatusCodes.Status200OK)]
+        public async Task<IActionResult> SaveAttemptAnswer(
+            int attemptId,
+            [FromBody] AnswerSubmissionItem answer,
+            CancellationToken cancellationToken)
+        {
+            var result = await mockTestService.SaveAttemptAnswerAsync(attemptId, answer, cancellationToken);
+            return StatusCode((int)result.StatusCode, result);
+        }
+
+        /// <summary>Kết thúc lượt thi thử hết giờ bằng các đáp án đã lưu trên máy chủ.</summary>
+        [HttpPost("attempts/{attemptId:int}/finalize")]
+        [ProducesResponseType(typeof(ApiResponse<AttemptResultResponse>), StatusCodes.Status200OK)]
+        public async Task<IActionResult> FinalizeExpiredAttempt(int attemptId, CancellationToken cancellationToken)
+        {
+            var result = await mockTestService.FinalizeExpiredAttemptAsync(attemptId, cancellationToken);
+            return StatusCode((int)result.StatusCode, result);
+        }
+
+        /// <summary>
+        /// Lấy kết quả tóm tắt của một attempt.
+        /// </summary>
+        /// <param name="attemptId">ID attempt (Required).</param>
+        /// <param name="cancellationToken">Token hủy request (Optional).</param>
+        [HttpGet("attempts/{attemptId:int}")]
+        [ProducesResponseType(typeof(ApiResponse<AttemptResultResponse>), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ApiResponse<AttemptResultResponse>), StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(typeof(ApiResponse<AttemptResultResponse>), StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(typeof(ApiResponse<AttemptResultResponse>), StatusCodes.Status404NotFound)]
+        [ProducesResponseType(typeof(ApiResponse<AttemptResultResponse>), StatusCodes.Status500InternalServerError)]
+        public async Task<IActionResult> GetAttemptResult(int attemptId, CancellationToken cancellationToken)
+        {
+            var result = await mockTestService.GetAttemptResultAsync(attemptId, cancellationToken);
+            return StatusCode((int)result.StatusCode, result);
+        }
+
+        /// <summary>
+        /// Lấy danh sách practice tests theo JLPT level.
+        /// </summary>
+        /// <param name="jlptLevelId">JLPT level ID (Required).</param>
+        /// <param name="cancellationToken">Token hủy request (Optional).</param>
+        [HttpGet("level/{jlptLevelId:int}/tests")]
+        [ProducesResponseType(typeof(ApiResponse<List<TestSummaryResponse>>), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ApiResponse<List<TestSummaryResponse>>), StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(typeof(ApiResponse<List<TestSummaryResponse>>), StatusCodes.Status404NotFound)]
+        [ProducesResponseType(typeof(ApiResponse<List<TestSummaryResponse>>), StatusCodes.Status500InternalServerError)]
+        public async Task<IActionResult> GetTestsByLevel(int jlptLevelId, CancellationToken cancellationToken)
+        {
+            var result = await mockTestService.GetTestsByLevelAsync(jlptLevelId, cancellationToken);
+            return StatusCode((int)result.StatusCode, result);
+        }
+
+        /// <summary>
+        /// Lấy bài đánh giá năng lực theo cấp độ chứng chỉ.
+        /// </summary>
+        /// <param name="certificateLevelId">Id của cấp độ chứng chỉ (CertificateLevel).</param>
+        /// <param name="cancellationToken">Token hủy request (Optional).</param>
+        [HttpGet("placement")]
+        [ProducesResponseType(typeof(ApiResponse<MockTestDetailResponse>), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ApiResponse<MockTestDetailResponse>), StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(typeof(ApiResponse<MockTestDetailResponse>), StatusCodes.Status404NotFound)]
+        [ProducesResponseType(typeof(ApiResponse<MockTestDetailResponse>), StatusCodes.Status500InternalServerError)]
+        public async Task<IActionResult> GetPlacementTests(
+            [FromQuery] int certificateLevelId,
+            CancellationToken cancellationToken)
+        {
+            var result = await mockTestService.GetPlacementTestsByCertificateLevelAsync(certificateLevelId, cancellationToken);
+            return StatusCode((int)result.StatusCode, result);
+        }
+
+        /// <summary>
+        /// Lấy kết quả chi tiết của một attempt (per-question breakdown, feedback).
+        /// </summary>
+        /// <param name="attemptId">ID attempt (Required).</param>
+        /// <param name="cancellationToken">Token hủy request (Optional).</param>
+        [HttpGet("attempts/{attemptId:int}/detailed")]
+        [ProducesResponseType(typeof(ApiResponse<DetailedAttemptResultResponse>), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ApiResponse<DetailedAttemptResultResponse>), StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(typeof(ApiResponse<DetailedAttemptResultResponse>), StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(typeof(ApiResponse<DetailedAttemptResultResponse>), StatusCodes.Status404NotFound)]
+        [ProducesResponseType(typeof(ApiResponse<DetailedAttemptResultResponse>), StatusCodes.Status500InternalServerError)]
+        public async Task<IActionResult> GetDetailedResult(int attemptId, CancellationToken cancellationToken)
+        {
+            var result = await mockTestService.GetDetailedResultAsync(attemptId, cancellationToken);
+            return StatusCode((int)result.StatusCode, result);
+        }
+
+        /// <summary>
+        /// Lấy danh sách câu hỏi sai để ôn tập lại (Quizlet Review Mode).
+        /// </summary>
+        /// <param name="practiceTestId">ID đề thi tùy chọn để lọc câu hỏi sai.</param>
+        /// <param name="cancellationToken">Token hủy request (Optional).</param>
+        [HttpGet("wrong-questions")]
+        [ProducesResponseType(typeof(ApiResponse<List<QuestionReviewCard>>), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ApiResponse<List<QuestionReviewCard>>), StatusCodes.Status404NotFound)]
+        [ProducesResponseType(typeof(ApiResponse<List<QuestionReviewCard>>), StatusCodes.Status500InternalServerError)]
+        public async Task<IActionResult> GetWrongQuestionsReviewSession(
+            [FromQuery] int? practiceTestId = null,
+            CancellationToken cancellationToken = default)
+        {
+            var result = await mockTestService.GetWrongQuestionsReviewSessionAsync(practiceTestId, cancellationToken);
             return StatusCode((int)result.StatusCode, result);
         }
     }

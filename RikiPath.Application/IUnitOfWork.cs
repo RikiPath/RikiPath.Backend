@@ -1,4 +1,5 @@
 using RikiPath.Application.IRepositories;
+using RikiPath.Domain.Entities;
 
 namespace RikiPath.Application
 {
@@ -8,6 +9,7 @@ namespace RikiPath.Application
         IUserAccountRepository UserAccounts { get; }
         IEmailVerificationRepository EmailVerifications { get; }
         INotificationRepository Notifications { get; }
+        IUserDeviceTokenRepository UserDeviceTokens { get; }
 
         // 2. Master Data / CertificateTypes & LanguageSkills
         ICertificateTypeRepository CertificateTypes { get; }
@@ -73,10 +75,21 @@ namespace RikiPath.Application
         INoteRepository Notes { get; }
         IMentorAvailabilityRepository MentorAvailabilities { get; }
         IMentorWeeklyAvailabilityRepository MentorWeeklyAvailabilities { get; }
+        IMentorProfileRepository MentorProfiles { get; }
+        IMentorScheduleRepository MentorSchedules { get; }
+        IMentorCreditLedgerRepository MentorCreditLedger { get; }
+        IGenericRepository<MentorTeachingQualification> MentorTeachingQualifications { get; }
+        void AddMentorOutboxEvent(MentorOutboxEvent outboxEvent);
 
         IContentApprovalRequestRepository ContentApprovalRequests { get; }
 
         IContentAiReviewRepository ContentAiReviews { get; }
+        IStudyCourseRepository StudyCourses { get; }
+        IGenericRepository<StudyCoursePlan> StudyCoursePlans { get; }
+        IGenericRepository<StudyCohort> StudyCohorts { get; }
+        IGenericRepository<CourseScheduleRequest> CourseScheduleRequests { get; }
+        IGenericRepository<JlptExamSchedule> JlptExamSchedules { get; }
+
         // Db Helpers
         Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
         Task ExecuteInTransactionAsync(

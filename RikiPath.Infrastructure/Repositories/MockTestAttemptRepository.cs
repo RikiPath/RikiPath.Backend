@@ -21,6 +21,14 @@ namespace RikiPath.Infrastructure.Repositories
                 .ThenByDescending(x => x.Id)
                 .ToListAsync();
 
+        public async Task LockMockStartAsync(int userId, CancellationToken cancellationToken = default)
+        {
+            if (_context.Database.ProviderName != "Npgsql.EntityFrameworkCore.PostgreSQL") return;
+            // Transaction-scoped, per-learner lock: concurrent start requests cannot create two attempts.
+            await _context.Database.ExecuteSqlInterpolatedAsync(
+                $"SELECT pg_advisory_xact_lock({1347111}, {userId})", cancellationToken);
+        }
+
         public async Task<List<MockTestAttempt>> GetPlacementByUserAsync(
             int userId,
             CancellationToken cancellationToken = default)

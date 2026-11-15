@@ -6,6 +6,7 @@ namespace RikiPath.Application.Responses.KanjiWriting
         public string Character { get; set; } = string.Empty;
         public string Meaning { get; set; } = string.Empty;
         public string? OnYomi { get; set; }
+        public string? SinoVietnamese { get; set; }
         public string? KunYomi { get; set; }
         public int StrokeCount { get; set; }
         public int? WritingScore { get; set; }

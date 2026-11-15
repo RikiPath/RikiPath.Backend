@@ -12,6 +12,10 @@ namespace RikiPath.Infrastructure.Configuration
             builder.Property(x => x.Name).IsRequired().HasMaxLength(150);
             builder.Property(x => x.Price).HasColumnType("decimal(18,0)");
             builder.Property(x => x.MeetingSessionCount).HasDefaultValue(0);
+            builder.HasOne(x => x.CertificateLevel)
+                .WithMany()
+                .HasForeignKey(x => x.CertificateLevelId)
+                .OnDelete(DeleteBehavior.Restrict);
             builder.HasMany(x => x.Features)
                 .WithMany(x => x.SubscriptionPlans)
                 .UsingEntity<Dictionary<string, object>>(

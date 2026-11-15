@@ -16,14 +16,20 @@ public partial class AuthService
     public async Task<ApiResponse<LoginResponse>> ContinueWithGoogleAsync(
         GoogleAuthRequest request, CancellationToken cancellationToken)
     {
+        var token = string.IsNullOrWhiteSpace(request.Credential) ? request.IdToken : request.Credential;
+        if (string.IsNullOrWhiteSpace(token))
+            return ApiResponse<LoginResponse>.Fail("Token Google là bắt buộc.");
+
         var clientId = appSettings.GoogleAuth?.ClientId?.Trim();
+        if (string.IsNullOrWhiteSpace(clientId))
+            clientId = appSettings.Google?.ClientId?.Trim();
         if (string.IsNullOrWhiteSpace(clientId))
             return ApiResponse<LoginResponse>.Fail("Đăng nhập Google chưa được cấu hình.", HttpStatusCode.ServiceUnavailable);
 
         GoogleJsonWebSignature.Payload identity;
         try
         {
-            identity = await GoogleJsonWebSignature.ValidateAsync(request.Credential,
+            identity = await GoogleJsonWebSignature.ValidateAsync(token,
                 new GoogleJsonWebSignature.ValidationSettings { Audience = [clientId] }).WaitAsync(cancellationToken);
         }
         catch (Exception ex) when (ex is InvalidJwtException or FormatException or ArgumentException or Newtonsoft.Json.JsonException)

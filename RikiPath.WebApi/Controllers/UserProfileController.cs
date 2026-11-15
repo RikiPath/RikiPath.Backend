@@ -108,6 +108,14 @@ namespace RikiPath.WebApi.Controllers
             return StatusCode((int)result.StatusCode, result);
         }
 
+        /// <summary>Atomically saves the complete learner goal, including the self-declared JLPT certificate.</summary>
+        [HttpPut("me/learning-goal")]
+        public async Task<IActionResult> SetLearningGoal([FromBody] SetLearningGoalRequest request, CancellationToken cancellationToken)
+        {
+            var result = await userProfileService.SetLearningGoalAsync(request, cancellationToken);
+            return StatusCode((int)result.StatusCode, result);
+        }
+
         /// <summary>
         /// Cập nhật cài đặt thông báo (notification settings) cho user.
         /// </summary>

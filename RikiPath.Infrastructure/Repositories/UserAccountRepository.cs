@@ -21,6 +21,7 @@ namespace RikiPath.Infrastructure.Repositories
                     .ThenInclude(level => level!.CertificateType)
                 .Include(user => user.StartingCertificateLevel)
                 .Include(user => user.AssessedCertificateLevel)
+                .Include(user => user.SelfDeclaredCertificateLevel)
                 .FirstOrDefaultAsync(user => user.Id == userId, cancellationToken);
 
         public async Task<UserAccount?> GetByIdForUpdateAsync(

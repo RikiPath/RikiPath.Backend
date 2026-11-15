@@ -8,19 +8,21 @@ using RikiPath.Domain;
 using RikiPath.Domain.Entities;
 using RikiPath.Domain.Enums;
 using RikiPath.Infrastructure;
+using RikiPath.Infrastructure.Services;
 
 namespace RikiPath.Tests;
 
-public sealed class MentorBookingConfirmationTests
+public sealed class MentorBookingReadTests
 {
     private static AppDbContext Context() => new(new DbContextOptionsBuilder<AppDbContext>()
         .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
-    private static MentorMeetingService Service(AppDbContext db, int id = 1, Role role = Role.Mentor)
+    private static MentorBookingService Service(AppDbContext db, int id = 1, Role role = Role.Mentor)
     {
         var claims = new Mock<IClaimService>();
         claims.Setup(x => x.GetUserClaim()).Returns(new ClaimDTO { Id = id, Role = role });
-        return new MentorMeetingService(new UnitOfWork(db), Mock.Of<IPaymentGatewayClient>(), claims.Object,
-            new AppSettings(), NullLogger<MentorMeetingService>.Instance);
+        var unitOfWork = new UnitOfWork(db);
+        var ledger = Mock.Of<IMentorCreditLedgerService>();
+        return new MentorBookingService(db, unitOfWork, claims.Object, ledger, new AppSettings(), NullLogger<MentorBookingService>.Instance);
     }
     private static async Task<MentorBooking> Seed(AppDbContext db, PaymentStatus payment = PaymentStatus.Paid,
         MentorStatus status = MentorStatus.Assigned, bool expired = false, bool approved = true)
@@ -39,59 +41,32 @@ public sealed class MentorBookingConfirmationTests
     }
 
     [Fact]
-    public async Task Assigned_mentor_accepts_and_state_survives_reload_without_duplicate_action()
+    public async Task Mentor_queue_reads_only_own_paid_bookings_and_preserves_historical_status()
     {
         await using var db = Context();
         var booking = await Seed(db);
-        var result = await Service(db).AcceptMentorBookingAsync(booking.Id, default);
-        Assert.True(result.IsSuccess);
-        Assert.Equal(MentorStatus.Accepted, result.Result!.Status);
-        Assert.Equal("Real Learner", result.Result.LearnerName);
-        Assert.Equal("Câu hỏi thật của học viên", result.Result.Question);
-        Assert.Equal(booking.MentorAvailability!.RoomId, result.Result.RoomId);
-        db.ChangeTracker.Clear();
-        Assert.Equal(MentorStatus.Accepted, (await Service(db).GetMentorBookingAsync(booking.Id, default)).Result!.Status);
-        Assert.True((await Service(db).AcceptMentorBookingAsync(booking.Id, default)).IsSuccess);
-        Assert.Single(db.MentorBookings);
-    }
-
-    [Theory]
-    [InlineData(3, Role.Mentor, 404)]
-    [InlineData(2, Role.Learner, 403)]
-    [InlineData(1, Role.Admin, 403)]
-    public async Task Other_users_cannot_read_or_accept(int id, Role role, int expected)
-    {
-        await using var db = Context();
-        var booking = await Seed(db);
-        Assert.Equal(expected, (await Service(db, id, role).GetMentorBookingAsync(booking.Id, default)).StatusCode);
-        Assert.Equal(expected, (await Service(db, id, role).AcceptMentorBookingAsync(booking.Id, default)).StatusCode);
-        Assert.Equal(MentorStatus.Assigned, booking.Status);
-    }
-
-    [Theory]
-    [InlineData(PaymentStatus.Pending, MentorStatus.Assigned, false, true, 404)]
-    [InlineData(PaymentStatus.Paid, MentorStatus.Completed, false, true, 409)]
-    [InlineData(PaymentStatus.Paid, MentorStatus.Cancelled, false, true, 409)]
-    [InlineData(PaymentStatus.Paid, MentorStatus.Assigned, true, true, 409)]
-    [InlineData(PaymentStatus.Paid, MentorStatus.Assigned, false, false, 409)]
-    public async Task Ineligible_booking_is_not_confirmed(PaymentStatus payment, MentorStatus status, bool expired, bool approved, int expected)
-    {
-        await using var db = Context();
-        var booking = await Seed(db, payment, status, expired, approved);
-        Assert.Equal(expected, (await Service(db).AcceptMentorBookingAsync(booking.Id, default)).StatusCode);
-        Assert.Equal(status, booking.Status);
+        var result = await Service(db).GetMyMentorBookingsAsync(default);
+        Assert.Equal(booking.Id, Assert.Single(result.Result!).Id);
+        Assert.Equal(MentorStatus.Assigned, result.Result![0].Status);
+        Assert.Empty((await Service(db, 3).GetMyMentorBookingsAsync(default)).Result!);
+        booking.UserSubscription.PaymentStatus = PaymentStatus.Pending;
+        await db.SaveChangesAsync();
+        Assert.Empty((await Service(db).GetMyMentorBookingsAsync(default)).Result!);
     }
 
     [Fact]
-    public async Task Queue_contains_only_own_paid_bookings_and_real_details()
+    public async Task Mentor_booking_detail_is_limited_to_its_owner()
     {
         await using var db = Context();
         var booking = await Seed(db);
-        var result = await Service(db).GetMyMeetingsAsync(default);
-        Assert.Equal(booking.Id, Assert.Single(result.Result!).Id);
-        Assert.Empty((await Service(db, 3).GetMyMeetingsAsync(default)).Result!);
-        booking.UserSubscription.PaymentStatus = PaymentStatus.Pending;
-        await db.SaveChangesAsync();
-        Assert.Empty((await Service(db).GetMyMeetingsAsync(default)).Result!);
+
+        var ownerResult = await Service(db).GetMentorBookingAsync(booking.Id, default);
+        Assert.True(ownerResult.IsSuccess);
+        Assert.Equal(booking.Id, ownerResult.Result!.Id);
+        Assert.Equal(booking.UserSubscription.UserId, ownerResult.Result.LearnerId);
+        Assert.Equal(MentorStatus.Assigned, ownerResult.Result.Status);
+
+        Assert.Equal(404, (await Service(db, id: 3).GetMentorBookingAsync(booking.Id, default)).StatusCode);
+        Assert.Equal(403, (await Service(db, id: 2, role: Role.Learner).GetMentorBookingAsync(booking.Id, default)).StatusCode);
     }
 }

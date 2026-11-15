@@ -6,6 +6,7 @@ namespace RikiPath.Application.IServices
 {
     public interface IKanaWritingPracticeService
     {
+        Task<ApiResponse<List<KanaWritingQueueItem>>> GetAllForPracticeAsync(KanaCharacterType type, CancellationToken cancellationToken);
         Task<ApiResponse<List<KanaWritingQueueItem>>> GetDueForPracticeAsync(int count, KanaCharacterType? type, CancellationToken cancellationToken);
         Task<ApiResponse<SubmitKanaWritingResultResponse>> SubmitResultAsync(SubmitKanaWritingResultRequest request, CancellationToken cancellationToken);
     }

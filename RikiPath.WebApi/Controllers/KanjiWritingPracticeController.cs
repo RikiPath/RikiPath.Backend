@@ -28,10 +28,22 @@ namespace RikiPath.WebApi.Controllers
         }
 
         [HttpGet("all")]
-        public async Task<IActionResult> GetAll([FromQuery] int count = 100, CancellationToken cancellationToken = default)
+        public async Task<IActionResult> GetAll(CancellationToken cancellationToken = default)
         {
-            var result = await kanjiWritingPracticeService.GetAllForPracticeAsync(count, cancellationToken);
+            var result = await kanjiWritingPracticeService.GetAllForPracticeAsync(cancellationToken);
             return Ok(result);
+        }
+
+        /// <summary>Nhận dạng một chữ Kanji vẽ tay, không lưu ảnh hoặc bài viết.</summary>
+        [HttpPost("recognize")]
+        [Consumes("multipart/form-data")]
+        [RequestSizeLimit(1100000)]
+        public async Task<IActionResult> Recognize(
+            IFormFile image, [FromServices] IKanjiRecognitionService recognition,
+            CancellationToken cancellationToken)
+        {
+            var result = await recognition.RecognizeAsync(image, cancellationToken);
+            return StatusCode(result.StatusCode, result);
         }
 
         /// <summary>

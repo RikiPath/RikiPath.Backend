@@ -18,7 +18,8 @@ namespace RikiPath.Application.Services
         IExcelParser excelParser,
         IClaimService claimService,
         IEnumerable<ISheetImportHandler> sheetHandlers,
-        IEnumerable<IApprovalDiffBuilder> diffBuilders) : IContentApprovalService
+        IEnumerable<IApprovalDiffBuilder> diffBuilders,
+        IContentApprovalNotifierService notifier) : IContentApprovalService
     {
         private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
 
@@ -107,11 +108,11 @@ namespace RikiPath.Application.Services
                             EntityType = sheet.EntityType,
                             Action = row.Action,
                             RowKey = row.RowKey,
-                            SubmittedByUserId = authorId,
                             TargetEntityId = row.TargetEntityId,
                             PayloadJson = row.PayloadJson ?? "{}",
                             DiffSummaryJson = JsonSerializer.Serialize(row.ChangedFields),
                             Status = ContentApprovalStatus.PendingReview,
+                            SubmittedByUserId = authorId,
                             SubmittedAt = DateTime.UtcNow
                         };
 
@@ -347,6 +348,7 @@ namespace RikiPath.Application.Services
                 await ApplyReviewAsync(req, request.Approve, request.ReviewNote, cancellationToken);
 
                 await unitOfWork.SaveChangesAsync(cancellationToken);
+                await NotifyAuthorsAsync([req], cancellationToken);
 
                 return ApiResponse<bool>.Success(true);
             }
@@ -401,6 +403,7 @@ namespace RikiPath.Application.Services
 
                 result.SuccessCount = group.Count;
                 await unitOfWork.SaveChangesAsync(cancellationToken);
+                await NotifyAuthorsAsync(request.Approve ? [lessonRequest] : group, cancellationToken);
                 return ApiResponse<BulkReviewResponse>.Success(result);
             }
             catch (Exception ex)
@@ -417,6 +420,7 @@ namespace RikiPath.Application.Services
 
             var result = new BulkReviewResponse();
             var seen = new HashSet<int>();
+            var reviewed = new List<ContentApprovalRequest>();
 
             foreach (var item in request.Items)
             {
@@ -447,6 +451,8 @@ namespace RikiPath.Application.Services
                     }
 
                     await ApplyReviewAsync(req, item.Approve, item.ReviewNote, cancellationToken);
+                    unitOfWork.ContentApprovalRequests.Update(req);
+                    reviewed.Add(req);
                     result.SuccessCount++;
                 }
                 catch (Exception ex)
@@ -458,12 +464,52 @@ namespace RikiPath.Application.Services
             // Lưu 1 lần cho cả lô: các request đã xử lý thành công (staged ở trên) được ghi xuống DB,
             // các request lỗi/bị bỏ qua ở trên không ảnh hưởng tới các request khác.
             await unitOfWork.SaveChangesAsync(cancellationToken);
+            await NotifyAuthorsAsync(reviewed, cancellationToken);
 
             if (result.SuccessCount == 0 && result.Failures.Count > 0)
                 return ApiResponse<BulkReviewResponse>.Fail(
                     string.Join("; ", result.Failures.Select(f => $"#{f.RequestId}: {f.Reason}")));
 
             return ApiResponse<BulkReviewResponse>.Success(result);
+        }
+
+        public async Task<ApiResponse<List<ContentApprovalListItemResponse>>> GetMyApprovalsAsync(CancellationToken cancellationToken)
+        {
+            var userId = claimService.GetUserClaim().Id;
+            var rows = await unitOfWork.ContentApprovalRequests.Query()
+                .Where(request => !request.IsDeleted && request.SubmittedByUserId == userId)
+                .OrderByDescending(request => request.SubmittedAt)
+                .Take(50)
+                .ToListAsync(cancellationToken);
+            return ApiResponse<List<ContentApprovalListItemResponse>>.Success(rows.Select(request => new ContentApprovalListItemResponse
+            {
+                Id = request.Id,
+                BatchId = request.BatchId,
+                EntityType = request.EntityType,
+                Action = request.Action,
+                TargetEntityId = request.TargetEntityId,
+                RowKey = request.RowKey,
+                Status = request.Status,
+                SourceFileName = request.SourceFileName,
+                SourceRowNumber = request.SourceRowNumber,
+                SubmittedByUserId = request.SubmittedByUserId,
+                SubmittedAt = request.SubmittedAt,
+                ReviewedByName = request.ReviewedByName,
+                ReviewedAt = request.ReviewedAt,
+                ReviewNote = request.ReviewNote,
+            }).ToList());
+        }
+
+        private async Task NotifyAuthorsAsync(IEnumerable<ContentApprovalRequest> reviewed, CancellationToken cancellationToken)
+        {
+            foreach (var group in reviewed.Where(request => request.SubmittedByUserId > 0).GroupBy(request => request.SubmittedByUserId))
+            {
+                var rejected = group
+                    .Where(request => request.Status == ContentApprovalStatus.Rejected)
+                    .Select(request => (request.RowKey, request.ReviewNote ?? "Không có ghi chú"))
+                    .ToList();
+                await notifier.NotifyAuthorOnReviewResultAsync(group.Key, group.Count(), rejected, cancellationToken);
+            }
         }
 
         private static bool IsReviewable(ContentApprovalStatus status) =>

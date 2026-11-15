@@ -27,7 +27,7 @@ public sealed class BookingMentorDirectoryTests
         await context.SaveChangesAsync();
         var service = new MentorMeetingService(new UnitOfWork(context),
             Mock.Of<IPaymentGatewayClient>(), Mock.Of<IClaimService>(), new AppSettings(),
-            NullLogger<MentorMeetingService>.Instance);
+            NullLogger<MentorMeetingService>.Instance, Mock.Of<IMentorCreditLedgerService>());
 
         var result = await service.GetMentorsAsync(default);
 

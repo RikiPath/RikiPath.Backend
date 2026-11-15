@@ -9,6 +9,16 @@ namespace RikiPath.Application.Services
 {
     public class KanaWritingPracticeService(IUnitOfWork unitOfWork, IClaimService claimService) : IKanaWritingPracticeService
     {
+        public async Task<ApiResponse<List<KanaWritingQueueItem>>> GetAllForPracticeAsync(KanaCharacterType type, CancellationToken cancellationToken)
+        {
+            if (!Enum.IsDefined(type))
+                return ApiResponse<List<KanaWritingQueueItem>>.Fail("type chỉ nhận Hiragana hoặc Katakana.");
+            var characters = await unitOfWork.KanaCharacters.FindAsync(
+                x => !x.IsDeleted && x.Type == type, cancellationToken);
+            return ApiResponse<List<KanaWritingQueueItem>>.Success(characters
+                .OrderBy(x => x.Id).Select(x => Map(x, true)).ToList());
+        }
+
         public async Task<ApiResponse<List<KanaWritingQueueItem>>> GetDueForPracticeAsync(int count, KanaCharacterType? type, CancellationToken cancellationToken)
         {
             if (count is < 1 or > 100) return ApiResponse<List<KanaWritingQueueItem>>.Fail("count phải nằm trong khoảng 1 đến 100.");

@@ -5,7 +5,6 @@ using RikiPath.Application.Requests.MentorMeetings;
 
 namespace RikiPath.WebApi.Hubs;
 
-/// <summary>Private realtime conversation per learner/mentor; booking IDs resolve to one canonical group.</summary>
 [Authorize(Roles = "Learner,Mentor")]
 public sealed class MentorChatHub(IMentorChatService chatService) : Hub
 {

@@ -1,37 +1,27 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using RikiPath.Application;
 using RikiPath.Application.IServices;
 using RikiPath.Application.Requests.AdminMentor;
+using RikiPath.Application.Requests.MentorProfile;
 using RikiPath.Application.Responses;
 using RikiPath.Application.Responses.AdminMentor;
+using RikiPath.Application.Responses.MentorProfile;
+using RikiPath.Domain.Enums;
 
 namespace RikiPath.WebApi.Controllers
 {
     [Authorize(Roles = "Admin")]
     [ApiController]
     [Route("api/admin/mentors")]
-    public class AdminMentorController(IAdminMentorService adminMentorService) : ControllerBase
+    public class AdminMentorController(IAdminMentorService adminMentorService, IUnitOfWork unitOfWork) : ControllerBase
     {
         // ==========================================
         // 1. Quản lý Chuyên gia (Mentor)
         // ==========================================
 
-        /// <summary>
-        /// Tạo mới tài khoản Chuyên gia tư vấn (Mentor).
-        /// </summary>
-        /// <remarks>
-        /// - Màn hình sử dụng: Dashboard Admin - Quản lý nhân sự/Mentor (Task Package 2).
-        /// - Luồng xử lý: Tạo tài khoản UserAccount với Role = Mentor, tự động đặt IsEmailVerified = true (do Admin khởi tạo).
-        /// - Lưu ý cho FE: Yêu cầu Bearer Token (Role = Admin). Request body bao gồm Email, Mật khẩu (tối thiểu 6 ký tự), Họ tên và SĐT.
-        /// </remarks>
-        /// <param name="request">Thông tin khởi tạo tài khoản Mentor.</param>
-        /// <param name="cancellationToken">Token hủy request (Optional).</param>
-        /// <response code="200">Thành công: Trả về thông tin Mentor vừa tạo.</response>
-        /// <response code="400">Yêu cầu không hợp lệ: Email đã tồn tại, mật khẩu quá ngắn hoặc dữ liệu thiếu.</response>
-        /// <response code="401">Chưa xác thực: Thiếu hoặc sai Bearer Token.</response>
-        /// <response code="403">Không có quyền: Token không phải quyền Admin.</response>
-        /// <response code="500">Lỗi server khi tạo tài khoản.</response>
         [HttpPost]
         [ProducesResponseType(typeof(ApiResponse<MentorResponse>), StatusCodes.Status200OK)]
         [ProducesResponseType(typeof(ApiResponse<MentorResponse>), StatusCodes.Status400BadRequest)]
@@ -43,19 +33,6 @@ namespace RikiPath.WebApi.Controllers
             return result.IsSuccess ? Ok(result) : BadRequest(result);
         }
 
-        /// <summary>
-        /// Lấy danh sách tất cả Chuyên gia tư vấn (Mentor) trong hệ thống.
-        /// </summary>
-        /// <remarks>
-        /// - Màn hình sử dụng: Màn hình danh sách Mentor trong Admin Portal.
-        /// - Luồng xử lý: Truys vấn các UserAccount có Role = Mentor và chưa bị xóa mềm (!IsDeleted), sắp xếp theo Tên.
-        /// - Lưu ý cho FE: Yêu cầu Bearer Token (Role = Admin). Kết quả trả về danh sách DTO gọn gàng phục vụ hiển thị dạng Table/Grid.
-        /// </remarks>
-        /// <param name="cancellationToken">Token hủy request (Optional).</param>
-        /// <response code="200">Thành công: Trả về danh sách Mentor.</response>
-        /// <response code="401">Chưa xác thực: Thiếu hoặc sai Bearer Token.</response>
-        /// <response code="403">Không có quyền: Token không phải quyền Admin.</response>
-        /// <response code="500">Lỗi server khi truy vấn CSDL.</response>
         [HttpGet]
         [ProducesResponseType(typeof(ApiResponse<List<MentorResponse>>), StatusCodes.Status200OK)]
         [ProducesResponseType(typeof(ApiResponse<List<MentorResponse>>), StatusCodes.Status400BadRequest)]
@@ -65,22 +42,6 @@ namespace RikiPath.WebApi.Controllers
             return result.IsSuccess ? Ok(result) : BadRequest(result);
         }
 
-        /// <summary>
-        /// Kích hoạt hoặc Khóa/Vô hiệu hóa tài khoản Mentor.
-        /// </summary>
-        /// <remarks>
-        /// - Màn hình sử dụng: Toggle switch kích hoạt/khóa tài khoản trên dòng tương ứng trong Bảng Mentor.
-        /// - Luồng xử lý: Cập nhật cờ IsDeleted của UserAccount (IsDeleted = !isActive).
-        /// - Lưu ý cho FE: Truyền mentorId trên URL Route và trạng thái isActive (true/false) dưới dạng Query Parameter.
-        /// </remarks>
-        /// <param name="mentorId">ID định danh tài khoản Mentor.</param>
-        /// <param name="isActive">Trạng thái mong muốn: true = Kích hoạt, false = Khóa.</param>
-        /// <param name="cancellationToken">Token hủy request (Optional).</param>
-        /// <response code="200">Thành công: Trả về thông tin Mentor cùng thông báo cập nhật trạng thái thành công.</response>
-        /// <response code="400">Yêu cầu không hợp lệ: Không tìm thấy Mentor với ID chỉ định.</response>
-        /// <response code="401">Chưa xác thực: Thiếu hoặc sai Bearer Token.</response>
-        /// <response code="403">Không có quyền: Token không phải quyền Admin.</response>
-        /// <response code="500">Lỗi server khi cập nhật trạng thái.</response>
         [HttpPut("{mentorId:int}/active")]
         [ProducesResponseType(typeof(ApiResponse<MentorResponse>), StatusCodes.Status200OK)]
         [ProducesResponseType(typeof(ApiResponse<MentorResponse>), StatusCodes.Status400BadRequest)]
@@ -91,6 +52,101 @@ namespace RikiPath.WebApi.Controllers
         {
             var result = await adminMentorService.SetMentorActiveAsync(mentorId, isActive, cancellationToken);
             return result.IsSuccess ? Ok(result) : BadRequest(result);
+        }
+
+        // ==========================================
+        // 2. Xét duyệt Hồ sơ Xác minh (Verification)
+        // ==========================================
+
+        [HttpGet("verifications")]
+        [ProducesResponseType(typeof(ApiResponse<List<AdminMentorProfileResponse>>), StatusCodes.Status200OK)]
+        public async Task<IActionResult> GetMentorProfiles(
+            [FromQuery] MentorVerificationStatus? status,
+            CancellationToken cancellationToken)
+        {
+            var result = await adminMentorService.GetMentorProfilesAsync(status, cancellationToken);
+            return StatusCode((int)result.StatusCode, result);
+        }
+
+        [HttpGet("{mentorId:int}/profile")]
+        [ProducesResponseType(typeof(ApiResponse<AdminMentorProfileResponse>), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ApiResponse<AdminMentorProfileResponse>), StatusCodes.Status404NotFound)]
+        public async Task<IActionResult> GetMentorProfileById(
+            [FromRoute] int mentorId,
+            CancellationToken cancellationToken)
+        {
+            var result = await adminMentorService.GetMentorProfileByIdAsync(mentorId, cancellationToken);
+            return StatusCode((int)result.StatusCode, result);
+        }
+
+        [HttpGet("{mentorId:int}/verification-document")]
+        public async Task<IActionResult> GetVerificationDocument(
+            [FromRoute] int mentorId,
+            [FromServices] IFileStorageService fileStorageService,
+            CancellationToken cancellationToken)
+        {
+            var url = await unitOfWork.MentorProfiles.Query()
+                .Where(profile => profile.MentorId == mentorId)
+                .Select(profile => profile.VerificationDocumentUrl)
+                .FirstOrDefaultAsync(cancellationToken);
+            if (string.IsNullOrWhiteSpace(url)) return NotFound();
+            try
+            {
+                var signedUrl = await fileStorageService.CreateSignedReadUrlAsync(url, cancellationToken);
+                Response.Headers.CacheControl = "no-store";
+                return Ok(new { Url = signedUrl });
+            }
+            catch (ArgumentException)
+            {
+                return UnprocessableEntity(new { Message = "Tài liệu cũ chưa thuộc kho lưu trữ bảo vệ. Vui lòng yêu cầu cố vấn gửi lại." });
+            }
+            catch (InvalidOperationException)
+            {
+                return StatusCode(StatusCodes.Status503ServiceUnavailable,
+                    new { Message = "Không thể mở tài liệu xác minh lúc này. Vui lòng thử lại." });
+            }
+            catch (NotSupportedException)
+            {
+                return StatusCode(StatusCodes.Status409Conflict,
+                    new { Message = "Kho QA chỉ hỗ trợ xem chứng chỉ qua phiên đăng nhập hiện tại." });
+            }
+        }
+
+        /// <summary>Đọc chứng chỉ ứng tuyển qua quyền quản trị hiện tại.</summary>
+        [HttpGet("{mentorId:int}/verification-document/content")]
+        public async Task<IActionResult> ReadVerificationDocument(
+            [FromRoute] int mentorId,
+            [FromServices] IFileStorageService fileStorageService,
+            CancellationToken cancellationToken)
+        {
+            var reference = await unitOfWork.MentorProfiles.Query()
+                .Where(profile => profile.MentorId == mentorId)
+                .Select(profile => profile.VerificationDocumentUrl)
+                .FirstOrDefaultAsync(cancellationToken);
+            if (string.IsNullOrWhiteSpace(reference)) return NotFound();
+            try
+            {
+                var document = await fileStorageService.OpenPrivateVerificationAsync(reference, cancellationToken);
+                Response.Headers.CacheControl = "no-store";
+                Response.Headers.XContentTypeOptions = "nosniff";
+                return File(document.Content, document.ContentType);
+            }
+            catch (FileNotFoundException) { return NotFound(); }
+            catch (ArgumentException) { return UnprocessableEntity(new { Message = "Chứng chỉ cũ cần được tải lại." }); }
+            catch (InvalidOperationException) { return StatusCode(503, new { Message = "Kho chứng chỉ chưa sẵn sàng." }); }
+        }
+
+        [HttpPost("{mentorId:int}/verify")]
+        [ProducesResponseType(typeof(ApiResponse<AdminMentorProfileResponse>), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ApiResponse<AdminMentorProfileResponse>), StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(typeof(ApiResponse<AdminMentorProfileResponse>), StatusCodes.Status404NotFound)]
+        public async Task<IActionResult> ReviewVerification(
+            [FromRoute] int mentorId,
+            [FromBody] ReviewMentorVerificationRequest request,
+            CancellationToken cancellationToken)
+        {
+            var result = await adminMentorService.ReviewVerificationAsync(mentorId, request, cancellationToken);
+            return StatusCode((int)result.StatusCode, result);
         }
     }
 }

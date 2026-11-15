@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Authorization;
 using RikiPath.Application.Services;
 using RikiPath.Application.Responses;
 using Microsoft.AspNetCore.Mvc;
@@ -15,7 +15,7 @@ namespace RikiPath.WebApi.Controllers;
 public class SpeechController(ISpeechToTextService speechService, SubscriptionAccessService subscriptions,
     IPracticeSubmissionService practice) : ControllerBase
 {
-    /// <summary>Legacy Azure endpoint. Use POST transcribe with an audio file.</summary>
+    /// <summary>Issues a temporary Azure token for compatible streaming clients.</summary>
     [HttpGet("get-token")]
     public async Task<IActionResult> GetToken(CancellationToken cancellationToken)
     {
@@ -73,4 +73,16 @@ public class SpeechController(ISpeechToTextService speechService, SubscriptionAc
         catch (AiServiceException ex) { return StatusCode(502, new { message = ex.Message }); }
         catch (HttpRequestException) { return StatusCode(502, new { message = "Không thể kết nối OpenAI." }); }
     }
+
+    /// <summary>Creates a short-lived Japanese PCM streaming session for Amazon Transcribe.</summary>
+    [Authorize(Roles = "Learner")]
+    [HttpPost("streaming-session")]
+    [Microsoft.AspNetCore.RateLimiting.EnableRateLimiting("speech-session")]
+    [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
+    public async Task<IActionResult> CreateStreamingSession(CancellationToken cancellationToken)
+    {
+        var result = await speechService.CreateStreamingSessionAsync(cancellationToken);
+        return StatusCode(result.StatusCode, result);
+    }
+
 }

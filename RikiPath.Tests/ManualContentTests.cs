@@ -29,7 +29,7 @@ public sealed class ManualContentTests
         claims.Setup(x => x.GetUserClaim()).Returns(new ClaimDTO { Id = 7, Role = Role.ContentAuthor });
         var uow = new UnitOfWork(db);
         var author = new ManualContentService(uow, claims.Object);
-        var review = new ContentApprovalService(uow, Mock.Of<IExcelParser>(), claims.Object, [], []);
+        var review = new ContentApprovalService(uow, Mock.Of<IExcelParser>(), claims.Object, [], [], Mock.Of<IContentApprovalNotifierService>());
         static JsonElement Input(string title, string? topicTitle = null, int? topicId = null) =>
             JsonSerializer.SerializeToElement(new { title, certificateLevelId = 42, languageSkillId = 43, topicTitle, topicId });
 
@@ -94,7 +94,7 @@ public sealed class ManualContentTests
         claims.Setup(x => x.GetUserClaim()).Returns(() => actor);
         var uow = new UnitOfWork(db);
         var author = new ManualContentService(uow, claims.Object);
-        var review = new ContentApprovalService(uow, Mock.Of<IExcelParser>(), claims.Object, [], []);
+        var review = new ContentApprovalService(uow, Mock.Of<IExcelParser>(), claims.Object, [], [], Mock.Of<IContentApprovalNotifierService>());
         static JsonElement Vocabulary(string meaning) => JsonSerializer.SerializeToElement(new
         {
             certificateLevelId = 42, word = "山", reading = "やま", meaning
@@ -150,7 +150,7 @@ public sealed class ManualContentTests
         var unit = new UnitOfWork(db);
         var importer = new ExcelContentImportService(unit, []);
         var author = new ManualContentService(unit, claims.Object, notifier.Object);
-        var review = new ContentApprovalService(unit, Mock.Of<IExcelParser>(), claims.Object, [], []);
+        var review = new ContentApprovalService(unit, Mock.Of<IExcelParser>(), claims.Object, [], [], Mock.Of<IContentApprovalNotifierService>());
         var request = new ConfirmImportRequest
         {
             BatchId = Guid.NewGuid(),
@@ -264,7 +264,7 @@ public sealed class ManualContentTests
         claims.Setup(x => x.GetUserClaim()).Returns(() => actor);
         var uow = new UnitOfWork(db);
         var author = new ManualContentService(uow, claims.Object);
-        var review = new ContentApprovalService(uow, Mock.Of<IExcelParser>(), claims.Object, [], []);
+        var review = new ContentApprovalService(uow, Mock.Of<IExcelParser>(), claims.Object, [], [], Mock.Of<IContentApprovalNotifierService>());
         var tokens = new[] { "読みます", "毎日", "本を" };
         var answer = new[] { "毎日", "本を", "読みます" };
         JsonElement Input(string[] answerKey, string explanation) => JsonSerializer.SerializeToElement(new

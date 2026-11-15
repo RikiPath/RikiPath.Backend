@@ -16,7 +16,7 @@ namespace RikiPath.WebApi.Controllers
         /// <remarks>
         /// - Màn hình sử dụng: Hiển thị trên dashboard / Progress của Learner để khuyến khích thói quen học.
         /// - Luồng xử lý: API chỉ đọc dữ liệu phân tích từ CSDL/Cache (không gọi AI). Có thể có cache để trả nhanh.
-        /// - Lưu ý cho FE: Yêu cầu Bearer Token (Role = Learner). Thường trả nhanh (<200ms); FE nên hiển thị loading placeholder khi chờ.
+        /// - Lưu ý cho FE: Yêu cầu Bearer Token (Role = Learner). Thường trả nhanh (&lt;200ms); FE nên hiển thị loading placeholder khi chờ.
         /// </remarks>
         /// <param name="cancellationToken">Token hủy request (Optional).</param>
         /// <response code="200">Thành công: Trả về số ngày liên tiếp hiện tại và metadata (JSON).</response>

@@ -7,12 +7,19 @@ namespace RikiPath.Infrastructure.Repositories
     public class SubscriptionPlanRepository(AppDbContext context) : GenericRepository<SubscriptionPlan>(context), ISubscriptionPlanRepository
     {
         public Task<List<SubscriptionPlan>> GetMeetingPlansAsync(CancellationToken cancellationToken = default)
-            => _dbSet.AsNoTracking().Include(x => x.Features)
+            => _dbSet.AsNoTracking()
+                .Include(x => x.Features)
+                .Include(x => x.CertificateLevel)
                 .Where(x => x.IsActive && !x.IsDeleted && (x.MeetingSessionCount == 1 || x.MeetingSessionCount == 3))
                 .OrderBy(x => x.SortOrder).ToListAsync(cancellationToken);
 
-        public Task<SubscriptionPlan?> GetMeetingPlanAsync(int id, CancellationToken cancellationToken = default)
-            => _dbSet.Include(x => x.Features)
-                .FirstOrDefaultAsync(x => x.Id == id && x.IsActive && !x.IsDeleted && x.MeetingSessionCount > 0, cancellationToken);
+        public async Task<SubscriptionPlan?> GetMeetingPlanAsync(int id, CancellationToken cancellationToken = default)
+        {
+            return await _dbSet
+                .Include(x => x.Features)
+                .Include(x => x.CertificateLevel)
+                .FirstOrDefaultAsync(x => x.Id == id && x.IsActive && !x.IsDeleted
+                    && (x.MeetingSessionCount == 1 || x.MeetingSessionCount == 3), cancellationToken);
+        }
     }
 }

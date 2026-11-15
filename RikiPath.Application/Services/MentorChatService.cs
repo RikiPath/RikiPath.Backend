@@ -25,7 +25,7 @@ public sealed class MentorChatService(IUnitOfWork unitOfWork, IClaimService clai
         };
 
         if (user.Role is not (Role.Learner or Role.Mentor))
-            return ApiResponse<List<MentorChatThreadResponse>>.Fail("Chỉ Learner và Mentor được sử dụng chat.", HttpStatusCode.Forbidden);
+            return ApiResponse<List<MentorChatThreadResponse>>.Fail("Chỉ học viên và cố vấn được sử dụng tin nhắn tư vấn.", HttpStatusCode.Forbidden);
 
         var paidBookings = bookings.Where(x => !x.IsDeleted && !x.UserSubscription.IsDeleted && x.UserSubscription.PaymentStatus == PaymentStatus.Paid)
             .GroupBy(x => new { x.UserSubscription.UserId, MentorId = x.MentorAvailability?.MentorId ?? x.UserSubscription.MentorId })

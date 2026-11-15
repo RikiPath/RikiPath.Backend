@@ -92,7 +92,7 @@ namespace RikiPath.Application.Services
         }
 
         public async Task<ApiResponse<List<KanjiWritingQueueItem>>> GetAllForPracticeAsync(
-            int count, CancellationToken cancellationToken)
+            CancellationToken cancellationToken)
         {
             try
             {
@@ -106,7 +106,6 @@ namespace RikiPath.Application.Services
                           k.ContentLevelMappings.Any(m => m.CertificateLevelId == targetLevelId && !m.IsDeleted),
                      cancellationToken))
                      .OrderBy(k => k.Id)
-                     .Take(Math.Clamp(count, 1, 200))
                      .ToList();
 
                 var cards = await unitOfWork.ReviewCards.FindAsync(
@@ -227,6 +226,7 @@ namespace RikiPath.Application.Services
             KanjiId = kanji.Id,
             Character = kanji.Character,
             Meaning = kanji.Meaning,
+            SinoVietnamese = kanji.SinoVietnamese,
             OnYomi = kanji.OnYomi,
             KunYomi = kanji.KunYomi,
             StrokeCount = kanji.StrokeCount,

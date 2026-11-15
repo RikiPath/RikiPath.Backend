@@ -262,6 +262,7 @@ namespace RikiPath.Application.Services
             }
         }
 
+
         public async Task<ApiResponse<LoginResponse>> LoginWithFirebasePhoneAsync(FirebasePhoneAuthRequest request, CancellationToken cancellationToken)
         {
             try
@@ -400,6 +401,7 @@ namespace RikiPath.Application.Services
                 return ApiResponse.Unauthorized("Không xác định được tài khoản hiện tại từ JWT.");
             }
         }
+
 
         private string CreateToken(UserAccount user)
         {

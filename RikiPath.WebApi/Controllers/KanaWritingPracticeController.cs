@@ -12,6 +12,14 @@ namespace RikiPath.WebApi.Controllers
     [Authorize(Roles = "Learner")]
     public class KanaWritingPracticeController(IKanaWritingPracticeService service) : ControllerBase
     {
+        /// <summary>Lấy toàn bộ ký tự trong bảng Hiragana hoặc Katakana.</summary>
+        [HttpGet("all")]
+        public async Task<IActionResult> GetAll([FromQuery] KanaCharacterType type, CancellationToken cancellationToken = default)
+        {
+            var response = await service.GetAllForPracticeAsync(type, cancellationToken);
+            return StatusCode(response.StatusCode, response);
+        }
+
         /// <summary>Lấy Kana đến hạn ôn trước, sau đó bổ sung ký tự mới đã được Admin duyệt.</summary>
         /// <param name="count">Số ký tự muốn lấy, từ 1 đến 100.</param>
         /// <param name="type">Lọc bảng chữ Hiragana hoặc Katakana; bỏ trống để lấy cả hai.</param>
