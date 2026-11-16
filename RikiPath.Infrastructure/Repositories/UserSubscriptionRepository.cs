@@ -19,14 +19,16 @@ namespace RikiPath.Infrastructure.Repositories
 
         public Task<UserSubscription?> GetMeetingPurchaseWithBookingsAsync(int subscriptionId, CancellationToken ct = default)
             => _dbSet
+                .Include(x => x.PendingMentorAvailability)
                 .Include(x => x.CertificateLevel)
                 .Include(x => x.SubscriptionPlan).ThenInclude(x => x.CertificateLevel)
                 .Include(x => x.MentorBookings)
                     .ThenInclude(x => x.MentorAvailability)
-                .FirstOrDefaultAsync(x => x.Id == subscriptionId, ct);
+                .FirstOrDefaultAsync(x => x.Id == subscriptionId && !x.IsDeleted, ct);
 
         public Task<UserSubscription?> GetMeetingSubscriptionWithBookingsAsync(int subscriptionId, int userId, CancellationToken ct = default)
             => _dbSet
+                .Include(x => x.PendingMentorAvailability)
                 .Include(x => x.CertificateLevel)
                 .Include(x => x.SubscriptionPlan).ThenInclude(x => x.CertificateLevel)
                 .Include(x => x.MentorBookings!)

@@ -13,3 +13,17 @@ public sealed record CreateHomeworkRequest(
 public sealed record SubmitHomeworkRequest(
     [property: MaxLength(20000)] string? TextContent,
     [property: MaxLength(2000)] string? FileUrl);
+
+public sealed record PublishHomeworkGradeRequest(
+    [property: Range(1, int.MaxValue)] int SubmissionId,
+    [property: Range(0, 100)] decimal Score,
+    [property: Required, MaxLength(2000)] string Feedback);
+
+public sealed record EvaluateMentorBookingRequest(
+    [property: Range(0, 100)] int Score,
+    [property: Required, MaxLength(2000)] string Feedback);
+
+public sealed record RecordMentorPracticeResultRequest([property: Range(1, int.MaxValue)] int AttemptId);
+
+public sealed record SaveMentorReviewPlanRequest(
+    [property: Required, MaxLength(6000)] string Plan, DateTimeOffset? SessionAt, bool Completed = false);

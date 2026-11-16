@@ -118,7 +118,6 @@ internal class Program
         builder.Services.AddHttpClient("MentorCalendar", c => c.Timeout = TimeSpan.FromSeconds(15));
         builder.Services.AddScoped<IMentorCalendarService, MentorCalendarService>();
         builder.Services.AddHostedService<MentorCalendarWorker>();
-        builder.Services.AddHttpClient<IJlptExamSource, RikiPath.Infrastructure.Services.JlptExamSource>(c => c.Timeout = TimeSpan.FromSeconds(15));
         builder.Services.AddMemoryCache();
 
         // 3b. Firebase Admin SDK — dùng để verify idToken do React (Firebase Phone Auth) gửi lên.

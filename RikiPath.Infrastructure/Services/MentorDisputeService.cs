@@ -64,6 +64,16 @@ public sealed class MentorDisputeService : IMentorDisputeService
 
             // Kiểm tra thời hạn gửi khiếu nại (trong vòng 48 giờ sau khi lịch hẹn kết thúc hoặc bị hủy)
             var referenceTime = booking.CancelledAtUtc ?? slot?.EndTime ?? booking.ScheduledAt ?? nowUtc;
+            if (request.Category == MentorDisputeCategory.QualityIssue)
+            {
+                var lastGrade = await _context.GradingResults.Where(grade => !grade.IsDeleted && grade.HomeworkSubmission != null
+                        && !grade.HomeworkSubmission.IsDeleted && !grade.HomeworkSubmission.HomeworkAssignment.IsDeleted
+                        && grade.HomeworkSubmission.HomeworkAssignment.MentorBookingId == booking.Id
+                        && grade.HomeworkSubmission.LearnerId == booking.UserSubscription.UserId)
+                    .MaxAsync(grade => (DateTime?)grade.GradedAt, cancellationToken);
+                if (lastGrade > referenceTime) referenceTime = lastGrade.Value;
+                if (booking.PracticeFeedbackAt > referenceTime) referenceTime = booking.PracticeFeedbackAt.Value;
+            }
             if (nowUtc > referenceTime.AddHours(48))
                 return ApiResponse<MentorDisputeResponse>.Fail("Đã quá thời hạn 48 giờ để gửi khiếu nại cho lịch hẹn này.", HttpStatusCode.Conflict);
 
@@ -147,7 +157,7 @@ public sealed class MentorDisputeService : IMentorDisputeService
     public async Task<ApiResponse<List<MentorDisputeResponse>>> GetLearnerDisputesAsync(
         int page = 1,
         int pageSize = 20,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, int? bookingId = null)
     {
         if (page < 1) page = 1;
         if (pageSize < 1 || pageSize > 50) pageSize = 20;
@@ -159,7 +169,7 @@ public sealed class MentorDisputeService : IMentorDisputeService
             var disputes = await _context.MentorDisputes
                 .Include(d => d.Learner)
                 .Include(d => d.Mentor)
-                .Where(d => d.LearnerId == claim.Id)
+                .Where(d => d.LearnerId == claim.Id && (!bookingId.HasValue || d.MentorBookingId == bookingId))
                 .OrderByDescending(d => d.CreatedAtUtc)
                 .Skip((page - 1) * pageSize)
                 .Take(pageSize)
@@ -178,7 +188,7 @@ public sealed class MentorDisputeService : IMentorDisputeService
     public async Task<ApiResponse<List<MentorDisputeResponse>>> GetMentorDisputesAsync(
         int page = 1,
         int pageSize = 20,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, int? bookingId = null)
     {
         if (page < 1) page = 1;
         if (pageSize < 1 || pageSize > 50) pageSize = 20;
@@ -190,7 +200,7 @@ public sealed class MentorDisputeService : IMentorDisputeService
             var disputes = await _context.MentorDisputes
                 .Include(d => d.Learner)
                 .Include(d => d.Mentor)
-                .Where(d => d.MentorId == claim.Id)
+                .Where(d => d.MentorId == claim.Id && (!bookingId.HasValue || d.MentorBookingId == bookingId))
                 .OrderByDescending(d => d.CreatedAtUtc)
                 .Skip((page - 1) * pageSize)
                 .Take(pageSize)
@@ -352,7 +362,7 @@ public sealed class MentorDisputeService : IMentorDisputeService
         MentorDisputeStatus? status = null,
         int page = 1,
         int pageSize = 20,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, int? bookingId = null)
     {
         if (page < 1) page = 1;
         if (pageSize < 1 || pageSize > 50) pageSize = 20;
@@ -363,7 +373,7 @@ public sealed class MentorDisputeService : IMentorDisputeService
             if (claim.Role != Role.Admin)
                 return ApiResponse<List<MentorDisputeResponse>>.Fail("Chỉ Quản trị viên mới có quyền xem hàng đợi khiếu nại.", HttpStatusCode.Forbidden);
 
-            var query = _context.MentorDisputes
+            var query = _context.MentorDisputes.Where(d => !bookingId.HasValue || d.MentorBookingId == bookingId)
                 .Include(d => d.Learner)
                 .Include(d => d.Mentor)
                 .AsQueryable();

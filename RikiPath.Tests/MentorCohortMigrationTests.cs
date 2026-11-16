@@ -8,6 +8,15 @@ using RikiPath.Infrastructure.Migrations;
 
 namespace RikiPath.Tests;
 
+public sealed class CoursePostgresFactAttribute : FactAttribute
+{
+    public CoursePostgresFactAttribute()
+    {
+        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("RIKIPATH_COURSE_TEST_DB")))
+            Skip = "Set RIKIPATH_COURSE_TEST_DB to an isolated PostgreSQL test database.";
+    }
+}
+
 public sealed class MentorCohortMigrationTests
 {
     [Fact] public void Migration_does_not_drop_existing_columns_or_rewrite_seed_data()

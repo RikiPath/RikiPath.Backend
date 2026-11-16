@@ -22,17 +22,15 @@ public sealed class MentorAvailabilityReviewService(IUnitOfWork unitOfWork, ICla
         var error = "";
         await unitOfWork.ExecuteInTransactionAsync(async token =>
         {
-            await unitOfWork.StudyCourses.LockScheduleAsync(source.MentorId, source.MentorId, token);
+            await unitOfWork.MentorAvailabilities.LockMentorScheduleAsync(source.MentorId, token);
             var state = await unitOfWork.MentorAvailabilities.Query().AsNoTracking().SingleAsync(s => s.Id == id, token);
             if (state.IsDeleted || !state.IsApproved || state.RejectedAt != null || state.PolicyVersion != null
                 || state.ChangeRequestedAt != null || state.BookedCount > 0 || state.MaxLearners != 1 || state.StartTime <= DateTime.UtcNow
                 || state.EndTime - state.StartTime <= TimeSpan.FromMinutes(sessionMinutes)
-                || await unitOfWork.StudyCohorts.AnyAsync(c => c.Sessions.Any(s => s.AvailabilityId == id), token)
-                || await unitOfWork.StudyCourses.AnyAsync(c => c.Sessions.Any(s => s.AvailabilityId == id), token)
                 || await unitOfWork.MentorBookings.AnyAsync(b => b.MentorAvailabilityId == id && !b.IsDeleted
                     && (b.Status == MentorStatus.Assigned || b.Status == MentorStatus.Accepted
                         || (b.Status == MentorStatus.AwaitingPayment && b.UserSubscription.PaymentExpiresAt > DateTime.UtcNow)), token))
-            { error = "Chỉ chia khung đã duyệt, chưa đặt/gán lớp, không có yêu cầu điều chỉnh và dài hơn một buổi."; return; }
+            { error = "Chỉ chia khung đã duyệt, chưa được đặt, không có yêu cầu điều chỉnh và dài hơn một buổi."; return; }
             for (var start = state.StartTime; start < state.EndTime; start = start.AddMinutes(sessionMinutes))
             {
                 var end = start.AddMinutes(sessionMinutes);
@@ -65,14 +63,23 @@ public sealed class MentorAvailabilityReviewService(IUnitOfWork unitOfWork, ICla
             .Where(s => s.MentorId == mentorId && s.StartTime >= from && s.StartTime < to)
             .OrderBy(s => s.StartTime).ToListAsync(ct);
         var now = DateTime.UtcNow;
+        var slotIds = slots.Select(s => s.Id).ToArray();
+        var pendingReservations = await unitOfWork.UserSubscriptions.Query().AsNoTracking()
+            .Where(s => !s.IsDeleted && s.PaymentStatus == PaymentStatus.Pending
+                && s.PendingMentorAvailabilityId != null && slotIds.Contains(s.PendingMentorAvailabilityId.Value))
+            .Select(s => new { SlotId = s.PendingMentorAvailabilityId!.Value, s.PaymentExpiresAt })
+            .ToListAsync(ct);
+        var reservationsBySlot = pendingReservations.ToLookup(s => s.SlotId);
         return ApiResponse<List<AdminMentorScheduleResponse>>.Success(slots.Select(s => {
             var bookings = s.MentorBookings.Where(b => !b.IsDeleted && !b.UserSubscription.IsDeleted).ToList();
             var paid = bookings.Any(b => b.UserSubscription.PaymentStatus == PaymentStatus.Paid
                 && b.Status is MentorStatus.Assigned or MentorStatus.Accepted or MentorStatus.Completed);
             var held = bookings.Any(b => b.Status == MentorStatus.AwaitingPayment && b.UserSubscription.PaymentStatus == PaymentStatus.Pending
-                && b.UserSubscription.PaymentExpiresAt > now);
+                && b.UserSubscription.PaymentExpiresAt > now)
+                || reservationsBySlot[s.Id].Any(r => r.PaymentExpiresAt > now);
             var expiredHold = bookings.Any(b => b.Status == MentorStatus.AwaitingPayment && b.UserSubscription.PaymentStatus == PaymentStatus.Pending
-                && b.UserSubscription.PaymentExpiresAt <= now);
+                && b.UserSubscription.PaymentExpiresAt <= now)
+                || reservationsBySlot[s.Id].Any(r => r.PaymentExpiresAt <= now);
             var status = s.IsDeleted ? "Cancelled" : s.RejectedAt != null ? "Rejected" : !s.IsApproved ? "Draft" :
                 s.EndTime <= now ? "Ended" : paid ? "Booked" : held ? "Held" : expiredHold ? "HeldExpired" : "Available";
             return new AdminMentorScheduleResponse(s.Id, s.StartTime, s.EndTime, status, bookings

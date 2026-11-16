@@ -40,7 +40,6 @@ public sealed class MentorAvailabilityApprovalTests
         await Seed(db);
         var uow = new UnitOfWork(db);
         var registrationUow = new Mock<IUnitOfWork>();
-        registrationUow.SetupGet(x => x.StudyCourses).Returns(Mock.Of<IStudyCourseRepository>());
         registrationUow.SetupGet(x => x.MentorAvailabilities).Returns(uow.MentorAvailabilities);
         registrationUow.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>())).Returns((CancellationToken ct) => db.SaveChangesAsync(ct));
         registrationUow.Setup(x => x.ExecuteInTransactionAsync(It.IsAny<Func<CancellationToken, Task>>(), It.IsAny<CancellationToken>()))

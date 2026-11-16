@@ -1,4 +1,6 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.Http;
+using RikiPath.Application.IClients;
 using RikiPath.Application.IServices;
 using RikiPath.Application.Requests.Homework;
 using RikiPath.Application.Responses;
@@ -10,7 +12,8 @@ using System.Net;
 
 namespace RikiPath.Application.Services;
 
-public sealed class HomeworkService(IUnitOfWork unit, IClaimService claims, ILessonProgressService lessons)
+public sealed partial class HomeworkService(IUnitOfWork unit, IClaimService claims, ILessonProgressService lessons,
+    IFileStorageService? storage = null, IAiEssayGradingClient? grader = null, IAiOcrClient? ocr = null)
 {
     private static readonly TimeSpan VietnamOffset = TimeSpan.FromHours(7);
     private static readonly string[] SupportedLevels = ["N5", "N4", "N3", "N2"];
@@ -23,7 +26,7 @@ public sealed class HomeworkService(IUnitOfWork unit, IClaimService claims, ILes
             booking.MentorAvailability != null && !booking.MentorAvailability.IsDeleted &&
             booking.MentorAvailability.IsApproved && booking.MentorAvailability.RejectedAt == null);
 
-    public async Task<List<HomeworkLearner>> GetLearnersAsync(CancellationToken ct)
+    public async Task<List<HomeworkLearner>> GetLearnersAsync(CancellationToken ct, bool includeAllBookings = false)
     {
         var mentorId = claims.GetUserClaim().Id;
         var bookings = await ScheduledBookings(unit)
@@ -34,7 +37,8 @@ public sealed class HomeworkService(IUnitOfWork unit, IClaimService claims, ILes
                 (booking.UserSubscription.UserAccount.FirstName + " " + booking.UserSubscription.UserAccount.LastName).Trim(),
                 booking.Id, booking.MentorAvailability!.StartTime))
             .ToListAsync(ct);
-        return bookings.DistinctBy(booking => booking.LearnerId).OrderBy(booking => booking.LearnerName).ToList();
+        return (includeAllBookings ? bookings : bookings.DistinctBy(booking => booking.LearnerId))
+            .OrderBy(booking => booking.LearnerName).ToList();
     }
 
     public async Task<List<HomeworkCatalogItem>> GetCatalogAsync(string? level, string? search, int page, CancellationToken ct)
@@ -108,16 +112,17 @@ public sealed class HomeworkService(IUnitOfWork unit, IClaimService claims, ILes
         return ApiResponse<int>.Created(assignment.Id);
     }
 
-    public async Task<List<HomeworkItem>> GetAssignmentsAsync(int? learnerId, CancellationToken ct)
+    public async Task<List<HomeworkItem>> GetAssignmentsAsync(int? learnerId, CancellationToken ct, int? bookingId = null)
     {
         var user = claims.GetUserClaim();
-        var rows = await AssignmentsFor(user, learnerId).AsNoTracking().OrderByDescending(item => item.CreatedDate)
+        var rows = await AssignmentsFor(user, learnerId).Where(item => !bookingId.HasValue || item.MentorBookingId == bookingId)
+            .AsNoTracking().OrderByDescending(item => item.CreatedDate)
             .ThenByDescending(item => item.Id)
             .Include(item => item.Learner).Include(item => item.Mentor)
             .Include(item => item.HomeworkAssignmentLessons).ThenInclude(link => link.Lesson).ThenInclude(lesson => lesson.CertificateLevel)
             .Include(item => item.HomeworkAssignmentLessons).ThenInclude(link => link.Lesson).ThenInclude(lesson => lesson.LanguageSkill)
             .Include(item => item.Exercises).ThenInclude(link => link.PracticeExercise)
-            .Include(item => item.Submission).AsSplitQuery().ToListAsync(ct);
+            .Include(item => item.Submission).ThenInclude(submission => submission!.GradingResult).AsSplitQuery().ToListAsync(ct);
         var ids = rows.Select(item => item.Id).ToArray();
         var scores = await unit.PracticeExerciseAttempts.Query()
             .Where(attempt => attempt.HomeworkAssignmentId.HasValue && ids.Contains(attempt.HomeworkAssignmentId.Value) &&
@@ -141,7 +146,7 @@ public sealed class HomeworkService(IUnitOfWork unit, IClaimService claims, ILes
                 .Select(link => new HomeworkExercise(link.PracticeExerciseId, link.PracticeExercise.Title,
                     link.PracticeExercise.Description, questionCounts.GetValueOrDefault(link.PracticeExerciseId),
                     scores.GetValueOrDefault((item.Id, link.PracticeExerciseId)))).ToList(),
-            item.Submission is { IsDeleted: false } submission ? ToSubmission(submission) : null)).ToList();
+            item.Submission is { IsDeleted: false } submission ? ToSubmission(submission) : null, item.MentorBookingId)).ToList();
     }
 
     public async Task<ApiResponse<LessonDetailResponse>> GetAssignedLessonAsync(int assignmentId, int lessonId, CancellationToken ct)
@@ -152,8 +157,11 @@ public sealed class HomeworkService(IUnitOfWork unit, IClaimService claims, ILes
         return await lessons.GetLessonDetailAsync(lessonId, ct);
     }
 
-    public async Task<ApiResponse<HomeworkSubmissionDetail>> SubmitAsync(int assignmentId, SubmitHomeworkRequest request,
-        CancellationToken ct)
+    public Task<ApiResponse<HomeworkSubmissionDetail>> SubmitAsync(int assignmentId, SubmitHomeworkRequest request, CancellationToken ct)
+        => SubmitInternalAsync(assignmentId, request, null, ct);
+
+    private async Task<ApiResponse<HomeworkSubmissionDetail>> SubmitInternalAsync(int assignmentId, SubmitHomeworkRequest request,
+        IFormFile? scan, CancellationToken ct)
     {
         var userId = claims.GetUserClaim().Id;
         var response = ApiResponse<HomeworkSubmissionDetail>.NotFound("Không tìm thấy bài tập được giao.");
@@ -170,7 +178,8 @@ public sealed class HomeworkService(IUnitOfWork unit, IClaimService claims, ILes
             if (await unit.UserAccounts.GetByIdForUpdateAsync(userId, token) is not { IsDeleted: false })
                 return;
             var assignment = await unit.HomeworkAssignments.Query().AsTracking()
-                .Include(item => item.Submission).Include(item => item.Exercises).Include(item => item.HomeworkAssignmentLessons)
+                .Include(item => item.Submission).ThenInclude(submission => submission!.GradingResult)
+                .Include(item => item.Exercises).Include(item => item.HomeworkAssignmentLessons)
                 .SingleOrDefaultAsync(item => item.Id == assignmentId && item.LearnerId == userId && !item.IsDeleted, token);
             if (assignment is null) return;
             if (assignment.Submission is { IsDeleted: false } previous)
@@ -194,10 +203,18 @@ public sealed class HomeworkService(IUnitOfWork unit, IClaimService claims, ILes
                     HttpStatusCode.Conflict, "HOMEWORK_EXERCISES_INCOMPLETE");
                 return;
             }
-            if (completed == 0 && string.IsNullOrEmpty(text) && string.IsNullOrEmpty(link))
+            if (completed == 0 && string.IsNullOrEmpty(text) && string.IsNullOrEmpty(link) && scan is null)
             {
                 response = ApiResponse<HomeworkSubmissionDetail>.Fail("Hãy nhập nội dung hoặc đường dẫn bài nộp.");
                 return;
+            }
+
+            string? privateScanReference = null;
+            if (scan is not null)
+            {
+                await using var image = scan.OpenReadStream();
+                var stored = await storage!.UploadPrivateVerificationAsync(image, scan.ContentType, userId, token);
+                privateScanReference = stored.Url;
             }
 
             var submission = new HomeworkSubmission
@@ -207,6 +224,7 @@ public sealed class HomeworkService(IUnitOfWork unit, IClaimService claims, ILes
                 LessonId = assignment.HomeworkAssignmentLessons.Select(item => (int?)item.LessonId).Order().FirstOrDefault(),
                 TextContent = string.IsNullOrEmpty(text) ? null : text,
                 FileUrl = string.IsNullOrEmpty(link) ? null : link,
+                PrivateScanReference = privateScanReference,
                 SubmittedAt = DateTime.UtcNow
             };
             await unit.HomeworkSubmissions.AddAsync(submission, token);
@@ -263,7 +281,8 @@ public sealed class HomeworkService(IUnitOfWork unit, IClaimService claims, ILes
     }
 
     private IQueryable<HomeworkAssignment> AssignmentsFor(ClaimDTO user, int? learnerId) =>
-        unit.HomeworkAssignments.Query().Where(item => !item.IsDeleted && (user.Role == Role.Mentor
+        unit.HomeworkAssignments.Query().Where(item => !item.IsDeleted && (user.Role == Role.Admin
+            ? (!learnerId.HasValue || item.LearnerId == learnerId) : user.Role == Role.Mentor
             ? item.MentorId == user.Id && (!learnerId.HasValue || item.LearnerId == learnerId)
             : item.LearnerId == user.Id));
 
@@ -279,7 +298,8 @@ public sealed class HomeworkService(IUnitOfWork unit, IClaimService claims, ILes
              !question.Options!.Any(option => !option.IsDeleted && option.IsCorrect))));
 
     private static HomeworkSubmissionDetail ToSubmission(HomeworkSubmission submission) =>
-        new(submission.Id, submission.TextContent, submission.FileUrl, submission.SubmittedAt);
+        new(submission.Id, submission.TextContent, submission.FileUrl, submission.SubmittedAt,
+            submission.PrivateScanReference is not null, PublishedGrade(submission.GradingResult));
 
     private static string FullName(UserAccount user) => $"{user.FirstName} {user.LastName}".Trim();
     private static double? Percent(int count, int total) => total == 0 ? null : Math.Round(count * 100d / total, 2);

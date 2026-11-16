@@ -16,13 +16,13 @@ public interface IMentorDisputeService
     Task<ApiResponse<List<MentorDisputeResponse>>> GetLearnerDisputesAsync(
         int page = 1,
         int pageSize = 20,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default, int? bookingId = null);
 
     // Chuyên gia tư vấn xem danh sách khiếu nại liên quan đến mình
     Task<ApiResponse<List<MentorDisputeResponse>>> GetMentorDisputesAsync(
         int page = 1,
         int pageSize = 20,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default, int? bookingId = null);
 
     // Xem chi tiết hồ sơ khiếu nại kèm bằng chứng điểm danh và lịch sử xử lý
     Task<ApiResponse<MentorDisputeDetailResponse>> GetDisputeDetailAsync(
@@ -40,7 +40,7 @@ public interface IMentorDisputeService
         MentorDisputeStatus? status = null,
         int page = 1,
         int pageSize = 20,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default, int? bookingId = null);
 
     // Quản trị viên ra phán quyết giải quyết khiếu nại (hoàn tín dụng hoặc bác bỏ)
     Task<ApiResponse<MentorDisputeResponse>> AdminResolveDisputeAsync(

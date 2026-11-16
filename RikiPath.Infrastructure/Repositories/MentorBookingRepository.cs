@@ -10,6 +10,15 @@ namespace RikiPath.Infrastructure.Repositories
 {
     public class MentorBookingRepository(AppDbContext context) : GenericRepository<MentorBooking>(context), IMentorBookingRepository
     {
+        public async Task<HashSet<string>> GetRescheduledBookingKeysAsync(IEnumerable<int> bookingIds, CancellationToken ct)
+        {
+            var keys = bookingIds.Select(id => id.ToString(System.Globalization.CultureInfo.InvariantCulture)).ToArray();
+            var moved = await context.MentorOutboxEvents.AsNoTracking().Where(e => e.AggregateType == "MentorBooking"
+                    && e.EventType == "BookingRescheduled" && keys.Contains(e.AggregateId))
+                .Select(e => e.AggregateId).Distinct().ToListAsync(ct);
+            return moved.ToHashSet(StringComparer.Ordinal);
+        }
+
         public async Task<List<MentorBooking>> GetQueueForMentorAsync(int mentorId)
             => await _context.MentorBookings
                 .Include(x => x.CompensationLevel)

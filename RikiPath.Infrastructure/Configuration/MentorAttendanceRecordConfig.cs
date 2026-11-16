@@ -15,8 +15,6 @@ public sealed class MentorAttendanceRecordConfig : IEntityTypeConfiguration<Ment
         });
 
         b.HasKey(x => x.Id);
-        b.HasOne(x => x.CourseSession).WithMany().HasForeignKey(x => x.CourseSessionId).OnDelete(DeleteBehavior.Restrict);
-        b.HasIndex(x => new { x.RoomId, x.UserId }).IsUnique().HasFilter("\"MentorBookingId\" IS NULL");
 
         b.Property(x => x.Role)
             .IsRequired()

@@ -329,20 +329,17 @@ public sealed partial class MentorMeetingService(
                 }, createdQaSubscription ? HttpStatusCode.Created : HttpStatusCode.OK);
             }
 
-            var now = DateTime.UtcNow;
+            if (request.MentorAvailabilityId is not int slotId)
+                return ApiResponse<MentorMeetingPurchaseResponse>.Fail("Hãy chọn khung giờ với mentor trước khi thanh toán.");
+
             await ExpirePendingPaymentsAsync(cancellationToken);
-            var expiresAt = now.AddMinutes(15);
-            MentorAvailability? slot = null;
-            if (request.MentorAvailabilityId is int slotId)
-            {
-                slot = await unitOfWork.MentorAvailabilities.GetAvailableSlotByIdAsync(slotId, now, cancellationToken);
-                if (slot is null || slot.CancelRequestedAt is not null)
-                    return ApiResponse<MentorMeetingPurchaseResponse>.Fail("Khung giờ vừa hết chỗ. Hãy chọn lịch khác.", HttpStatusCode.Conflict);
-                var duration = plan.MeetingSessionCount == 1 ? 14 : 35;
-                if (slot.EndTime > now.AddDays(duration))
-                    return ApiResponse<MentorMeetingPurchaseResponse>.Fail("Khung giờ nằm ngoài thời hạn của gói.", HttpStatusCode.Conflict);
-                if (slot.StartTime < expiresAt) expiresAt = slot.StartTime;
-            }
+            var now = DateTime.UtcNow;
+            var slot = await unitOfWork.MentorAvailabilities.GetAvailableSlotByIdAsync(slotId, now, cancellationToken);
+            if (slot is null || slot.CancelRequestedAt is not null)
+                return ApiResponse<MentorMeetingPurchaseResponse>.Fail("Khung giờ vừa hết chỗ. Hãy chọn lịch khác.", HttpStatusCode.Conflict);
+            var checkoutDeadline = now.AddMinutes(15);
+            var expiresAt = slot.StartTime < checkoutDeadline ? slot.StartTime : checkoutDeadline;
+
             var subscription = new UserSubscription
             {
                 UserId = claims.Id,
@@ -355,30 +352,21 @@ public sealed partial class MentorMeetingService(
                 MeetingSessionsIncluded = plan.MeetingSessionCount,
                 MeetingSessionsUsed = 0,
                 PaymentExpiresAt = expiresAt,
+                PendingMentorAvailability = slot,
+                PendingMentorQuestion = request.Question?.Trim(),
                 PurchasedAt = now,
                 AiGradingQuota = plan.AiGradingQuota
             };
-            MentorBooking? hold = null;
-            if (slot is not null)
-            {
-                slot.BookedCount++;
-                subscription.MeetingSessionsUsed = 1;
-                hold = new MentorBooking
-                {
-                    UserSubscription = subscription,
-                    MentorAvailability = slot,
-                    Status = MentorStatus.AwaitingPayment,
-                    ScheduledAt = slot.StartTime,
-                    Question = request.Question?.Trim()
-                };
-                subscription.MentorBookings.Add(hold);
-            }
+            if (slot.EndTime > now.AddDays(MentorPurchaseFinalizer.DurationDays(subscription)))
+                return ApiResponse<MentorMeetingPurchaseResponse>.Fail("Khung giờ nằm ngoài thời hạn của gói.", HttpStatusCode.Conflict);
+
+            slot.BookedCount++;
             await unitOfWork.UserSubscriptions.AddAsync(subscription, cancellationToken);
             try
             {
                 await unitOfWork.SaveChangesAsync(cancellationToken);
             }
-            catch (DbUpdateConcurrencyException) when (slot is not null)
+            catch (DbUpdateConcurrencyException)
             {
                 return ApiResponse<MentorMeetingPurchaseResponse>.Fail("Khung giờ vừa thay đổi. Hãy chọn lại lịch.", HttpStatusCode.Conflict);
             }
@@ -404,29 +392,17 @@ public sealed partial class MentorMeetingService(
             catch (Exception ex)
             {
                 logger.LogError(ex, "PayOS checkout creation failed for subscription {SubscriptionId}.", subscription.Id);
-                subscription.PaymentStatus = PaymentStatus.Failed;
-                subscription.PaymentExpiresAt = null;
-                if (hold is not null && slot is not null)
-                {
-                    slot.BookedCount = Math.Max(0, slot.BookedCount - 1);
-                    hold.Status = MentorStatus.Cancelled;
-                    hold.MentorAvailability = null;
-                    hold.MentorAvailabilityId = null;
-                    subscription.MeetingSessionsUsed = 0;
-                }
-                unitOfWork.UserSubscriptions.Update(subscription);
+                MentorPurchaseFinalizer.MarkFailed(subscription);
                 await unitOfWork.SaveChangesAsync(cancellationToken);
                 return ApiResponse<MentorMeetingPurchaseResponse>.Fail("Không thể tạo liên kết thanh toán. Chưa cộng hoặc trừ lượt.", HttpStatusCode.BadGateway);
             }
 
             subscription.PaymentTransactionId = checkout.PaymentLinkId;
-            unitOfWork.UserSubscriptions.Update(subscription);
             await unitOfWork.SaveChangesAsync(cancellationToken);
 
             return ApiResponse<MentorMeetingPurchaseResponse>.Success(new MentorMeetingPurchaseResponse
             {
                 SubscriptionId = subscription.Id,
-                BookingId = hold?.Id,
                 OrderCode = subscription.Id,
                 PlanName = plan.Name,
                 MeetingSessionCount = plan.MeetingSessionCount,
@@ -589,16 +565,7 @@ public sealed partial class MentorMeetingService(
                 }
                 else if (information.Status == "CANCELLED")
                 {
-                    subscription.PaymentStatus = PaymentStatus.Failed;
-                    subscription.PaymentExpiresAt = null;
-                    foreach (var booking in subscription.MentorBookings.Where(b => b.Status == MentorStatus.AwaitingPayment))
-                    {
-                        booking.Status = MentorStatus.Cancelled;
-                        if (booking.MentorAvailability is { } heldSlot) heldSlot.BookedCount = Math.Max(0, heldSlot.BookedCount - 1);
-                        subscription.MeetingSessionsUsed = Math.Max(0, subscription.MeetingSessionsUsed - 1);
-                        booking.MentorAvailability = null;
-                        booking.MentorAvailabilityId = null;
-                    }
+                    MentorPurchaseFinalizer.MarkFailed(subscription);
                     await unitOfWork.SaveChangesAsync(cancellationToken);
                 }
             }
@@ -665,7 +632,7 @@ public sealed partial class MentorMeetingService(
         {
             await unitOfWork.ExecuteInTransactionAsync(async token =>
             {
-                await unitOfWork.StudyCourses.LockScheduleAsync(actor.Id, actor.Id, token);
+                await unitOfWork.MentorAvailabilities.LockMentorScheduleAsync(actor.Id, token);
                 foreach (var slot in rows)
                     if (await unitOfWork.MentorAvailabilities.HasOverlappingSlotAsync(actor.Id, slot.StartTime, slot.EndTime, token))
                         throw new AvailabilityOverlapException();
@@ -725,8 +692,6 @@ public sealed partial class MentorMeetingService(
             if (slots.Count != ids.Count)
                 return ApiResponse<List<MentorAvailabilityResponse>>.Fail("Có khung giờ không tồn tại.", HttpStatusCode.NotFound);
 
-            if (await unitOfWork.StudyCohorts.AnyAsync(c => c.Sessions.Any(s => ids.Contains(s.AvailabilityId)), cancellationToken))
-                return ApiResponse<List<MentorAvailabilityResponse>>.Fail("Lịch thuộc lớp nhóm; gửi yêu cầu trong hồ sơ khóa học để xử lý đúng phạm vi.", HttpStatusCode.Conflict);
             var now = DateTime.UtcNow;
             if (slots.Any(x => x.CancelRequestedAt is not null))
                 return ApiResponse<List<MentorAvailabilityResponse>>.Fail("Có khung giờ đang chờ quản trị viên duyệt hủy.", HttpStatusCode.Conflict);
@@ -917,25 +882,18 @@ public sealed partial class MentorMeetingService(
     private async Task ExpirePendingPaymentsAsync(CancellationToken cancellationToken)
     {
         var now = DateTime.UtcNow;
-        var expired = await unitOfWork.MentorBookings.GetExpiredPaymentHoldsAsync(now, cancellationToken);
-        if (expired.Count == 0) return;
-        foreach (var booking in expired)
-        {
-            booking.Status = MentorStatus.Cancelled;
-            if (booking.MentorAvailability is not null)
-            {
-                var slot = booking.MentorAvailability;
-                slot.BookedCount = Math.Max(0, slot.BookedCount - 1);
-                unitOfWork.MentorAvailabilities.Update(slot);
-                booking.MentorAvailability = null;
-                booking.MentorAvailabilityId = null;
-            }
-            booking.UserSubscription.MeetingSessionsUsed = Math.Max(0, booking.UserSubscription.MeetingSessionsUsed - 1);
-            booking.UserSubscription.PaymentExpiresAt = now;
-            unitOfWork.UserSubscriptions.Update(booking.UserSubscription);
-            unitOfWork.MentorBookings.Update(booking);
-        }
-        await unitOfWork.SaveChangesAsync(cancellationToken);
+        var expiredReservations = await unitOfWork.UserSubscriptions.Query()
+            .Where(x => !x.IsDeleted && x.PaymentStatus == PaymentStatus.Pending
+                && x.PendingMentorAvailabilityId != null && x.PaymentExpiresAt <= now)
+            .Include(x => x.PendingMentorAvailability)
+            .ToListAsync(cancellationToken);
+        var expiredBookings = await unitOfWork.MentorBookings.GetExpiredPaymentHoldsAsync(now, cancellationToken);
+        foreach (var subscription in expiredReservations)
+            MentorPurchaseFinalizer.ReleaseReservation(subscription);
+        foreach (var booking in expiredBookings)
+            MentorPurchaseFinalizer.ReleaseLegacyBooking(booking);
+        if (expiredReservations.Count > 0 || expiredBookings.Count > 0)
+            await unitOfWork.SaveChangesAsync(cancellationToken);
     }
 
     private (string? ReturnUrl, string? CancelUrl) BuildPayOsReturnUrls(int subscriptionId, string? frontendOrigin)

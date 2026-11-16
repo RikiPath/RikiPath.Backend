@@ -20,7 +20,6 @@ namespace RikiPath.Infrastructure.Repositories
                 .Where(x => x.IsApproved && x.RejectedAt == null
                     && x.MaxLearners == 1 && x.BookedCount < x.MaxLearners && !x.IsDeleted
                     && x.ChangeRequestedAt == null
-                    && !_context.StudyCohorts.Any(c => c.Sessions.Any(s => s.AvailabilityId == x.Id))
                     && x.StartTime >= from && x.EndTime <= to
                     && x.StartTime > DateTime.UtcNow && x.Mentor != null && !x.Mentor.IsDeleted && x.Mentor.Role == Role.Mentor
                     && (x.PolicyVersion != null ? (x.Mentor.MentorProfile != null && x.Mentor.MentorProfile.VerificationStatus == MentorVerificationStatus.Approved) : (x.Mentor.MentorProfile == null || x.Mentor.MentorProfile.VerificationStatus == MentorVerificationStatus.Approved)));
@@ -37,18 +36,23 @@ namespace RikiPath.Infrastructure.Repositories
                 .FirstOrDefaultAsync(x => x.Id == id && !x.IsDeleted
                     && x.IsApproved && x.RejectedAt == null && x.MaxLearners == 1 && x.BookedCount < x.MaxLearners
                     && x.ChangeRequestedAt == null
-                    && !_context.StudyCohorts.Any(c => c.Sessions.Any(s => s.AvailabilityId == x.Id))
                     && x.StartTime > after
                     && x.Mentor != null && !x.Mentor.IsDeleted && x.Mentor.Role == Role.Mentor
                     && (x.PolicyVersion != null ? (x.Mentor.MentorProfile != null && x.Mentor.MentorProfile.VerificationStatus == MentorVerificationStatus.Approved) : (x.Mentor.MentorProfile == null || x.Mentor.MentorProfile.VerificationStatus == MentorVerificationStatus.Approved)), cancellationToken);
 
         // Lịch bị từ chối không còn chiếm khung giờ của mentor.
-        public async Task<bool> HasOverlappingSlotAsync(int mentorId, DateTime startTime, DateTime endTime, CancellationToken cancellationToken = default)
-            => await _context.MentorAvailabilities.AnyAsync(x => x.MentorId == mentorId && !x.IsDeleted && x.RejectedAt == null
-                && x.StartTime < endTime && startTime < x.EndTime, cancellationToken)
-                || await _context.StudyCourses.AnyAsync(c => c.Status == "Active" && c.MentorId == mentorId
-                    && c.Sessions.Any(s => s.Status == "Scheduled" && s.ScheduledAt < endTime
-                        && s.ScheduledAt.AddMinutes(c.SessionMinutes) > startTime), cancellationToken);
+        public Task<bool> HasOverlappingSlotAsync(int mentorId, DateTime startTime, DateTime endTime, CancellationToken cancellationToken = default)
+            => _context.MentorAvailabilities.AnyAsync(x => x.MentorId == mentorId && !x.IsDeleted && x.RejectedAt == null
+                && x.StartTime < endTime && startTime < x.EndTime, cancellationToken);
+
+        public async Task LockMentorScheduleAsync(int mentorId, CancellationToken cancellationToken = default)
+        {
+            if (_context.Database.IsNpgsql())
+            {
+                var key = $"mentor-schedule:{mentorId}";
+                await _context.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({key}, 0))", cancellationToken);
+            }
+        }
 
         // Phòng họp theo RoomId của lịch (hub dùng để kiểm tra quyền vào phòng).
         public Task<MentorAvailability?> GetMeetingByRoomIdAsync(Guid roomId, CancellationToken cancellationToken = default)
