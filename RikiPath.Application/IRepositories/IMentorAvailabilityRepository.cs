@@ -14,6 +14,7 @@ namespace RikiPath.Application.IRepositories
         Task<List<MentorAvailability>> GetAvailableSlotsAsync(int? mentorId, DateTime from, DateTime to, CancellationToken cancellationToken = default);
         Task<MentorAvailability?> GetAvailableSlotByIdAsync(int id, DateTime after, CancellationToken cancellationToken = default);
         Task<bool> HasOverlappingSlotAsync(int mentorId, DateTime startTime, DateTime endTime, CancellationToken cancellationToken = default);
+        Task LockMentorScheduleAsync(int mentorId, CancellationToken cancellationToken = default);
         Task<MentorAvailability?> GetActiveSlotByRoomIdAsync(Guid roomId, CancellationToken cancellationToken = default);
         Task<List<MentorAvailability>> GetSlotsByGenerationKeysAsync(int mentorId, IEnumerable<string> generationKeys, CancellationToken cancellationToken = default);
         Task<List<MentorAvailability>> GetSlotsInRangeAsync(int mentorId, DateTime fromUtc, DateTime toUtc, CancellationToken cancellationToken = default);

@@ -36,9 +36,9 @@ public sealed class MentorDisputeController(IMentorDisputeService disputeService
     public async Task<IActionResult> GetLearnerDisputes(
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 20,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, [FromQuery] int? bookingId = null)
     {
-        var result = await disputeService.GetLearnerDisputesAsync(page, pageSize, cancellationToken);
+        var result = await disputeService.GetLearnerDisputesAsync(page, pageSize, cancellationToken, bookingId);
         return StatusCode(result.StatusCode, result);
     }
 
@@ -49,9 +49,9 @@ public sealed class MentorDisputeController(IMentorDisputeService disputeService
     public async Task<IActionResult> GetMentorDisputes(
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 20,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, [FromQuery] int? bookingId = null)
     {
-        var result = await disputeService.GetMentorDisputesAsync(page, pageSize, cancellationToken);
+        var result = await disputeService.GetMentorDisputesAsync(page, pageSize, cancellationToken, bookingId);
         return StatusCode(result.StatusCode, result);
     }
 
@@ -94,9 +94,9 @@ public sealed class MentorDisputeController(IMentorDisputeService disputeService
         [FromQuery] MentorDisputeStatus? status = null,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 20,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, [FromQuery] int? bookingId = null)
     {
-        var result = await disputeService.AdminGetDisputeQueueAsync(status, page, pageSize, cancellationToken);
+        var result = await disputeService.AdminGetDisputeQueueAsync(status, page, pageSize, cancellationToken, bookingId);
         return StatusCode(result.StatusCode, result);
     }
 

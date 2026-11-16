@@ -17,6 +17,8 @@ namespace RikiPath.Infrastructure.Configuration
             builder.Property(x => x.PaymentTransactionId).HasMaxLength(200);
             builder.Property(x => x.MeetingSessionsIncluded).HasDefaultValue(0);
             builder.Property(x => x.MeetingSessionsUsed).HasDefaultValue(0);
+            builder.Property(x => x.MentorReviewPlan).HasMaxLength(6000);
+            builder.Property(x => x.PendingMentorQuestion).HasMaxLength(2000);
 
             builder.HasOne(x => x.UserAccount)
                 .WithMany(x => x.UserSubscriptions)
@@ -36,6 +38,11 @@ namespace RikiPath.Infrastructure.Configuration
             builder.HasOne(x => x.CertificateLevel)
                 .WithMany()
                 .HasForeignKey(x => x.CertificateLevelId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            builder.HasOne(x => x.PendingMentorAvailability)
+                .WithMany()
+                .HasForeignKey(x => x.PendingMentorAvailabilityId)
                 .OnDelete(DeleteBehavior.Restrict);
 
             builder.HasIndex(x => new { x.UserId, x.PaymentStatus, x.EndDate });

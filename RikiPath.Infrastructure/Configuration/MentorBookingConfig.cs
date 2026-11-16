@@ -19,6 +19,7 @@ namespace RikiPath.Infrastructure.Configuration
             builder.HasOne(x => x.CreditGrant).WithMany().HasForeignKey(x => x.CreditGrantId).OnDelete(DeleteBehavior.Restrict);
             builder.Property(x => x.Status).HasConversion<string>().HasMaxLength(20);
             builder.Property(x => x.MeetingLink).HasMaxLength(500);
+            builder.Property(x => x.PracticeFeedback).HasMaxLength(2000);
             builder.Property(x => x.CancellationReason).HasMaxLength(500);
             builder.Property(x => x.CancelledByRole).HasMaxLength(50);
             builder.Property(x => x.ExceptionReason).HasMaxLength(500);

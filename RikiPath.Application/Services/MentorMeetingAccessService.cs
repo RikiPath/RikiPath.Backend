@@ -1,7 +1,6 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using RikiPath.Application.IServices;
 using RikiPath.Application.Responses.MentorMeetings;
-using Microsoft.EntityFrameworkCore;
 using RikiPath.Domain.Entities;
 using RikiPath.Domain.Enums;
 using System.Collections.Concurrent;
@@ -89,11 +88,6 @@ namespace RikiPath.Application.Services
                 .Select(g => g.First())
                 .ToList();
 
-            var courseLearners = await unitOfWork.StudyCourses.Query().Where(c => c.PaymentStatus == "Paid"
-                && c.Status == "Active" && c.Sessions.Any(s => s.AvailabilityId == slot.Id && s.Status == "Scheduled"))
-                .Select(c => new MeetingParticipantResponse { UserId = c.LearnerId,
-                    Name = c.Learner.FirstName + " " + c.Learner.LastName, IsMentor = false }).ToListAsync(cancellationToken);
-            learners = learners.Concat(courseLearners).DistinctBy(x => x.UserId).ToList();
             return new MeetingAccessInfoResponse
             {
                 Capacity = slot.MaxLearners,

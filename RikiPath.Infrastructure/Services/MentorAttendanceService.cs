@@ -67,8 +67,6 @@ public sealed class MentorAttendanceService : IMentorAttendanceService
             && (b.Status == MentorStatus.Assigned || b.Status == MentorStatus.Accepted));
 
         if (hasValidBooking) return true;
-        if (await _context.StudyCourses.AnyAsync(c => c.LearnerId == userId && c.PaymentStatus == "Paid" && c.Status == "Active"
-            && c.Sessions.Any(s => s.AvailabilityId == slot.Id && s.Status == "Scheduled"), cancellationToken)) return true;
 
         // Quản trị viên (Admin) luôn có quyền giám sát
         var claim = _claimService.GetUserClaim();
@@ -105,30 +103,27 @@ public sealed class MentorAttendanceService : IMentorAttendanceService
             {
                 participantName = slot.Mentor != null ? $"{slot.Mentor.FirstName} {slot.Mentor.LastName}".Trim() : "Mentor";
                 RoomMentors[roomId] = userId;
-                booking = slot.MentorBookings?.FirstOrDefault(b => !b.IsDeleted && (b.Status == MentorStatus.Assigned || b.Status == MentorStatus.Accepted));
+                booking = slot.MentorBookings.FirstOrDefault(b => !b.IsDeleted
+                    && b.UserSubscription.PaymentStatus == PaymentStatus.Paid
+                    && b.Status is MentorStatus.Assigned or MentorStatus.Accepted);
             }
             else
             {
-                booking = slot.MentorBookings?.FirstOrDefault(b =>
+                booking = slot.MentorBookings.FirstOrDefault(b =>
                     !b.IsDeleted
                     && b.UserSubscription.UserId == userId
-                    && (b.Status == MentorStatus.Assigned || b.Status == MentorStatus.Accepted));
+                    && b.UserSubscription.PaymentStatus == PaymentStatus.Paid
+                    && b.Status is MentorStatus.Assigned or MentorStatus.Accepted);
 
-                if (booking is null && !await _context.StudyCourses.AnyAsync(c => c.LearnerId == userId && c.PaymentStatus == "Paid" && c.Status == "Active" && c.Sessions.Any(s => s.AvailabilityId == slot.Id && s.Status == "Scheduled"), cancellationToken))
+                if (booking is null)
                     return ApiResponse<MentorAttendanceResponse>.Fail("Bạn không có lịch hẹn hợp lệ cho phòng họp này.", HttpStatusCode.Forbidden);
 
-                var learnerAccount = booking?.UserSubscription?.UserAccount ?? await _context.Users.FindAsync([userId], cancellationToken);
+                var learnerAccount = booking.UserSubscription.UserAccount;
                 participantName = learnerAccount != null ? $"{learnerAccount.FirstName} {learnerAccount.LastName}".Trim() : $"User #{userId}";
             }
 
-            int? courseSessionId = null;
             if (booking is null)
-            {
-                courseSessionId = await _context.StudyCourses.Where(c => c.PaymentStatus == "Paid" && c.Status == "Active"
-                    && (isMentor || c.LearnerId == userId)).SelectMany(c => c.Sessions)
-                    .Where(s => s.AvailabilityId == slot.Id && s.Status == "Scheduled").Select(s => (int?)s.Id).FirstOrDefaultAsync(cancellationToken);
-                if (!courseSessionId.HasValue) return ApiResponse<MentorAttendanceResponse>.Fail("Chưa có buổi học hợp lệ cho phòng này.", HttpStatusCode.Conflict);
-            }
+                return ApiResponse<MentorAttendanceResponse>.Fail("Chưa có buổi học hợp lệ cho phòng này.", HttpStatusCode.Conflict);
 
             // 1. Quản lý trạng thái hiện diện đa thiết bị trong bộ nhớ
             var userConnMap = UserConnections.GetOrAdd((roomId, userId), _ => new ConcurrentDictionary<string, byte>());
@@ -145,8 +140,7 @@ public sealed class MentorAttendanceService : IMentorAttendanceService
             {
                 record = new MentorAttendanceRecord
                 {
-                    MentorBookingId = booking?.Id,
-                    CourseSessionId = courseSessionId,
+                    MentorBookingId = booking.Id,
                     RoomId = roomId,
                     UserId = userId,
                     Role = role,
@@ -499,7 +493,6 @@ public sealed class MentorAttendanceService : IMentorAttendanceService
         {
             Id = r.Id,
             MentorBookingId = r.MentorBookingId,
-            CourseSessionId = r.CourseSessionId,
             RoomId = r.RoomId,
             UserId = r.UserId,
             ParticipantName = name,
