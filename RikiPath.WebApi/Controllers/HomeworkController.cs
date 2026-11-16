@@ -43,7 +43,7 @@ public sealed class HomeworkController(HomeworkService homework, IPracticeQuizSe
 
     [HttpPost("{assignmentId:int}/scan"), Authorize(Roles = "Learner"), RequestSizeLimit(11000000)]
     [Consumes("multipart/form-data")]
-    public async Task<IActionResult> SubmitScan(int assignmentId, [FromForm] IFormFile? file, CancellationToken ct)
+    public async Task<IActionResult> SubmitScan(int assignmentId, IFormFile? file, CancellationToken ct)
         => Send(await homework.SubmitScanAsync(assignmentId, file, ct));
 
     [HttpGet("{assignmentId:int}/scan")]
