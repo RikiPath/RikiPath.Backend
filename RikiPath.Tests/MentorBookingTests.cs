@@ -213,6 +213,67 @@ public sealed class MentorBookingTests
         Assert.Equal(-1, spendEntry.Amount);
     }
 
+    [Fact]
+    public async Task Four_learners_share_one_room_and_cancellation_releases_only_one_seat()
+    {
+        await using var db = CreateInMemoryDb();
+        var (_, slot) = await SeedMentorAndSlotAsync(db);
+        slot.MaxLearners = 4;
+        await db.SaveChangesAsync();
+
+        var bookingIds = new List<int>();
+        var meetingLinks = new HashSet<string>();
+        for (var learnerId = 101; learnerId <= 104; learnerId++)
+        {
+            await SeedLearnerWithCreditsAsync(db, learnerId, 1);
+            var result = await CreateBookingService(db, learnerId).BookSlotAsync(
+                new BookIncludedMeetingRequest { MentorAvailabilityId = slot.Id });
+            Assert.True(result.IsSuccess, result.ErrorMessage);
+            bookingIds.Add(result.Result!.Id);
+            meetingLinks.Add(result.Result.MeetingLink!);
+        }
+
+        Assert.Equal(4, slot.BookedCount);
+        Assert.Single(meetingLinks);
+        Assert.Equal(4, await db.MentorBookingReservations.CountAsync(r => r.MentorAvailabilityId == slot.Id && r.ReleasedAtUtc == null));
+        Assert.Equal(1, (await db.MentorBookingDayGuards.SingleAsync()).ActiveBookingCount);
+
+        await SeedLearnerWithCreditsAsync(db, 105, 1);
+        var fifthAttempt = await CreateBookingService(db, 105).BookSlotAsync(
+            new BookIncludedMeetingRequest { MentorAvailabilityId = slot.Id });
+        Assert.Equal(409, fifthAttempt.StatusCode);
+        Assert.Equal(4, slot.BookedCount);
+        Assert.Equal(1, (await db.MentorCreditGrants.SingleAsync(g => g.LearnerId == 105)).AvailableQuantity);
+
+        var cancelled = await CreateBookingService(db, 101).ReleaseBookingHoldAsync(bookingIds[0]);
+        Assert.True(cancelled.IsSuccess, cancelled.ErrorMessage);
+        Assert.Equal(3, slot.BookedCount);
+        Assert.Equal(1, (await db.MentorBookingDayGuards.SingleAsync()).ActiveBookingCount);
+
+        var fifthBooking = await CreateBookingService(db, 105).BookSlotAsync(
+            new BookIncludedMeetingRequest { MentorAvailabilityId = slot.Id });
+        Assert.True(fifthBooking.IsSuccess, fifthBooking.ErrorMessage);
+        Assert.Equal(4, slot.BookedCount);
+        Assert.Equal(meetingLinks.Single(), fifthBooking.Result!.MeetingLink);
+    }
+
+    [Fact]
+    public async Task Started_session_rejects_new_learner_even_with_free_seats()
+    {
+        await using var db = CreateInMemoryDb();
+        var (_, slot) = await SeedMentorAndSlotAsync(db, startHoursAhead: -1);
+        slot.MaxLearners = 4;
+        await db.SaveChangesAsync();
+        await SeedLearnerWithCreditsAsync(db, 101, 1);
+
+        var result = await CreateBookingService(db, 101).BookSlotAsync(
+            new BookIncludedMeetingRequest { MentorAvailabilityId = slot.Id });
+
+        Assert.Equal(409, result.StatusCode);
+        Assert.Equal(0, slot.BookedCount);
+        Assert.Equal(1, (await db.MentorCreditGrants.SingleAsync()).AvailableQuantity);
+    }
+
     // 2. Người dùng không phải Learner bị từ chối với 403 Forbidden
     [Theory]
     [InlineData(Role.Mentor)]
@@ -441,9 +502,9 @@ public sealed class MentorBookingTests
         Assert.Contains("thời gian nghỉ 15 phút", response.ErrorMessage);
     }
 
-    // 12. Slot đã có active reservation khác thì bị từ chối với 409 Conflict
+    // 12. Buổi đã hết chỗ thì bị từ chối, kể cả khi bản ghi giữ chỗ còn hoạt động.
     [Fact]
-    public async Task Active_Reservation_On_Slot_Blocks_New_Booking_With_409()
+    public async Task Full_Slot_Blocks_New_Booking_With_409()
     {
         await using var db = CreateInMemoryDb();
         var (mentor, slot) = await SeedMentorAndSlotAsync(db);
@@ -462,6 +523,7 @@ public sealed class MentorBookingTests
             CreatedAtUtc = DateTime.UtcNow,
             ReleasedAtUtc = null
         });
+        slot.BookedCount = slot.MaxLearners;
         await db.SaveChangesAsync();
 
         var service = CreateBookingService(db, 101);
@@ -469,7 +531,7 @@ public sealed class MentorBookingTests
 
         Assert.False(response.IsSuccess);
         Assert.Equal(409, response.StatusCode);
-        Assert.Contains("đã có người giữ chỗ", response.ErrorMessage);
+        Assert.Contains("hết chỗ", response.ErrorMessage);
     }
 
     // 13. Học viên đã có lịch tư vấn khác trùng giờ thì bị từ chối với 409 Conflict

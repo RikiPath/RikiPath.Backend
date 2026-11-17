@@ -30,5 +30,8 @@ namespace RikiPath.Application.IServices
 
         // Dành cho Quản trị viên: Xem chi tiết mẫu lịch làm việc của một chuyên gia bất kỳ theo ID.
         Task<ApiResponse<MentorScheduleResponse>> GetMentorScheduleByIdForAdminAsync(int mentorId, CancellationToken cancellationToken = default);
+
+        // Mentor xem trước xung đột lịch dạy của chính mình cho các khung giờ dự kiến (chỉ dữ liệu của mình).
+        Task<ApiResponse<TeachingConflictReport>> PreviewTeachingConflictsAsync(TeachingConflictPreviewRequest request, CancellationToken cancellationToken = default);
     }
 }

@@ -128,12 +128,12 @@ public sealed class MentorPersistenceModelTests
     }
 
     [Fact]
-    public void Only_one_active_reservation_can_claim_a_slot()
+    public void Group_slot_allows_multiple_active_reservations_but_each_booking_is_unique()
     {
         using var db = ModelContext();
         var index = Assert.Single(Entity<MentorBookingReservation>(db).GetIndexes(), index =>
             index.Properties.Select(property => property.Name).SequenceEqual([nameof(MentorBookingReservation.MentorAvailabilityId)]));
-        Assert.True(index.IsUnique);
+        Assert.False(index.IsUnique);
         Assert.Equal("\"ReleasedAtUtc\" IS NULL", index.GetFilter());
         Assert.True(Entity<MentorBookingReservation>(db).FindProperty(nameof(MentorBookingReservation.ReleasedAtUtc))!.IsNullable);
     }
@@ -179,7 +179,7 @@ public sealed class MentorPersistenceModelTests
             && c.Sql.Contains("MaxLearners") && c.Sql.Contains("90 minutes"));
         Assert.Contains(designModel.FindEntityType(typeof(MentorBookingReservation))!.GetCheckConstraints(), c => c.Sql.Contains("EndUtc") && c.Sql.Contains("StartUtc"));
         Assert.Contains(designModel.FindEntityType(typeof(MentorBookingReservation))!.GetCheckConstraints(), c =>
-            c.Name == "CK_MentorBookingReservation_Rest" && c.Sql.Contains("RestProtectedUntilUtc") && c.Sql.Contains("15 minutes"));
+            c.Name == "CK_MentorBookingReservation_Rest" && c.Sql.Contains("RestProtectedUntilUtc") && c.Sql.Contains("EndUtc"));
         Assert.Contains(designModel.FindEntityType(typeof(MentorBookingTerms))!.GetCheckConstraints(), c => c.Sql.Contains("ScheduledEndUtc"));
         Assert.Contains(designModel.FindEntityType(typeof(MentorBookingDayGuard))!.GetCheckConstraints(), c => c.Sql.Contains("ActiveBookingCount"));
         Assert.Contains(designModel.FindEntityType(typeof(MentorScheduleRule))!.GetCheckConstraints(), c =>
@@ -390,9 +390,11 @@ public sealed class MentorPersistenceModelTests
         var createdTables = migration.UpOperations.OfType<CreateTableOperation>().Select(t => t.Name).ToHashSet();
         var expectedTables = new HashSet<string>
         {
-            "MentorAbuseReports", "MentorDisputeHistories", "MentorDisputes", "MentorReviews"
+            "MentorAbuseReports", "MentorDisputeHistories", "MentorDisputes"
         };
         Assert.Equal(expectedTables, createdTables);
+        Assert.Contains(migration.UpOperations.OfType<SqlOperation>(), operation =>
+            operation.Sql.Contains("CREATE TABLE IF NOT EXISTS \"MentorReviews\"", StringComparison.OrdinalIgnoreCase));
     }
 
     private static void AssertUnique<T>(AppDbContext db, params string[] names) =>

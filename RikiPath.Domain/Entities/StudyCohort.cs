@@ -12,6 +12,11 @@ public sealed class StudyCohort
     public DateTime StartsAt { get; set; }
     public DateTime EndsAt { get; set; }
     public int Capacity { get; set; }
+    public int? CapacitySnapshot { get; set; }
+    public int? GroupPolicyId { get; set; }
+    public MentorGroupPolicy? GroupPolicy { get; set; }
+    public int? PolicyVersionSnapshot { get; set; }
+    public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
     public string Status { get; set; } = "Draft";
     public int Revision { get; set; } = 1;
     public List<StudyCohortSession> Sessions { get; set; } = [];

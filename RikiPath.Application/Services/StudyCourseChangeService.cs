@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using RikiPath.Application.IServices;
 using RikiPath.Application.Requests.StudyCourses;
 using RikiPath.Application.Responses;
 using RikiPath.Domain.Entities;
@@ -38,21 +39,43 @@ public sealed partial class StudyCourseService
         if (r.Approve)
         {
             Require(!c.CohortId.HasValue || request!.Kind != "Move" || r.EntireClassConfirmed, "Dời buổi nhóm sẽ ảnh hưởng cả lớp; Admin cần xác nhận phạm vi cả lớp.");
+            Require(!c.CohortId.HasValue || request!.Kind != "Cancel",
+                "Không thể hủy cả lớp qua yêu cầu của một học viên; cần quy trình duyệt hủy lớp và quyền lợi riêng.");
             await uow.StudyCourses.LockScheduleAsync(c.MentorId!.Value, c.LearnerId, ct);
             if (request!.Kind == "Move")
             {
                 Require(r.NewAvailabilityId.HasValue, "Chọn lịch rảnh đã duyệt thay thế.");
-                var slot = await uow.MentorAvailabilities.GetByIdAsync(r.NewAvailabilityId!.Value, ct);
-                Require(slot is not null && slot.MentorId == c.MentorId && slot.IsApproved && !slot.IsDeleted && slot.RejectedAt == null
-                    && slot.BookedCount == 0 && slot.MaxLearners == 1 && slot.StartTime > DateTime.UtcNow && slot.ChangeRequestedAt == null
+                var slot = await uow.MentorAvailabilities.Query()
+                    .Include(x => x.GroupPolicy)
+                    .FirstOrDefaultAsync(x => x.Id == r.NewAvailabilityId!.Value, ct);
+                RequireConflict(slot is not null && slot.MentorId == c.MentorId && slot.IsApproved && !slot.IsDeleted && slot.RejectedAt == null
+                    && slot.BookedCount == 0 && (c.CohortId.HasValue || slot.MaxLearners == 1) && slot.StartTime > DateTime.UtcNow && slot.ChangeRequestedAt == null
                     && (slot.EndTime - slot.StartTime).TotalMinutes == c.SessionMinutes, "Lịch thay thế không phù hợp hoặc đã có người đặt.");
-                Require((!c.CohortId.HasValue || slot!.PolicyVersion == null) && (!c.TargetExamDate.HasValue || slot!.EndTime <= c.TargetExamDate)
+                Require((!c.TargetExamDate.HasValue || slot!.EndTime <= c.TargetExamDate)
                     && (c.CohortId.HasValue || (slot!.StartTime >= c.StartsAt && slot.EndTime <= c.EndsAt)), "Lịch thay thế ngoài thời hạn/cấu hình gói.");
-                Require(!await uow.StudyCohorts.AnyAsync(g => g.Sessions.Any(s => s.AvailabilityId == slot!.Id), ct), "Lịch dành cho lớp nhóm.");
-                Require(!await uow.StudyCourses.AnyAsync(e => e.PaymentStatus == "Paid" && (e.LearnerId == c.LearnerId || e.MentorId == c.MentorId)
-                    && e.Sessions.Any(s => s.Id != session.Id && (!c.CohortId.HasValue || e.CohortId != c.CohortId || s.AvailabilityId != session.AvailabilityId) && s.Status == "Scheduled" && s.ScheduledAt < slot!.EndTime
-                        && s.ScheduledAt.AddMinutes(e.SessionMinutes) > slot.StartTime), ct), "Lịch thay thế bị trùng.");
-                if (session.AvailabilityId.HasValue)
+                RequireConflict(!await uow.StudyCohorts.Query().AnyAsync(g => g.Sessions.Any(s => s.AvailabilityId == slot!.Id), ct), "Lịch dành cho lớp nhóm.");
+                // Phía Mentor: kiểm tra chuẩn (lớp đã công bố, lịch 1-1 đã xác nhận, buổi khóa 1-1) cho khung giờ mới,
+                // bỏ qua khung giờ cũ của buổi đang dời. Đã giữ LockScheduleAsync(mentor) ở trên.
+                await EnsureNoTeachingConflictAsync(c.MentorId!.Value,
+                    [new ProposedTeachingInterval(slot!.StartTime, slot.EndTime, session.Number)],
+                    new TeachingConflictOptions
+                    {
+                        ExcludeAvailabilityIds = session.AvailabilityId.HasValue ? new[] { session.AvailabilityId.Value } : null
+                    }, ct);
+                var restMinutes = slot.RestMinutesSnapshot ?? slot.GroupPolicy?.RestMinutes ?? 0;
+                var slotRestEnd = slot.EndTime.AddMinutes(restMinutes);
+                // Phía học viên: giữ nguyên kiểm tra trùng lịch của học viên.
+                RequireConflict(!await uow.StudyCourses.Query().AnyAsync(e => e.PaymentStatus == "Paid" && e.Status != "Cancelled" && e.LearnerId == c.LearnerId
+                    && e.Sessions.Any(s => s.Id != session.Id && (!c.CohortId.HasValue || e.CohortId != c.CohortId || s.AvailabilityId != session.AvailabilityId) && s.Status == "Scheduled" && s.ScheduledAt < slotRestEnd
+                        && s.ScheduledAt.AddMinutes(e.SessionMinutes + (s.Availability != null && s.Availability.RestMinutesSnapshot.HasValue ? s.Availability.RestMinutesSnapshot.Value : 0)) > slot.StartTime), ct), "Lịch thay thế bị trùng.");
+                RequireConflict(!await uow.MentorBookings.Query().AnyAsync(b => !b.IsDeleted && b.MentorAvailability != null
+                    && b.UserSubscription.UserId == c.LearnerId
+                    && (b.Status == MentorStatus.Assigned || b.Status == MentorStatus.Accepted
+                        || (b.Status == MentorStatus.AwaitingPayment && b.UserSubscription.PaymentExpiresAt > DateTime.UtcNow))
+                    && b.MentorAvailability.StartTime < slotRestEnd
+                    && slot.StartTime < b.MentorAvailability.EndTime.AddMinutes(b.MentorAvailability.RestMinutesSnapshot ?? 0), ct),
+                    "Lịch thay thế trùng với buổi tư vấn hiện có.");
+                if (!c.CohortId.HasValue && session.AvailabilityId.HasValue)
                 {
                     var old = await uow.MentorAvailabilities.GetByIdAsync(session.AvailabilityId.Value, ct);
                     if (old is not null) old.BookedCount = Math.Max(0, old.BookedCount - 1);
@@ -60,16 +83,42 @@ public sealed partial class StudyCourseService
                 if (c.CohortId.HasValue)
                 {
                     await uow.StudyCourses.LockCohortAsync(c.CohortId.Value, ct);
-                    var cohort = await uow.StudyCohorts.Query().Include(x => x.Sessions).ThenInclude(x => x.Availability)
+                    var cohort = await uow.StudyCohorts.Query().Include(x => x.Sessions).ThenInclude(x => x.Availability).ThenInclude(x => x.GroupPolicy)
                         .Include(x => x.Enrollments).ThenInclude(x => x.Sessions).SingleAsync(x => x.Id == c.CohortId.Value, ct);
                     Require(session.AvailabilityId.HasValue, "Buổi nhóm chưa có lịch nguồn.");
                     var previousId = session.AvailabilityId;
                     var classSession = cohort.Sessions.Single(x => x.AvailabilityId == previousId);
+                    var rescheduleLeadHours = classSession.Availability.GroupPolicy?.ReschedulingLeadHours ?? 0;
+                    if (rescheduleLeadHours > 0)
+                    {
+                        RequireConflict((classSession.Availability.StartTime - DateTime.UtcNow).TotalHours >= rescheduleLeadHours,
+                            $"Chỉ được dời buổi nhóm trước giờ bắt đầu ít nhất {rescheduleLeadHours} giờ theo chính sách.");
+                    }
+                    if (classSession.Availability.GroupPolicyId.HasValue)
+                    {
+                        RequireConflict(slot.MaxLearners == cohort.Capacity
+                            && slot.GroupPolicyId == classSession.Availability.GroupPolicyId
+                            && slot.SessionMinutesSnapshot == classSession.Availability.SessionMinutesSnapshot,
+                            "Lịch thay thế phải giữ nguyên sức chứa và chính sách của buổi nhóm.");
+                    }
+                    else
+                    {
+                        RequireConflict(slot.PolicyVersion == null && slot.GroupPolicyId == null
+                            && slot.MaxLearners == cohort.Capacity,
+                            "Lịch thay thế lớp nhóm phải giữ nguyên sức chứa và cấu hình.");
+                    }
                     var learners = cohort.Enrollments.Where(e => e.PaymentStatus == "Paid" && e.Status == "Active").Select(e => e.LearnerId).ToList();
-                    Require(!await uow.StudyCourses.AnyAsync(e => learners.Contains(e.LearnerId) && e.PaymentStatus == "Paid"
+                    RequireConflict(!await uow.StudyCourses.Query().AnyAsync(e => learners.Contains(e.LearnerId) && e.PaymentStatus == "Paid"
+                        && e.Status != "Cancelled"
                         && e.Sessions.Any(s => s.AvailabilityId != previousId && s.Status == "Scheduled" && s.ScheduledAt < slot.EndTime
                             && s.ScheduledAt.AddMinutes(e.SessionMinutes) > slot.StartTime), ct), "Một học viên trong lớp bị trùng lịch thay thế.");
-                    slot.MaxLearners = cohort.Capacity;
+                    RequireConflict(!await uow.MentorBookings.Query().AnyAsync(b => !b.IsDeleted && b.MentorAvailability != null
+                        && learners.Contains(b.UserSubscription.UserId)
+                        && (b.Status == MentorStatus.Assigned || b.Status == MentorStatus.Accepted
+                            || (b.Status == MentorStatus.AwaitingPayment && b.UserSubscription.PaymentExpiresAt > DateTime.UtcNow))
+                        && b.MentorAvailability.StartTime < slot.EndTime
+                        && slot.StartTime < b.MentorAvailability.EndTime, ct),
+                        "Một học viên trong lớp có lịch tư vấn trùng giờ thay thế.");
                     classSession.AvailabilityId = slot.Id; classSession.Availability = slot;
                     foreach (var enrollment in cohort.Enrollments.Where(e => e.PaymentStatus == "Paid" && e.Status == "Active"))
                     {

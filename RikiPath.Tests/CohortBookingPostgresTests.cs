@@ -27,8 +27,8 @@ public sealed class CohortBookingPostgresTests
             var keep = new HashSet<Type> { typeof(UserAccount), typeof(CertificateType), typeof(CertificateLevel),
                 typeof(StudyCoursePlan), typeof(StudyCourse), typeof(StudyCourseSession), typeof(StudyCourseHomework),
                 typeof(CourseRetakeRequest), typeof(CourseAuditEntry), typeof(StudyCohort), typeof(StudyCohortSession),
-                typeof(MentorAvailability), typeof(MentorBooking), typeof(UserSubscription), typeof(SubscriptionPlan),
-                typeof(CourseScheduleRequest), typeof(JlptExamSchedule), typeof(MentorCalendarConnection) };
+                typeof(MentorAvailability), typeof(MentorGroupPolicy), typeof(MentorBooking), typeof(UserSubscription), typeof(SubscriptionPlan),
+                typeof(CourseScheduleRequest), typeof(JlptExamSchedule), typeof(MentorCalendarConnection), typeof(MentorOutboxEvent) };
             foreach (var type in b.Model.GetEntityTypes().Select(x => x.ClrType).Distinct().Where(t => !keep.Contains(t)).ToList()) b.Ignore(type);
 
         }
@@ -48,33 +48,42 @@ public sealed class CohortBookingPostgresTests
             var operations = setup.GetService<IMigrationsModelDiffer>().GetDifferences(null,
                 setup.GetService<IDesignTimeModel>().Model.GetRelationalModel()).Where(x => x is not InsertDataOperation).ToList();
             foreach (var sql in setup.GetService<IMigrationsSqlGenerator>().Generate(operations, setup.Model))
-                await setup.Database.ExecuteSqlRawAsync(sql.CommandText);
+                await setup.Database.ExecuteSqlRawAsync(sql.CommandText.Replace("{", "{{").Replace("}", "}}"));
             var mentor = new UserAccount { Id = 1100, Role = Role.Mentor, Email = "mentor@test.invalid", PasswordHash = [], PasswordSalt = [] };
-            var users = new[] { 1101, 1102, 1103 }.Select(id => new UserAccount { Id = id, Role = Role.Learner, Email = $"{id}@test.invalid", PasswordHash = [], PasswordSalt = [] }).ToArray();
+            var users = new[] { 1101, 1102, 1103, 1104, 1105 }.Select(id => new UserAccount { Id = id, Role = Role.Learner, Email = $"{id}@test.invalid", PasswordHash = [], PasswordSalt = [] }).ToArray();
             setup.Users.Add(mentor); setup.Users.AddRange(users);
             var level = new CertificateLevel { Code = "N5", CertificateType = new CertificateType { Name = "JLPT", IsActive = true } };
-            var plan = new StudyCoursePlan { Name = "Group", CertificateLevel = level, SessionType = "Group", Capacity = 2, SessionMinutes = 60, TotalSessions = 1, DurationMonths = 1, SessionsPerWeek = 1, Price = 100, IsPublished = true };
+            var plan = new StudyCoursePlan { Name = "Group", CertificateLevel = level, SessionType = "Group", Capacity = 4, SessionMinutes = 60, TotalSessions = 1, DurationMonths = 1, SessionsPerWeek = 1, Price = 100, IsPublished = true };
             var startsAt = DateTime.UtcNow.AddDays(5);
-            var slot = new MentorAvailability { MentorId = mentor.Id, IsApproved = true, StartTime = startsAt, EndTime = startsAt.AddHours(1), MaxLearners = 2 };
-            var cohort = new StudyCohort { Name = "Class", MentorId = mentor.Id, Plan = plan, Capacity = 2, Status = "Published", StartsAt = slot.StartTime, EndsAt = slot.EndTime,
+            var slot = new MentorAvailability { MentorId = mentor.Id, IsApproved = true, StartTime = startsAt, EndTime = startsAt.AddHours(1), MaxLearners = 4 };
+            var cohort = new StudyCohort { Name = "Class", MentorId = mentor.Id, Plan = plan, Capacity = 4, Status = "Published", StartsAt = slot.StartTime, EndsAt = slot.EndTime,
                 Sessions = [new() { Number = 1, Availability = slot }] };
-            cohort.Enrollments.Add(new() { LearnerId = users[2].Id, Plan = plan, Name = "Existing", CertificateLevel = level, PurchaseKey = Guid.NewGuid(), PaymentStatus = "Paid", Status = "Active" });
+            foreach (var learner in users.Skip(2))
+                cohort.Enrollments.Add(new() { LearnerId = learner.Id, Plan = plan, Name = "Existing", CertificateLevel = level,
+                    PurchaseKey = Guid.NewGuid(), PaymentStatus = "Paid", Status = "Active" });
             setup.Add(cohort); await setup.SaveChangesAsync();
             var gateway = new Mock<IPaymentGatewayClient>();
             gateway.Setup(x => x.CreatePaymentLinkAsync(It.IsAny<long>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new PaymentLinkResult("https://pay.invalid/test", "test", ""));
+            gateway.Setup(x => x.CreatePaymentLinkAsync(It.IsAny<long>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<DateTime?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new PaymentLinkResult("https://pay.invalid/test", "test", ""));
             StudyCourseService Service(BookingDb db, int learnerId) => new(new UnitOfWork(db),
                 Mock.Of<IClaimService>(c => c.GetUserClaim() == new ClaimDTO { Id = learnerId, Role = Role.Learner }),
                 gateway.Object, Mock.Of<IFileStorageService>(), new AppSettings { FrontendBaseUrl = "https://test.invalid" });
-            async Task<RikiPath.Application.Responses.ApiResponse<object>> Purchase(int learnerId)
+            async Task<RikiPath.Application.Responses.ApiResponse<object>> Purchase(int learnerId, Guid? key = null)
             {
                 await using var db = Context();
-                return await Service(db, learnerId).PurchaseAsync(new PurchaseCourse(plan.Id, Guid.NewGuid(), cohort.Id), default);
+                return await Service(db, learnerId).PurchaseAsync(new PurchaseCourse(plan.Id, key ?? Guid.NewGuid(), cohort.Id), default);
             }
-            var outcomes = await Task.WhenAll(Purchase(users[0].Id), Purchase(users[1].Id));
+            var firstKey = Guid.NewGuid(); var secondKey = Guid.NewGuid();
+            var outcomes = await Task.WhenAll(Purchase(users[0].Id, firstKey), Purchase(users[1].Id, secondKey));
             Assert.True(outcomes.Count(x => x.IsSuccess) == 1, string.Join(" | ", outcomes.Select(x => x.ErrorMessage)));
             await using var verify = Context();
             var hold = await verify.StudyCourses.SingleAsync(c => c.CohortId == cohort.Id && c.PaymentStatus == "Pending");
+            var winnerKey = hold.LearnerId == users[0].Id ? firstKey : secondKey;
+            Assert.True((await Purchase(hold.LearnerId, winnerKey)).IsSuccess);
+            Assert.Equal(1, await verify.StudyCourses.CountAsync(c => c.CohortId == cohort.Id
+                && c.LearnerId == hold.LearnerId && c.PaymentStatus == "Pending"));
             hold.PaymentExpiresAt = DateTime.UtcNow.AddSeconds(-1); await verify.SaveChangesAsync();
             var loser = hold.LearnerId == users[0].Id ? users[1].Id : users[0].Id;
             Assert.True((await Purchase(loser)).IsSuccess);

@@ -1,8 +1,6 @@
-using System.Net;
 using Microsoft.EntityFrameworkCore;
 using RikiPath.Application.Responses;
 using RikiPath.Application.Responses.MentorMeetings;
-using RikiPath.Domain.Entities;
 using RikiPath.Domain.Enums;
 
 namespace RikiPath.Application.Services;
@@ -47,60 +45,4 @@ public sealed partial class MentorMeetingService
         return ApiResponse<List<MentorRecommendationResponse>>.Success(recommendations);
     }
 
-    public async Task<ApiResponse<int>> GetMyRatingAsync(int bookingId, CancellationToken ct)
-    {
-        var userId = claimService.GetUserClaim().Id;
-        if (await FindEligibleRatingBookingAsync(bookingId, userId, ct) is null)
-            return ApiResponse<int>.NotFound("Buổi tư vấn không đủ điều kiện đánh giá.");
-
-        var review = await unitOfWork.MentorReviews.FirstOrDefaultAsync(
-            item => item.MentorBookingId == bookingId && item.LearnerId == userId, ct);
-        return ApiResponse<int>.Success(review?.Rating ?? 0);
-    }
-
-    public async Task<ApiResponse<int>> RateMentorAsync(int bookingId, int rating, CancellationToken ct)
-    {
-        if (rating is < 1 or > 5)
-            return ApiResponse<int>.Fail("Hãy chọn từ 1 đến 5 sao.");
-
-        var userId = claimService.GetUserClaim().Id;
-        var response = ApiResponse<int>.NotFound("Buổi tư vấn không đủ điều kiện đánh giá.");
-        await unitOfWork.ExecuteInTransactionAsync(async token =>
-        {
-            await unitOfWork.UserAccounts.GetByIdForUpdateAsync(userId, token);
-            var booking = await FindEligibleRatingBookingAsync(bookingId, userId, token);
-            if (booking is null) return;
-
-            var review = await unitOfWork.MentorReviews.FirstOrDefaultAsync(
-                item => item.MentorBookingId == bookingId, token);
-            if (review is not null)
-            {
-                response = ApiResponse<int>.Fail("Bạn đã đánh giá buổi tư vấn này.", HttpStatusCode.Conflict);
-                return;
-            }
-
-            await unitOfWork.MentorReviews.AddAsync(new MentorReview
-            {
-                MentorBookingId = booking.Id,
-                MentorId = booking.MentorAvailability!.MentorId,
-                LearnerId = userId,
-                Rating = rating,
-            }, token);
-            await unitOfWork.SaveChangesAsync(token);
-            response = ApiResponse<int>.Created(rating);
-        }, ct);
-        return response;
-    }
-
-    private Task<MentorBooking?> FindEligibleRatingBookingAsync(int bookingId, int learnerId, CancellationToken ct)
-    {
-        var now = DateTime.UtcNow;
-        return unitOfWork.MentorBookings.Query().AsNoTracking().Include(booking => booking.MentorAvailability)
-            .FirstOrDefaultAsync(booking => booking.Id == bookingId && !booking.IsDeleted &&
-                booking.UserSubscription.UserId == learnerId && !booking.UserSubscription.IsDeleted &&
-                booking.UserSubscription.PaymentStatus == PaymentStatus.Paid &&
-                booking.MentorAvailability != null && booking.MentorAvailability.EndTime <= now &&
-                (booking.Status == MentorStatus.Completed ||
-                    (booking.AttendedAt.HasValue && (booking.Status == MentorStatus.Assigned || booking.Status == MentorStatus.Accepted))), ct);
-    }
 }

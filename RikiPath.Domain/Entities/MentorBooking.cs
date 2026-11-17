@@ -12,6 +12,8 @@ namespace RikiPath.Domain.Entities
 
         public int? MentorAvailabilityId { get; set; }
         public MentorAvailability? MentorAvailability { get; set; }
+        // Chỉ booking mới lưu học viên trực tiếp để khóa trùng chỗ trong cùng một buổi; lịch sử giữ null.
+        public int? LearnerId { get; set; }
 
         public MentorStatus Status { get; set; } = MentorStatus.PendingAssignment;
         public string? Question { get; set; }
@@ -20,6 +22,9 @@ namespace RikiPath.Domain.Entities
         public string? MeetingLink { get; set; }
         public DateTime? CompletedAt { get; set; }
         public DateTime? AttendedAt { get; set; }
+        public int? PracticeScore { get; set; }
+        public string? PracticeFeedback { get; set; }
+        public DateTime? PracticeFeedbackAt { get; set; }
 
         // Bản chụp thù lao nullable để giữ nguyên mọi booking lịch sử.
         public int? CompensationLevelId { get; set; }

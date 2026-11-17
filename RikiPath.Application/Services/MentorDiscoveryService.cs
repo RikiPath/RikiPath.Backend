@@ -430,6 +430,9 @@ public sealed class MentorDiscoveryService(
             LocalStart = localStart,
             LocalEnd = localEnd,
             DurationMinutes = durationMinutes,
+            BookedCount = slot.BookedCount,
+            MaxLearners = slot.MaxLearners,
+            RemainingSeats = Math.Max(0, slot.MaxLearners - slot.BookedCount),
             DaypartCode = ResolveDaypart(localStart),
             Status = "Available",
             IsAvailable = true

@@ -14,6 +14,9 @@ internal static class JlptCurriculum
         _ => 0,
     };
 
+    /// <summary>Standard study roadmap levels (N5-N3). N2 is supported only as a target goal.</summary>
+    public static bool IsSupportedStudyLevel(string? code) => Rank(code) is >= 1 and <= 3;
+
     public static bool IsValidSpan(CertificateLevel starting, CertificateLevel target)
         => Rank(starting.Code) > 0 && Rank(target.Code) >= Rank(starting.Code);
 }

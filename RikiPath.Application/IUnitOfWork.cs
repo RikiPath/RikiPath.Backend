@@ -87,7 +87,13 @@ namespace RikiPath.Application
         IStudyCourseRepository StudyCourses { get; }
         IGenericRepository<StudyCoursePlan> StudyCoursePlans { get; }
         IGenericRepository<StudyCohort> StudyCohorts { get; }
+        IGenericRepository<CohortEnrollmentEntitlement> CohortEnrollmentEntitlements { get; }
         IGenericRepository<CourseScheduleRequest> CourseScheduleRequests { get; }
+        IGenericRepository<CohortTransferRequest> CohortTransferRequests { get; }
+        IGenericRepository<StudyCohortMentorAssignment> StudyCohortMentorAssignments { get; }
+        IGenericRepository<CohortScheduleRequest> CohortScheduleRequests { get; }
+        IGenericRepository<CohortMentorReview> CohortMentorReviews { get; }
+        IGenericRepository<CohortComplaint> CohortComplaints { get; }
         IGenericRepository<JlptExamSchedule> JlptExamSchedules { get; }
 
         // Db Helpers

@@ -15,6 +15,14 @@ namespace RikiPath.Tests;
 
 public class PlacementFourSkillSamplingTests
 {
+    // First Sunday of December next year: always in the future and a valid JLPT exam day.
+    private static DateTime NextJlptExamSunday()
+    {
+        var date = new DateTime(DateTime.UtcNow.Year + 1, 12, 1, 0, 0, 0, DateTimeKind.Utc);
+        while (date.DayOfWeek != DayOfWeek.Sunday) date = date.AddDays(1);
+        return date;
+    }
+
     [Theory]
     [InlineData(true, 48, null, null, null)]
     [InlineData(false, 48, null, null, null)]
@@ -52,7 +60,7 @@ public class PlacementFourSkillSamplingTests
         context.Users.Add(new UserAccount { Id = 7, Email = "four-skills@example.test", PasswordHash = [], PasswordSalt = [], Role = Role.Learner,
             TargetCertificateLevelId = goal is null ? null : 71000 + (goal[1] - '0'),
             DeclaredJlptCertificateCode = declared,
-            TargetExamDate = goal == "N5" ? null : new DateTime(DateTime.UtcNow.Year + 1, 12, 1),
+            TargetExamDate = goal is null ? null : NextJlptExamSunday(),
             DailyStudyMinutes = 30 });
         var questionId = 10000;
         foreach (var (code, index) in new[] { "N5", "N4", "N3", "N2", "N1" }.Select((code,index) => (code,index)))
@@ -102,6 +110,16 @@ public class PlacementFourSkillSamplingTests
             UtcNowProvider = () => DateTime.UtcNow + clockOffset,
         };
         var result = await service.StartPlacementTestAsync(default);
+        if (goal is null)
+        {
+            // Production (commit cfc38f1) requires a saved target JLPT level plus a valid JLPT exam date,
+            // so the comprehensive no-goal placement path is unreachable and must fail closed.
+            Assert.False(result.IsSuccess);
+            Assert.Equal("PLACEMENT_GOAL_REQUIRED", result.ErrorCode);
+            Assert.Equal(409, result.StatusCode);
+            Assert.False(await context.MockTestAttempts.AnyAsync());
+            return;
+        }
         if (declared == "NONE" && goal is ("N2" or "N3"))
         {
             Assert.True(result.IsSuccess, result.ErrorMessage);
@@ -218,7 +236,16 @@ public class PlacementFourSkillSamplingTests
                 Assert.Contains("N5 từ nền tảng", submitted.Result.AssessmentMessage);
             Assert.False(submitted.Result.RequiresMiniAssessment);
             Assert.Equal(goal, submitted.Result.ScreeningLevelName);
-            var canRetake = correct.Value * 2 < expected;
+            // Official rule: retake eligibility = remaining placement attempts for the target under the Admin limit
+            // (production TargetAttemptLimit = 2 when no group policy PlacementAttemptLimit is configured) and a valid
+            // future JLPT exam date — NOT a score threshold. After the single initial attempt a retake is available.
+            const int placementAttemptLimit = 2;
+            var attemptsForTarget = await context.MockTestAttempts.CountAsync(a => a.UserId == 7 && a.AttemptKind == AttemptKind.Placement);
+            var examDate = (await context.Users.SingleAsync(user => user.Id == 7)).TargetExamDate;
+            var examDateValid = examDate is { } examDay && examDay.DayOfWeek == DayOfWeek.Sunday && examDay > DateTime.UtcNow;
+            var canRetake = attemptsForTarget < placementAttemptLimit && examDateValid;
+            Assert.Equal(1, attemptsForTarget);
+            Assert.True(canRetake);
             Assert.Equal(canRetake ? ["RETAKE_TARGET_ASSESSMENT"] : Array.Empty<string>(), submitted.Result.NextActions);
             Assert.Equal(goal, submitted.Result.RecommendedTargetJlptLevelName);
             Assert.Equal(submitted.Result.NextActions,
@@ -226,11 +253,14 @@ public class PlacementFourSkillSamplingTests
             var status = await service.GetStatusAsync();
             Assert.False(status.Result!.RequiresMiniAssessment);
             Assert.True(status.Result.IsReadyForLearningPath);
-            if (!canRetake)
+            // Case selector only (not an eligibility rule): higher-score scenarios exercise the target-change flow below.
+            var highScoreScenario = correct.Value * 2 >= expected;
+            if (highScoreScenario)
             {
                 if (goal == "N2" && declared is null)
                 {
-                    var openN2 = await service.StartPlacementTestAsync(default);
+                    // Official rule: a second attempt at the same target is an explicit retake while attempts remain.
+                    var openN2 = await service.StartPlacementTestAsync(new StartPlacementTestRequest { RetakeTargetAssessment = true });
                     Assert.True(openN2.IsSuccess, openN2.ErrorMessage);
                     var learner = await context.Users.SingleAsync(user => user.Id == 7);
                     learner.TargetCertificateLevelId = 71003;

@@ -12,6 +12,8 @@ public class HomeworkSubmissionConfig : IEntityTypeConfiguration<HomeworkSubmiss
         builder.HasOne(x => x.HomeworkAssignment).WithOne(x => x.Submission).HasForeignKey<HomeworkSubmission>(x => x.HomeworkAssignmentId).OnDelete(DeleteBehavior.Cascade);
         builder.HasOne(x => x.Learner).WithMany().HasForeignKey(x => x.LearnerId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne(x => x.Lesson).WithMany().HasForeignKey(x => x.LessonId).OnDelete(DeleteBehavior.Restrict);
+        builder.Property(x => x.ScanStorageUrl).HasMaxLength(1000);
+        builder.Property(x => x.PrivateScanReference).HasMaxLength(2000);
         builder.HasIndex(x => x.HomeworkAssignmentId).IsUnique();
     }
 }

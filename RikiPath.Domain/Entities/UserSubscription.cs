@@ -30,7 +30,14 @@ namespace RikiPath.Domain.Entities
 
         public int MeetingSessionsIncluded { get; set; }
         public int MeetingSessionsUsed { get; set; }
+        public string? MentorPracticeOutcomeJson { get; set; }
+        public string? MentorReviewPlan { get; set; }
+        public DateTime? MentorReviewSessionAt { get; set; }
+        public DateTime? MentorReviewCompletedAt { get; set; }
         public DateTime? PaymentExpiresAt { get; set; }
+        public int? PendingMentorAvailabilityId { get; set; }
+        public MentorAvailability? PendingMentorAvailability { get; set; }
+        public string? PendingMentorQuestion { get; set; }
 
         public DateTime PurchasedAt { get; set; }
 

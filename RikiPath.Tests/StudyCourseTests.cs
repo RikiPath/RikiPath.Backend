@@ -178,13 +178,15 @@ public sealed class StudyCourseServiceTests : IDisposable
         var original = await Seed(); actor = new() { Id = 10, Role = Role.Learner };
         gateway.Setup(x => x.CreatePaymentLinkAsync(It.IsAny<long>(), 100, It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new PaymentLinkResult("https://pay.invalid/checkout", "test", ""));
+        gateway.Setup(x => x.CreatePaymentLinkAsync(It.IsAny<long>(), 100, It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<DateTime?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PaymentLinkResult("https://pay.invalid/checkout", "test", ""));
         var request = new PurchaseCourse(original.PlanId, Guid.NewGuid());
         Assert.True((await Service().PurchaseAsync(request, default)).IsSuccess);
         original.Plan.Price = 999;
         Assert.True((await Service().PurchaseAsync(request, default)).IsSuccess);
         var order = await db.Set<StudyCourse>().SingleAsync(x => x.PurchaseKey == request.IdempotencyKey);
         Assert.Equal(100, order.Amount);
-        gateway.Verify(x => x.CreatePaymentLinkAsync(It.IsAny<long>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
+        gateway.Verify(x => x.CreatePaymentLinkAsync(It.IsAny<long>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<DateTime?>(), It.IsAny<CancellationToken>()), Times.Once);
     }
     [Fact] public async Task Weekly_cadence_prevents_overbooking_original_sessions()
     {
@@ -223,9 +225,151 @@ public sealed class StudyCourseServiceTests : IDisposable
         await db.SaveChangesAsync(); actor = new() { Id = 10, Role = Role.Learner };
         gateway.Setup(x => x.CreatePaymentLinkAsync(It.IsAny<long>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new PaymentLinkResult("https://pay.invalid/checkout", "test", ""));
+        gateway.Setup(x => x.CreatePaymentLinkAsync(It.IsAny<long>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<DateTime?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PaymentLinkResult("https://pay.invalid/checkout", "test", ""));
         Assert.False((await Service().PurchaseAsync(new(p.Id, Guid.NewGuid(), cohort.Id), default)).IsSuccess);
         cohort.Enrollments[0].PaymentExpiresAt = DateTime.UtcNow.AddMinutes(-1); await db.SaveChangesAsync();
         Assert.True((await Service().PurchaseAsync(new(p.Id, Guid.NewGuid(), cohort.Id), default)).IsSuccess);
+    }
+
+    [Fact] public async Task Group_enrollment_closes_at_first_approved_session_policy_cutoff()
+    {
+        var original = await Seed(); var plan = original.Plan; plan.SessionType = "Group"; plan.TotalSessions = 2;
+        var firstStart = DateTime.UtcNow.AddHours(2);
+        var policy = new MentorGroupPolicy { Version = 1, MaxLearners = 4,
+            EnrollmentCutoffMinutesBeforeFirstSession = 180, SessionMinutes = 60 };
+        var first = new MentorAvailability { MentorId = 20, StartTime = firstStart,
+            EndTime = firstStart.AddMinutes(60), IsApproved = true, MaxLearners = 4, GroupPolicy = policy };
+        var second = new MentorAvailability { MentorId = 20, StartTime = firstStart.AddDays(2),
+            EndTime = firstStart.AddDays(2).AddMinutes(60), IsApproved = true, MaxLearners = 4, GroupPolicy = policy };
+        var cohort = new StudyCohort { Plan = plan, MentorId = 20, Name = "Lớp định kỳ", Capacity = 4,
+            Status = "Published", StartsAt = second.StartTime, EndsAt = second.EndTime,
+            Sessions = [new() { Number = 1, Availability = first }, new() { Number = 2, Availability = second }] };
+        db.Add(cohort); await db.SaveChangesAsync(); actor = new() { Id = 10, Role = Role.Learner };
+
+        var result = await Service().PurchaseAsync(new(plan.Id, Guid.NewGuid(), cohort.Id), default);
+
+        Assert.False(result.IsSuccess);
+        Assert.Contains("khóa đăng ký", result.ErrorMessage);
+        gateway.Verify(x => x.CreatePaymentLinkAsync(It.IsAny<long>(), It.IsAny<int>(), It.IsAny<string>(),
+            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        gateway.Verify(x => x.CreatePaymentLinkAsync(It.IsAny<long>(), It.IsAny<int>(), It.IsAny<string>(),
+            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<DateTime?>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact] public async Task New_policy_group_class_opens_paid_checkout_at_published_price_without_free_enrollment()
+    {
+        gateway.Setup(x => x.CreatePaymentLinkAsync(It.IsAny<long>(), It.IsAny<int>(), It.IsAny<string>(),
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PaymentLinkResult("https://pay.test.invalid/x", "plink", ""));
+        gateway.Setup(x => x.CreatePaymentLinkAsync(It.IsAny<long>(), It.IsAny<int>(), It.IsAny<string>(),
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<DateTime?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PaymentLinkResult("https://pay.test.invalid/x", "plink", ""));
+        var original = await Seed(); var plan = original.Plan; plan.SessionType = "Group"; plan.TotalSessions = 1;
+        var start = DateTime.UtcNow.AddDays(4);
+        var policy = new MentorGroupPolicy { Version = 1, MaxLearners = 4, SessionMinutes = 60 };
+        var slot = new MentorAvailability { MentorId = 20, StartTime = start, EndTime = start.AddMinutes(60),
+            IsApproved = true, MaxLearners = 4, GroupPolicy = policy };
+        var cohort = new StudyCohort { Plan = plan, MentorId = 20, Name = "Lớp mới", Capacity = 4,
+            Status = "Published", StartsAt = start, EndsAt = slot.EndTime,
+            Sessions = [new() { Number = 1, Availability = slot }] };
+        db.Add(cohort); await db.SaveChangesAsync(); actor = new() { Id = 10, Role = Role.Learner };
+
+        var result = await Service().PurchaseAsync(new(plan.Id, Guid.NewGuid(), cohort.Id), default);
+
+        Assert.True(result.IsSuccess, result.ErrorMessage);
+        var order = await db.Set<StudyCourse>().SingleAsync(x => x.CohortId == cohort.Id);
+        Assert.Equal("Pending", order.PaymentStatus);
+        Assert.Equal("PendingPayment", order.Status);
+        Assert.Equal(plan.Price, order.Amount);
+        Assert.Empty(order.Sessions);
+        Assert.Empty(db.Set<CohortEnrollmentEntitlement>());
+        // Link PayOS hết hạn đúng lúc giữ chỗ hết hạn.
+        gateway.Verify(x => x.CreatePaymentLinkAsync(It.IsAny<long>(), (int)plan.Price, It.IsAny<string>(),
+            It.IsAny<string>(), It.IsAny<string>(), order.PaymentExpiresAt, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact] public async Task New_group_class_uses_approved_policy_capacity_without_overwriting_slot_snapshot()
+    {
+        var original = await Seed(); var plan = original.Plan; plan.SessionType = "Group"; plan.TotalSessions = 2;
+        var policy = new MentorGroupPolicy { Version = 1, MaxLearners = 4, SessionMinutes = 60 };
+        var start = DateTime.UtcNow.AddDays(8);
+        var slots = new[] { 0, 2 }.Select(days => new MentorAvailability
+        {
+            MentorId = 20, StartTime = start.AddDays(days), EndTime = start.AddDays(days).AddMinutes(60),
+            IsApproved = true, MaxLearners = 4, GroupPolicy = policy, SessionMinutesSnapshot = 60
+        }).ToArray();
+        db.AddRange(slots); await db.SaveChangesAsync();
+
+        // Sĩ số lớp 1..MaxLearners của chính sách; vượt sức chứa chính sách bị từ chối.
+        var wrongCapacity = await Service().SaveCohortAsync(null,
+            new SaveStudyCohort(plan.Id, "Lớp định kỳ", 20, 5, slots.Select(x => x.Id).ToList(), true), default);
+        var approvedCapacity = await Service().SaveCohortAsync(null,
+            new SaveStudyCohort(plan.Id, "Lớp định kỳ", 20, 4, slots.Select(x => x.Id).ToList(), true), default);
+
+        Assert.False(wrongCapacity.IsSuccess);
+        Assert.Equal("COURSE_PLAN_INVALID_CAPACITY", wrongCapacity.ErrorCode);
+        Assert.True(approvedCapacity.IsSuccess, approvedCapacity.ErrorMessage);
+        Assert.All(slots, slot => Assert.Equal(4, slot.MaxLearners));
+        Assert.Equal(4, (await db.StudyCohorts.SingleAsync()).Capacity);
+    }
+
+    [Fact] public async Task Mentor_cannot_publish_two_group_classes_at_overlapping_times()
+    {
+        var original = await Seed(); var plan = original.Plan; plan.SessionType = "Group"; plan.TotalSessions = 1;
+        var policy = new MentorGroupPolicy { Version = 1, MaxLearners = 4, SessionMinutes = 60 };
+        var start = DateTime.UtcNow.AddDays(9);
+        var slots = new[] { start, start.AddMinutes(30) }.Select(time => new MentorAvailability
+        {
+            MentorId = 20, StartTime = time, EndTime = time.AddMinutes(60), IsApproved = true,
+            MaxLearners = 4, GroupPolicy = policy, SessionMinutesSnapshot = 60
+        }).ToArray();
+        db.AddRange(slots); await db.SaveChangesAsync();
+
+        var first = await Service().SaveCohortAsync(null,
+            new SaveStudyCohort(plan.Id, "Lớp A", 20, 4, [slots[0].Id], true), default);
+        var second = await Service().SaveCohortAsync(null,
+            new SaveStudyCohort(plan.Id, "Lớp B", 20, 4, [slots[1].Id], true), default);
+
+        Assert.True(first.IsSuccess, first.ErrorMessage);
+        Assert.False(second.IsSuccess);
+        Assert.Equal(409, second.StatusCode);
+        Assert.Equal("MENTOR_SCHEDULE_CONFLICT", second.ErrorCode);
+        Assert.Contains("Lớp A", second.ErrorMessage);
+        Assert.Single(await db.StudyCohorts.ToListAsync());
+    }
+
+    [Fact] public async Task Cancelling_unpaid_enrollment_releases_one_seat_and_late_payment_needs_review()
+    {
+        var original = await Seed(); var plan = original.Plan; plan.SessionType = "Group"; plan.TotalSessions = 1;
+        var start = DateTime.UtcNow.AddDays(8);
+        var slot = new MentorAvailability { MentorId = 20, StartTime = start, EndTime = start.AddMinutes(60),
+            IsApproved = true, MaxLearners = 1 };
+        var cohort = new StudyCohort { Plan = plan, MentorId = 20, Name = "Lớp nhỏ", Capacity = 1,
+            Status = "Published", StartsAt = start, EndsAt = slot.EndTime,
+            Sessions = [new() { Number = 1, Availability = slot }] };
+        var pending = new StudyCourse { LearnerId = 10, Plan = plan, Cohort = cohort,
+            PurchaseKey = Guid.NewGuid(), Amount = 100, PaymentStatus = "Pending", Status = "PendingPayment",
+            PaymentExpiresAt = DateTime.UtcNow.AddMinutes(10) };
+        db.Add(pending); await db.SaveChangesAsync(); actor = new() { Id = 10, Role = Role.Learner };
+        gateway.Setup(x => x.CreatePaymentLinkAsync(It.IsAny<long>(), It.IsAny<int>(), It.IsAny<string>(),
+            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PaymentLinkResult("https://pay.invalid/checkout", "test", ""));
+        gateway.Setup(x => x.CreatePaymentLinkAsync(It.IsAny<long>(), It.IsAny<int>(), It.IsAny<string>(),
+            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<DateTime?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PaymentLinkResult("https://pay.invalid/checkout", "test", ""));
+
+        Assert.True((await Service().CancelPendingEnrollmentAsync(pending.Id, default)).IsSuccess);
+        Assert.Equal("Cancelled", pending.PaymentStatus);
+        Assert.True((await Service().CancelPendingEnrollmentAsync(pending.Id, default)).IsSuccess);
+        Assert.False((await Service().PurchaseAsync(new(plan.Id, pending.PurchaseKey, cohort.Id), default)).IsSuccess);
+        Assert.True((await Service().PurchaseAsync(new(plan.Id, Guid.NewGuid(), cohort.Id), default)).IsSuccess);
+
+        var late = await Service().ConfirmPaymentAsync(pending.Id,
+            new PaymentCallbackResult(true, true, 700000000 + pending.Id, pending.Amount, ""), "late", default);
+        Assert.True(late.IsSuccess, late.ErrorMessage);
+        Assert.Equal("PaymentReview", pending.Status);
+        Assert.Empty(pending.Sessions);
     }
     [Fact] public async Task Late_paid_group_order_requires_review_when_seat_was_reused()
     {

@@ -32,14 +32,19 @@ public sealed class StudyCoursePostgresTests
         try
         {
             await using var db = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>().UseNpgsql(connectionString).Options);
-            await using (var prerequisites = new NpgsqlCommand("CREATE TABLE \"MentorAvailabilities\" (\"Id\" integer PRIMARY KEY); CREATE TABLE \"MentorAttendanceRecords\" (\"Id\" integer PRIMARY KEY, \"MentorBookingId\" integer NOT NULL, \"RoomId\" uuid NOT NULL, \"UserId\" integer NOT NULL);", connection))
+            await using (var prerequisites = new NpgsqlCommand("CREATE TABLE \"MentorAvailabilities\" (\"Id\" integer PRIMARY KEY); CREATE TABLE \"MentorAttendanceRecords\" (\"Id\" integer PRIMARY KEY, \"MentorBookingId\" integer NOT NULL, \"RoomId\" uuid NOT NULL, \"UserId\" integer NOT NULL); CREATE TABLE \"MentorGroupPolicies\" (\"Id\" integer PRIMARY KEY); CREATE TABLE \"HomeworkSubmissions\" (\"Id\" integer PRIMARY KEY);", connection))
                 await prerequisites.ExecuteNonQueryAsync();
-            // The current EF model includes cohort fields, so apply both course migrations.
+            // The current EF model includes cohort, canonical reconciliation, and remediation fields.
             var operations = new AddStudyCoursesAndRetakePolicy().UpOperations
-                .Concat(new MentorCohortsAndExamDrafts().UpOperations).ToList();
+                .Concat(new MentorCohortsAndExamDrafts().UpOperations)
+                .Concat(new ReconcileCanonicalGroupCohortModel().UpOperations)
+                .Concat(new AddCohortEntitlementsAndRemediationSupport().UpOperations)
+                .Concat(new AddCohortTransferAndMentorReplacement().UpOperations)
+                .Concat(new AddCohortCheckoutPaymentIntegrity().UpOperations).ToList();
             var statements = db.GetService<IMigrationsSqlGenerator>().Generate(operations, db.Model);
             foreach (var sql in statements)
             {
+                Assert.DoesNotContain("DROP TABLE", sql.CommandText, StringComparison.OrdinalIgnoreCase);
                 Assert.DoesNotContain("DROP COLUMN", sql.CommandText, StringComparison.OrdinalIgnoreCase);
                 await using var command = new NpgsqlCommand(sql.CommandText, connection);
                 await command.ExecuteNonQueryAsync();

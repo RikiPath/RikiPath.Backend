@@ -2,6 +2,7 @@ using RikiPath.Application.IRepositories;
 using Microsoft.EntityFrameworkCore;
 using RikiPath.Domain.Entities;
 using RikiPath.Domain.Enums;
+using RikiPath.Domain.MentorScheduling;
 
 namespace RikiPath.Infrastructure.Repositories
 {
@@ -18,7 +19,7 @@ namespace RikiPath.Infrastructure.Repositories
         {
             IQueryable<MentorAvailability> query = _context.MentorAvailabilities
                 .Where(x => x.IsApproved && x.RejectedAt == null
-                    && x.MaxLearners == 1 && x.BookedCount < x.MaxLearners && !x.IsDeleted
+                    && x.BookedCount < x.MaxLearners && !x.IsDeleted
                     && x.ChangeRequestedAt == null
                     && !_context.StudyCohorts.Any(c => c.Sessions.Any(s => s.AvailabilityId == x.Id))
                     && x.StartTime >= from && x.EndTime <= to
@@ -35,7 +36,7 @@ namespace RikiPath.Infrastructure.Repositories
             => _context.MentorAvailabilities.Include(x => x.Mentor)
                 .ThenInclude(m => m!.MentorProfile)
                 .FirstOrDefaultAsync(x => x.Id == id && !x.IsDeleted
-                    && x.IsApproved && x.RejectedAt == null && x.MaxLearners == 1 && x.BookedCount < x.MaxLearners
+                    && x.IsApproved && x.RejectedAt == null && x.BookedCount < x.MaxLearners
                     && x.ChangeRequestedAt == null
                     && !_context.StudyCohorts.Any(c => c.Sessions.Any(s => s.AvailabilityId == x.Id))
                     && x.StartTime > after
@@ -49,6 +50,15 @@ namespace RikiPath.Infrastructure.Repositories
                 || await _context.StudyCourses.AnyAsync(c => c.Status == "Active" && c.MentorId == mentorId
                     && c.Sessions.Any(s => s.Status == "Scheduled" && s.ScheduledAt < endTime
                         && s.ScheduledAt.AddMinutes(c.SessionMinutes) > startTime), cancellationToken);
+
+        // PR #70: khóa lịch mentor. Dùng cùng khóa "course-schedule:{mentorId}" với StudyCourseRepository.LockScheduleAsync
+        // để mọi writer (booking 1-1 cũ, Cohort, duyệt khung) được tuần tự hóa trên cùng một advisory lock.
+        public async Task LockMentorScheduleAsync(int mentorId, CancellationToken cancellationToken = default)
+        {
+            if (!_context.Database.IsRelational()) return;
+            var key = $"course-schedule:{mentorId}";
+            await _context.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({key}, 0))", cancellationToken);
+        }
 
         // Phòng họp theo RoomId của lịch (hub dùng để kiểm tra quyền vào phòng).
         public Task<MentorAvailability?> GetMeetingByRoomIdAsync(Guid roomId, CancellationToken cancellationToken = default)
@@ -132,8 +142,8 @@ namespace RikiPath.Infrastructure.Repositories
                     && !x.IsDeleted
                     && x.IsApproved
                     && x.RejectedAt == null
-                    && x.MaxLearners == 1
-                    && x.BookedCount == 0
+                    && x.BookedCount < x.MaxLearners
+                    && !_context.StudyCohorts.Any(c => c.Sessions.Any(s => s.AvailabilityId == x.Id))
                     && x.StartTime >= minStartUtc
                     && x.StartTime >= fromUtc
                     && x.EndTime <= toUtc
@@ -143,12 +153,14 @@ namespace RikiPath.Infrastructure.Repositories
                     && x.Mentor.MentorProfile != null
                     && x.Mentor.MentorProfile.VerificationStatus == MentorVerificationStatus.Approved
                     && !_context.MentorBookingReservations.Any(r =>
-                        r.MentorAvailabilityId == x.Id
+                        r.MentorId == x.MentorId && r.MentorAvailabilityId != x.Id
                         && r.ReleasedAtUtc == null
-                        && r.EndUtc > nowUtc));
+                        && x.StartTime < r.RestProtectedUntilUtc
+                        && x.EndTime.AddMinutes(x.RestMinutesSnapshot ?? MentorSlotPolicy.MinimumRestMinutes) > r.StartUtc));
 
             var slots = await query.OrderBy(x => x.StartTime).ToListAsync(cancellationToken);
-            return slots.Where(x => (x.EndTime - x.StartTime) == TimeSpan.FromMinutes(90)).ToList();
+            return slots.Where(x => (x.EndTime - x.StartTime)
+                == TimeSpan.FromMinutes(x.SessionMinutesSnapshot ?? MentorSlotPolicy.AppointmentDurationMinutes)).ToList();
         }
 
         public async Task<MentorAvailability?> GetPublicBookableSlotByIdAsync(int slotId, CancellationToken cancellationToken = default)
@@ -163,8 +175,8 @@ namespace RikiPath.Infrastructure.Repositories
                     && !x.IsDeleted
                     && x.IsApproved
                     && x.RejectedAt == null
-                    && x.MaxLearners == 1
-                    && x.BookedCount == 0
+                    && x.BookedCount < x.MaxLearners
+                    && !_context.StudyCohorts.Any(c => c.Sessions.Any(s => s.AvailabilityId == x.Id))
                     && x.StartTime >= minStartUtc
                     && x.Mentor != null
                     && !x.Mentor.IsDeleted
@@ -172,11 +184,13 @@ namespace RikiPath.Infrastructure.Repositories
                     && x.Mentor.MentorProfile != null
                     && x.Mentor.MentorProfile.VerificationStatus == MentorVerificationStatus.Approved
                     && !_context.MentorBookingReservations.Any(r =>
-                        r.MentorAvailabilityId == x.Id
+                        r.MentorId == x.MentorId && r.MentorAvailabilityId != x.Id
                         && r.ReleasedAtUtc == null
-                        && r.EndUtc > nowUtc), cancellationToken);
+                        && x.StartTime < r.RestProtectedUntilUtc
+                        && x.EndTime.AddMinutes(x.RestMinutesSnapshot ?? MentorSlotPolicy.MinimumRestMinutes) > r.StartUtc), cancellationToken);
 
-            if (slot != null && (slot.EndTime - slot.StartTime) != TimeSpan.FromMinutes(90))
+            if (slot != null && (slot.EndTime - slot.StartTime)
+                != TimeSpan.FromMinutes(slot.SessionMinutesSnapshot ?? MentorSlotPolicy.AppointmentDurationMinutes))
                 return null;
 
             return slot;

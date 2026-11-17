@@ -589,16 +589,7 @@ public sealed partial class MentorMeetingService(
                 }
                 else if (information.Status == "CANCELLED")
                 {
-                    subscription.PaymentStatus = PaymentStatus.Failed;
-                    subscription.PaymentExpiresAt = null;
-                    foreach (var booking in subscription.MentorBookings.Where(b => b.Status == MentorStatus.AwaitingPayment))
-                    {
-                        booking.Status = MentorStatus.Cancelled;
-                        if (booking.MentorAvailability is { } heldSlot) heldSlot.BookedCount = Math.Max(0, heldSlot.BookedCount - 1);
-                        subscription.MeetingSessionsUsed = Math.Max(0, subscription.MeetingSessionsUsed - 1);
-                        booking.MentorAvailability = null;
-                        booking.MentorAvailabilityId = null;
-                    }
+                    MentorPurchaseFinalizer.MarkFailed(subscription);
                     await unitOfWork.SaveChangesAsync(cancellationToken);
                 }
             }
@@ -625,7 +616,17 @@ public sealed partial class MentorMeetingService(
             if (claims.Role != Role.Mentor)
                 return ApiResponse<List<MentorAvailabilityResponse>>.Fail("Chỉ cố vấn mới có thể xem lịch tư vấn của mình.", HttpStatusCode.Forbidden);
             var slots = await unitOfWork.MentorAvailabilities.GetByMentorAsync(claims.Id);
-            return ApiResponse<List<MentorAvailabilityResponse>>.Success(slots.Select(MapAvailability).ToList());
+            var slotIds = slots.Select(x => x.Id).ToList();
+            var cohortMap = slotIds.Count == 0
+                ? new Dictionary<int, int>()
+                : (await unitOfWork.StudyCohorts.Query().AsNoTracking()
+                    .SelectMany(c => c.Sessions.Where(s => slotIds.Contains(s.AvailabilityId)).Select(s => new { s.AvailabilityId, CohortId = c.Id }))
+                    .ToListAsync(cancellationToken))
+                    .GroupBy(x => x.AvailabilityId)
+                    .ToDictionary(g => g.Key, g => g.First().CohortId);
+            return ApiResponse<List<MentorAvailabilityResponse>>.Success(slots
+                .Select(s => MapAvailabilityWithCohort(s, cohortMap.TryGetValue(s.Id, out var cid) ? cid : null))
+                .ToList());
         }
         catch (Exception ex)
         {
@@ -864,9 +865,25 @@ public sealed partial class MentorMeetingService(
             if (slots.Any(x => x.StartTime <= now))
                 return ApiResponse<bool>.Fail("Có lịch đã quá hạn, không thể duyệt.", HttpStatusCode.Conflict);
 
+            if (approve)
+            {
+                foreach (var slot in slots)
+                {
+                    var batchOverlap = slots.Any(other => other.Id != slot.Id && other.MentorId == slot.MentorId
+                        && other.StartTime < slot.EndTime && slot.StartTime < other.EndTime);
+                    var existingOverlap = await unitOfWork.MentorAvailabilities.Query().AnyAsync(x =>
+                        !distinctIds.Contains(x.Id) && x.MentorId == slot.MentorId && !x.IsDeleted
+                        && x.IsApproved && x.RejectedAt == null
+                        && x.StartTime < slot.EndTime && slot.StartTime < x.EndTime, cancellationToken);
+                    if (batchOverlap || existingOverlap)
+                        return ApiResponse<bool>.Fail("Có khung giờ bị trùng với lịch đã duyệt khác của cố vấn.", HttpStatusCode.Conflict);
+                }
+            }
+
             foreach (var slot in slots)
             {
                 slot.IsApproved = approve;
+                slot.PublishedAt = approve ? now : null;
                 slot.RejectedAt = approve ? null : now;
                 slot.RejectionReason = approve ? null : rejectionReason!.Trim();
                 slot.AdminName = adminName;
@@ -917,25 +934,22 @@ public sealed partial class MentorMeetingService(
     private async Task ExpirePendingPaymentsAsync(CancellationToken cancellationToken)
     {
         var now = DateTime.UtcNow;
-        var expired = await unitOfWork.MentorBookings.GetExpiredPaymentHoldsAsync(now, cancellationToken);
-        if (expired.Count == 0) return;
-        foreach (var booking in expired)
+        // PR #70: giải phóng cả giữ chỗ dạng PendingMentorAvailability và hold booking AwaitingPayment cũ.
+        var expiredReservations = await unitOfWork.UserSubscriptions.Query()
+            .Where(x => !x.IsDeleted && x.PaymentStatus == PaymentStatus.Pending
+                && x.PendingMentorAvailabilityId != null && x.PaymentExpiresAt <= now)
+            .Include(x => x.PendingMentorAvailability)
+            .ToListAsync(cancellationToken);
+        var expiredBookings = await unitOfWork.MentorBookings.GetExpiredPaymentHoldsAsync(now, cancellationToken);
+        foreach (var subscription in expiredReservations)
+            MentorPurchaseFinalizer.ReleaseReservation(subscription);
+        foreach (var booking in expiredBookings)
         {
-            booking.Status = MentorStatus.Cancelled;
-            if (booking.MentorAvailability is not null)
-            {
-                var slot = booking.MentorAvailability;
-                slot.BookedCount = Math.Max(0, slot.BookedCount - 1);
-                unitOfWork.MentorAvailabilities.Update(slot);
-                booking.MentorAvailability = null;
-                booking.MentorAvailabilityId = null;
-            }
-            booking.UserSubscription.MeetingSessionsUsed = Math.Max(0, booking.UserSubscription.MeetingSessionsUsed - 1);
+            MentorPurchaseFinalizer.ReleaseLegacyBooking(booking);
             booking.UserSubscription.PaymentExpiresAt = now;
-            unitOfWork.UserSubscriptions.Update(booking.UserSubscription);
-            unitOfWork.MentorBookings.Update(booking);
         }
-        await unitOfWork.SaveChangesAsync(cancellationToken);
+        if (expiredReservations.Count > 0 || expiredBookings.Count > 0)
+            await unitOfWork.SaveChangesAsync(cancellationToken);
     }
 
     private (string? ReturnUrl, string? CancelUrl) BuildPayOsReturnUrls(int subscriptionId, string? frontendOrigin)
@@ -982,7 +996,9 @@ public sealed partial class MentorMeetingService(
         Description = feature.Description
     };
 
-    private static MentorAvailabilityResponse MapAvailability(MentorAvailability slot) => new()
+    private static MentorAvailabilityResponse MapAvailability(MentorAvailability slot) => MapAvailabilityWithCohort(slot, null);
+
+    private static MentorAvailabilityResponse MapAvailabilityWithCohort(MentorAvailability slot, int? cohortId) => new()
     {
         Id = slot.Id,
         MentorId = slot.MentorId,
@@ -1007,6 +1023,8 @@ public sealed partial class MentorMeetingService(
         ChangeRequestReason = slot.ChangeRequestReason,
         ChangeRequestedAt = slot.ChangeRequestedAt,
         ChangeResolution = slot.ChangeResolution,
+        IsInCohort = cohortId.HasValue,
+        CohortId = cohortId
     };
 
     private static MentorBookingResponse MapBooking(MentorBooking booking, int currentUserId)

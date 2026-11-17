@@ -1,3 +1,5 @@
+using Microsoft.EntityFrameworkCore;
+using System.Net;
 using RikiPath.Application;
 using RikiPath.Application.IClients;
 using RikiPath.Application.IServices;
@@ -37,6 +39,10 @@ public sealed class PaymentService(
                 _ => await HandleMentorPaymentAsync((int)code, callback, webhook, ct) // code cũ của bạn
             };
         }
+        catch (DbUpdateConcurrencyException)
+        {
+            return ApiResponse<bool>.Fail("Đơn thanh toán đang được cập nhật. Vui lòng gửi lại webhook.", HttpStatusCode.ServiceUnavailable);
+        }
         catch (Exception ex)
         {
             return ApiResponse<bool>.Fail($"Lỗi xử lý webhook PayOS: {ex.Message}");
@@ -48,7 +54,8 @@ public sealed class PaymentService(
         if (studyCourses is null) return ApiResponse<bool>.Fail("Dịch vụ khóa học chưa sẵn sàng.");
         var result = await studyCourses.ConfirmPaymentAsync(id, callback, reference, ct);
         return result.IsSuccess ? ApiResponse<bool>.Success(true)
-            : ApiResponse<bool>.Fail(result.ErrorMessage ?? "Không xác nhận được thanh toán khóa học.", (System.Net.HttpStatusCode)result.StatusCode);
+            : ApiResponse<bool>.Fail(result.ErrorMessage ?? "Không xác nhận được thanh toán khóa học.", (System.Net.HttpStatusCode)result.StatusCode,
+                result.ErrorCode);
     }
 
     private async Task<ApiResponse<bool>> HandleAiTopUpAsync(
@@ -102,22 +109,13 @@ public sealed class PaymentService(
         }
         if (subscription.PaymentStatus != PaymentStatus.Pending)
             return ApiResponse<bool>.Success(true, message: "Đơn hàng không còn ở trạng thái chờ thanh toán.");
+        if (!string.IsNullOrWhiteSpace(subscription.PaymentTransactionId) &&
+            !string.Equals(subscription.PaymentTransactionId, webhook.Data.PaymentLinkId, StringComparison.Ordinal))
+            return ApiResponse<bool>.Fail("Mã liên kết thanh toán không khớp với đơn hàng.");
 
         if (!callback.IsSuccess)
         {
-            subscription.PaymentStatus = PaymentStatus.Failed;
-            foreach (var booking in subscription.MentorBookings ?? [])
-            {
-                if (booking.Status != MentorStatus.AwaitingPayment) continue;
-                booking.Status = MentorStatus.Cancelled;
-                if (booking.MentorAvailability is not null)
-                {
-                    booking.MentorAvailability.BookedCount = Math.Max(0, booking.MentorAvailability.BookedCount - 1);
-                    subscription.MeetingSessionsUsed = Math.Max(0, subscription.MeetingSessionsUsed - 1);
-                    booking.MentorAvailability = null;
-                    booking.MentorAvailabilityId = null;
-                }
-            }
+            MentorPurchaseFinalizer.MarkFailed(subscription);
         }
         else
         {
@@ -126,7 +124,7 @@ public sealed class PaymentService(
 
         subscription.PaymentExpiresAt = null;
         await unitOfWork.SaveChangesAsync(ct);
-        if (callback.IsSuccess)
+        if (callback.IsSuccess && subscription.MeetingSessionsUsed < subscription.MeetingSessionsIncluded)
         {
             var grantResult = await creditLedgerService.CreateGrantFromPaidSubscriptionAsync(orderCode, cancellationToken: ct);
             if (!grantResult.IsSuccess)

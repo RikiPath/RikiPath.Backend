@@ -1,7 +1,6 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using RikiPath.Application.IServices;
 using RikiPath.Application.Responses.MentorMeetings;
-using Microsoft.EntityFrameworkCore;
 using RikiPath.Domain.Entities;
 using RikiPath.Domain.Enums;
 using System.Collections.Concurrent;

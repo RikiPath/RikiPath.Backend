@@ -14,5 +14,6 @@ namespace RikiPath.Application.IRepositories
         Task<MentorBooking?> GetActiveMeetingByRoomIdAsync(Guid roomId, CancellationToken cancellationToken = default);
         Task<MentorBooking?> GetForChatAsync(int bookingId, CancellationToken cancellationToken = default);
         Task<List<MentorBooking>> GetChatThreadsForMentorAsync(int mentorId, CancellationToken cancellationToken = default);
+        Task<HashSet<string>> GetRescheduledBookingKeysAsync(IEnumerable<int> bookingIds, CancellationToken ct);
     }
 }

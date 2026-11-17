@@ -47,8 +47,15 @@ public sealed class StudyCourse
     public int MinimumHomeworkPercent { get; set; } = 90;
     public int MaximumAbsencePercent { get; set; } = 20;
     public decimal Amount { get; set; }
+    public string Currency { get; set; } = "VND";
     public string PaymentStatus { get; set; } = "Pending";
     public string? PaymentReference { get; set; }
+    // Điều khoản đơn hàng (JSON) chụp lại tại thời điểm checkout; bất biến sau khi tạo.
+    public string? OrderSnapshot { get; set; }
+    // Mã giao dịch PayOS chỉ của thanh toán ĐÃ XÁC MINH (webhook có chữ ký hoặc truy vấn server-to-server).
+    public string? ProviderPaymentReference { get; set; }
+    public DateTime? PaymentConfirmedAtUtc { get; set; }
+    public string? PaymentReviewReason { get; set; }
     public string? CheckoutUrl { get; set; }
     public DateTime? PaymentExpiresAt { get; set; }
     public string Status { get; set; } = "PendingPayment";
@@ -56,6 +63,15 @@ public sealed class StudyCourse
     public DateTime? StartsAt { get; set; }
     public DateTime? EndsAt { get; set; }
     public DateTime? CompletedAt { get; set; }
+    public int? GroupPolicyId { get; set; }
+    public MentorGroupPolicy? GroupPolicy { get; set; }
+    public int? PolicyVersionSnapshot { get; set; }
+    public int? CapacitySnapshot { get; set; }
+    public DateTime? CancelledAtUtc { get; set; }
+    public string? CancellationReason { get; set; }
+    // Ghi danh đích của một lần chuyển lớp đã duyệt trỏ về ghi danh nguồn (nguồn giữ nguyên lịch sử, trạng thái "Transferred").
+    public int? TransferredFromCourseId { get; set; }
+    public DateTime? TransferredAtUtc { get; set; }
     public List<StudyCourseSession> Sessions { get; set; } = [];
     public List<StudyCourseHomework> Homework { get; set; } = [];
     public List<CourseRetakeRequest> RetakeRequests { get; set; } = [];
@@ -104,12 +120,16 @@ public sealed class CourseRetakeRequest
     public DateTime ExamDate { get; set; }
     public DateTime ResultPublishedAt { get; set; }
     public string EvidenceUrl { get; set; } = "";
+    public string Reason { get; set; } = "";
     public string Status { get; set; } = "Pending";
     public DateTime SubmittedAt { get; set; } = DateTime.UtcNow;
     public int? ReviewedById { get; set; }
     public DateTime? ReviewedAt { get; set; }
     public string? Response { get; set; }
     public string? EligibilitySnapshot { get; set; }
+    public string? MentorSupportPlan { get; set; }
+    public int? MentorSupportPlanById { get; set; }
+    public DateTime? MentorSupportPlanAtUtc { get; set; }
 }
 
 public sealed class CourseAuditEntry

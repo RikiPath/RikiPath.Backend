@@ -15,6 +15,9 @@ public sealed class MentorCohortMigrationTests
         var operations = new MentorCohortsAndExamDrafts().UpOperations;
         Assert.DoesNotContain(operations, x => x is DropColumnOperation or DropTableOperation or UpdateDataOperation or DeleteDataOperation);
         Assert.Contains(operations.OfType<SqlOperation>(), x => x.Sql.Contains("\"MentorCalendarConnections\" ENABLE ROW LEVEL SECURITY"));
+        var reconcile = new ReconcileCanonicalGroupCohortModel().UpOperations;
+        Assert.DoesNotContain(reconcile, x => x is DropColumnOperation or DropTableOperation or UpdateDataOperation or DeleteDataOperation or DropIndexOperation);
+        Assert.Contains(reconcile.OfType<CreateIndexOperation>(), x => x.Name == "IX_StudyCourses_Cohort_ActiveLearner" && x.IsUnique);
     }
 
     [CoursePostgresFact]
@@ -38,7 +41,7 @@ public sealed class MentorCohortMigrationTests
                 """);
             foreach (var migration in new Migration[] { new AddStudyCoursesAndRetakePolicy(), new MentorCohortsAndExamDrafts() })
                 foreach (var sql in db.GetService<IMigrationsSqlGenerator>().Generate(migration.UpOperations, db.Model))
-                    await db.Database.ExecuteSqlRawAsync(sql.CommandText);
+                    await db.Database.ExecuteSqlRawAsync(sql.CommandText.Replace("{", "{{").Replace("}", "}}"));
             await using var verify = new NpgsqlCommand("SELECT \"IsPlacementAssessment\" FROM \"MockTests\" WHERE \"Id\"=1", connection);
             Assert.True((bool)(await verify.ExecuteScalarAsync())!);
             await using var rls = new NpgsqlCommand("SELECT relrowsecurity FROM pg_class WHERE oid='\"MentorCalendarConnections\"'::regclass", connection);
