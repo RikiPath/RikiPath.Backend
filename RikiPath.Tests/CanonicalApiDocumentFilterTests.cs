@@ -36,6 +36,24 @@ public sealed class CanonicalApiDocumentFilterTests
     }
 
     [Fact]
+    public void MentorReviewControllerIsTheOnlyRatingWriteRoute()
+    {
+        var oldRoutes = typeof(MentorMeetingController).GetMethods()
+            .SelectMany(method => method.GetCustomAttributes(typeof(HttpMethodAttribute), inherit: true)
+                .Cast<HttpMethodAttribute>())
+            .Select(attribute => attribute.Template)
+            .ToArray();
+
+        // Đánh giá chỉ được ghi qua luồng kiểm duyệt MentorReview, không qua shortcut cũ.
+        Assert.DoesNotContain(oldRoutes, route => route?.Contains("rating", StringComparison.OrdinalIgnoreCase) == true);
+        var createRoute = typeof(MentorReviewController).GetMethod(nameof(MentorReviewController.CreateReview))!
+            .GetCustomAttributes(typeof(HttpPostAttribute), inherit: true)
+            .Cast<HttpPostAttribute>()
+            .Single();
+        Assert.Equal("api/mentor-reviews", createRoute.Template);
+    }
+
+    [Fact]
     public void DocumentFilterRemovesUnusedControllerTagsAndUsesVietnameseDescriptions()
     {
         var document = new OpenApiDocument

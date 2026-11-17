@@ -10,6 +10,9 @@ public sealed class PublicMentorSlotResponse
     public TimeOnly LocalStart { get; set; }
     public TimeOnly LocalEnd { get; set; }
     public int DurationMinutes { get; set; }
+    public int BookedCount { get; set; }
+    public int MaxLearners { get; set; }
+    public int RemainingSeats { get; set; }
     public string? DaypartCode { get; set; }
     public string Status { get; set; } = "Available";
     public bool IsAvailable { get; set; } = true;

@@ -7,6 +7,20 @@ namespace RikiPath.Infrastructure
     public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(options)
     {
 
+        public DbSet<StudyCourse> StudyCourses { get; set; }
+        public DbSet<StudyCoursePlan> StudyCoursePlans { get; set; }
+        public DbSet<StudyCohort> StudyCohorts { get; set; }
+        public DbSet<CohortEnrollmentEntitlement> CohortEnrollmentEntitlements { get; set; }
+        public DbSet<CourseScheduleRequest> CourseScheduleRequests { get; set; }
+        public DbSet<CohortTransferRequest> CohortTransferRequests { get; set; }
+        public DbSet<CohortTransferRequestEvent> CohortTransferRequestEvents { get; set; }
+        public DbSet<StudyCohortMentorAssignment> StudyCohortMentorAssignments { get; set; }
+        public DbSet<CohortScheduleRequest> CohortScheduleRequests { get; set; }
+        public DbSet<CohortScheduleRequestEvent> CohortScheduleRequestEvents { get; set; }
+        public DbSet<CohortMentorReview> CohortMentorReviews { get; set; }
+        public DbSet<CohortComplaint> CohortComplaints { get; set; }
+        public DbSet<CohortComplaintEvent> CohortComplaintEvents { get; set; }
+        public DbSet<JlptExamSchedule> JlptExamSchedules { get; set; }
 
         // Users
         public DbSet<UserAccount> Users { get; set; }
@@ -65,6 +79,7 @@ namespace RikiPath.Infrastructure
         public DbSet<MentorBooking> MentorBookings { get; set; }
         public DbSet<MentorSchedule> MentorSchedules { get; set; }
         public DbSet<MentorScheduleRule> MentorScheduleRules { get; set; }
+        public DbSet<MentorGroupPolicy> MentorGroupPolicies { get; set; }
         public DbSet<MentorBookingIntent> MentorBookingIntents { get; set; }
         public DbSet<MentorBookingTerms> MentorBookingTerms { get; set; }
         public DbSet<MentorBookingReservation> MentorBookingReservations { get; set; }
@@ -164,6 +179,7 @@ namespace RikiPath.Infrastructure
             modelBuilder.ApplyConfiguration(new MentorBookingConfig());
             modelBuilder.ApplyConfiguration(new MentorScheduleConfig());
             modelBuilder.ApplyConfiguration(new MentorScheduleRuleConfig());
+            modelBuilder.ApplyConfiguration(new MentorGroupPolicyConfig());
             modelBuilder.ApplyConfiguration(new MentorBookingIntentConfig());
             modelBuilder.ApplyConfiguration(new MentorBookingTermsConfig());
             modelBuilder.ApplyConfiguration(new MentorBookingReservationConfig());
@@ -205,6 +221,25 @@ namespace RikiPath.Infrastructure
             modelBuilder.ApplyConfiguration(new UserDeviceTokenConfig());
 
             modelBuilder.ApplyConfiguration(new MentorCalendarConnectionConfig());
+            modelBuilder.ApplyConfiguration(new StudyCohortConfig());
+            modelBuilder.ApplyConfiguration(new CohortEnrollmentEntitlementConfig());
+            modelBuilder.ApplyConfiguration(new StudyCohortSessionConfig());
+            modelBuilder.ApplyConfiguration(new JlptExamScheduleConfig());
+            modelBuilder.ApplyConfiguration(new CourseScheduleRequestConfig());
+            modelBuilder.ApplyConfiguration(new CohortTransferRequestConfig());
+            modelBuilder.ApplyConfiguration(new CohortTransferRequestEventConfig());
+            modelBuilder.ApplyConfiguration(new StudyCohortMentorAssignmentConfig());
+            modelBuilder.ApplyConfiguration(new CohortScheduleRequestConfig());
+            modelBuilder.ApplyConfiguration(new CohortScheduleRequestEventConfig());
+            modelBuilder.ApplyConfiguration(new CohortMentorReviewConfig());
+            modelBuilder.ApplyConfiguration(new CohortComplaintConfig());
+            modelBuilder.ApplyConfiguration(new CohortComplaintEventConfig());
+            modelBuilder.ApplyConfiguration(new StudyCourseConfig());
+            modelBuilder.ApplyConfiguration(new StudyCoursePlanConfig());
+            modelBuilder.ApplyConfiguration(new StudyCourseSessionConfig());
+            modelBuilder.ApplyConfiguration(new StudyCourseHomeworkConfig());
+            modelBuilder.ApplyConfiguration(new CourseRetakeRequestConfig());
+            modelBuilder.ApplyConfiguration(new CourseAuditEntryConfig());
 
             // Additional configurations for completeness
             modelBuilder.ApplyConfiguration(new CertificateSectionConfig());

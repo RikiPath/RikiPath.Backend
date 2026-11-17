@@ -14,6 +14,10 @@ namespace RikiPath.Domain.Entities
         public MentorScheduleRule? ScheduleRule { get; set; }
         public string? GenerationKey { get; set; }
         public int? PolicyVersion { get; set; }
+        public int? GroupPolicyId { get; set; }
+        public MentorGroupPolicy? GroupPolicy { get; set; }
+        public int? SessionMinutesSnapshot { get; set; }
+        public int? RestMinutesSnapshot { get; set; }
         public DateOnly? LocalBusinessDate { get; set; }
         public DateTime? PublishedAt { get; set; }
         public string? ChangeRequestReason { get; set; }

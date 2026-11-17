@@ -19,6 +19,16 @@ namespace RikiPath.Domain
         public GoogleAuthSettings Google { get; set; } = new();
         public AzureSpeechSettings AzureSpeechSettings { get; set; } = new();
         public QaPaymentSimulatorSettings QaPaymentSimulator { get; set; } = new();
+        public GroupLearningSettings GroupLearning { get; set; } = new();
+    }
+
+    public sealed class GroupLearningSettings
+    {
+        /// <summary>
+        /// Cổng an toàn: chuyển lớp sau khai giảng chỉ được bật khi Product Owner đã phê duyệt quyền lợi
+        /// (buổi đã học, hoàn/thu chênh lệch). Mặc định TẮT.
+        /// </summary>
+        public bool PostStartTransferProductApproved { get; set; }
     }
     public class GoogleAuthSettings
     {

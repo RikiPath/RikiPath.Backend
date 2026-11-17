@@ -147,6 +147,42 @@ public sealed class MentorReviewAndDisputeTests
     }
 
     [Fact]
+    public async Task Review_rejected_when_slot_ended_without_completed_booking_or_attendance()
+    {
+        await using var db = CreateInMemoryDb();
+        var (_, learner, _, booking, _) = await SeedSessionScenarioAsync(db, bookingStatus: MentorStatus.Accepted);
+        var service = new MentorReviewService(db, MockClaims(Role.Learner, learner.Id), NullLogger<MentorReviewService>.Instance);
+
+        var result = await service.CreateReviewAsync(new CreateMentorReviewRequest
+        {
+            MentorBookingId = booking.Id,
+            Rating = 5
+        });
+
+        Assert.Equal((int)HttpStatusCode.Conflict, result.StatusCode);
+        Assert.Empty(await db.MentorReviews.ToListAsync());
+    }
+
+    [Fact]
+    public async Task Review_rejected_when_booking_is_unpaid()
+    {
+        await using var db = CreateInMemoryDb();
+        var (_, learner, _, booking, subscription) = await SeedSessionScenarioAsync(db);
+        subscription.PaymentStatus = PaymentStatus.Pending;
+        await db.SaveChangesAsync();
+        var service = new MentorReviewService(db, MockClaims(Role.Learner, learner.Id), NullLogger<MentorReviewService>.Instance);
+
+        var result = await service.CreateReviewAsync(new CreateMentorReviewRequest
+        {
+            MentorBookingId = booking.Id,
+            Rating = 5
+        });
+
+        Assert.Equal((int)HttpStatusCode.Conflict, result.StatusCode);
+        Assert.Empty(await db.MentorReviews.ToListAsync());
+    }
+
+    [Fact]
     public async Task Review_rejected_if_session_is_cancelled()
     {
         await using var db = CreateInMemoryDb();

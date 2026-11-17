@@ -25,5 +25,7 @@
         public string? ChangeRequestReason { get; set; }
         public DateTime? ChangeRequestedAt { get; set; }
         public string? ChangeResolution { get; set; }
+        public bool IsInCohort { get; set; }
+        public int? CohortId { get; set; }
     }
 }

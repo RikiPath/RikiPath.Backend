@@ -31,7 +31,7 @@ public sealed class StandardRoadmapService(IUnitOfWork unitOfWork, IClaimService
 
             var level = await unitOfWork.CertificateLevels.GetActiveJlptLevelByIdAsync(
                 levelId.Value, cancellationToken);
-            if (level is null || JlptCurriculum.Rank(level.Code) == 0)
+            if (level is null || !JlptCurriculum.IsSupportedStudyLevel(level.Code))
                 return ApiResponse<StandardRoadmapResponse>.Fail(
                     "Cấp độ học không khả dụng; lộ trình hiện hỗ trợ N5–N3.",
                     HttpStatusCode.BadRequest, errorCode: "STUDY_LEVEL_UNSUPPORTED");

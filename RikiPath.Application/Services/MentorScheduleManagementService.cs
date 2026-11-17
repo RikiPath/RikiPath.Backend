@@ -17,9 +17,32 @@ namespace RikiPath.Application.Services
         IClaimService claimService,
         IMentorProfileService mentorProfileService,
         IMentorSlotGenerator slotGenerator,
-        ILogger<MentorScheduleManagementService> logger) : IMentorScheduleManagementService
+        ILogger<MentorScheduleManagementService> logger,
+        IMentorGroupPolicyService? groupPolicies = null,
+        IMentorTeachingConflictService? teachingConflicts = null) : IMentorScheduleManagementService
     {
         private const int DefaultPolicyVersion = 3;
+
+        // Mentor chỉ xem được xung đột của chính mình: mentorId luôn lấy từ phiên đăng nhập, không nhận từ request.
+        public async Task<ApiResponse<TeachingConflictReport>> PreviewTeachingConflictsAsync(
+            TeachingConflictPreviewRequest request, CancellationToken cancellationToken = default)
+        {
+            var claim = claimService.GetUserClaim();
+            if (claim.Role != Role.Mentor)
+                return ApiResponse<TeachingConflictReport>.Fail("Chỉ cố vấn mới xem trước được lịch dạy của mình.", HttpStatusCode.Forbidden, "FORBIDDEN");
+            if (request?.Intervals is not { Count: > 0 and <= 500 }
+                || request.Intervals.Any(i => i.EndUtc <= i.StartUtc || (i.EndUtc - i.StartUtc).TotalHours > 12))
+                return ApiResponse<TeachingConflictReport>.Fail("Danh sách khung giờ không hợp lệ (1–500 khung, giờ kết thúc sau giờ bắt đầu).",
+                    HttpStatusCode.BadRequest, "INVALID_INTERVALS");
+            if (request.ExcludeCohortId is int cohortId && !await unitOfWork.StudyCohorts.Query().AsNoTracking()
+                    .AnyAsync(x => x.Id == cohortId && x.MentorId == claim.Id, cancellationToken))
+                return ApiResponse<TeachingConflictReport>.Fail("Không tìm thấy lớp của bạn.", HttpStatusCode.NotFound, "COHORT_NOT_FOUND");
+            var service = teachingConflicts ?? new MentorTeachingConflictService(unitOfWork, groupPolicies);
+            var report = await service.CheckAsync(claim.Id,
+                request.Intervals.Select((i, n) => new ProposedTeachingInterval(i.StartUtc, i.EndUtc, n + 1)).ToList(),
+                new TeachingConflictOptions { ExcludeCohortId = request.ExcludeCohortId }, cancellationToken);
+            return ApiResponse<TeachingConflictReport>.Success(report);
+        }
 
         public async Task<ApiResponse<MentorScheduleResponse>> GetMyScheduleAsync(CancellationToken cancellationToken = default)
         {
@@ -201,8 +224,10 @@ namespace RikiPath.Application.Services
                 if (request.StartDate < todayLocal)
                     return ApiResponse<SlotPreviewResponse>.Fail("Không thể xem trước khung giờ cho các ngày trong quá khứ.", HttpStatusCode.BadRequest);
 
-                if (request.EndDate > todayLocal.AddDays(MentorSlotPolicy.MaximumScheduleHorizonDays))
-                    return ApiResponse<SlotPreviewResponse>.Fail($"Chỉ được xem trước khung giờ trong phạm vi {MentorSlotPolicy.MaximumScheduleHorizonDays} ngày tới.", HttpStatusCode.BadRequest);
+                var horizonDays = (await GetGroupPolicyAsync(DateTime.UtcNow, cancellationToken))?.PublicationHorizonDays
+                    ?? MentorSlotPolicy.MaximumScheduleHorizonDays;
+                if (request.EndDate > todayLocal.AddDays(horizonDays))
+                    return ApiResponse<SlotPreviewResponse>.Fail($"Chỉ được xem trước khung giờ trong phạm vi {horizonDays} ngày tới.", HttpStatusCode.BadRequest);
 
                 var previewItems = new List<SlotPreviewItemResponse>();
 
@@ -233,8 +258,8 @@ namespace RikiPath.Application.Services
 
                         if (dayparts.Count > 0)
                         {
-                            var dailySlots = slotGenerator.GenerateDailySlots(
-                                claim.Id, currentDate, dayparts, DateTimeOffset.UtcNow, DefaultPolicyVersion);
+                            var (dailySlots, _) = await GenerateDailySlotsAsync(
+                                claim.Id, currentDate, dayparts, tz, cancellationToken);
 
                             foreach (var s in dailySlots)
                             {
@@ -335,15 +360,21 @@ namespace RikiPath.Application.Services
                 if (request.StartDate < todayLocal)
                     return ApiResponse<PublishSlotsResponse>.Fail("Không thể công bố khung giờ cho các ngày trong quá khứ.", HttpStatusCode.BadRequest);
 
-                if (request.EndDate > todayLocal.AddDays(MentorSlotPolicy.MaximumScheduleHorizonDays))
-                    return ApiResponse<PublishSlotsResponse>.Fail($"Chỉ được công bố khung giờ trong phạm vi {MentorSlotPolicy.MaximumScheduleHorizonDays} ngày tới.", HttpStatusCode.BadRequest);
+                var horizonDays = (await GetGroupPolicyAsync(DateTime.UtcNow, cancellationToken))?.PublicationHorizonDays
+                    ?? MentorSlotPolicy.MaximumScheduleHorizonDays;
+                if (request.EndDate > todayLocal.AddDays(horizonDays))
+                    return ApiResponse<PublishSlotsResponse>.Fail($"Chỉ được gửi duyệt khung giờ trong phạm vi {horizonDays} ngày tới.", HttpStatusCode.BadRequest);
 
                 var createdSlots = new List<PublishedSlotItemResponse>();
+                var newlyCreated = new List<(MentorAvailability Slot, DateOnly LocalDate, string DaypartCode,
+                    string LocalStart, string LocalEnd, string GenerationKey)>();
                 var createdCount = 0;
                 var skippedCount = 0;
 
                 await unitOfWork.ExecuteInTransactionAsync(async token =>
                 {
+                    // Khóa theo Mentor để hai yêu cầu sinh lịch đồng thời không tạo hai nguồn slot chồng giờ.
+                    await unitOfWork.StudyCourses.LockScheduleAsync(claim.Id, claim.Id, token);
                     var startRangeUtc = TimeZoneInfo.ConvertTimeToUtc(request.StartDate.ToDateTime(TimeOnly.MinValue), tz);
                     var endRangeUtc = TimeZoneInfo.ConvertTimeToUtc(request.EndDate.ToDateTime(TimeOnly.MaxValue), tz);
 
@@ -372,60 +403,35 @@ namespace RikiPath.Application.Services
 
                             if (dayparts.Count > 0)
                             {
-                                var dailySlots = slotGenerator.GenerateDailySlots(
-                                    claim.Id, currentDate, dayparts, DateTimeOffset.UtcNow, DefaultPolicyVersion);
+                                var (dailySlots, groupPolicy) = await GenerateDailySlotsAsync(
+                                    claim.Id, currentDate, dayparts, tz, token);
 
                                 foreach (var s in dailySlots)
                                 {
                                     // 1. Kiểm tra nếu GenerationKey đã tồn tại
-                                    if (existingByKey.TryGetValue(s.GenerationKey, out var existingSlot))
+                                    if (existingByKey.ContainsKey(s.GenerationKey))
                                     {
-                                        if (!existingSlot.IsDeleted)
-                                        {
-                                            skippedCount++;
-                                            continue; // Idempotent: Bỏ qua slot đã công bố và đang active
-                                        }
-
-                                        // Nếu bị soft-delete và chưa từng có booking -> Kích hoạt lại
-                                        if (existingSlot.BookedCount == 0 && (existingSlot.MentorBookings == null || existingSlot.MentorBookings.Count == 0))
-                                        {
-                                            existingSlot.IsDeleted = false;
-                                            existingSlot.IsApproved = true;
-                                            existingSlot.PublishedAt = DateTime.UtcNow;
-                                            existingSlot.ModifiedDate = DateTime.UtcNow;
-                                            unitOfWork.MentorAvailabilities.Update(existingSlot);
-                                            createdCount++;
-
-                                            createdSlots.Add(new PublishedSlotItemResponse
-                                            {
-                                                AvailabilityId = existingSlot.Id,
-                                                LocalDate = s.LocalDate,
-                                                DaypartCode = s.Daypart.ToString(),
-                                                StartTimeUtc = existingSlot.StartTime,
-                                                EndTimeUtc = existingSlot.EndTime,
-                                                LocalStart = TimeZoneInfo.ConvertTime(s.StartUtc, tz).ToString("HH:mm"),
-                                                LocalEnd = TimeZoneInfo.ConvertTime(s.EndUtc, tz).ToString("HH:mm"),
-                                                GenerationKey = s.GenerationKey,
-                                                IsApproved = existingSlot.IsApproved
-                                            });
-                                            continue;
-                                        }
-
-                                        // Nếu đã từng có booking trong lịch sử, không ghi đè
                                         skippedCount++;
                                         continue;
                                     }
 
-                                    // 2. Kiểm tra xung đột với các slot khác (khác GenerationKey) mà có booking
-                                    var hasOverlapWithBooked = existingSlots.Any(x =>
+                                    // Slot đã hủy vẫn giữ GenerationKey để bảo toàn quyết định hủy và lịch sử.
+                                    if (await unitOfWork.MentorAvailabilities.GetByGenerationKeyAsync(s.GenerationKey, token) is not null)
+                                    {
+                                        skippedCount++;
+                                        continue;
+                                    }
+
+                                    // Mọi slot còn hoạt động đều chặn chồng giờ, kể cả slot đang chờ duyệt.
+                                    var hasOverlapWithActiveSlot = existingSlots.Any(x =>
+                                        !x.IsDeleted && x.RejectedAt == null &&
                                         x.GenerationKey != s.GenerationKey &&
-                                        x.BookedCount > 0 &&
                                         x.StartTime < s.EndUtc.UtcDateTime &&
                                         s.StartUtc.UtcDateTime < x.EndTime);
 
-                                    if (hasOverlapWithBooked)
+                                    if (hasOverlapWithActiveSlot)
                                     {
-                                        logger.LogWarning("Bỏ qua sinh slot {GenKey} vì xung đột với buổi hẹn lịch sử đã có booking.", s.GenerationKey);
+                                        logger.LogWarning("Bỏ qua sinh slot {GenKey} vì xung đột với khung giờ còn hoạt động.", s.GenerationKey);
                                         skippedCount++;
                                         continue;
                                     }
@@ -444,29 +450,24 @@ namespace RikiPath.Application.Services
                                         StartTime = s.StartUtc.UtcDateTime,
                                         EndTime = s.EndUtc.UtcDateTime,
                                         RoomId = Guid.NewGuid(),
-                                        MaxLearners = 1,
+                                        GroupPolicyId = groupPolicy?.Id,
+                                        SessionMinutesSnapshot = groupPolicy?.SessionMinutes,
+                                        RestMinutesSnapshot = groupPolicy?.RestMinutes,
+                                        MaxLearners = groupPolicy?.MaxLearners ?? 1,
                                         BookedCount = 0,
-                                        IsApproved = true,
-                                        PublishedAt = DateTime.UtcNow,
+                                        IsApproved = false,
+                                        PublishedAt = null,
                                         IsDeleted = false,
                                         CreatedDate = DateTime.UtcNow
                                     };
 
                                     await unitOfWork.MentorAvailabilities.AddAsync(newAvailability, token);
+                                    existingSlots.Add(newAvailability);
+                                    existingByKey.Add(s.GenerationKey, newAvailability);
                                     createdCount++;
-
-                                    createdSlots.Add(new PublishedSlotItemResponse
-                                    {
-                                        AvailabilityId = newAvailability.Id,
-                                        LocalDate = s.LocalDate,
-                                        DaypartCode = s.Daypart.ToString(),
-                                        StartTimeUtc = newAvailability.StartTime,
-                                        EndTimeUtc = newAvailability.EndTime,
-                                        LocalStart = TimeZoneInfo.ConvertTime(s.StartUtc, tz).ToString("HH:mm"),
-                                        LocalEnd = TimeZoneInfo.ConvertTime(s.EndUtc, tz).ToString("HH:mm"),
-                                        GenerationKey = s.GenerationKey,
-                                        IsApproved = newAvailability.IsApproved
-                                    });
+                                    newlyCreated.Add((newAvailability, s.LocalDate, s.Daypart.ToString(),
+                                        TimeZoneInfo.ConvertTime(s.StartUtc, tz).ToString("HH:mm"),
+                                        TimeZoneInfo.ConvertTime(s.EndUtc, tz).ToString("HH:mm"), s.GenerationKey));
                                 }
                             }
                         }
@@ -479,6 +480,20 @@ namespace RikiPath.Application.Services
                     await unitOfWork.SaveChangesAsync(token);
                 }, cancellationToken);
 
+                // EF gán Id sau SaveChanges; không trả AvailabilityId=0 cho client.
+                createdSlots.AddRange(newlyCreated.Select(item => new PublishedSlotItemResponse
+                {
+                    AvailabilityId = item.Slot.Id,
+                    LocalDate = item.LocalDate,
+                    DaypartCode = item.DaypartCode,
+                    StartTimeUtc = item.Slot.StartTime,
+                    EndTimeUtc = item.Slot.EndTime,
+                    LocalStart = item.LocalStart,
+                    LocalEnd = item.LocalEnd,
+                    GenerationKey = item.GenerationKey,
+                    IsApproved = item.Slot.IsApproved
+                }));
+
                 var response = new PublishSlotsResponse
                 {
                     CreatedCount = createdCount,
@@ -490,7 +505,7 @@ namespace RikiPath.Application.Services
 
                 return ApiResponse<PublishSlotsResponse>.Success(
                     response,
-                    message: $"Công bố thành công {createdCount} khung giờ làm việc mới ({skippedCount} khung giờ đã tồn tại trước đó được giữ nguyên).");
+                    message: $"Đã gửi {createdCount} khung giờ mới để quản trị viên xét duyệt ({skippedCount} khung giờ đã tồn tại được giữ nguyên).");
             }
             catch (DbUpdateException ex)
             {
@@ -674,6 +689,30 @@ namespace RikiPath.Application.Services
                     }
                 }
             }
+        }
+
+        private Task<MentorGroupPolicy?> GetGroupPolicyAsync(DateTime atUtc, CancellationToken cancellationToken)
+            => groupPolicies is null
+                ? Task.FromResult<MentorGroupPolicy?>(null)
+                : groupPolicies.GetEffectiveAsync(atUtc, cancellationToken);
+
+        private async Task<(IReadOnlyList<MentorGeneratedSlot> Slots, MentorGroupPolicy? Policy)> GenerateDailySlotsAsync(
+            int mentorId,
+            DateOnly localDate,
+            IReadOnlyCollection<MentorDaypart> dayparts,
+            TimeZoneInfo timeZone,
+            CancellationToken cancellationToken)
+        {
+            var localMidnightUtc = TimeZoneInfo.ConvertTimeToUtc(localDate.ToDateTime(TimeOnly.MinValue), timeZone);
+            var policy = await GetGroupPolicyAsync(localMidnightUtc, cancellationToken);
+            if (groupPolicies is not null && policy is null)
+                throw new InvalidOperationException("Chưa có chính sách buổi học áp dụng cho ngày này.");
+
+            var slots = policy is null
+                ? slotGenerator.GenerateDailySlots(mentorId, localDate, dayparts, DateTimeOffset.UtcNow, DefaultPolicyVersion)
+                : slotGenerator.GenerateDailySlots(mentorId, localDate, dayparts, DateTimeOffset.UtcNow,
+                    DefaultPolicyVersion, policy.SessionMinutes, policy.RestMinutes, policy.PublicationHorizonDays);
+            return (slots, policy);
         }
 
         private static MentorScheduleResponse MapToMentorScheduleResponse(MentorSchedule s) => new()

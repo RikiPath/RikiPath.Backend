@@ -82,7 +82,7 @@ public sealed class MentorBookingReservationConfig : IEntityTypeConfiguration<Me
         b.ToTable("MentorBookingReservations", t =>
         {
             t.HasCheckConstraint("CK_MentorBookingReservation_Interval", "\"EndUtc\" > \"StartUtc\"");
-            t.HasCheckConstraint("CK_MentorBookingReservation_Rest", "\"RestProtectedUntilUtc\" = \"EndUtc\" + INTERVAL '15 minutes'");
+            t.HasCheckConstraint("CK_MentorBookingReservation_Rest", "\"RestProtectedUntilUtc\" >= \"EndUtc\"");
             t.HasCheckConstraint("CK_MentorBookingReservation_PolicyVersion", "\"PolicyVersion\" > 0");
         });
         b.HasKey(x => x.Id);
@@ -99,8 +99,8 @@ public sealed class MentorBookingReservationConfig : IEntityTypeConfiguration<Me
         b.Property(x => x.CreatedAtUtc).HasColumnType("timestamp with time zone");
         b.Property(x => x.ReleasedAtUtc).HasColumnType("timestamp with time zone");
         b.HasIndex(x => x.MentorBookingId).IsUnique();
-        // Mỗi khung giờ chỉ có một bản ghi giữ chỗ đang hoạt động; bản ghi đã nhả vẫn được giữ để đối soát.
-        b.HasIndex(x => x.MentorAvailabilityId).IsUnique().HasFilter("\"ReleasedAtUtc\" IS NULL");
+        // Nhiều học viên có thể giữ chỗ trong một buổi; mỗi booking vẫn chỉ có một reservation.
+        b.HasIndex(x => x.MentorAvailabilityId).HasFilter("\"ReleasedAtUtc\" IS NULL");
         b.HasIndex(x => new { x.MentorId, x.LocalBusinessDate, x.ReleasedAtUtc });
         // Ràng buộc loại trừ GiST EX_MentorBookingReservation_ActiveMentorRest bảo vệ khoảng [StartUtc, RestProtectedUntilUtc)
         // khi ReleasedAtUtc IS NULL; yêu cầu PostgreSQL extension btree_gist đã được tích hợp điều kiện trong migration draft.

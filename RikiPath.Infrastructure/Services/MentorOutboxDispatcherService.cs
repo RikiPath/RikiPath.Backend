@@ -340,6 +340,23 @@ public class MentorOutboxDispatcherService : BackgroundService
                         break;
                     }
 
+                    case "CohortLearningNotification":
+                    {
+                        // Chuyển lớp / thay cố vấn chính: payload liệt kê sẵn người nhận; gửi sau commit, lỗi sẽ được thử lại.
+                        foreach (var item in root.GetProperty("Notifications").EnumerateArray())
+                        {
+                            var linkUrl = item.TryGetProperty("LinkUrl", out var link) && link.ValueKind == JsonValueKind.String ? link.GetString() : null;
+                            await DispatchNotificationAsync(
+                                item.GetProperty("UserId").GetInt32(),
+                                item.GetProperty("Title").GetString() ?? "Thông báo lớp học",
+                                item.GetProperty("Message").GetString() ?? string.Empty,
+                                item.GetProperty("Type").GetString() ?? "Cohort",
+                                linkUrl,
+                                cancellationToken);
+                        }
+                        break;
+                    }
+
                     case "DisputeResolved":
                     {
                         var bookingId = root.TryGetProperty("BookingId", out var bId) ? bId.GetInt32() : 0;

@@ -1225,7 +1225,6 @@ public sealed class MentorCompensationAndPayoutTests
             });
             c.DocumentFilter<RikiPath.WebApi.Swagger.CanonicalApiDocumentFilter>();
             c.OperationFilter<RikiPath.WebApi.Swagger.CanonicalApiOperationFilter>();
-            c.SchemaFilter<RikiPath.WebApi.Swagger.CanonicalApiSchemaFilter>();
         });
 
         using var app = builder.Build();

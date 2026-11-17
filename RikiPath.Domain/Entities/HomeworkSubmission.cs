@@ -12,7 +12,10 @@ public class HomeworkSubmission : Base
     public Lesson? Lesson { get; set; }
     public string? TextContent { get; set; }
     public string? FileUrl { get; set; }
+    public string? ScanStorageUrl { get; set; }
     public string? PrivateScanReference { get; set; }
     public DateTime SubmittedAt { get; set; }
+    public int RevisionCount { get; set; } = 1;
+    public DateTime? LastRevisedAtUtc { get; set; }
     public GradingResult? GradingResult { get; set; }
 }

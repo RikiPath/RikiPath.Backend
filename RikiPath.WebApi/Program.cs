@@ -19,6 +19,7 @@ using RikiPath.Infrastructure;
 using RikiPath.Infrastructure.Clients;
 using RikiPath.Infrastructure.Services;
 using RikiPath.WebApi.Hubs;
+using RikiPath.WebApi.Middleware;
 using RikiPath.WebApi.Services;
 using System.Net.Http.Headers;
 using System.Security.Claims;
@@ -118,6 +119,7 @@ internal class Program
         builder.Services.AddHttpClient("MentorCalendar", c => c.Timeout = TimeSpan.FromSeconds(15));
         builder.Services.AddScoped<IMentorCalendarService, MentorCalendarService>();
         builder.Services.AddHostedService<MentorCalendarWorker>();
+        builder.Services.AddHttpClient<IJlptExamSource, RikiPath.Infrastructure.Services.JlptExamSource>(c => c.Timeout = TimeSpan.FromSeconds(15));
         builder.Services.AddMemoryCache();
 
         // 3b. Firebase Admin SDK — dùng để verify idToken do React (Firebase Phone Auth) gửi lên.
@@ -379,6 +381,8 @@ internal class Program
             });
 
         builder.Services.AddAuthorization();
+        builder.Services.AddExceptionHandler<GlobalApiExceptionHandler>();
+        builder.Services.AddProblemDetails();
 
         // 8. Controllers & JSON Formatting
         builder.Services.AddControllers()
@@ -413,7 +417,6 @@ internal class Program
             });
             c.DocumentFilter<CanonicalApiDocumentFilter>();
             c.OperationFilter<CanonicalApiOperationFilter>();
-            c.SchemaFilter<CanonicalApiSchemaFilter>();
 
             var securityScheme = new OpenApiSecurityScheme
             {
@@ -461,7 +464,8 @@ internal class Program
         }
         else
         {
-            app.UseExceptionHandler("/error");
+                // Lỗi chưa xử lý trả về ApiResponse chuẩn qua GlobalApiExceptionHandler (không lộ stack trace/SQL).
+            app.UseExceptionHandler();
             app.UseHsts();
         }
         app.UseSwagger();

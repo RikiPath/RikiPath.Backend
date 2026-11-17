@@ -12,6 +12,8 @@ namespace RikiPath.Domain.Entities
 
         public int? MentorAvailabilityId { get; set; }
         public MentorAvailability? MentorAvailability { get; set; }
+        // Chỉ booking mới lưu học viên trực tiếp để khóa trùng chỗ trong cùng một buổi; lịch sử giữ null.
+        public int? LearnerId { get; set; }
 
         public MentorStatus Status { get; set; } = MentorStatus.PendingAssignment;
         public string? Question { get; set; }

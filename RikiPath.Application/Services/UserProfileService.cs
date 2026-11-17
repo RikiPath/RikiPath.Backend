@@ -200,7 +200,7 @@ namespace RikiPath.Application.Services
                 var userId = claimService.GetUserClaim().Id;
                 var level = await unitOfWork.CertificateLevels.GetActiveJlptLevelByIdAsync(
                     request.CurrentStudyLevelId, cancellationToken);
-                if (level is null || JlptCurriculum.Rank(level.Code) == 0)
+                if (level is null || !JlptCurriculum.IsSupportedStudyLevel(level.Code))
                     return ApiResponse<UserProfileResponse>.Fail(
                         "Cấp độ học không khả dụng; lộ trình tiêu chuẩn hiện hỗ trợ N5–N3.",
                         HttpStatusCode.BadRequest, errorCode: "STUDY_LEVEL_UNSUPPORTED");
@@ -248,7 +248,7 @@ namespace RikiPath.Application.Services
                 if (request.CertifiedJlptLevelId.HasValue)
                     certified = await unitOfWork.CertificateLevels.GetActiveJlptLevelByIdAsync(request.CertifiedJlptLevelId.Value, cancellationToken);
 
-                if (current is null || JlptCurriculum.Rank(current.Code) == 0)
+                if (current is null || !JlptCurriculum.IsSupportedStudyLevel(current.Code))
                     return ApiResponse<UserProfileResponse>.Fail("Cấp độ đang học không khả dụng; hiện hỗ trợ N5–N3.");
                 if (target is null || !IsSupportedGoalLevel(target.Code))
                     return ApiResponse<UserProfileResponse>.Fail("Mục tiêu JLPT phải thuộc N5–N2.");

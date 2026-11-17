@@ -335,7 +335,72 @@ public sealed class MentorDiscoveryTests
         Assert.Equal(0, result.Result!.TotalAvailableSlots);
     }
 
-    // 14. Khung giờ đang có Active Reservation Hold bị loại khỏi danh sách duyệt
+    [Fact]
+    public async Task GetPublicSlots_GroupSessionWithOneBooking_StillShowsThreeSeats()
+    {
+        await using var db = CreateInMemoryDb();
+        db.Users.Add(CreateMentor(35, "Sensei", "Group", MentorVerificationStatus.Approved));
+        var start = DateTime.UtcNow.AddDays(2).Date.AddHours(10);
+        db.MentorAvailabilities.Add(CreateSlot(351, 35, start, start.AddMinutes(90),
+            bookedCount: 1, maxLearners: 4));
+        await db.SaveChangesAsync();
+
+        var service = new MentorDiscoveryService(new UnitOfWork(db), NullLogger<MentorDiscoveryService>.Instance);
+        var result = await service.GetPublicSlotsAsync(35, new MentorSlotBrowsingRequest());
+
+        Assert.True(result.IsSuccess);
+        var slot = Assert.Single(Assert.Single(result.Result!.DailySlots).Slots);
+        Assert.Equal(1, slot.BookedCount);
+        Assert.Equal(4, slot.MaxLearners);
+        Assert.Equal(3, slot.RemainingSeats);
+    }
+
+    [Fact]
+    public async Task GetPublicSlots_CohortOwnedSession_IsNotOfferedAsSeparateBooking()
+    {
+        await using var db = CreateInMemoryDb();
+        db.Users.Add(CreateMentor(36, "Sensei", "Class", MentorVerificationStatus.Approved));
+        var start = DateTime.UtcNow.AddDays(2).Date.AddHours(10);
+        db.MentorAvailabilities.Add(CreateSlot(361, 36, start, start.AddMinutes(90), maxLearners: 4));
+        db.StudyCohorts.Add(new StudyCohort
+        {
+            Id = 1, PlanId = 1, MentorId = 36, Name = "Lớp N5", Capacity = 4,
+            StartsAt = start, EndsAt = start.AddMinutes(90), Status = "Published",
+            Sessions = [new StudyCohortSession { Number = 1, AvailabilityId = 361 }]
+        });
+        await db.SaveChangesAsync();
+
+        var service = new MentorDiscoveryService(new UnitOfWork(db), NullLogger<MentorDiscoveryService>.Instance);
+        var list = await service.GetPublicSlotsAsync(36, new MentorSlotBrowsingRequest());
+        var detail = await service.GetPublicSlotByIdAsync(361);
+
+        Assert.True(list.IsSuccess);
+        Assert.Equal(0, list.Result!.TotalAvailableSlots);
+        Assert.False(detail.IsSuccess);
+    }
+
+    [Fact]
+    public async Task GetPublicSlots_UsesPublishedDurationSnapshotInsteadOfLegacyConstant()
+    {
+        await using var db = CreateInMemoryDb();
+        db.Users.Add(CreateMentor(37, "Sensei", "Policy", MentorVerificationStatus.Approved));
+        var start = DateTime.UtcNow.AddDays(2).Date.AddHours(10);
+        var slot = CreateSlot(371, 37, start, start.AddMinutes(60), maxLearners: 4);
+        slot.SessionMinutesSnapshot = 60;
+        db.MentorAvailabilities.Add(slot);
+        await db.SaveChangesAsync();
+
+        var service = new MentorDiscoveryService(new UnitOfWork(db), NullLogger<MentorDiscoveryService>.Instance);
+        var list = await service.GetPublicSlotsAsync(37, new MentorSlotBrowsingRequest());
+        var detail = await service.GetPublicSlotByIdAsync(371);
+
+        Assert.True(list.IsSuccess);
+        Assert.Single(Assert.Single(list.Result!.DailySlots).Slots);
+        Assert.True(detail.IsSuccess);
+        Assert.Equal(60, detail.Result!.DurationMinutes);
+    }
+
+    // 14. Reservation của buổi khác trùng giờ phải chặn lịch, nhưng cùng buổi vẫn được chia sẻ chỗ.
     [Fact]
     public async Task GetPublicSlots_ActiveReservationHold_ExcludesSlot()
     {
@@ -345,6 +410,7 @@ public sealed class MentorDiscoveryTests
         var start = DateTime.UtcNow.AddDays(1).Date.AddHours(15);
         var end = start.AddMinutes(90);
         db.MentorAvailabilities.Add(CreateSlot(331, 33, start, end, bookedCount: 0));
+        db.MentorAvailabilities.Add(CreateSlot(332, 33, start, end, isApproved: false));
 
         // Active reservation: ReleasedAtUtc == null và EndUtc còn trong tương lai
         db.MentorBookingReservations.Add(new MentorBookingReservation
@@ -352,7 +418,7 @@ public sealed class MentorDiscoveryTests
             Id = 1,
             MentorId = 33,
             MentorBookingId = 999,
-            MentorAvailabilityId = 331,
+            MentorAvailabilityId = 332,
             LocalBusinessDate = DateOnly.FromDateTime(start),
             StartUtc = start,
             EndUtc = end,

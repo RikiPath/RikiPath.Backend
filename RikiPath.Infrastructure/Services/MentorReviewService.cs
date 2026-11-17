@@ -61,11 +61,16 @@ public sealed class MentorReviewService : IMentorReviewService
             if (booking.Status == MentorStatus.Cancelled)
                 return ApiResponse<MentorReviewResponse>.Fail("Không thể đánh giá lịch hẹn đã bị hủy.", HttpStatusCode.Conflict);
 
+            if (booking.UserSubscription?.PaymentStatus != PaymentStatus.Paid)
+                return ApiResponse<MentorReviewResponse>.Fail("Chỉ có thể đánh giá buổi tư vấn đã được thanh toán.", HttpStatusCode.Conflict);
+
             var nowUtc = DateTime.UtcNow;
             var slot = booking.MentorAvailability;
 
             // Kiểm tra điều kiện hoàn thành buổi tư vấn
-            var isCompleted = booking.Status == MentorStatus.Completed || (slot != null && slot.EndTime <= nowUtc);
+            var isCompleted = slot != null && slot.EndTime <= nowUtc &&
+                (booking.Status == MentorStatus.Completed ||
+                    (booking.AttendedAt.HasValue && booking.Status is (MentorStatus.Assigned or MentorStatus.Accepted)));
             if (!isCompleted)
                 return ApiResponse<MentorReviewResponse>.Fail("Chỉ có thể đánh giá sau khi buổi tư vấn đã hoàn thành.", HttpStatusCode.Conflict);
 

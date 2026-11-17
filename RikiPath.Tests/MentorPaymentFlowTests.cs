@@ -16,6 +16,20 @@ namespace RikiPath.Tests;
 
 public sealed class MentorPaymentFlowTests
 {
+    [Fact]
+    public async Task Short_consultation_cannot_overlap_a_long_course_session()
+    {
+        await using var db = Context(); var gateway = new Mock<IPaymentGatewayClient>();
+        var id = await Purchase(db, gateway);
+        var subscription = await db.UserSubscriptions.FindAsync(id); subscription!.PaymentStatus = PaymentStatus.Paid;
+        var slot = await db.MentorAvailabilities.SingleAsync();
+        db.StudyCourses.Add(new StudyCourse { Name = "Long course QA", LearnerId = 1, MentorId = 2, Status = "Active", PaymentStatus = "Paid",
+            SessionMinutes = 60, Sessions = [new() { Number = 1, ScheduledAt = slot.StartTime, Status = "Scheduled" }] });
+        await db.SaveChangesAsync();
+        var result = await BookingService(db).BookSlotAsync(new() { MentorAvailabilityId = slot.Id }, default);
+        Assert.False(result.IsSuccess); Assert.Equal(409, result.StatusCode);
+        Assert.Equal(0, await db.MentorBookings.CountAsync()); Assert.Equal(0, subscription.MeetingSessionsUsed);
+    }
     private static AppDbContext Context() => new(new DbContextOptionsBuilder<AppDbContext>()
         .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
     private static readonly AppSettings Settings = new()
@@ -148,11 +162,15 @@ public sealed class MentorPaymentFlowTests
     {
         await using var db = Context(); var gateway = new Mock<IPaymentGatewayClient>();
         var id = await Purchase(db, gateway);
-        var webhook = new PayOsWebhookRequest { Data = new PayOsWebhookData { Reference = "bank-ref" } };
+        // PR #70: webhook phải mang đúng paymentLinkId của đơn (PayOS gửi trường này); sai link bị từ chối.
+        var forged = new PayOsWebhookRequest { Data = new PayOsWebhookData { Reference = "bank-ref", PaymentLinkId = "other-link" } };
+        gateway.Setup(x => x.VerifyWebhook(forged)).Returns(new PaymentCallbackResult(true, true, id, 1000, ""));
+        var webhook = new PayOsWebhookRequest { Data = new PayOsWebhookData { Reference = "bank-ref", PaymentLinkId = "test-payment-link" } };
         gateway.Setup(x => x.VerifyWebhook(webhook)).Returns(new PaymentCallbackResult(true, true, id, 1000, ""));
         var uow = new UnitOfWork(db);
         var ledger = new MentorCreditLedgerService(uow, Claims(1, Role.Learner), NullLogger<MentorCreditLedgerService>.Instance);
         var service = new PaymentService(uow, gateway.Object, Settings, ledger);
+        Assert.False((await service.HandlePayOsWebhookAsync(forged, default)).IsSuccess);
         Assert.True((await service.HandlePayOsWebhookAsync(webhook, default)).IsSuccess);
         Assert.True((await service.HandlePayOsWebhookAsync(webhook, default)).IsSuccess);
         Assert.Equal(PaymentStatus.Paid, (await db.UserSubscriptions.FindAsync(id))!.PaymentStatus);

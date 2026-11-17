@@ -39,22 +39,29 @@ namespace RikiPath.Infrastructure.Clients
                 data.GetProperty("id").GetString() ?? string.Empty);
         }
 
-        public async Task<PaymentLinkResult> CreatePaymentLinkAsync(
+        public Task<PaymentLinkResult> CreatePaymentLinkAsync(
             long orderCode, int amount, string description, string returnUrl, string cancelUrl,
             CancellationToken cancellationToken)
+            => CreatePaymentLinkAsync(orderCode, amount, description, returnUrl, cancelUrl, null, cancellationToken);
+
+        public async Task<PaymentLinkResult> CreatePaymentLinkAsync(
+            long orderCode, int amount, string description, string returnUrl, string cancelUrl,
+            DateTime? expiresAtUtc, CancellationToken cancellationToken)
         {
             var payOs = RequireConfigured(appSettings.PayOs);
 
             // Ký trên đúng 5 field này, đúng thứ tự alphabet, theo doc PayOS "Create Payment Link".
-            var signatureData =
-                $"amount={amount}&cancelUrl={cancelUrl}&description={description}&orderCode={orderCode}&returnUrl={returnUrl}";
+            // "expiredAt" là trường tùy chọn và KHÔNG thuộc chữ ký.
+            var signatureData = BuildPaymentRequestSignatureData(orderCode, amount, description, returnUrl, cancelUrl);
             var signature = ComputeHmacSha256(signatureData, payOs.ChecksumKey);
 
-            var requestBody = new { orderCode, amount, description, cancelUrl, returnUrl, signature };
+            object requestBody = expiresAtUtc.HasValue
+                ? new { orderCode, amount, description, cancelUrl, returnUrl, expiredAt = ToUnixSeconds(expiresAtUtc.Value), signature }
+                : new { orderCode, amount, description, cancelUrl, returnUrl, signature };
 
             using var request = new HttpRequestMessage(HttpMethod.Post, CreatePaymentLinkUrl)
             {
-                Content = JsonContent.Create(requestBody),
+                Content = JsonContent.Create(requestBody, requestBody.GetType()),
             };
             request.Headers.Add("x-client-id", payOs.ClientId);
             request.Headers.Add("x-api-key", payOs.ApiKey);
@@ -121,6 +128,21 @@ namespace RikiPath.Infrastructure.Clients
             var isSuccess = isValidSignature && webhook.Success && d.Code == "00";
 
             return new PaymentCallbackResult(isValidSignature, isSuccess, d.OrderCode, d.Amount, d.Description);
+        }
+
+        internal static string BuildPaymentRequestSignatureData(long orderCode, int amount, string description, string returnUrl, string cancelUrl)
+            => $"amount={amount}&cancelUrl={cancelUrl}&description={description}&orderCode={orderCode}&returnUrl={returnUrl}";
+
+        // PayOS: Unix timestamp (giây, Int32).
+        internal static int ToUnixSeconds(DateTime value)
+        {
+            var utc = value.Kind switch
+            {
+                DateTimeKind.Utc => value,
+                DateTimeKind.Local => value.ToUniversalTime(),
+                _ => DateTime.SpecifyKind(value, DateTimeKind.Utc)
+            };
+            return checked((int)new DateTimeOffset(utc).ToUnixTimeSeconds());
         }
 
         private static string ComputeHmacSha256(string data, string key)

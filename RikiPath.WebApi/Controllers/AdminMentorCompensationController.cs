@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using RikiPath.Application.IServices;
 using RikiPath.Application.Requests.MentorCompensation;
 using RikiPath.Application.Responses;
+using RikiPath.WebApi.Authorization;
 
 namespace RikiPath.WebApi.Controllers;
 
@@ -23,6 +24,7 @@ public sealed class AdminMentorCompensationController(IMentorCompensationService
     /// <param name="mentorUserId">Mã tài khoản người dùng của Cố vấn (User ID, tùy chọn).</param>
     /// <param name="ct">Token hủy yêu cầu.</param>
     /// <response code="200">Truy xuất danh sách đơn giá thù lao thành công.</response>
+    [MentorFinanceDisabled]
     [HttpGet("hourly-rates")]
     public async Task<IActionResult> GetHourlyRates([FromQuery] int? mentorUserId, CancellationToken ct)
         => ToActionResult(await compensationService.GetMentorHourlyRatesAsync(mentorUserId, ct));
@@ -36,6 +38,7 @@ public sealed class AdminMentorCompensationController(IMentorCompensationService
     /// <param name="request">Thông tin cấu hình đơn giá thù lao mới bao gồm số tiền, loại hình áp dụng và ngày hiệu lực.</param>
     /// <param name="ct">Token hủy yêu cầu.</param>
     /// <response code="200">Cấu hình đơn giá thù lao thành công.</response>
+    [MentorFinanceDisabled]
     [HttpPost("hourly-rates")]
     public async Task<IActionResult> ConfigureHourlyRate([FromBody] ConfigureMentorHourlyRateRequest request, CancellationToken ct)
         => ToActionResult(await compensationService.ConfigureMentorHourlyRateAsync(request, ct));
@@ -48,6 +51,7 @@ public sealed class AdminMentorCompensationController(IMentorCompensationService
     /// </remarks>
     /// <param name="ct">Token hủy yêu cầu.</param>
     /// <response code="200">Truy xuất danh sách hệ số thù lao thành công.</response>
+    [MentorFinanceDisabled]
     [HttpGet("jlpt-coefficients")]
     public async Task<IActionResult> GetJlptCoefficients(CancellationToken ct)
         => ToActionResult(await compensationService.GetJlptCoefficientsAsync(ct));
@@ -61,6 +65,7 @@ public sealed class AdminMentorCompensationController(IMentorCompensationService
     /// <param name="request">Cấu hình hệ số thù lao theo cấp độ JLPT.</param>
     /// <param name="ct">Token hủy yêu cầu.</param>
     /// <response code="200">Cấu hình hệ số thù lao thành công.</response>
+    [MentorFinanceDisabled]
     [HttpPost("jlpt-coefficients")]
     public async Task<IActionResult> ConfigureJlptCoefficient([FromBody] ConfigureJlptCoefficientRequest request, CancellationToken ct)
         => ToActionResult(await compensationService.ConfigureJlptCoefficientAsync(request, ct));
@@ -113,6 +118,7 @@ public sealed class AdminMentorCompensationController(IMentorCompensationService
     /// <param name="bookingId">Mã định danh buổi tư vấn (Booking ID).</param>
     /// <param name="ct">Token hủy yêu cầu.</param>
     /// <response code="200">Đánh giá thời lượng buổi tư vấn thành công.</response>
+    [MentorFinanceDisabled]
     [HttpPost("bookings/{bookingId:int}/attendance/evaluate")]
     public async Task<IActionResult> EvaluateBookingAttendance(int bookingId, CancellationToken ct)
         => ToActionResult(await compensationService.EvaluateBookingAttendanceAsync(bookingId, ct));
@@ -127,6 +133,7 @@ public sealed class AdminMentorCompensationController(IMentorCompensationService
     /// <param name="request">Thời lượng buổi tư vấn được công nhận và ghi chú xét duyệt.</param>
     /// <param name="ct">Token hủy yêu cầu.</param>
     /// <response code="200">Xét duyệt thời lượng buổi tư vấn thành công.</response>
+    [MentorFinanceDisabled]
     [HttpPost("bookings/{bookingId:int}/attendance/review")]
     public async Task<IActionResult> ReviewBookingAttendance(
         int bookingId,
@@ -143,6 +150,7 @@ public sealed class AdminMentorCompensationController(IMentorCompensationService
     /// <param name="bookingId">Mã định danh buổi tư vấn (Booking ID).</param>
     /// <param name="ct">Token hủy yêu cầu.</param>
     /// <response code="200">Truy xuất kết quả xác nhận thời lượng thành công.</response>
+    [MentorFinanceDisabled]
     [HttpGet("bookings/{bookingId:int}/attendance")]
     public async Task<IActionResult> GetBookingAttendanceApproval(int bookingId, CancellationToken ct)
         => ToActionResult(await compensationService.GetBookingAttendanceApprovalAsync(bookingId, ct));
@@ -156,6 +164,7 @@ public sealed class AdminMentorCompensationController(IMentorCompensationService
     /// <param name="mentorUserId">Mã tài khoản người dùng của Cố vấn (User ID, tùy chọn).</param>
     /// <param name="ct">Token hủy yêu cầu.</param>
     /// <response code="200">Truy xuất sổ cái thu nhập thù lao thành công.</response>
+    [MentorFinanceDisabled]
     [HttpGet("earnings")]
     public async Task<IActionResult> GetEarnings([FromQuery] int? mentorUserId, CancellationToken ct)
         => ToActionResult(await compensationService.GetMentorEarningsAsync(mentorUserId, ct));
@@ -169,6 +178,7 @@ public sealed class AdminMentorCompensationController(IMentorCompensationService
     /// <param name="request">Thông tin kỳ đối soát cần tạo bao gồm năm, tháng và phạm vi Cố vấn áp dụng.</param>
     /// <param name="ct">Token hủy yêu cầu.</param>
     /// <response code="200">Khởi tạo kỳ đối soát thù lao thành công.</response>
+    [MentorFinanceDisabled]
     [HttpPost("payrolls/generate")]
     public async Task<IActionResult> GenerateMonthlyPayroll([FromBody] GenerateMonthlyPayrollRequest request, CancellationToken ct)
         => ToActionResult(await compensationService.GenerateMonthlyPayrollAsync(request, ct));
@@ -184,6 +194,7 @@ public sealed class AdminMentorCompensationController(IMentorCompensationService
     /// <param name="month">Tháng cần lọc kỳ đối soát thù lao (từ 1 đến 12).</param>
     /// <param name="ct">Token hủy yêu cầu.</param>
     /// <response code="200">Truy xuất danh sách kỳ đối soát thù lao thành công.</response>
+    [MentorFinanceDisabled]
     [HttpGet("payrolls")]
     public async Task<IActionResult> GetPayrollPeriods(
         [FromQuery] int? mentorUserId,
@@ -202,6 +213,7 @@ public sealed class AdminMentorCompensationController(IMentorCompensationService
     /// <param name="ct">Token hủy yêu cầu.</param>
     /// <response code="200">Truy xuất chi tiết kỳ đối soát thù lao thành công.</response>
     /// <response code="404">Không tìm thấy kỳ đối soát theo mã định danh.</response>
+    [MentorFinanceDisabled]
     [HttpGet("payrolls/{payrollPeriodId:long}")]
     public async Task<IActionResult> GetPayrollPeriod(long payrollPeriodId, CancellationToken ct)
         => ToActionResult(await compensationService.GetPayrollPeriodAsync(payrollPeriodId, ct));
@@ -216,6 +228,7 @@ public sealed class AdminMentorCompensationController(IMentorCompensationService
     /// <param name="request">Thông tin bút toán điều chỉnh: loại điều chỉnh (Thưởng/Phạt), số tiền và lý do cụ thể.</param>
     /// <param name="ct">Token hủy yêu cầu.</param>
     /// <response code="200">Thêm bút toán điều chỉnh thành công.</response>
+    [MentorFinanceDisabled]
     [HttpPost("payrolls/{payrollPeriodId:long}/adjustments")]
     public async Task<IActionResult> AddPayrollAdjustment(
         long payrollPeriodId,
@@ -233,6 +246,7 @@ public sealed class AdminMentorCompensationController(IMentorCompensationService
     /// <param name="request">Quyết định phê duyệt kỳ đối soát và ghi chú của Quản trị viên.</param>
     /// <param name="ct">Token hủy yêu cầu.</param>
     /// <response code="200">Phê duyệt kỳ đối soát thù lao thành công.</response>
+    [MentorFinanceDisabled]
     [HttpPost("payrolls/{payrollPeriodId:long}/approve")]
     public async Task<IActionResult> ApproveMonthlyPayroll(
         long payrollPeriodId,
@@ -249,6 +263,7 @@ public sealed class AdminMentorCompensationController(IMentorCompensationService
     /// <param name="mentorUserId">Mã tài khoản người dùng của Cố vấn (User ID, tùy chọn).</param>
     /// <param name="ct">Token hủy yêu cầu.</param>
     /// <response code="200">Truy xuất danh sách tài khoản ngân hàng thành công.</response>
+    [MentorFinanceDisabled]
     [HttpGet("bank-accounts")]
     public async Task<IActionResult> GetMentorBankAccounts([FromQuery] int? mentorUserId, CancellationToken ct)
         => ToActionResult(await compensationService.GetMentorBankAccountsForAdminAsync(mentorUserId, ct));
@@ -263,6 +278,7 @@ public sealed class AdminMentorCompensationController(IMentorCompensationService
     /// <param name="request">Trạng thái xác thực (Duyệt/Từ chối) và ghi chú đối soát của Quản trị viên.</param>
     /// <param name="ct">Token hủy yêu cầu.</param>
     /// <response code="200">Xác thực tài khoản ngân hàng thành công.</response>
+    [MentorFinanceDisabled]
     [HttpPost("bank-accounts/{bankAccountId:long}/verify")]
     public async Task<IActionResult> VerifyMentorBankAccount(
         long bankAccountId,
@@ -278,6 +294,7 @@ public sealed class AdminMentorCompensationController(IMentorCompensationService
     /// </remarks>
     /// <param name="ct">Token hủy yêu cầu.</param>
     /// <response code="200">Truy xuất danh sách tài khoản nguồn chi trả thành công.</response>
+    [MentorFinanceDisabled]
     [HttpGet("organization-payout-accounts")]
     public async Task<IActionResult> GetOrganizationPayoutAccounts(CancellationToken ct)
         => ToActionResult(await compensationService.GetOrganizationPayoutAccountsAsync(ct));
@@ -291,6 +308,7 @@ public sealed class AdminMentorCompensationController(IMentorCompensationService
     /// <param name="request">Thông tin tài khoản nguồn chi trả của tổ chức.</param>
     /// <param name="ct">Token hủy yêu cầu.</param>
     /// <response code="200">Cấu hình tài khoản nguồn chi trả thành công.</response>
+    [MentorFinanceDisabled]
     [HttpPost("organization-payout-accounts")]
     public async Task<IActionResult> ConfigureOrganizationPayoutAccount(
         [FromBody] ConfigureOrganizationPayoutAccountRequest request,
@@ -306,6 +324,7 @@ public sealed class AdminMentorCompensationController(IMentorCompensationService
     /// <param name="mentorUserId">Mã tài khoản người dùng của Cố vấn (tùy chọn).</param>
     /// <param name="ct">Token hủy yêu cầu.</param>
     /// <response code="200">Truy xuất danh sách nghĩa vụ chi trả thành công.</response>
+    [MentorFinanceDisabled]
     [HttpGet("payouts")]
     public async Task<IActionResult> GetPayoutObligations([FromQuery] int? mentorUserId, CancellationToken ct)
         => ToActionResult(await compensationService.GetPayoutObligationsAsync(mentorUserId, ct));
@@ -320,6 +339,7 @@ public sealed class AdminMentorCompensationController(IMentorCompensationService
     /// <param name="ct">Token hủy yêu cầu.</param>
     /// <response code="200">Truy xuất chi tiết nghĩa vụ chi trả thành công.</response>
     /// <response code="404">Không tìm thấy nghĩa vụ chi trả theo mã định danh.</response>
+    [MentorFinanceDisabled]
     [HttpGet("payouts/{obligationId:long}")]
     public async Task<IActionResult> GetPayoutObligation(long obligationId, CancellationToken ct)
         => ToActionResult(await compensationService.GetPayoutObligationAsync(obligationId, ct));
@@ -334,6 +354,7 @@ public sealed class AdminMentorCompensationController(IMentorCompensationService
     /// <param name="request">Phương thức chi trả được chọn (Manual hoặc PayOS).</param>
     /// <param name="ct">Token hủy yêu cầu.</param>
     /// <response code="200">Chọn phương thức chi trả thành công.</response>
+    [MentorFinanceDisabled]
     [HttpPost("payouts/{obligationId:long}/select-method")]
     public async Task<IActionResult> SelectPayoutMethod(
         long obligationId,
@@ -351,6 +372,7 @@ public sealed class AdminMentorCompensationController(IMentorCompensationService
     /// <param name="request">Ghi chú khởi tạo quy trình chi trả ngân hàng thủ công.</param>
     /// <param name="ct">Token hủy yêu cầu.</param>
     /// <response code="200">Khởi tạo chi trả thủ công thành công.</response>
+    [MentorFinanceDisabled]
     [HttpPost("payouts/{obligationId:long}/manual/initiate")]
     public async Task<IActionResult> InitiateManualPayout(
         long obligationId,
@@ -368,6 +390,7 @@ public sealed class AdminMentorCompensationController(IMentorCompensationService
     /// <param name="request">Mã tham chiếu ngân hàng, ngày giao dịch và ghi chú hoàn tất chuyển khoản thủ công.</param>
     /// <param name="ct">Token hủy yêu cầu.</param>
     /// <response code="200">Xác nhận hoàn tất chi trả thủ công thành công.</response>
+    [MentorFinanceDisabled]
     [HttpPost("payouts/{obligationId:long}/manual/confirm")]
     public async Task<IActionResult> ConfirmManualPayout(
         long obligationId,
@@ -385,6 +408,7 @@ public sealed class AdminMentorCompensationController(IMentorCompensationService
     /// <param name="request">Yêu cầu thực hiện chi trả qua cổng payOS.</param>
     /// <param name="ct">Token hủy yêu cầu.</param>
     /// <response code="200">Thực hiện chi trả qua cổng payOS thành công.</response>
+    [MentorFinanceDisabled]
     [HttpPost("payouts/{obligationId:long}/payos/execute")]
     public async Task<IActionResult> ExecutePayOsPayout(
         long obligationId,
@@ -401,6 +425,7 @@ public sealed class AdminMentorCompensationController(IMentorCompensationService
     /// <param name="request">Danh sách mã nghĩa vụ chi trả cần thực hiện tự động qua payOS.</param>
     /// <param name="ct">Token hủy yêu cầu.</param>
     /// <response code="200">Thực hiện chi trả hàng loạt qua payOS thành công.</response>
+    [MentorFinanceDisabled]
     [HttpPost("payouts/payos/batch")]
     public async Task<IActionResult> ExecutePayOsBatchPayout(
         [FromBody] ExecutePayOsBatchPayoutRequest request,
@@ -417,6 +442,7 @@ public sealed class AdminMentorCompensationController(IMentorCompensationService
     /// <param name="request">Thông tin đối soát trạng thái giao dịch chi trả.</param>
     /// <param name="ct">Token hủy yêu cầu.</param>
     /// <response code="200">Đối soát trạng thái chi trả thành công.</response>
+    [MentorFinanceDisabled]
     [HttpPost("payouts/{obligationId:long}/reconcile")]
     public async Task<IActionResult> ReconcilePayoutObligation(
         long obligationId,
@@ -432,6 +458,7 @@ public sealed class AdminMentorCompensationController(IMentorCompensationService
     /// </remarks>
     /// <param name="ct">Token hủy yêu cầu.</param>
     /// <response code="200">Truy xuất số dư ví payOS thành công.</response>
+    [MentorFinanceDisabled]
     [HttpGet("payouts/payos/balance")]
     public async Task<IActionResult> GetPayOsPayoutBalance(CancellationToken ct)
         => ToActionResult(await compensationService.GetPayOsPayoutBalanceAsync(ct));
@@ -445,6 +472,7 @@ public sealed class AdminMentorCompensationController(IMentorCompensationService
     /// <param name="obligationIds">Danh sách các mã nghĩa vụ chi trả cần ước tính số tiền.</param>
     /// <param name="ct">Token hủy yêu cầu.</param>
     /// <response code="200">Ước tính số tiền chi trả thành công.</response>
+    [MentorFinanceDisabled]
     [HttpPost("payouts/payos/estimate-credit")]
     public async Task<IActionResult> EstimatePayOsBatchCredit([FromBody] List<long> obligationIds, CancellationToken ct)
         => ToActionResult(await compensationService.EstimatePayOsBatchCreditAsync(obligationIds, ct));
