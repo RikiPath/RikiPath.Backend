@@ -68,13 +68,6 @@ public sealed partial class StudyCourseService
                 RequireConflict(!await uow.StudyCourses.Query().AnyAsync(e => e.PaymentStatus == "Paid" && e.Status != "Cancelled" && e.LearnerId == c.LearnerId
                     && e.Sessions.Any(s => s.Id != session.Id && (!c.CohortId.HasValue || e.CohortId != c.CohortId || s.AvailabilityId != session.AvailabilityId) && s.Status == "Scheduled" && s.ScheduledAt < slotRestEnd
                         && s.ScheduledAt.AddMinutes(e.SessionMinutes + (s.Availability != null && s.Availability.RestMinutesSnapshot.HasValue ? s.Availability.RestMinutesSnapshot.Value : 0)) > slot.StartTime), ct), "Lịch thay thế bị trùng.");
-                RequireConflict(!await uow.MentorBookings.Query().AnyAsync(b => !b.IsDeleted && b.MentorAvailability != null
-                    && b.UserSubscription.UserId == c.LearnerId
-                    && (b.Status == MentorStatus.Assigned || b.Status == MentorStatus.Accepted
-                        || (b.Status == MentorStatus.AwaitingPayment && b.UserSubscription.PaymentExpiresAt > DateTime.UtcNow))
-                    && b.MentorAvailability.StartTime < slotRestEnd
-                    && slot.StartTime < b.MentorAvailability.EndTime.AddMinutes(b.MentorAvailability.RestMinutesSnapshot ?? 0), ct),
-                    "Lịch thay thế trùng với buổi tư vấn hiện có.");
                 if (!c.CohortId.HasValue && session.AvailabilityId.HasValue)
                 {
                     var old = await uow.MentorAvailabilities.GetByIdAsync(session.AvailabilityId.Value, ct);
@@ -112,13 +105,6 @@ public sealed partial class StudyCourseService
                         && e.Status != "Cancelled"
                         && e.Sessions.Any(s => s.AvailabilityId != previousId && s.Status == "Scheduled" && s.ScheduledAt < slot.EndTime
                             && s.ScheduledAt.AddMinutes(e.SessionMinutes) > slot.StartTime), ct), "Một học viên trong lớp bị trùng lịch thay thế.");
-                    RequireConflict(!await uow.MentorBookings.Query().AnyAsync(b => !b.IsDeleted && b.MentorAvailability != null
-                        && learners.Contains(b.UserSubscription.UserId)
-                        && (b.Status == MentorStatus.Assigned || b.Status == MentorStatus.Accepted
-                            || (b.Status == MentorStatus.AwaitingPayment && b.UserSubscription.PaymentExpiresAt > DateTime.UtcNow))
-                        && b.MentorAvailability.StartTime < slot.EndTime
-                        && slot.StartTime < b.MentorAvailability.EndTime, ct),
-                        "Một học viên trong lớp có lịch tư vấn trùng giờ thay thế.");
                     classSession.AvailabilityId = slot.Id; classSession.Availability = slot;
                     foreach (var enrollment in cohort.Enrollments.Where(e => e.PaymentStatus == "Paid" && e.Status == "Active"))
                     {

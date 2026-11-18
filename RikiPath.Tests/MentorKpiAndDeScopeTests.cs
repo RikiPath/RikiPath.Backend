@@ -1,27 +1,11 @@
 using System.Net;
-using System.Reflection;
-using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Mvc.Abstractions;
-using Microsoft.AspNetCore.Mvc.Filters;
-using Microsoft.AspNetCore.Routing;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging.Abstractions;
-using RikiPath.Application;
 using RikiPath.Application.IServices;
-using RikiPath.Application.Requests.MentorMeetings;
-using RikiPath.Application.Responses;
 using RikiPath.Application.Services;
-using RikiPath.Domain;
 using RikiPath.Domain.Entities;
 using RikiPath.Domain.Enums;
 using RikiPath.Infrastructure;
-using RikiPath.Infrastructure.Repositories;
 using RikiPath.Infrastructure.Services;
-using RikiPath.WebApi.Authorization;
-using RikiPath.WebApi.Controllers;
 
 namespace RikiPath.Tests;
 
@@ -54,219 +38,6 @@ public sealed class MentorKpiAndDeScopeTests
         return db;
     }
 
-    private static AuthorizationFilterContext BuildAuthContext(bool? enabledFlag)
-    {
-        var configValues = new Dictionary<string, string?>();
-        if (enabledFlag.HasValue)
-        {
-            configValues["MentorFinance:PayrollAndPayoutEnabled"] = enabledFlag.Value ? "true" : "false";
-        }
-
-        var config = new ConfigurationBuilder()
-            .AddInMemoryCollection(configValues)
-            .Build();
-
-        var services = new ServiceCollection()
-            .AddSingleton<IConfiguration>(config)
-            .BuildServiceProvider();
-
-        var httpContext = new DefaultHttpContext { RequestServices = services };
-        var actionContext = new ActionContext(httpContext, new RouteData(), new ActionDescriptor());
-        return new AuthorizationFilterContext(actionContext, []);
-    }
-
-    [Fact]
-    public void MentorFinanceDisabled_BlocksFinancialEndpoints_AndKeepsQualificationsActive()
-    {
-        var mentorDiscontinued = new[]
-        {
-            nameof(MentorCompensationController.GetMyOverview),
-            nameof(MentorCompensationController.GetMyHourlyRates),
-            nameof(MentorCompensationController.GetMyEarnings),
-            nameof(MentorCompensationController.GetMyPayrollPeriods),
-            nameof(MentorCompensationController.GetMyPayrollPeriod),
-            nameof(MentorCompensationController.GetMyBankAccounts),
-            nameof(MentorCompensationController.UpsertMyBankAccount),
-            nameof(MentorCompensationController.GetMyPayouts),
-            nameof(MentorCompensationController.GetMyPayoutObligation),
-        };
-
-        foreach (var methodName in mentorDiscontinued)
-        {
-            var method = typeof(MentorCompensationController).GetMethod(methodName);
-            Assert.NotNull(method);
-            Assert.NotNull(method!.GetCustomAttribute<MentorFinanceDisabledAttribute>());
-        }
-
-        var mentorQualMethod = typeof(MentorCompensationController).GetMethod(nameof(MentorCompensationController.GetMyQualifications));
-        Assert.NotNull(mentorQualMethod);
-        Assert.Null(mentorQualMethod!.GetCustomAttribute<MentorFinanceDisabledAttribute>());
-
-        var adminDiscontinued = new[]
-        {
-            nameof(AdminMentorCompensationController.GetHourlyRates),
-            nameof(AdminMentorCompensationController.ConfigureHourlyRate),
-            nameof(AdminMentorCompensationController.GetJlptCoefficients),
-            nameof(AdminMentorCompensationController.ConfigureJlptCoefficient),
-            nameof(AdminMentorCompensationController.EvaluateBookingAttendance),
-            nameof(AdminMentorCompensationController.ReviewBookingAttendance),
-            nameof(AdminMentorCompensationController.GetBookingAttendanceApproval),
-            nameof(AdminMentorCompensationController.GetEarnings),
-            nameof(AdminMentorCompensationController.GenerateMonthlyPayroll),
-            nameof(AdminMentorCompensationController.GetPayrollPeriods),
-            nameof(AdminMentorCompensationController.GetPayrollPeriod),
-            nameof(AdminMentorCompensationController.AddPayrollAdjustment),
-            nameof(AdminMentorCompensationController.ApproveMonthlyPayroll),
-            nameof(AdminMentorCompensationController.GetMentorBankAccounts),
-            nameof(AdminMentorCompensationController.VerifyMentorBankAccount),
-            nameof(AdminMentorCompensationController.GetOrganizationPayoutAccounts),
-            nameof(AdminMentorCompensationController.ConfigureOrganizationPayoutAccount),
-            nameof(AdminMentorCompensationController.GetPayoutObligations),
-            nameof(AdminMentorCompensationController.GetPayoutObligation),
-            nameof(AdminMentorCompensationController.SelectPayoutMethod),
-            nameof(AdminMentorCompensationController.InitiateManualPayout),
-            nameof(AdminMentorCompensationController.ConfirmManualPayout),
-            nameof(AdminMentorCompensationController.ExecutePayOsPayout),
-            nameof(AdminMentorCompensationController.ExecutePayOsBatchPayout),
-            nameof(AdminMentorCompensationController.ReconcilePayoutObligation),
-            nameof(AdminMentorCompensationController.GetPayOsPayoutBalance),
-            nameof(AdminMentorCompensationController.EstimatePayOsBatchCredit),
-        };
-
-        foreach (var methodName in adminDiscontinued)
-        {
-            var method = typeof(AdminMentorCompensationController).GetMethod(methodName);
-            Assert.NotNull(method);
-            Assert.NotNull(method!.GetCustomAttribute<MentorFinanceDisabledAttribute>());
-        }
-
-        foreach (var keptQualMethod in new[]
-        {
-            nameof(AdminMentorCompensationController.GetQualifications),
-            nameof(AdminMentorCompensationController.GrantQualification),
-            nameof(AdminMentorCompensationController.RevokeQualification),
-        })
-        {
-            var method = typeof(AdminMentorCompensationController).GetMethod(keptQualMethod);
-            Assert.NotNull(method);
-            Assert.Null(method!.GetCustomAttribute<MentorFinanceDisabledAttribute>());
-        }
-
-        // Runtime filter check: default (missing config) and explicit false -> 403 MENTOR_FINANCE_OUT_OF_SCOPE
-        var filter = new MentorFinanceDisabledAttribute();
-        foreach (bool? flag in new bool?[] { null, false })
-        {
-            var authCtx = BuildAuthContext(flag);
-            filter.OnAuthorization(authCtx);
-            var objResult = Assert.IsType<ObjectResult>(authCtx.Result);
-            Assert.Equal((int)HttpStatusCode.Forbidden, objResult.StatusCode);
-            var payload = Assert.IsType<ApiResponse<object>>(objResult.Value);
-            Assert.False(payload.IsSuccess);
-            Assert.Equal("MENTOR_FINANCE_OUT_OF_SCOPE", payload.ErrorCode);
-        }
-
-        var enabledCtx = BuildAuthContext(true);
-        filter.OnAuthorization(enabledCtx);
-        Assert.Null(enabledCtx.Result);
-    }
-
-    [Fact]
-    public async Task BookSlotAsync_SucceedsWithoutHourlyRateOrJlptCoefficient_WhenQualificationExists()
-    {
-        await using var db = CreateInMemoryDb();
-        var admin = new UserAccount { Id = 1, Role = Role.Admin, FirstName = "Admin", Email = "admin@riki.jp", PasswordHash = [], PasswordSalt = [] };
-        var mentor = new UserAccount { Id = 10, Role = Role.Mentor, FirstName = "Haruto", LastName = "Sato", Email = "haruto@riki.jp", PasswordHash = [], PasswordSalt = [] };
-        var learner = new UserAccount { Id = 20, Role = Role.Learner, FirstName = "An", LastName = "Nguyen", Email = "an@riki.jp", PasswordHash = [], PasswordSalt = [] };
-        db.Users.AddRange(admin, mentor, learner);
-        db.MentorProfiles.Add(new MentorProfile
-        {
-            MentorId = mentor.Id,
-            VerificationStatus = MentorVerificationStatus.Approved,
-            Bio = "JLPT N3/N2 Mentor"
-        });
-
-        db.MentorTeachingQualifications.Add(new MentorTeachingQualification
-        {
-            MentorUserId = mentor.Id,
-            CertificateLevelId = 3, // N3
-            IsActive = true,
-            VerifiedByAdminId = admin.Id,
-            VerifiedAtUtc = DateTime.UtcNow.AddDays(-5)
-        });
-
-        var slotStart = DateTime.UtcNow.Date.AddDays(3).AddHours(3);
-        var slot = new MentorAvailability
-        {
-            Id = 500,
-            MentorId = mentor.Id,
-            StartTime = slotStart,
-            EndTime = slotStart.AddMinutes(90),
-            MaxLearners = 1,
-            BookedCount = 0,
-            IsApproved = true,
-            RoomId = Guid.NewGuid()
-        };
-        db.MentorAvailabilities.Add(slot);
-
-        var sub = new UserSubscription
-        {
-            Id = 600,
-            UserId = learner.Id,
-            SubscriptionPlanId = 1,
-            CertificateLevelId = 3, // N3
-            PaymentStatus = PaymentStatus.Paid,
-            MeetingSessionsIncluded = 2,
-            PurchasedAt = DateTime.UtcNow,
-            EndDate = DateTime.UtcNow.AddDays(30)
-        };
-        db.UserSubscriptions.Add(sub);
-
-        var grant = new MentorCreditGrant
-        {
-            Id = 700,
-            LearnerId = learner.Id,
-            UserSubscriptionId = sub.Id,
-            CertificateLevelId = 3,
-            InitialQuantity = 2,
-            AvailableQuantity = 2,
-            EffectiveFromUtc = DateTime.UtcNow.AddMinutes(-5),
-            ExpiresAtUtc = DateTime.UtcNow.AddDays(30),
-            CreatedAtUtc = DateTime.UtcNow
-        };
-        db.MentorCreditGrants.Add(grant);
-        await db.SaveChangesAsync();
-
-        // Zero MentorHourlyRates and zero JlptLevelPayCoefficients seeded
-        Assert.Empty(db.MentorHourlyRates);
-        Assert.Empty(db.JlptLevelPayCoefficients);
-
-        var claims = new MutableClaimService(learner.Id, Role.Learner);
-        var uow = new UnitOfWork(db);
-        var creditLedger = new MentorCreditLedgerService(uow, claims, NullLogger<MentorCreditLedgerService>.Instance);
-        var settings = new AppSettings
-        {
-            FrontendBaseUrl = "https://rikipath.test"
-        };
-        var bookingService = new MentorBookingService(db, uow, claims, creditLedger, settings, NullLogger<MentorBookingService>.Instance);
-
-        var result = await bookingService.BookSlotAsync(new BookIncludedMeetingRequest
-        {
-            MentorAvailabilityId = slot.Id,
-            JlptLevel = "N3",
-            Question = "Em muốn luyện đọc hiểu N3."
-        });
-
-        Assert.True(result.IsSuccess, result.ErrorMessage);
-        Assert.Equal((int)HttpStatusCode.Created, result.StatusCode);
-
-        var savedBooking = await db.MentorBookings.SingleAsync(b => b.Id == result.Result!.Id);
-        Assert.Equal(3, savedBooking.CompensationLevelId);
-        Assert.Null(savedBooking.FrozenHourlyRate);
-        Assert.Null(savedBooking.FrozenLevelCoefficient);
-        Assert.Null(savedBooking.ScheduledCompensationAmount);
-        Assert.Equal(1, (await db.MentorCreditGrants.FindAsync(grant.Id))!.AvailableQuantity);
-    }
-
     [Fact]
     public async Task MentorKpiService_AggregatesSessionsAttendanceHomeworkReviewsDisputes_AndHandlesNullTurnaround()
     {
@@ -283,8 +54,10 @@ public sealed class MentorKpiAndDeScopeTests
         var plan = new StudyCoursePlan
         {
             Id = 1,
-            Name = "N3 1-1",
+            Name = "N3 Group",
             CertificateLevelId = 3,
+            SessionType = "Group",
+            Capacity = 4,
             DurationMonths = 1,
             SessionsPerWeek = 2,
             SessionMinutes = 60,
@@ -294,35 +67,7 @@ public sealed class MentorKpiAndDeScopeTests
         };
         db.StudyCoursePlans.Add(plan);
 
-        var sub = new UserSubscription
-        {
-            Id = 10,
-            UserId = learner.Id,
-            SubscriptionPlanId = 1,
-            CertificateLevelId = 3,
-            PaymentStatus = PaymentStatus.Paid,
-            MeetingSessionsIncluded = 4,
-            PurchasedAt = DateTime.UtcNow.AddDays(-20)
-        };
-        db.UserSubscriptions.Add(sub);
-
         var now = DateTime.UtcNow;
-        var slotCompleted = new MentorAvailability { Id = 101, MentorId = mentor.Id, StartTime = now.AddDays(-4), EndTime = now.AddDays(-4).AddMinutes(90), IsApproved = true, RoomId = Guid.NewGuid() };
-        var slotCancelled = new MentorAvailability { Id = 102, MentorId = mentor.Id, StartTime = now.AddDays(-3), EndTime = now.AddDays(-3).AddMinutes(90), IsApproved = true, RoomId = Guid.NewGuid() };
-        var slotMissed = new MentorAvailability { Id = 103, MentorId = mentor.Id, StartTime = now.AddDays(-2), EndTime = now.AddDays(-2).AddMinutes(90), IsApproved = true, RoomId = Guid.NewGuid() };
-        var slotUpcoming = new MentorAvailability { Id = 104, MentorId = mentor.Id, StartTime = now.AddDays(2), EndTime = now.AddDays(2).AddMinutes(90), IsApproved = true, RoomId = Guid.NewGuid() };
-        db.MentorAvailabilities.AddRange(slotCompleted, slotCancelled, slotMissed, slotUpcoming);
-
-        var bCompleted = new MentorBooking { Id = 201, UserSubscriptionId = sub.Id, MentorAvailabilityId = slotCompleted.Id, CompensationLevelId = 3, Status = MentorStatus.Completed, ScheduledAt = slotCompleted.StartTime, AttendedAt = slotCompleted.StartTime.AddMinutes(5), CompletedAt = slotCompleted.EndTime };
-        var bCancelled = new MentorBooking { Id = 202, UserSubscriptionId = sub.Id, MentorAvailabilityId = slotCancelled.Id, CompensationLevelId = 3, Status = MentorStatus.Cancelled, CancelledByRole = "Mentor", CancelledAtUtc = now.AddDays(-3) };
-        var bMissed = new MentorBooking { Id = 203, UserSubscriptionId = sub.Id, MentorAvailabilityId = slotMissed.Id, CompensationLevelId = 3, Status = MentorStatus.Accepted, ScheduledAt = slotMissed.StartTime };
-        var bUpcoming = new MentorBooking { Id = 204, UserSubscriptionId = sub.Id, MentorAvailabilityId = slotUpcoming.Id, CompensationLevelId = 3, Status = MentorStatus.Accepted, ScheduledAt = slotUpcoming.StartTime };
-        db.MentorBookings.AddRange(bCompleted, bCancelled, bMissed, bUpcoming);
-
-        db.MentorAttendanceRecords.AddRange(
-            new MentorAttendanceRecord { Id = 301, MentorBookingId = bCompleted.Id, RoomId = slotCompleted.RoomId, UserId = mentor.Id, Role = "Mentor", Status = MentorAttendanceStatus.Completed, TotalDurationSeconds = 75 * 60, FirstJoinedAtUtc = slotCompleted.StartTime },
-            new MentorAttendanceRecord { Id = 302, MentorBookingId = bCompleted.Id, RoomId = slotCompleted.RoomId, UserId = learner.Id, Role = "Learner", Status = MentorAttendanceStatus.Completed, TotalDurationSeconds = 70 * 60, FirstJoinedAtUtc = slotCompleted.StartTime });
-
         var course = new StudyCourse
         {
             Id = 401,
@@ -363,8 +108,8 @@ public sealed class MentorKpiAndDeScopeTests
             Id = 701,
             LearnerId = learner.Id,
             MentorId = mentor.Id,
-            MentorBookingId = bCompleted.Id,
-            Title = "Bài tập Kanji 1-1",
+            StudyCourseId = course.Id,
+            Title = "Bài tập Kanji",
             Status = "Submitted",
             CreatedDate = now.AddDays(-4),
             Submission = new HomeworkSubmission
@@ -376,13 +121,13 @@ public sealed class MentorKpiAndDeScopeTests
         });
 
         db.MentorReviews.AddRange(
-            new MentorReview { Id = 801, MentorBookingId = bCompleted.Id, MentorId = mentor.Id, LearnerId = learner.Id, Rating = 5, ModerationStatus = MentorReviewStatus.Approved, CreatedAtUtc = now.AddDays(-3) },
-            new MentorReview { Id = 802, MentorBookingId = bCancelled.Id, MentorId = mentor.Id, LearnerId = learner.Id, Rating = 4, ModerationStatus = MentorReviewStatus.Approved, CreatedAtUtc = now.AddDays(-2) });
+            new MentorReview { Id = 801, MentorBookingId = 201, MentorId = mentor.Id, LearnerId = learner.Id, Rating = 5, ModerationStatus = MentorReviewStatus.Approved, CreatedAtUtc = now.AddDays(-3) },
+            new MentorReview { Id = 802, MentorBookingId = 202, MentorId = mentor.Id, LearnerId = learner.Id, Rating = 4, ModerationStatus = MentorReviewStatus.Approved, CreatedAtUtc = now.AddDays(-2) });
 
         db.MentorDisputes.Add(new MentorDispute
         {
             Id = 901,
-            MentorBookingId = bMissed.Id,
+            MentorBookingId = 203,
             MentorId = mentor.Id,
             LearnerId = learner.Id,
             Status = MentorDisputeStatus.UnderReview,
@@ -401,16 +146,14 @@ public sealed class MentorKpiAndDeScopeTests
         Assert.True(res.IsSuccess, res.ErrorMessage);
         var kpi = res.Result!;
         Assert.Equal(["N3", "N2"], kpi.TeachingJlptLevels);
-        Assert.Equal(6, kpi.TotalAssignedSessions); // 4 bookings + 2 course sessions
-        Assert.Equal(4, kpi.AssignedBookingsCount);
+        Assert.Equal(2, kpi.TotalAssignedSessions);
+        Assert.Equal(0, kpi.AssignedBookingsCount);
         Assert.Equal(2, kpi.AssignedCourseSessionsCount);
-        Assert.Equal(2, kpi.CompletedValidSessions); // 1 booking + 1 course present
-        Assert.Equal(75 + 60, kpi.ConfirmedTeachingMinutes); // 75m WebRTC booking + 60m course fallback
-        Assert.Equal(90 + 60, kpi.ScheduledCompletedMinutes);
-        Assert.Equal(2, kpi.CancelledSessionsCount);
-        Assert.Equal(2, kpi.CancelledByMentorCount);
-        Assert.Equal(1, kpi.MissedOrNoShowSessionsCount);
-        Assert.Equal(1, kpi.UpcomingOrIncompleteSessionsCount);
+        Assert.Equal(1, kpi.CompletedValidSessions);
+        Assert.Equal(60, kpi.ConfirmedTeachingMinutes);
+        Assert.Equal(60, kpi.ScheduledCompletedMinutes);
+        Assert.Equal(1, kpi.CancelledSessionsCount);
+        Assert.Equal(1, kpi.CancelledByMentorCount);
         Assert.Equal(2, kpi.HomeworkAssignedCount);
         Assert.Equal(2, kpi.HomeworkSubmittedCount);
         Assert.Equal(1, kpi.HomeworkGradedCount);
@@ -422,11 +165,7 @@ public sealed class MentorKpiAndDeScopeTests
         Assert.Equal(1, kpi.OpenDisputesCount);
         Assert.NotEmpty(kpi.WeeklyBreakdown);
         Assert.NotEmpty(kpi.MonthlyBreakdown);
-        Assert.Equal(6, kpi.RecentSessions.Count);
-
-        // Role enforcement + Admin attendance detail
-        var forbiddenAdminCall = await kpiService.GetAdminBookingAttendanceAsync(bCompleted.Id);
-        Assert.Equal((int)HttpStatusCode.Forbidden, forbiddenAdminCall.StatusCode);
+        Assert.Equal(2, kpi.RecentSessions.Count);
 
         claims.UserId = admin.Id;
         claims.Role = Role.Admin;
@@ -434,12 +173,6 @@ public sealed class MentorKpiAndDeScopeTests
         var adminKpiList = await kpiService.GetAdminMentorKpisAsync(from, to, mentor.Id);
         Assert.True(adminKpiList.IsSuccess);
         Assert.Single(adminKpiList.Result!);
-
-        var adminAtt = await kpiService.GetAdminBookingAttendanceAsync(bCompleted.Id);
-        Assert.True(adminAtt.IsSuccess, adminAtt.ErrorMessage);
-        Assert.True(adminAtt.Result!.BothJoinedAtLeastOneMinute);
-        Assert.Equal(75 * 60, adminAtt.Result.MentorObservedSeconds);
-        Assert.Equal(70 * 60, adminAtt.Result.LearnerObservedSeconds);
 
         // Null turnaround verification when there are zero graded submissions
         var mentorNoGrades = new UserAccount { Id = 12, Role = Role.Mentor, FirstName = "Ken", Email = "ken@riki.jp", PasswordHash = [], PasswordSalt = [] };

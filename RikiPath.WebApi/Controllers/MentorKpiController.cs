@@ -60,17 +60,4 @@ public sealed class MentorKpiController(IMentorKpiService mentorKpiService) : Co
         var result = await mentorKpiService.GetAdminMentorKpiByMentorAsync(mentorId, from, to, cancellationToken);
         return StatusCode(result.StatusCode, result);
     }
-
-    [HttpGet("api/admin/bookings/{bookingId:int}/attendance")]
-    [Authorize(Roles = "Admin")]
-    [ProducesResponseType(typeof(ApiResponse<MentorBookingAttendanceDetailResponse>), StatusCodes.Status200OK)]
-    [ProducesResponseType(typeof(ApiResponse<MentorBookingAttendanceDetailResponse>), StatusCodes.Status403Forbidden)]
-    [ProducesResponseType(typeof(ApiResponse<MentorBookingAttendanceDetailResponse>), StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> GetAdminBookingAttendance(
-        [FromRoute] int bookingId,
-        CancellationToken cancellationToken = default)
-    {
-        var result = await mentorKpiService.GetAdminBookingAttendanceAsync(bookingId, cancellationToken);
-        return StatusCode(result.StatusCode, result);
-    }
 }

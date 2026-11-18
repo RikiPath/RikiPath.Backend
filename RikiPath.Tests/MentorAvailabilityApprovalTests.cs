@@ -48,8 +48,7 @@ public sealed class MentorAvailabilityApprovalTests
         registrationUow.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>())).Returns((CancellationToken ct) => db.SaveChangesAsync(ct));
         registrationUow.Setup(x => x.ExecuteInTransactionAsync(It.IsAny<Func<CancellationToken, Task>>(), It.IsAny<CancellationToken>()))
             .Returns((Func<CancellationToken, Task> fn, CancellationToken ct) => fn(ct));
-        var meeting = new MentorMeetingService(registrationUow.Object, Mock.Of<IPaymentGatewayClient>(), Claims(Role.Mentor, 501),
-            new AppSettings(), NullLogger<MentorMeetingService>.Instance, Mock.Of<IMentorCreditLedgerService>());
+        var meeting = new MentorAvailabilityReviewService(registrationUow.Object, Claims(Role.Mentor, 501));
         var start = DateTime.UtcNow.AddDays(2).Date.AddHours(2);
         var registration = await meeting.CreateAvailabilityAsync(new CreateMentorAvailabilityRequest
         { StartTime = start, EndTime = start.AddHours(1) }, default);

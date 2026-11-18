@@ -19,8 +19,6 @@ public interface IStudyCourseService
     Task<ApiResponse<object>> SaveCohortAsync(int? id, SaveStudyCohort request, CancellationToken ct);
     // Admin xem trước xung đột lịch dạy của Mentor cho các khung giờ đã chọn (không ghi dữ liệu).
     Task<ApiResponse<object>> CohortSchedulePreviewAsync(CohortSchedulePreviewRequest request, CancellationToken ct);
-    Task<ApiResponse<object>> AvailableSlotsAsync(int id, CancellationToken ct);
-    Task<ApiResponse<object>> BookSlotAsync(int id, BookCourseSlot request, CancellationToken ct);
     Task<ApiResponse<object>> CatalogAsync(CancellationToken ct);
     Task<ApiResponse<object>> AdminCatalogAsync(CancellationToken ct);
     Task<ApiResponse<object>> MentorsAsync(CancellationToken ct);
@@ -36,12 +34,7 @@ public interface IStudyCourseService
     Task<ApiResponse<object>> CancelCohortEnrollmentAsync(int id, CancelCohortEnrollmentRequest? request, CancellationToken ct);
     Task<ApiResponse<object>> ConfirmPaymentAsync(int courseId, PaymentCallbackResult callback, string? reference, CancellationToken ct);
     Task<ApiResponse<object>> ReconcileCoursePaymentAsync(int courseId, CancellationToken ct);
-    Task<ApiResponse<object>> ActivateAsync(int id, ActivateCourse request, CancellationToken ct);
-    Task<ApiResponse<object>> ScheduleAsync(int id, ScheduleCourseSession request, CancellationToken ct);
     Task<ApiResponse<object>> AttendanceAsync(int id, int sessionId, ConfirmCourseAttendance request, CancellationToken ct);
-    Task<ApiResponse<object>> AssignAsync(int id, AssignCourseHomework request, CancellationToken ct);
-    Task<ApiResponse<object>> SubmitHomeworkAsync(int id, int homeworkId, SubmitCourseHomework request, CancellationToken ct);
-    Task<ApiResponse<object>> GradeAsync(int id, int homeworkId, GradeCourseHomework request, CancellationToken ct);
     Task<ApiResponse<object>> CompleteAsync(int id, CancellationToken ct);
     Task<ApiResponse<object>> RequestRetakeAsync(int id, DateTime examDate, DateTime resultPublishedAt, IFormFile? evidence, CancellationToken ct, string? reason = null);
     Task<ApiResponse<object>> ReviewRetakeAsync(int id, int requestId, ReviewCourseRetake request, CancellationToken ct);

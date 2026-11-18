@@ -189,17 +189,17 @@ public sealed partial class HomeworkService
             assignment.Passed = passed ?? assignment.Passed;
             assignment.PublishedFeedbackAtUtc = grade.GradedAt;
             assignment.PublishedByMentorId = actor.Id;
-            await NotifyAsync(assignment.LearnerId, "Mentor đã chấm bài tập", assignment.Title, assignment.MentorBookingId, token);
+            await NotifyAsync(assignment.LearnerId, "Mentor đã chấm bài tập", assignment.Title, assignment.CohortId, token);
             await unit.SaveChangesAsync(token);
             response = ApiResponse<HomeworkGrade>.Success(PublishedGrade(grade)!);
         }, ct);
         return response;
     }
 
-    private Task NotifyAsync(int learnerId, string title, string message, int? bookingId, CancellationToken ct)
+    private Task NotifyAsync(int learnerId, string title, string message, int? cohortId, CancellationToken ct)
         => unit.Notifications.AddAsync(new Notification
         {
             UserId = learnerId, Title = title, Message = message, Type = "Homework", IsRead = false,
-            LinkUrl = bookingId.HasValue ? $"/homework/?bookingId={bookingId}" : "/homework/",
+            LinkUrl = cohortId.HasValue ? $"/homework/?cohortId={cohortId}" : "/homework/",
         }, ct);
 }

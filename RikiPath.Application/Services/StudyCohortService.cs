@@ -50,11 +50,7 @@ public sealed partial class StudyCourseService
             if (e.PaymentStatus == "Pending" && e.Cohort is not null && e.Cohort.Sessions.Any(s => proposed.Any(p =>
                 s.Availability.StartTime < p.EndTime && s.Availability.EndTime > p.StartTime))) return true;
         }
-        var legacy = await uow.MentorBookings.Query().Where(b => !b.IsDeleted && b.UserSubscription.UserId == learnerId && b.MentorAvailability != null
-            && (b.Status == MentorStatus.Assigned || b.Status == MentorStatus.Accepted
-                || (b.Status == MentorStatus.AwaitingPayment && b.UserSubscription.PaymentExpiresAt > now)))
-            .Include(b => b.MentorAvailability).ToListAsync(ct);
-        return legacy.Any(b => proposed.Any(p => b.MentorAvailability!.StartTime < p.EndTime && b.MentorAvailability.EndTime > p.StartTime));
+        return false;
     }
 
     public Task<ApiResponse<object>> CohortsAsync(CancellationToken ct) => CohortsAsync(null, ct);
@@ -308,65 +304,6 @@ public sealed partial class StudyCourseService
             slots.Select((s, i) => new ProposedTeachingInterval(s.StartTime, s.EndTime, i + 1)).ToList(),
             new TeachingConflictOptions { ExcludeCohortId = r.CohortId, ExcludeAvailabilityIds = r.AvailabilityIds }, ct);
     });
-
-    public Task<ApiResponse<object>> AvailableSlotsAsync(int id, CancellationToken ct) => Run(async () =>
-    {
-        var c = await uow.StudyCourses.GetByIdAsync(id, ct);
-        Require(c is not null, "Không tìm thấy gói học."); Learner(c!);
-        Require(c!.SessionType == "Individual" && c.PaymentStatus == "Paid", "Chỉ gói 1–1 đã thanh toán được chọn lịch.");
-        return await uow.MentorAvailabilities.Query().Where(s => !s.IsDeleted && s.IsApproved && s.RejectedAt == null
-            && s.ChangeRequestedAt == null && s.StartTime > DateTime.UtcNow && s.MaxLearners == 1 && s.BookedCount == 0
-            && (!c.MentorId.HasValue || s.MentorId == c.MentorId) && (c.Status == "Ready" || (s.StartTime >= c.StartsAt && s.EndTime <= c.EndsAt)) && s.EndTime == s.StartTime.AddMinutes(c.SessionMinutes)
-            && (!c.TargetExamDate.HasValue || s.EndTime <= c.TargetExamDate)
-            && !uow.StudyCohorts.Query().Any(g => g.Sessions.Any(t => t.AvailabilityId == s.Id))
-            && !uow.StudyCourses.Query().Any(e => e.PaymentStatus == "Paid" && e.Sessions.Any(t => t.AvailabilityId == s.Id && t.Status == "Scheduled")))
-            .OrderBy(s => s.StartTime).Select(s => new { s.Id, s.MentorId,
-                MentorName = s.Mentor.FirstName + " " + s.Mentor.LastName, s.StartTime, s.EndTime }).Take(500).ToListAsync(ct);
-    });
-
-    public Task<ApiResponse<object>> BookSlotAsync(int id, BookCourseSlot r, CancellationToken ct) => Change(id, async c =>
-    {
-        Learner(c);
-        Require(c.SessionType == "Individual" && c.PaymentStatus == "Paid" && c.Status is "Ready" or "Active", "Gói không còn được đặt lịch.");
-        var slot = await uow.MentorAvailabilities.GetByIdAsync(r.AvailabilityId, ct);
-        Require(slot is not null, "Không tìm thấy lịch.");
-        await uow.StudyCourses.LockScheduleAsync(slot!.MentorId, c.LearnerId, ct);
-        // Requery after acquiring the same lock used by existing booking flows.
-        var available = await uow.MentorAvailabilities.Query().AsNoTracking().AnyAsync(s => s.Id == r.AvailabilityId
-            && !s.IsDeleted && s.IsApproved && s.RejectedAt == null && s.ChangeRequestedAt == null
-            && s.StartTime > DateTime.UtcNow && s.MaxLearners == 1 && s.BookedCount == 0, ct);
-        Require(available && (!c.MentorId.HasValue || c.MentorId == slot.MentorId), "Lịch đã có người đặt hoặc không thuộc Mentor của gói.");
-        Require(await uow.UserAccounts.AnyAsync(x => x.Id == slot.MentorId && x.Role == Role.Mentor && !x.IsDeleted, ct), "Mentor không còn hoạt động.");
-        Require((slot.EndTime - slot.StartTime).TotalMinutes == c.SessionMinutes
-            && (!c.TargetExamDate.HasValue || slot.EndTime <= c.TargetExamDate), "Thời lượng/ngày học không phù hợp gói.");
-        Require(!await uow.StudyCohorts.AnyAsync(g => g.Sessions.Any(s => s.AvailabilityId == slot.Id), ct), "Lịch dành cho lớp nhóm.");
-        var occupied = c.Sessions.Where(s => s.Status != "CancelledByMentor").Select(s => s.Number).Distinct().ToHashSet();
-        Require(occupied.Count < c.TotalSessions, "Đã dùng hết số buổi của gói.");
-        Require(!await HasLearnerConflictAsync(c.LearnerId, [slot], c.Id, ct), "Bạn đã có lịch hoặc đang giữ chỗ trùng giờ.");
-        Require(!await uow.StudyCourses.Query().AnyAsync(e => e.PaymentStatus == "Paid" && e.Status != "Completed"
-            && (e.MentorId == slot.MentorId || e.LearnerId == c.LearnerId)
-            && e.Sessions.Any(s => s.Status == "Scheduled" && s.ScheduledAt < slot.EndTime
-                && s.ScheduledAt.AddMinutes(e.SessionMinutes) > slot.StartTime), ct), "Mentor hoặc học viên đã có lịch trùng giờ.");
-        Require(!await uow.MentorBookings.AnyAsync(b => !b.IsDeleted && b.UserSubscription.UserId == c.LearnerId
-            && (b.Status == MentorStatus.Assigned || b.Status == MentorStatus.Accepted) && b.MentorAvailability != null
-            && b.MentorAvailability.StartTime < slot.EndTime && b.MentorAvailability.EndTime > slot.StartTime, ct), "Bạn đã có lịch trùng giờ.");
-        if (c.Status == "Ready") { c.StartsAt = slot.StartTime; c.EndsAt = slot.StartTime.AddMonths(c.DurationMonths); }
-        Require(slot.StartTime >= c.StartsAt && slot.EndTime <= c.EndsAt, "Lịch nằm ngoài thời hạn gói tính từ buổi đầu tiên.");
-        slot.BookedCount = 1;
-        c.MentorId = slot.MentorId; c.Status = "Active";
-        var number = Enumerable.Range(1, c.TotalSessions).First(n => !occupied.Contains(n));
-        if (!c.Sessions.Any(s => s.Number == number))
-        {
-            var local = slot.StartTime.AddHours(7).Date;
-            var week = local.AddDays(-(((int)local.DayOfWeek + 6) % 7)).AddHours(-7);
-            Require(c.Sessions.Count(s => s.Attempt == 1 && s.Status != "CancelledByMentor" && s.ScheduledAt >= week && s.ScheduledAt < week.AddDays(7)) < c.SessionsPerWeek,
-                "Tuần này đã đủ số buổi theo gói.");
-        }
-        c.Sessions.Add(new() { Number = number, Attempt = c.Sessions.Count(s => s.Number == number) + 1,
-            ScheduledAt = slot.StartTime, AvailabilityId = slot.Id, MeetingUrl = $"/meeting-room/{slot.RoomId}" });
-        Audit(c, "LearnerBooked", $"Đặt buổi {number}: {slot.StartTime:O}.");
-        return new { c.Id };
-    }, ct);
 
     private void AddCohortSessions(StudyCourse c, StudyCohort cohort)
     {

@@ -161,22 +161,17 @@ public sealed partial class StudyCourseService(IUnitOfWork uow, IClaimService cl
             "Chưa được mở bán khi thiếu thời lượng, tổng buổi cam kết hoặc giá.");
         Require(await uow.CertificateLevels.Query().Include(x => x.CertificateType)
             .AnyAsync(x => x.Id == r.CertificateLevelId && !x.IsDeleted && !x.CertificateType.IsDeleted && x.CertificateType.IsActive, ct), "Cấp độ không còn hoạt động.");
-        Require(r.SessionType is "Individual" or "Group", "Kiểm tra hình thức và sĩ số gói.");
-        if (r.SessionType == "Individual")
-            Require(r.Capacity == 1, "Kiểm tra hình thức và sĩ số gói.");
-        else
-        {
-            // Gói học nhóm: 1 Mentor chính, 1..sức chứa chính sách học viên; 10 tuần x 2/3/4 buổi, buổi 90 phút (theo chính sách).
-            var policy = await EffectiveGroupPolicyAsync(DateTime.UtcNow, ct);
-            var allowed = policy.AllowedSessionsPerWeek();
-            Rule(allowed.Contains(r.SessionsPerWeek), "COURSE_PLAN_INVALID_INTENSITY",
-                $"Số buổi mỗi tuần phải là một trong các cường độ được phép: {string.Join(", ", allowed.Select(x => $"{x} buổi ({IntensityLabelOf(x)})"))}.");
-            Rule(r.TotalSessions == policy.CourseDurationWeeks * r.SessionsPerWeek && r.SessionMinutes == policy.SessionMinutes,
-                "COURSE_PLAN_INVALID_DURATION",
-                $"Khóa học nhóm kéo dài {policy.CourseDurationWeeks} tuần: với {r.SessionsPerWeek} buổi/tuần cần đúng {policy.CourseDurationWeeks * r.SessionsPerWeek} buổi, mỗi buổi {policy.SessionMinutes} phút.");
-            Rule(r.Capacity >= 1 && r.Capacity <= policy.MaxLearners, "COURSE_PLAN_INVALID_CAPACITY",
-                $"Sĩ số lớp nhóm phải từ 1 đến {policy.MaxLearners} học viên.");
-        }
+        Rule(r.SessionType == "Group", "INDIVIDUAL_PLAN_DISCONTINUED", "Hệ thống chỉ hỗ trợ gói khóa học nhóm (Group).", HttpStatusCode.BadRequest);
+        // Gói học nhóm: 1 Mentor chính, 1..sức chứa chính sách học viên; 10 tuần x 2/3/4 buổi, buổi 90 phút (theo chính sách).
+        var policy = await EffectiveGroupPolicyAsync(DateTime.UtcNow, ct);
+        var allowed = policy.AllowedSessionsPerWeek();
+        Rule(allowed.Contains(r.SessionsPerWeek), "COURSE_PLAN_INVALID_INTENSITY",
+            $"Số buổi mỗi tuần phải là một trong các cường độ được phép: {string.Join(", ", allowed.Select(x => $"{x} buổi ({IntensityLabelOf(x)})"))}.");
+        Rule(r.TotalSessions == policy.CourseDurationWeeks * r.SessionsPerWeek && r.SessionMinutes == policy.SessionMinutes,
+            "COURSE_PLAN_INVALID_DURATION",
+            $"Khóa học nhóm kéo dài {policy.CourseDurationWeeks} tuần: với {r.SessionsPerWeek} buổi/tuần cần đúng {policy.CourseDurationWeeks * r.SessionsPerWeek} buổi, mỗi buổi {policy.SessionMinutes} phút.");
+        Rule(r.Capacity >= 1 && r.Capacity <= policy.MaxLearners, "COURSE_PLAN_INVALID_CAPACITY",
+            $"Sĩ số lớp nhóm phải từ 1 đến {policy.MaxLearners} học viên.");
         Require(!r.TargetExamDate.HasValue || (r.TargetExamDate.Value.Kind == DateTimeKind.Utc && r.TargetExamDate > DateTime.UtcNow), "Ngày thi mục tiêu phải trong tương lai và có múi giờ UTC.");
         var p = id.HasValue ? await uow.StudyCoursePlans.GetByIdAsync(id.Value, ct) : new StudyCoursePlan();
         Require(p is not null, "Không tìm thấy gói.");
@@ -289,6 +284,7 @@ public sealed partial class StudyCourseService(IUnitOfWork uow, IClaimService cl
             }
             var p = await uow.StudyCoursePlans.GetByIdAsync(r.PlanId, token);
             Require(p is { IsPublished: true, SessionMinutes: not null, TotalSessions: not null } && p.Price > 0, "Gói chưa đủ cấu hình để mua.");
+            Rule(p!.SessionType == "Group" && r.CohortId.HasValue, "INDIVIDUAL_COURSE_DISCONTINUED", "Mua khóa học cá nhân 1-1 đã ngừng hỗ trợ. Vui lòng chọn lớp học nhóm (Cohort).", HttpStatusCode.Conflict);
             Require(!p!.TargetExamDate.HasValue || p.TargetExamDate > DateTime.UtcNow, "Gói đã qua kỳ thi mục tiêu.");
             Require(await uow.CertificateLevels.Query().AnyAsync(x => x.Id == p!.CertificateLevelId && !x.IsDeleted
                 && !x.CertificateType.IsDeleted && x.CertificateType.IsActive, token), "Cấp độ không còn mở đăng ký.");
@@ -741,52 +737,6 @@ public sealed partial class StudyCourseService(IUnitOfWork uow, IClaimService cl
         GatewayUnavailable = gatewayUnavailable
     };
 
-    public Task<ApiResponse<object>> ActivateAsync(int id, ActivateCourse r, CancellationToken ct) => Change(id, async c =>
-    {
-        Admin(); Require(!c.CohortId.HasValue, "Lớp nhóm sử dụng lịch chung, không mở riêng từng học viên."); Require(c.Status == "Ready" && c.PaymentStatus == "Paid", "Khóa chưa thanh toán hoặc đã được mở.");
-        Require(r.StartsAt.Kind == DateTimeKind.Utc, "Ngày bắt đầu phải có múi giờ UTC.");
-        Require(await uow.UserAccounts.Query().AnyAsync(x => x.Id == r.MentorId && x.Role == Role.Mentor && !x.IsDeleted, ct), "Tài khoản Mentor không hợp lệ hoặc đã ngừng hoạt động.");
-        c.MentorId = r.MentorId; c.StartsAt = r.StartsAt; c.EndsAt = r.StartsAt.AddMonths(c.DurationMonths); c.Status = "Active";
-        Audit(c, "Activated", $"Mentor {r.MentorId}; lịch học và điều kiện theo phiên bản {c.PlanRevision}.");
-        return new { c.Id };
-    }, ct);
-
-    public Task<ApiResponse<object>> ScheduleAsync(int id, ScheduleCourseSession r, CancellationToken ct) => Change(id, async c =>
-    {
-        Admin(); Active(c); Require(!c.CohortId.HasValue, "Lớp nhóm sử dụng lịch chung; thay đổi qua yêu cầu điều chỉnh.");
-        await uow.StudyCourses.LockScheduleAsync(c.MentorId!.Value, c.LearnerId, ct);
-        Require(r.Number >= 1 && r.Number <= c.TotalSessions && r.ScheduledAt.Kind == DateTimeKind.Utc
-            && r.ScheduledAt >= c.StartsAt && r.ScheduledAt.AddMinutes(c.SessionMinutes) <= c.EndsAt, "Buổi học ngoài phạm vi cam kết.");
-        Require(string.IsNullOrWhiteSpace(r.MeetingUrl) || (Uri.TryCreate(r.MeetingUrl, UriKind.Absolute, out var uri) && uri.Scheme == "https"), "Link học phải là HTTPS.");
-        var group = c.Sessions.Where(x => x.Number == r.Number).ToList();
-        Require(!group.Any(x => x.Status is "Scheduled" or "Present"), "Buổi này còn lịch chờ học hoặc đã tham dự.");
-        if (group.Count == 0)
-        {
-            // Cadence uses Vietnam time; make-up attempts share their original session number.
-            var local = r.ScheduledAt.AddHours(7);
-            var weekStart = local.Date.AddDays(-(((int)local.DayOfWeek + 6) % 7)).AddHours(-7);
-            var weekEnd = weekStart.AddDays(7);
-            Require(c.Sessions.Count(x => x.Attempt == 1 && x.Status != "CancelledByMentor"
-                && x.ScheduledAt >= weekStart && x.ScheduledAt < weekEnd) < c.SessionsPerWeek,
-                "Tuần này đã đủ số buổi gốc theo gói. Buổi học bù cần chọn lại số buổi gốc.");
-        }
-        var end = r.ScheduledAt.AddMinutes(c.SessionMinutes);
-        var conflict = await uow.StudyCourses.Query().Where(x => x.Status == "Active" && (x.MentorId == c.MentorId || x.LearnerId == c.LearnerId))
-            .AnyAsync(x => x.Sessions.Any(s => s.Status == "Scheduled" && s.ScheduledAt < end
-                && s.ScheduledAt.AddMinutes(x.SessionMinutes) > r.ScheduledAt), ct);
-        Require(!conflict, "Mentor hoặc học viên bị trùng lịch khóa học.");
-        Require(!await uow.MentorBookings.Query().AnyAsync(b => !b.IsDeleted && b.UserSubscription.UserId == c.LearnerId
-            && (b.Status == MentorStatus.Assigned || b.Status == MentorStatus.Accepted) && b.MentorAvailability != null
-            && b.MentorAvailability.StartTime < end && b.MentorAvailability.EndTime > r.ScheduledAt, ct),
-            "Học viên đã có lịch tư vấn trùng giờ này.");
-        Require(!await uow.MentorAvailabilities.Query().AnyAsync(x => !x.IsDeleted && x.MentorId == c.MentorId
-            && x.IsApproved && x.StartTime < end && x.EndTime > r.ScheduledAt, ct),
-            "Mentor đã mở khung tư vấn trong giờ này. Hãy chọn giờ khác.");
-        c.Sessions.Add(new() { Number = r.Number, Attempt = group.Count + 1, ScheduledAt = r.ScheduledAt, MeetingUrl = r.MeetingUrl });
-        Audit(c, "Scheduled", $"Buổi {r.Number}, lần {group.Count + 1}: {r.ScheduledAt:O}.");
-        return new { c.Id };
-    }, ct);
-
     public Task<ApiResponse<object>> AttendanceAsync(int id, int sessionId, ConfirmCourseAttendance r, CancellationToken ct) => Run(async () =>
     {
         object result = new { };
@@ -827,38 +777,6 @@ public sealed partial class StudyCourseService(IUnitOfWork uow, IClaimService cl
         Audit(c, "Attendance", $"Buổi {session.Number}/{session.Attempt}: {r.Status}. {r.Note.Trim()}");
         return Task.FromResult<object>(new { session.Id });
     }
-
-    public Task<ApiResponse<object>> AssignAsync(int id, AssignCourseHomework r, CancellationToken ct) => Change(id, c =>
-    {
-        Teacher(c); Active(c);
-        Require(!string.IsNullOrWhiteSpace(r.Title) && r.Title.Length <= 200 && r.Instructions.Length <= 10000
-            && r.DueAt.Kind == DateTimeKind.Utc && r.DueAt > DateTime.UtcNow && r.DueAt <= c.EndsAt, "Kiểm tra tên bài, hướng dẫn và hạn nộp trong khóa.");
-        c.Homework.Add(new() { Title = r.Title.Trim(), Instructions = r.Instructions, Required = r.Required, DueAt = r.DueAt });
-        Audit(c, "HomeworkAssigned", r.Title.Trim());
-        return Task.FromResult<object>(new { c.Id });
-    }, ct);
-
-    public Task<ApiResponse<object>> SubmitHomeworkAsync(int id, int homeworkId, SubmitCourseHomework r, CancellationToken ct) => Change(id, c =>
-    {
-        Learner(c); Active(c);
-        var h = c.Homework.SingleOrDefault(x => x.Id == homeworkId);
-        Require(h is not null && h.Passed != true, "Bài đã được xác nhận đạt hoặc không tồn tại.");
-        Require(!string.IsNullOrWhiteSpace(r.Content) && r.Content.Length <= 20000, "Bài nộp phải từ 1 đến 20000 ký tự.");
-        h!.Submission = r.Content.Trim(); h.SubmittedAt = DateTime.UtcNow; h.Passed = null; h.ReviewedAt = null; h.Feedback = null;
-        Audit(c, "HomeworkSubmitted", $"Bài {h.Id}, giờ nộp do server ghi nhận.");
-        return Task.FromResult<object>(new { h.Id });
-    }, ct);
-
-    public Task<ApiResponse<object>> GradeAsync(int id, int homeworkId, GradeCourseHomework r, CancellationToken ct) => Change(id, c =>
-    {
-        Teacher(c); Active(c);
-        var h = c.Homework.SingleOrDefault(x => x.Id == homeworkId);
-        Require(h?.SubmittedAt is not null, "Học viên chưa nộp bài.");
-        Require(!string.IsNullOrWhiteSpace(r.Feedback) && r.Feedback.Length <= 2000, "Cần nhận xét tối đa 2000 ký tự.");
-        h!.Passed = r.Passed; h.ReviewedAt = DateTime.UtcNow; h.Feedback = r.Feedback.Trim();
-        Audit(c, "HomeworkReviewed", $"Bài {h.Id}: {(r.Passed ? "Đạt" : "Chưa đạt")}.");
-        return Task.FromResult<object>(new { h.Id });
-    }, ct);
 
     public Task<ApiResponse<object>> CompleteAsync(int id, CancellationToken ct) => Change(id, c =>
     {

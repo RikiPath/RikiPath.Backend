@@ -32,38 +32,6 @@ public sealed class MentorDiscoveryController(IMentorDiscoveryService discoveryS
         CancellationToken cancellationToken)
         => ToActionResult(await discoveryService.GetMentorProfileAsync(mentorId, cancellationToken));
 
-    // Duyệt danh sách các khung giờ 90 phút khả dụng của chuyên gia theo khoảng ngày (tối đa 30 ngày).
-    [HttpGet("{mentorId:int}/slots")]
-    [ProducesResponseType(typeof(ApiResponse<PublicMentorSlotsGroupedResponse>), StatusCodes.Status200OK)]
-    [ProducesResponseType(typeof(ApiResponse<PublicMentorSlotsGroupedResponse>), StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(typeof(ApiResponse<PublicMentorSlotsGroupedResponse>), StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> GetPublicSlots(
-        [FromRoute] int mentorId,
-        [FromQuery] MentorSlotBrowsingRequest request,
-        CancellationToken cancellationToken)
-        => ToActionResult(await discoveryService.GetPublicSlotsAsync(mentorId, request, cancellationToken));
-
-    // Lấy danh sách các ngày có ít nhất một khung giờ khả dụng để học viên chọn trên lịch.
-    [HttpGet("{mentorId:int}/available-dates")]
-    [ProducesResponseType(typeof(ApiResponse<List<DateOnly>>), StatusCodes.Status200OK)]
-    [ProducesResponseType(typeof(ApiResponse<List<DateOnly>>), StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(typeof(ApiResponse<List<DateOnly>>), StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> GetAvailableDates(
-        [FromRoute] int mentorId,
-        [FromQuery] MentorSlotBrowsingRequest request,
-        CancellationToken cancellationToken)
-        => ToActionResult(await discoveryService.GetAvailableDatesAsync(mentorId, request, cancellationToken));
-
-    // Kiểm tra trực tiếp một khung giờ công khai theo SlotId (kiểm tra trạng thái duyệt và giữ chỗ).
-    [HttpGet("slots/{slotId:int}")]
-    [ProducesResponseType(typeof(ApiResponse<PublicMentorSlotResponse>), StatusCodes.Status200OK)]
-    [ProducesResponseType(typeof(ApiResponse<PublicMentorSlotResponse>), StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> GetPublicSlotById(
-        [FromRoute] int slotId,
-        [FromQuery] string? timeZoneId,
-        CancellationToken cancellationToken)
-        => ToActionResult(await discoveryService.GetPublicSlotByIdAsync(slotId, timeZoneId, cancellationToken));
-
     private IActionResult ToActionResult<T>(ApiResponse<T> response)
         => StatusCode(response.StatusCode, response);
 }

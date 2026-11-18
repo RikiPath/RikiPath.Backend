@@ -33,7 +33,6 @@ public sealed class AdminMentorScheduleTests
         var response = await Service(db).GetScheduleAsync(2, start, start.AddDays(7), default);
         Assert.True(response.IsSuccess);
         var actual = Assert.Single(response.Result!); Assert.Equal(slot.Id, actual.Id); Assert.Equal("Booked", actual.Status);
-        var saved = Assert.Single(actual.Bookings); Assert.Equal("Actual Learner", saved.LearnerName); Assert.Equal("Actual saved question", saved.Question);
         Assert.Empty((await Service(db).GetScheduleAsync(2, start.AddDays(14), start.AddDays(21), default)).Result!);
         Assert.Equal(403, (await Service(db, Role.Mentor).GetScheduleAsync(2, start, start.AddDays(7), default)).StatusCode);
         Assert.Equal(400, (await Service(db).GetScheduleAsync(2, start, start.AddDays(32), default)).StatusCode);

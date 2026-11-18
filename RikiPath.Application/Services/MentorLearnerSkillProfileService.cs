@@ -53,25 +53,11 @@ public sealed class MentorLearnerSkillProfileService(
                 .OrderByDescending(c => c.Id)
                 .Select(c => new { c.Id })
                 .FirstOrDefaultAsync(cancellationToken);
-            if (courseEnrollment is not null)
-            {
-                enrollmentId = courseEnrollment.Id;
-                scopeType = "Course";
-            }
-            else
-            {
-                var hasBooking = await uow.MentorBookings.Query().AsNoTracking()
-                    .AnyAsync(b => !b.IsDeleted
-                        && b.MentorAvailability != null && b.MentorAvailability.MentorId == actor.Id
-                        && b.UserSubscription.UserId == learnerId
-                        && b.UserSubscription.PaymentStatus == PaymentStatus.Paid
-                        && (b.Status == MentorStatus.Assigned || b.Status == MentorStatus.Accepted || b.Status == MentorStatus.Completed),
-                        cancellationToken);
-                if (!hasBooking)
-                    return ApiResponse<MentorLearnerSkillProfileResponse>.Fail(
-                        "Bạn không phụ trách học viên này.", HttpStatusCode.Forbidden);
-                scopeType = "Booking1on1";
-            }
+            if (courseEnrollment is null)
+                return ApiResponse<MentorLearnerSkillProfileResponse>.Fail(
+                    "Bạn không phụ trách học viên này.", HttpStatusCode.Forbidden);
+            enrollmentId = courseEnrollment.Id;
+            scopeType = "Course";
         }
 
         var learner = await uow.UserAccounts.Query().AsNoTracking()

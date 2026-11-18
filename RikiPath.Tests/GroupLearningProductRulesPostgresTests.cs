@@ -202,8 +202,11 @@ public sealed class GroupLearningProductRulesPostgresTests
                 await Expect(GroupPlan(w.LevelN3, 5), "COURSE_PLAN_INVALID_INTENSITY");
                 await Expect(GroupPlan(w.LevelN3, 3, minutes: 60), "COURSE_PLAN_INVALID_DURATION");
                 await Expect(GroupPlan(w.LevelN3, 3, capacity: 5), "COURSE_PLAN_INVALID_CAPACITY");
-                // Gói 1-1 cũ không bị quy tắc nhóm ảnh hưởng.
-                Assert.True((await admin.SavePlanAsync(null, new SaveCoursePlan("1-1", w.LevelN3, 3, 2, 60, 7, 60, 900_000m, true), default)).IsSuccess);
+                // Gói 1-1 đã ngừng hỗ trợ.
+                var individual = await admin.SavePlanAsync(null, new SaveCoursePlan("1-1", w.LevelN3, 3, 2, 60, 7, 60, 900_000m, true), default);
+                Assert.False(individual.IsSuccess);
+                Assert.Equal(400, individual.StatusCode);
+                Assert.Equal("INDIVIDUAL_PLAN_DISCONTINUED", individual.ErrorCode);
             }
 
             await using (var db = w.Db())

@@ -13,13 +13,4 @@ public interface IMentorDiscoveryService
 
     Task<ApiResponse<PublicMentorProfileResponse>> GetMentorProfileAsync(
         int mentorId, CancellationToken cancellationToken = default);
-
-    Task<ApiResponse<PublicMentorSlotsGroupedResponse>> GetPublicSlotsAsync(
-        int mentorId, MentorSlotBrowsingRequest request, CancellationToken cancellationToken = default);
-
-    Task<ApiResponse<List<DateOnly>>> GetAvailableDatesAsync(
-        int mentorId, MentorSlotBrowsingRequest request, CancellationToken cancellationToken = default);
-
-    Task<ApiResponse<PublicMentorSlotResponse>> GetPublicSlotByIdAsync(
-        int slotId, string? timeZoneId = null, CancellationToken cancellationToken = default);
 }

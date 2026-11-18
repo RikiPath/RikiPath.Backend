@@ -148,44 +148,11 @@ public sealed class MentorTeachingConflictService(IUnitOfWork uow, IMentorGroupP
                 .Select(s => new { s.AvailabilityId, CohortId = g.Id, g.Name, s.Availability.StartTime, s.Availability.EndTime }))
             .ToListAsync(ct);
 
-        // (b) Lịch 1-1 cũ đang có người đặt (đã giao/chấp nhận, hoặc đang chờ thanh toán còn hạn).
-        var legacyRows = await uow.MentorBookings.Query().AsNoTracking()
-            .Where(b => !b.IsDeleted && b.MentorAvailability != null && b.MentorAvailability.MentorId == mentorId
-                && !b.MentorAvailability.IsDeleted && b.MentorAvailability.RejectedAt == null
-                && (b.Status == MentorStatus.Assigned || b.Status == MentorStatus.Accepted
-                    || (b.Status == MentorStatus.AwaitingPayment && b.UserSubscription.PaymentExpiresAt > now))
-                && b.MentorAvailability.StartTime < to && b.MentorAvailability.EndTime > from
-                && !excludedIds.Contains(b.MentorAvailabilityId!.Value))
-            .Select(b => new { AvailabilityId = b.MentorAvailabilityId!.Value, b.MentorAvailability!.StartTime, b.MentorAvailability.EndTime })
-            .ToListAsync(ct);
-
-        // (c) Buổi đã lên lịch của khóa 1-1 đang học, đã thanh toán.
-        var individualRows = await uow.StudyCourses.Query().AsNoTracking()
-            .Where(c => c.MentorId == mentorId && c.CohortId == null && c.Status == "Active" && c.PaymentStatus == "Paid")
-            .SelectMany(c => c.Sessions
-                .Where(s => s.Status == "Scheduled" && s.ScheduledAt < to && s.ScheduledAt >= from.AddDays(-1)
-                    && (s.AvailabilityId == null || !excludedIds.Contains(s.AvailabilityId.Value)))
-                .Select(s => new { s.AvailabilityId, s.ScheduledAt, c.SessionMinutes }))
-            .ToListAsync(ct);
-
         var seen = new HashSet<int>();
         var result = new List<Commitment>();
         foreach (var r in cohortRows)
             if (seen.Add(r.AvailabilityId))
                 result.Add(new Commitment(KindCohort, r.AvailabilityId, r.CohortId, r.Name, Utc(r.StartTime), Utc(r.EndTime)));
-        foreach (var r in legacyRows)
-            if (seen.Add(r.AvailabilityId))
-                result.Add(new Commitment(KindLegacy, r.AvailabilityId, null, null, Utc(r.StartTime), Utc(r.EndTime)));
-        var individualKeys = new HashSet<DateTime>();
-        foreach (var r in individualRows)
-        {
-            if (r.AvailabilityId is int aid && !seen.Add(aid)) continue;
-            var start = Utc(r.ScheduledAt);
-            if (r.AvailabilityId is null && !individualKeys.Add(start)) continue;
-            var end = start.AddMinutes(r.SessionMinutes);
-            if (end <= from || start >= to) continue;
-            result.Add(new Commitment(KindIndividual, r.AvailabilityId, null, null, start, end));
-        }
         return result.OrderBy(x => x.StartUtc).ToList();
     }
 

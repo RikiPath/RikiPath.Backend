@@ -9,7 +9,7 @@ namespace RikiPath.WebApi.Controllers;
 [ApiController]
 [Route("api/mentor/availability")]
 [Authorize(Roles = "Mentor")]
-public sealed class MentorAvailabilityController(IMentorMeetingService service) : ControllerBase
+public sealed class MentorAvailabilityController(IMentorAvailabilityReviewService service) : ControllerBase
 {
     [HttpGet]
     public async Task<IActionResult> GetMine(CancellationToken cancellationToken)

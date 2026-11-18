@@ -92,20 +92,6 @@ public sealed class CohortBookingPostgresTests
                 new PaymentCallbackResult(true, true, 700000000 + hold.Id, 100, ""), "late", default)).IsSuccess);
             var paid = await late.StudyCourses.Include(c => c.Sessions).SingleAsync(c => c.Id == hold.Id);
             Assert.Equal("PaymentReview", paid.Status); Assert.Equal("Paid", paid.PaymentStatus); Assert.Empty(paid.Sessions);
-            var individualPlan = new StudyCoursePlan { Name = "Individual", CertificateLevelId = level.Id, SessionType = "Individual", Capacity = 1,
-                SessionMinutes = 60, TotalSessions = 1, DurationMonths = 1, SessionsPerWeek = 1, Price = 100, IsPublished = true };
-            var individual = new StudyCourse { Plan = individualPlan, LearnerId = users[0].Id, CertificateLevelId = level.Id,
-                PurchaseKey = Guid.NewGuid(), Name = "Paid 1–1", PaymentStatus = "Paid", Status = "Ready", TotalSessions = 1, SessionMinutes = 60, DurationMonths = 1, SessionsPerWeek = 1 };
-            var individualStart = DateTime.UtcNow.AddMinutes(5);
-            var individualSlot = new MentorAvailability { MentorId = mentor.Id, StartTime = individualStart, EndTime = individualStart.AddMinutes(60), MaxLearners = 1, IsApproved = true };
-            late.Add(individual); late.Add(individualSlot); await late.SaveChangesAsync();
-            var individualService = Service(late, users[0].Id);
-            var available = await individualService.AvailableSlotsAsync(individual.Id, default);
-            Assert.True(available.IsSuccess, available.ErrorMessage);
-            Assert.True((await individualService.BookSlotAsync(individual.Id, new(individualSlot.Id), default)).IsSuccess);
-            var meeting = await new MentorMeetingAccessService(new UnitOfWork(late)).GetMeetingAsync(individualSlot.RoomId, default);
-            Assert.NotNull(meeting); Assert.Equal(1, meeting.Capacity);
-            Assert.Equal(users[0].Id, Assert.Single(meeting.Learners).UserId);
             var windowStart = DateTime.UtcNow.AddDays(8);
             windowStart = new DateTime(windowStart.Ticks / 10 * 10, DateTimeKind.Utc); // PostgreSQL microsecond precision.
             var window = new MentorAvailability { MentorId = mentor.Id, StartTime = windowStart, EndTime = windowStart.AddMinutes(150), IsApproved = true, MaxLearners = 1 };
@@ -115,7 +101,7 @@ public sealed class CohortBookingPostgresTests
             Assert.True(split.IsSuccess, split.ErrorMessage); Assert.Equal(3, split.Result!.Count);
             Assert.Equal(windowStart, split.Result[0].StartTime); Assert.Equal(window.EndTime, split.Result[^1].EndTime);
             Assert.True(window.IsDeleted); Assert.All(split.Result, child => Assert.True(child.IsApproved));
-            Assert.False((await review.SplitAsync(individualSlot.Id, 15, default)).IsSuccess);
+            Assert.False((await review.SplitAsync(slot.Id, 15, default)).IsSuccess);
 
 
         }
