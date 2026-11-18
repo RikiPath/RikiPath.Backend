@@ -62,20 +62,6 @@ public sealed class MentorWeeklyScheduleTests
     }
 
     [Fact]
-    public async Task Legacy_cancellation_route_delegates_to_canonical_cancellation_service()
-    {
-        var canonical = new Mock<IMentorCancellationService>();
-        canonical.Setup(x => x.CancelBookingAsync(42, It.IsAny<CancelMentorBookingRequest>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(ApiResponse<MentorCancellationResponse>.Success(new MentorCancellationResponse { BookingId = 42 }));
-        var controller = new MentorWeeklyScheduleController(Mock.Of<IMentorScheduleService>(), canonical.Object);
-
-        var result = Assert.IsType<ObjectResult>(await controller.Cancel(42, default));
-
-        Assert.Equal(200, result.StatusCode);
-        canonical.Verify(x => x.CancelBookingAsync(42, It.IsAny<CancelMentorBookingRequest>(), It.IsAny<CancellationToken>()), Times.Once);
-    }
-
-    [Fact]
     public async Task Legacy_slot_resolution_cannot_refund_bookings_outside_credit_ledger()
     {
         await using var db = Context();

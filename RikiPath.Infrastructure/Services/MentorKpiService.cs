@@ -129,92 +129,6 @@ public sealed class MentorKpiService(
         return ApiResponse<MentorKpiSummaryResponse>.Success(summary);
     }
 
-    public async Task<ApiResponse<MentorBookingAttendanceDetailResponse>> GetAdminBookingAttendanceAsync(
-        int bookingId,
-        CancellationToken cancellationToken = default)
-    {
-        var claim = claimService.GetUserClaim();
-        if (claim.Role != Role.Admin)
-        {
-            return ApiResponse<MentorBookingAttendanceDetailResponse>.Fail(
-                "Chỉ Admin mới có quyền tra cứu điểm danh theo buổi học.",
-                HttpStatusCode.Forbidden);
-        }
-
-        var booking = await context.MentorBookings
-            .AsNoTracking()
-            .Include(b => b.MentorAvailability)
-                .ThenInclude(a => a!.Mentor)
-            .Include(b => b.UserSubscription)
-                .ThenInclude(s => s.UserAccount)
-            .Include(b => b.CompensationLevel)
-            .FirstOrDefaultAsync(b => b.Id == bookingId && !b.IsDeleted, cancellationToken);
-
-        if (booking is null)
-        {
-            return ApiResponse<MentorBookingAttendanceDetailResponse>.NotFound("Không tìm thấy lịch hẹn 1-1.");
-        }
-
-        var records = await context.MentorAttendanceRecords
-            .AsNoTracking()
-            .Include(r => r.UserAccount)
-            .Where(r => r.MentorBookingId == bookingId)
-            .OrderBy(r => r.Role)
-            .ThenBy(r => r.UserId)
-            .ToListAsync(cancellationToken);
-
-        var mentorId = booking.MentorAvailability?.MentorId ?? 0;
-        var learnerId = booking.UserSubscription?.UserId ?? 0;
-
-        var participants = records.Select(r => new MentorAttendanceParticipantDto
-        {
-            UserId = r.UserId,
-            ParticipantName = FormatUserName(r.UserAccount, $"User #{r.UserId}"),
-            Role = r.Role,
-            AttendanceStatus = r.Status.ToString(),
-            ObservedDurationSeconds = r.TotalDurationSeconds,
-            ObservedDurationMinutes = (int)Math.Round(r.TotalDurationSeconds / 60.0),
-            ReconnectionCount = r.ReconnectionCount,
-            FirstJoinedAtUtc = r.FirstJoinedAtUtc,
-            LeftAtUtc = r.LeftAtUtc
-        }).ToList();
-
-        var mentorSeconds = records
-            .Where(r => r.UserId == mentorId || string.Equals(r.Role, "Mentor", StringComparison.OrdinalIgnoreCase))
-            .Sum(r => r.TotalDurationSeconds);
-        var learnerSeconds = records
-            .Where(r => r.UserId == learnerId || string.Equals(r.Role, "Learner", StringComparison.OrdinalIgnoreCase))
-            .Sum(r => r.TotalDurationSeconds);
-
-        var startUtc = booking.MentorAvailability?.StartTime ?? booking.ScheduledAt;
-        var endUtc = booking.MentorAvailability?.EndTime;
-        var scheduledMinutes = startUtc.HasValue && endUtc.HasValue && endUtc.Value > startUtc.Value
-            ? (int)Math.Round((endUtc.Value - startUtc.Value).TotalMinutes)
-            : 0;
-
-        var response = new MentorBookingAttendanceDetailResponse
-        {
-            BookingId = booking.Id,
-            RoomId = booking.MentorAvailability?.RoomId,
-            MentorId = mentorId,
-            MentorName = FormatUserName(booking.MentorAvailability?.Mentor, mentorId > 0 ? $"Mentor #{mentorId}" : "Chưa phân công"),
-            LearnerId = learnerId,
-            LearnerName = FormatUserName(booking.UserSubscription?.UserAccount, learnerId > 0 ? $"Learner #{learnerId}" : "Học viên"),
-            JlptLevel = booking.CompensationLevel?.Code ?? booking.UserSubscription?.CertificateLevel?.Code,
-            BookingStatus = booking.Status.ToString(),
-            ScheduledStartUtc = startUtc,
-            ScheduledEndUtc = endUtc,
-            ScheduledMinutes = scheduledMinutes,
-            AttendedAtUtc = booking.AttendedAt,
-            MentorObservedSeconds = mentorSeconds,
-            LearnerObservedSeconds = learnerSeconds,
-            BothJoinedAtLeastOneMinute = mentorSeconds >= 60 && learnerSeconds >= 60,
-            Participants = participants
-        };
-
-        return ApiResponse<MentorBookingAttendanceDetailResponse>.Success(response);
-    }
-
     private async Task<MentorKpiSummaryResponse> BuildSummaryForMentorAsync(
         UserAccount mentor,
         DateOnly fromDate,
@@ -233,42 +147,7 @@ public sealed class MentorKpiService(
             .Select(q => q.CertificateLevel.Code)
             .ToListAsync(cancellationToken);
 
-        // 1. Booking 1-1 sessions
-        var allMentorBookings = await context.MentorBookings
-            .AsNoTracking()
-            .Include(b => b.MentorAvailability)
-            .Include(b => b.UserSubscription)
-                .ThenInclude(s => s.UserAccount)
-            .Include(b => b.UserSubscription)
-                .ThenInclude(s => s.CertificateLevel)
-            .Include(b => b.CompensationLevel)
-            .Where(b => !b.IsDeleted
-                && b.Status != MentorStatus.AwaitingPayment
-                && b.MentorAvailabilityId != null
-                && b.MentorAvailability!.MentorId == mentor.Id)
-            .ToListAsync(cancellationToken);
-
-        var scopedBookings = allMentorBookings
-            .Where(b =>
-            {
-                var startUtc = ResolveBookingStartUtc(b);
-                return startUtc >= fromStartUtc && startUtc < toEndExclusiveUtc;
-            })
-            .ToList();
-
-        var bookingIds = scopedBookings.Select(b => b.Id).ToList();
-        var bookingAttendanceSeconds = bookingIds.Count == 0
-            ? new Dictionary<int, int>()
-            : (await context.MentorAttendanceRecords
-                .AsNoTracking()
-                .Where(r => r.MentorBookingId.HasValue
-                    && bookingIds.Contains(r.MentorBookingId.Value)
-                    && (r.UserId == mentor.Id || r.Role == "Mentor"))
-                .ToListAsync(cancellationToken))
-                .GroupBy(r => r.MentorBookingId!.Value)
-                .ToDictionary(g => g.Key, g => g.Sum(r => r.TotalDurationSeconds));
-
-        // 2. StudyCourse & Cohort sessions
+        // StudyCourse & Cohort sessions
         var mentorCourses = await context.StudyCourses
             .AsNoTracking()
             .Include(c => c.CertificateLevel)
@@ -320,8 +199,7 @@ public sealed class MentorKpiService(
                 .GroupBy(r => r.CourseSessionId!.Value)
                 .ToDictionary(g => g.Key, g => g.Sum(r => r.TotalDurationSeconds));
 
-        var roomIds = scopedBookings.Select(b => b.MentorAvailability?.RoomId)
-            .Concat(scopedCourseSessions.Select(x => x.Session.Availability?.RoomId))
+        var roomIds = scopedCourseSessions.Select(x => x.Session.Availability?.RoomId)
             .Where(id => id.HasValue)
             .Select(id => id!.Value)
             .Distinct()
@@ -335,7 +213,7 @@ public sealed class MentorKpiService(
                 .GroupBy(r => r.RoomId)
                 .ToDictionary(g => g.Key, g => g.Max(r => r.TotalDurationSeconds));
 
-        // 3. Homework (1-1 Booking + StudyCourse)
+        // Homework (HomeworkAssignments + StudyCourseHomework)
         var bookingHomeworks = await context.HomeworkAssignments
             .AsNoTracking()
             .Include(h => h.Submission)
@@ -360,7 +238,7 @@ public sealed class MentorKpiService(
             })
             .ToList();
 
-        // 4. Reviews & Disputes
+        // Reviews & Disputes
         var reviews = await context.MentorReviews
             .AsNoTracking()
             .Where(r => r.MentorId == mentor.Id
@@ -389,102 +267,6 @@ public sealed class MentorKpiService(
         int cancelledByLearner = 0;
         int missedOrNoShow = 0;
         int upcomingOrIncomplete = 0;
-
-        // Deduplicate by AvailabilityId so 1 group teaching slot with up to 4 learners counts as 1 Mentor session.
-        var bookingSessionGroups = scopedBookings
-            .GroupBy(b => b.MentorAvailabilityId.HasValue ? (long)b.MentorAvailabilityId.Value : -b.Id)
-            .ToList();
-
-        foreach (var group in bookingSessionGroups)
-        {
-            var list = group.ToList();
-            var b = list[0];
-            var startUtc = ResolveBookingStartUtc(b);
-            var endUtc = b.MentorAvailability?.EndTime ?? startUtc.AddMinutes(45);
-            var scheduledMins = endUtc > startUtc ? (int)Math.Round((endUtc - startUtc).TotalMinutes) : 0;
-            var roomId = b.MentorAvailability?.RoomId;
-            var observedByBooking = list.Max(x => bookingAttendanceSeconds.GetValueOrDefault(x.Id, 0));
-            var observedByRoom = roomId.HasValue ? mentorRoomAttendanceSeconds.GetValueOrDefault(roomId.Value, 0) : 0;
-            var observedSecs = Math.Max(observedByBooking, observedByRoom);
-            var observedMins = (int)Math.Round(observedSecs / 60.0);
-
-            var isCompleted = list.Any(x => x.Status == MentorStatus.Completed);
-            var isCancelled = !isCompleted && list.All(x => x.Status == MentorStatus.Cancelled);
-            var isMissed = !isCompleted && !isCancelled && endUtc < nowUtc;
-            var isUpcoming = !isCompleted && !isCancelled && endUtc >= nowUtc;
-            var anyAttended = list.Any(x => x.AttendedAt.HasValue);
-            var cancelledByRole = list.FirstOrDefault(x => x.Status == MentorStatus.Cancelled)?.CancelledByRole;
-
-            var sessionConfirmedMins = isCompleted
-                ? (observedMins > 0 ? observedMins : (anyAttended ? scheduledMins : 0))
-                : observedMins;
-
-            if (isCompleted)
-            {
-                completedValid++;
-                scheduledCompletedMinutes += scheduledMins;
-                confirmedMinutes += sessionConfirmedMins;
-            }
-            else if (isCancelled)
-            {
-                cancelled++;
-                if (string.Equals(cancelledByRole, "Mentor", StringComparison.OrdinalIgnoreCase))
-                    cancelledByMentor++;
-                else if (string.Equals(cancelledByRole, "Learner", StringComparison.OrdinalIgnoreCase))
-                    cancelledByLearner++;
-            }
-            else if (isMissed)
-            {
-                missedOrNoShow++;
-            }
-            else if (isUpcoming)
-            {
-                upcomingOrIncomplete++;
-            }
-
-            var w = GetBucket(weeklyBuckets, GetWeekStartLocal(startUtc));
-            var m = GetBucket(monthlyBuckets, GetMonthStartLocal(startUtc));
-            foreach (var bucket in new[] { w, m })
-            {
-                bucket.TotalAssignedSessions++;
-                if (isCompleted)
-                {
-                    bucket.CompletedValidSessions++;
-                    bucket.ScheduledCompletedMinutes += scheduledMins;
-                    bucket.ConfirmedTeachingMinutes += sessionConfirmedMins;
-                }
-                else if (isCancelled)
-                {
-                    bucket.CancelledSessionsCount++;
-                }
-                else if (isMissed)
-                {
-                    bucket.MissedOrNoShowSessionsCount++;
-                }
-                else if (isUpcoming)
-                {
-                    bucket.UpcomingOrIncompleteSessionsCount++;
-                }
-            }
-
-            recentSessions.Add(new MentorKpiRecentSessionItemResponse
-            {
-                SourceType = list.Count > 1 ? "GroupBooking" : "Booking1on1",
-                BookingOrSessionId = b.Id,
-                RoomId = roomId,
-                LearnerName = list.Count > 1
-                    ? $"Nhóm ({list.Count} học viên)"
-                    : FormatUserName(b.UserSubscription?.UserAccount, "Học viên"),
-                JlptLevel = b.CompensationLevel?.Code ?? b.UserSubscription?.CertificateLevel?.Code,
-                Status = isCompleted ? MentorStatus.Completed.ToString() : b.Status.ToString(),
-                ScheduledStartUtc = startUtc,
-                ScheduledEndUtc = endUtc,
-                ScheduledMinutes = scheduledMins,
-                ObservedMentorMinutes = observedMins,
-                AttendedAtUtc = list.Select(x => x.AttendedAt).FirstOrDefault(t => t.HasValue),
-                IsValidCompleted = isCompleted
-            });
-        }
 
         // Deduplicate Cohort class sessions by AvailabilityId so 4 enrolled learners = 1 Mentor teaching session.
         var courseSessionGroups = scopedCourseSessions
@@ -686,8 +468,8 @@ public sealed class MentorKpiService(
             ToDate = toDate,
             TeachingJlptLevels = qualifications,
 
-            TotalAssignedSessions = bookingSessionGroups.Count + courseSessionGroups.Count,
-            AssignedBookingsCount = bookingSessionGroups.Count,
+            TotalAssignedSessions = courseSessionGroups.Count,
+            AssignedBookingsCount = 0,
             AssignedCourseSessionsCount = courseSessionGroups.Count,
 
             CompletedValidSessions = completedValid,

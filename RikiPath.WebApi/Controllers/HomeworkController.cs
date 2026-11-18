@@ -16,33 +16,13 @@ namespace RikiPath.WebApi.Controllers;
 public sealed class HomeworkController(HomeworkService homework, IPracticeQuizService practice) : ControllerBase
 {
     [HttpGet]
-    public async Task<IActionResult> List([FromQuery] int? learnerId, [FromQuery] int? bookingId, [FromQuery] int? cohortId,
+    public async Task<IActionResult> List([FromQuery] int? learnerId, [FromQuery] int? cohortId,
         CancellationToken ct)
     {
-        if (User.IsInRole("Admin") && bookingId is not > 0 && learnerId is not > 0 && cohortId is not > 0)
-            return BadRequest(ApiResponse<object>.Fail("Chọn lịch ôn luyện, lớp học hoặc học viên để xem bài tập."));
-        return Ok(ApiResponse<object>.Success(await homework.GetAssignmentsAsync(learnerId, ct, cohortId, bookingId)));
+        if (User.IsInRole("Admin") && learnerId is not > 0 && cohortId is not > 0)
+            return BadRequest(ApiResponse<object>.Fail("Chọn lớp học hoặc học viên để xem bài tập."));
+        return Ok(ApiResponse<object>.Success(await homework.GetAssignmentsAsync(learnerId, ct, cohortId)));
     }
-
-    [HttpGet("bookings")]
-    public async Task<IActionResult> Bookings(CancellationToken ct)
-        => Ok(ApiResponse<object>.Success(await homework.ListBookingsAsync(ct)));
-
-    [HttpPut("bookings/{bookingId:int}/evaluation"), Authorize(Roles = "Mentor")]
-    public async Task<IActionResult> Evaluate(int bookingId, EvaluateMentorBookingRequest request, CancellationToken ct)
-        => Send(await homework.EvaluateBookingAsync(bookingId, request, ct));
-
-    [HttpGet("bookings/{bookingId:int}/progress")]
-    public async Task<IActionResult> Progress(int bookingId, CancellationToken ct)
-        => Send(await homework.GetPracticeProgressAsync(bookingId, ct));
-
-    [HttpPost("bookings/{bookingId:int}/progress"), Authorize(Roles = "Learner")]
-    public async Task<IActionResult> Record(int bookingId, RecordMentorPracticeResultRequest request, CancellationToken ct)
-        => Send(await homework.RecordPracticeProgressAsync(bookingId, request, ct));
-
-    [HttpPut("bookings/{bookingId:int}/review-plan"), Authorize(Roles = "Mentor")]
-    public async Task<IActionResult> ReviewPlan(int bookingId, SaveMentorReviewPlanRequest request, CancellationToken ct)
-        => Send(await homework.SaveReviewPlanAsync(bookingId, request, ct));
 
     [HttpPost("{assignmentId:int}/scan"), Authorize(Roles = "Learner"), RequestSizeLimit(11000000)]
     [Consumes("multipart/form-data")]

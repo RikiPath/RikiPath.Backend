@@ -211,40 +211,8 @@ public sealed class CanonicalCohortGroupPostgresTests
                 Assert.True(released.IsSuccess, released.ErrorMessage);
             }
 
-            // 2. 1-1 credit booking onto a Cohort session slot must be rejected (409).
-            await using (var creditBookingDb = Context())
-            {
-                var subPlan = new SubscriptionPlan
-                {
-                    Name = "1-1 Plan", Price = 1000, DurationDays = 30, MeetingSessionCount = 1,
-                    CertificateLevelId = level.Id, IsActive = true
-                };
-                creditBookingDb.Add(subPlan);
-                await creditBookingDb.SaveChangesAsync();
-                var sub = new UserSubscription
-                {
-                    UserId = learners[0].Id, SubscriptionPlanId = subPlan.Id, CertificateLevelId = level.Id,
-                    MeetingSessionsIncluded = 1, MeetingSessionsUsed = 0, PaymentStatus = PaymentStatus.Paid,
-                    StartDate = DateTime.UtcNow.AddDays(-1), EndDate = DateTime.UtcNow.AddDays(30), PurchasedAt = DateTime.UtcNow.AddDays(-1)
-                };
-                creditBookingDb.Add(sub);
-                await creditBookingDb.SaveChangesAsync();
-
-                var ledgerMock = new Mock<IMentorCreditLedgerService>();
-                var bookingSvc = new MentorBookingService(
-                    creditBookingDb,
-                    new UnitOfWork(creditBookingDb),
-                    Claim(learners[0].Id, Role.Learner),
-                    ledgerMock.Object,
-                    new AppSettings { FrontendBaseUrl = "https://test.invalid" },
-                    Mock.Of<ILogger<MentorBookingService>>());
-                var bookCohortSlotRes = await bookingSvc.BookSlotAsync(new BookIncludedMeetingRequest { MentorAvailabilityId = slot1.Id });
-                Assert.False(bookCohortSlotRes.IsSuccess);
-                Assert.Equal(409, bookCohortSlotRes.StatusCode);
-            }
-
             var contract = new AllowDirectGroupEntitlementContract();
-            // 3. Enroll first 2 learners sequentially.
+            // 2. Enroll first 2 learners sequentially.
             var keyL1 = Guid.NewGuid();
             await using (var l1Db = Context())
             {

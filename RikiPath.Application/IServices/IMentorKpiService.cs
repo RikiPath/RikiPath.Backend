@@ -26,8 +26,4 @@ public interface IMentorKpiService
         DateOnly? from = null,
         DateOnly? to = null,
         CancellationToken cancellationToken = default);
-
-    Task<ApiResponse<MentorBookingAttendanceDetailResponse>> GetAdminBookingAttendanceAsync(
-        int bookingId,
-        CancellationToken cancellationToken = default);
 }

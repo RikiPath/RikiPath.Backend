@@ -26,27 +26,22 @@ public sealed partial class HomeworkService(
     private static readonly TimeSpan VietnamOffset = TimeSpan.FromHours(7);
     private static readonly string[] SupportedLevels = ["N5", "N4", "N3", "N2"];
 
-    internal static IQueryable<MentorBooking> ScheduledBookings(IUnitOfWork unit) => unit.MentorBookings.Query()
-        .Where(booking => !booking.IsDeleted && !booking.UserSubscription.IsDeleted &&
-            booking.UserSubscription.PaymentStatus == PaymentStatus.Paid &&
-            (booking.Status == MentorStatus.Assigned || booking.Status == MentorStatus.Accepted ||
-             booking.Status == MentorStatus.Completed) &&
-            booking.MentorAvailability != null && !booking.MentorAvailability.IsDeleted &&
-            booking.MentorAvailability.IsApproved && booking.MentorAvailability.RejectedAt == null);
-
     public async Task<List<HomeworkLearner>> GetLearnersAsync(CancellationToken ct, bool includeAllBookings = false)
     {
         var mentorId = claims.GetUserClaim().Id;
-        var bookings = await ScheduledBookings(unit)
-            .Where(booking => booking.MentorAvailability!.MentorId == mentorId &&
-                !booking.UserSubscription.UserAccount.IsDeleted)
-            .OrderByDescending(booking => booking.MentorAvailability!.StartTime).ThenByDescending(booking => booking.Id)
-            .Select(booking => new HomeworkLearner(booking.UserSubscription.UserId,
-                (booking.UserSubscription.UserAccount.FirstName + " " + booking.UserSubscription.UserAccount.LastName).Trim(),
-                booking.Id, booking.MentorAvailability!.StartTime))
+        var enrollments = await unit.StudyCourses.Query()
+            .Where(c => c.CohortId != null && c.PaymentStatus == "Paid" && c.Status == "Active"
+                && c.Cohort!.MentorId == mentorId && !c.Learner.IsDeleted)
+            .OrderByDescending(c => c.StartsAt ?? c.Cohort!.StartsAt)
+            .ThenByDescending(c => c.Id)
+            .Select(c => new HomeworkLearner(
+                c.LearnerId,
+                (c.Learner.FirstName + " " + c.Learner.LastName).Trim(),
+                c.CohortId!.Value,
+                c.StartsAt ?? c.Cohort!.StartsAt))
             .ToListAsync(ct);
-        return (includeAllBookings ? bookings : bookings.DistinctBy(booking => booking.LearnerId))
-            .OrderBy(booking => booking.LearnerName).ToList();
+        return (includeAllBookings ? enrollments : enrollments.DistinctBy(c => c.LearnerId))
+            .OrderBy(c => c.LearnerName).ToList();
     }
 
     public async Task<List<HomeworkCatalogItem>> GetCatalogAsync(string? level, string? search, int page, CancellationToken ct)
@@ -81,31 +76,13 @@ public sealed partial class HomeworkService(
 
     public async Task<ApiResponse<int>> CreateAsync(CreateHomeworkRequest request, CancellationToken ct)
     {
-        if (request.CohortId.HasValue)
-        {
-            var batch = await CreateCohortAssignmentsAsync(request.CohortId.Value, request, ct);
-            return batch.IsSuccess && batch.Result is { Count: > 0 } ids
-                ? ApiResponse<int>.Created(ids[0])
-                : ApiResponse<int>.Fail(batch.ErrorMessage ?? "Không thể giao bài tập cho lớp nhóm.", (HttpStatusCode)batch.StatusCode, batch.ErrorCode, errors: batch.Errors);
-        }
+        if (!request.CohortId.HasValue)
+            return ApiResponse<int>.Fail("Vui lòng chọn lớp học nhóm (Cohort) để giao bài tập.", HttpStatusCode.BadRequest, "COHORT_REQUIRED");
 
-        var mentorId = claims.GetUserClaim().Id;
-        if (!request.BookingId.HasValue)
-            return ApiResponse<int>.Fail("Chọn buổi tư vấn 1-1 hoặc lớp nhóm để giao bài.");
-        var booking = await ScheduledBookings(unit).Where(booking => booking.Id == request.BookingId.Value &&
-            booking.MentorAvailability!.MentorId == mentorId && !booking.UserSubscription.UserAccount.IsDeleted)
-            .Select(booking => new { LearnerId = booking.UserSubscription.UserId }).SingleOrDefaultAsync(ct);
-        if (booking is null)
-            return ApiResponse<int>.NotFound("Không tìm thấy lịch ôn luyện hợp lệ với người học này.");
-
-        var validated = await ValidateAssignmentContentAsync(request, null, ct);
-        if (validated.Error is not null)
-            return ApiResponse<int>.Fail(validated.Error.ErrorMessage ?? "Yêu cầu giao bài không hợp lệ.", (HttpStatusCode)validated.Error.StatusCode);
-
-        var assignment = BuildAssignment(mentorId, booking.LearnerId, request.BookingId, null, null, null, "Booking1on1", request, validated.DueAt, validated.LessonIds, validated.ExerciseIds);
-        await unit.HomeworkAssignments.AddAsync(assignment, ct);
-        await unit.SaveChangesAsync(ct);
-        return ApiResponse<int>.Created(assignment.Id);
+        var batch = await CreateCohortAssignmentsAsync(request.CohortId.Value, request, ct);
+        return batch.IsSuccess && batch.Result is { Count: > 0 } ids
+            ? ApiResponse<int>.Created(ids[0])
+            : ApiResponse<int>.Fail(batch.ErrorMessage ?? "Không thể giao bài tập cho lớp nhóm.", (HttpStatusCode)batch.StatusCode, batch.ErrorCode, errors: batch.Errors);
     }
 
     public async Task<ApiResponse<List<int>>> CreateCohortAssignmentsAsync(int cohortId, CreateHomeworkRequest request, CancellationToken ct)
@@ -216,14 +193,12 @@ public sealed partial class HomeworkService(
             Exercises = exerciseIds.Select(id => new HomeworkAssignmentExercise { PracticeExerciseId = id }).ToList()
         };
 
-    public async Task<List<HomeworkItem>> GetAssignmentsAsync(int? learnerId, CancellationToken ct, int? cohortId = null, int? bookingId = null)
+    public async Task<List<HomeworkItem>> GetAssignmentsAsync(int? learnerId, CancellationToken ct, int? cohortId = null)
     {
         var user = claims.GetUserClaim();
         var query = AssignmentsFor(user, learnerId);
         if (cohortId.HasValue)
             query = query.Where(item => item.CohortId == cohortId.Value);
-        if (bookingId.HasValue)
-            query = query.Where(item => item.MentorBookingId == bookingId.Value);
         var rows = await query.AsNoTracking().OrderByDescending(item => item.CreatedDate)
             .ThenByDescending(item => item.Id)
             .Include(item => item.Learner).Include(item => item.Mentor)
@@ -436,20 +411,21 @@ public sealed partial class HomeworkService(
             return ApiResponse<HomeworkPeriodReport>.Fail("Chọn khoảng thời gian hợp lệ, tối đa 366 ngày.");
 
         var user = claims.GetUserClaim();
-        var sessions = ScheduledBookings(unit);
+        var courses = unit.StudyCourses.Query()
+            .Where(c => c.CohortId != null && c.PaymentStatus == "Paid" && c.Status != "Cancelled");
         var assignments = AssignmentsFor(user, learnerId);
         if (user.Role == Role.Mentor)
         {
             if (learnerId is null)
                 return ApiResponse<HomeworkPeriodReport>.Fail("Hãy chọn người học để xem báo cáo.");
-            sessions = sessions.Where(booking => booking.MentorAvailability!.MentorId == user.Id &&
-                booking.UserSubscription.UserId == learnerId);
-            if (!await sessions.AnyAsync(ct) && !await assignments.AnyAsync(ct))
+            courses = courses.Where(c => (c.MentorId == user.Id || (c.Cohort != null && c.Cohort.MentorId == user.Id)) &&
+                c.LearnerId == learnerId);
+            if (!await courses.AnyAsync(ct) && !await assignments.AnyAsync(ct))
                 return ApiResponse<HomeworkPeriodReport>.NotFound("Không tìm thấy người học của bạn.");
         }
         else
         {
-            sessions = sessions.Where(booking => booking.UserSubscription.UserId == user.Id);
+            courses = courses.Where(c => c.LearnerId == user.Id);
         }
 
         var start = new DateTimeOffset(from.ToDateTime(TimeOnly.MinValue), VietnamOffset).UtcDateTime;
@@ -458,13 +434,13 @@ public sealed partial class HomeworkService(
         var homework = await assignments.Where(item => item.CreatedDate >= start && item.CreatedDate < end)
             .Select(item => item.Submission != null && !item.Submission.IsDeleted &&
                 item.Submission.SubmittedAt < end).ToListAsync(ct);
-        var meetings = await sessions.Where(booking => booking.MentorAvailability!.StartTime >= start &&
-                booking.MentorAvailability.StartTime < end && booking.MentorAvailability.EndTime <= observedUntil)
-            .GroupBy(booking => booking.MentorAvailabilityId)
-            .Select(group => new
+        var meetings = await courses
+            .SelectMany(c => c.Sessions.Where(s => s.ScheduledAt >= start && s.ScheduledAt < end
+                && s.ScheduledAt.AddMinutes(c.SessionMinutes) <= observedUntil && s.Status != "CancelledByMentor"))
+            .Select(s => new
             {
-                Tracked = group.Any(booking => booking.MentorAvailability!.AttendanceTrackingEnabled),
-                Attended = group.Any(booking => booking.AttendedAt != null)
+                Tracked = true,
+                Attended = s.Status == "Present"
             }).ToListAsync(ct);
         var submitted = homework.Count(value => value);
         var tracked = meetings.Count(meeting => meeting.Tracked);

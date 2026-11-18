@@ -369,7 +369,6 @@ internal class Program
                         if (!string.IsNullOrEmpty(accessToken) &&
                             (context.HttpContext.Request.Path.StartsWithSegments("/hubs/consultation-call")
                              || context.HttpContext.Request.Path.StartsWithSegments("/hubs/mentor-meeting")
-                             || context.HttpContext.Request.Path.StartsWithSegments("/hubs/mentor-chat")
                              || context.HttpContext.Request.Path.StartsWithSegments("/hubs/notification")))
                         {
                             context.Token = accessToken;
@@ -483,7 +482,6 @@ internal class Program
         app.MapControllers();
 
         app.MapHub<MentorMeetingHub>("/hubs/mentor-meeting");
-        app.MapHub<MentorChatHub>("/hubs/mentor-chat");
         app.MapHub<NotificationHub>("/hubs/notification");
 
         app.Run();

@@ -114,13 +114,6 @@ public sealed class StudyCourseServiceTests : IDisposable
     {
         var c = await Seed(); actor = new() { Id = 99, Role = Role.Learner };
         Assert.Equal(403, (await Service().DetailAsync(c.Id, default)).StatusCode);
-        Assert.Equal(403, (await Service().SubmitHomeworkAsync(c.Id, c.Homework[0].Id, new("text"), default)).StatusCode);
-    }
-    [Fact] public async Task Completed_course_facts_are_locked()
-    {
-        var c = await Seed(); actor = new() { Id = 20, Role = Role.Mentor };
-        Assert.False((await Service().GradeAsync(c.Id, c.Homework[0].Id, new(false, "Changed"), default)).IsSuccess);
-        Assert.True(c.Homework[0].Passed);
     }
     [Fact] public async Task Approval_requires_verified_failure_and_grants_only_one_frozen_free_course()
     {
@@ -162,7 +155,7 @@ public sealed class StudyCourseServiceTests : IDisposable
         var c = await Seed(); c.Status = "PendingPayment"; c.PaymentStatus = "Pending";
         var webhook = new PayOsWebhookRequest { Data = new() { Reference = "course-ref" } };
         gateway.Setup(x => x.VerifyWebhook(webhook)).Returns(new PaymentCallbackResult(true, true, 700000000 + c.Id, c.Amount, ""));
-        var payment = new PaymentService(uow.Object, gateway.Object, new AppSettings(), Mock.Of<IMentorCreditLedgerService>(), Service());
+        var payment = new PaymentService(uow.Object, gateway.Object, new AppSettings(), Service());
         Assert.True((await payment.HandlePayOsWebhookAsync(webhook, default)).IsSuccess);
         Assert.Equal("Paid", c.PaymentStatus);
     }
@@ -175,43 +168,24 @@ public sealed class StudyCourseServiceTests : IDisposable
     }
     [Fact] public async Task Purchase_retry_reuses_order_and_keeps_original_price_after_plan_edit()
     {
-        var original = await Seed(); actor = new() { Id = 10, Role = Role.Learner };
+        var original = await Seed(); original.Plan.SessionType = "Group"; original.Plan.TotalSessions = 1;
+        var start = DateTime.UtcNow.AddDays(10);
+        var slot = new MentorAvailability { MentorId = 20, StartTime = start, EndTime = start.AddMinutes(60), IsApproved = true, MaxLearners = 4 };
+        var cohort = new StudyCohort { Plan = original.Plan, MentorId = 20, Name = "Group", Capacity = 4, Status = "Published", StartsAt = start, EndsAt = slot.EndTime,
+            Sessions = [new() { Number = 1, Availability = slot }] };
+        db.Add(cohort); await db.SaveChangesAsync();
+        actor = new() { Id = 10, Role = Role.Learner };
         gateway.Setup(x => x.CreatePaymentLinkAsync(It.IsAny<long>(), 100, It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new PaymentLinkResult("https://pay.invalid/checkout", "test", ""));
         gateway.Setup(x => x.CreatePaymentLinkAsync(It.IsAny<long>(), 100, It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<DateTime?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new PaymentLinkResult("https://pay.invalid/checkout", "test", ""));
-        var request = new PurchaseCourse(original.PlanId, Guid.NewGuid());
+        var request = new PurchaseCourse(original.PlanId, Guid.NewGuid(), cohort.Id);
         Assert.True((await Service().PurchaseAsync(request, default)).IsSuccess);
         original.Plan.Price = 999;
         Assert.True((await Service().PurchaseAsync(request, default)).IsSuccess);
         var order = await db.Set<StudyCourse>().SingleAsync(x => x.PurchaseKey == request.IdempotencyKey);
         Assert.Equal(100, order.Amount);
         gateway.Verify(x => x.CreatePaymentLinkAsync(It.IsAny<long>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<DateTime?>(), It.IsAny<CancellationToken>()), Times.Once);
-    }
-    [Fact] public async Task Weekly_cadence_prevents_overbooking_original_sessions()
-    {
-        var c = await Seed(); c.Status = "Active"; c.Sessions.Clear();
-        var start = DateTime.UtcNow.Date.AddDays(7);
-        start = start.AddDays(-(((int)start.DayOfWeek + 6) % 7)).AddHours(2);
-        c.StartsAt = start.AddDays(-1); c.EndsAt = start.AddMonths(3);
-        for (int i = 0; i < 3; i++) c.Sessions.Add(new() { Number = i + 1, Attempt = 1, ScheduledAt = start.AddDays(i), Status = "Scheduled" });
-        await db.SaveChangesAsync();
-        var result = await Service().ScheduleAsync(c.Id, new(4, start.AddDays(3), null), default);
-        Assert.False(result.IsSuccess); Assert.Contains("đủ số buổi", result.ErrorMessage);
-    }
-
-    [Fact] public async Task Paid_individual_package_books_once_and_reuses_existing_room()
-    {
-        var c = await Seed(); c.Status = "Ready"; c.MentorId = null; c.Sessions.Clear();
-        actor = new() { Id = c.LearnerId, Role = Role.Learner };
-        var start = DateTime.UtcNow.AddDays(10);
-        var slot = new MentorAvailability { MentorId = 20, StartTime = start, EndTime = start.AddMinutes(60), IsApproved = true, MaxLearners = 1 };
-        db.Add(slot); await db.SaveChangesAsync();
-        Assert.True((await Service().BookSlotAsync(c.Id, new(slot.Id), default)).IsSuccess);
-        Assert.Equal(1, slot.BookedCount); Assert.Equal(20, c.MentorId);
-        Assert.Contains(slot.RoomId.ToString(), c.Sessions.Single().MeetingUrl);
-        Assert.False((await Service().BookSlotAsync(c.Id, new(slot.Id), default)).IsSuccess);
-        Assert.Single(c.Sessions);
     }
     [Fact] public async Task Group_last_seat_counts_holds_but_releases_expired_holds()
     {

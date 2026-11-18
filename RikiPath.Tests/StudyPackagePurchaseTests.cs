@@ -49,7 +49,7 @@ public sealed class StudyPackagePurchaseTests
             It.IsAny<string>(), $"http://localhost:5173/payment/success?purchaseId={id}",
             $"http://localhost:5173/payment/cancel?purchaseId={id}", It.IsAny<CancellationToken>()), Times.Once);
         Assert.Equal(0, (await access.GetAccessAsync(default)).LearningPathUsesRemaining);
-        var payment = new PaymentService(uow, gateway.Object, settings, Mock.Of<IMentorCreditLedgerService>());
+        var payment = new PaymentService(uow, gateway.Object, settings);
         var webhook = new PayOsWebhookRequest { Data = new PayOsWebhookData { PaymentLinkId = "link" } };
         gateway.Setup(g => g.VerifyWebhook(webhook)).Returns(new PaymentCallbackResult(true, true,
             SubscriptionAccessService.OrderPrefix + id, 999, ""));

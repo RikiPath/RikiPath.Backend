@@ -66,10 +66,6 @@ public sealed class StudyCoursesController(
         => Result(await service.CohortSchedulePreviewAsync(r, ct));
     [HttpPut("cohorts/{id:int}"), Authorize(Roles = "Admin")]
     public async Task<IActionResult> UpdateCohort(int id, SaveStudyCohort r, CancellationToken ct) => Result(await service.SaveCohortAsync(id, r, ct));
-    [HttpGet("{id:int}/available-slots"), Authorize(Roles = "Learner")]
-    public async Task<IActionResult> AvailableSlots(int id, CancellationToken ct) => Result(await service.AvailableSlotsAsync(id, ct));
-    [HttpPost("{id:int}/book-slot"), Authorize(Roles = "Learner")]
-    public async Task<IActionResult> BookSlot(int id, BookCourseSlot r, CancellationToken ct) => Result(await service.BookSlotAsync(id, r, ct));
     [HttpGet("catalog")]
     public async Task<IActionResult> Catalog(CancellationToken ct) => Result(await service.CatalogAsync(ct));
     [HttpGet("admin-catalog"), Authorize(Roles = "Admin")]
@@ -109,18 +105,8 @@ public sealed class StudyCoursesController(
     [HttpPost("{id:int}/cancel-enrollment"), Authorize(Roles = "Learner,Admin")]
     public async Task<IActionResult> CancelCohortEnrollment(int id, CancelCohortEnrollmentRequest? r, CancellationToken ct)
         => Result(await service.CancelCohortEnrollmentAsync(id, r, ct));
-    [HttpPost("{id:int}/activate"), Authorize(Roles = "Admin")]
-    public async Task<IActionResult> Activate(int id, ActivateCourse r, CancellationToken ct) => Result(await service.ActivateAsync(id, r, ct));
-    [HttpPost("{id:int}/sessions"), Authorize(Roles = "Admin")]
-    public async Task<IActionResult> Schedule(int id, ScheduleCourseSession r, CancellationToken ct) => Result(await service.ScheduleAsync(id, r, ct));
     [HttpPost("{id:int}/sessions/{sessionId:int}/attendance"), Authorize(Roles = "Admin,Mentor")]
     public async Task<IActionResult> Attendance(int id, int sessionId, ConfirmCourseAttendance r, CancellationToken ct) => Result(await service.AttendanceAsync(id, sessionId, r, ct));
-    [HttpPost("{id:int}/homework"), Authorize(Roles = "Mentor")]
-    public async Task<IActionResult> Assign(int id, AssignCourseHomework r, CancellationToken ct) => Result(await service.AssignAsync(id, r, ct));
-    [HttpPost("{id:int}/homework/{homeworkId:int}/submit"), Authorize(Roles = "Learner")]
-    public async Task<IActionResult> Submit(int id, int homeworkId, SubmitCourseHomework r, CancellationToken ct) => Result(await service.SubmitHomeworkAsync(id, homeworkId, r, ct));
-    [HttpPost("{id:int}/homework/{homeworkId:int}/grade"), Authorize(Roles = "Mentor")]
-    public async Task<IActionResult> Grade(int id, int homeworkId, GradeCourseHomework r, CancellationToken ct) => Result(await service.GradeAsync(id, homeworkId, r, ct));
     [HttpPost("{id:int}/complete"), Authorize(Roles = "Admin")]
     public async Task<IActionResult> Complete(int id, CancellationToken ct) => Result(await service.CompleteAsync(id, ct));
     [HttpPost("{id:int}/retake"), Authorize(Roles = "Learner"), RequestSizeLimit(11000000)]

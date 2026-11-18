@@ -278,7 +278,7 @@ public sealed class CohortCheckoutPaymentPostgresTests
         var settings = Settings();
         var gateway = new TestPayOsGateway(settings);
         var courses = CourseService(db, 0, Role.Admin, gateway);
-        return await new PaymentService(new UnitOfWork(db), gateway, settings, Mock.Of<IMentorCreditLedgerService>(), courses)
+        return await new PaymentService(new UnitOfWork(db), gateway, settings, courses)
             .HandlePayOsWebhookAsync(webhook, default);
     }
 

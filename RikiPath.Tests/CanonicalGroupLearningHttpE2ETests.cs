@@ -218,7 +218,6 @@ public sealed class CanonicalGroupLearningHttpE2ETests
 
         var skippedServices = new HashSet<Type>
         {
-            typeof(IHomeworkAiDraftGenerator),
             typeof(IFileStorageService),
             typeof(IFcmPushService)
         };
@@ -255,7 +254,6 @@ public sealed class CanonicalGroupLearningHttpE2ETests
         builder.Services.AddSingleton(Mock.Of<IAzureSpeechClient>());
         builder.Services.AddSingleton(Mock.Of<ITranscribeSpeechClient>());
         builder.Services.AddSingleton(Mock.Of<IKanjiOcrClient>());
-        builder.Services.AddSingleton(Mock.Of<IPayOsPayoutClient>());
         builder.Services.AddSingleton(Mock.Of<ICallConnectionTracker>());
 
         builder.Services.AddSignalR(o => o.EnableDetailedErrors = true);
@@ -599,14 +597,6 @@ public sealed class CanonicalGroupLearningHttpE2ETests
             var cohortARes = await ReadResultAsync(await http.SendAsync(AuthReq(HttpMethod.Post, "/api/study-courses/cohorts", adminJwt,
                 new SaveStudyCohort(planId, "N3 Nhóm T2-4-6", mentorId, 4, [slot1, slot2], true))));
             var cohortAId = cohortARes.GetProperty("id").GetInt32();
-
-            // Confirm 1-1 slot browsing endpoint NEVER exposes Cohort A slots!
-            var fromIso = Uri.EscapeDataString(DateTime.UtcNow.ToString("O"));
-            var toIso = Uri.EscapeDataString(DateTime.UtcNow.AddDays(25).ToString("O"));
-            var oneOnOneSlots = await ReadResultAsync(await http.SendAsync(AuthReq(HttpMethod.Get, $"/api/mentor-meetings/availability?from={fromIso}&to={toIso}", learnerJwts[0])));
-            var exposedIds = oneOnOneSlots.EnumerateArray().Select(s => s.GetProperty("id").GetInt32()).ToHashSet();
-            Assert.DoesNotContain(slot1, exposedIds);
-            Assert.DoesNotContain(slot2, exposedIds);
 
             // Confirm Mentor & Admin slot views expose isInCohort + cohortId, and 1-1 request-cancel is blocked 409 on Cohort slots!
             var mentorMySlots = await ReadResultAsync(await http.SendAsync(AuthReq(HttpMethod.Get, "/api/mentor/availability", mentorJwt)));

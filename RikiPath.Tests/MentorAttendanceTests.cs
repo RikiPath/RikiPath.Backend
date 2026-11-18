@@ -111,6 +111,31 @@ public sealed class MentorAttendanceTests
         };
         db.MentorBookings.Add(booking);
 
+        var course = new StudyCourse
+        {
+            Id = 1500 + learnerId,
+            LearnerId = learnerId,
+            MentorId = mentorId,
+            PlanId = 1,
+            Name = "Cohort Session",
+            CertificateLevelId = 1,
+            PurchaseKey = Guid.NewGuid(),
+            PaymentStatus = paymentStatus == PaymentStatus.Paid ? "Paid" : "Pending",
+            Status = bookingStatus == MentorStatus.Cancelled ? "Cancelled" : "Active",
+            Sessions =
+            [
+                new StudyCourseSession
+                {
+                    Id = 2500 + learnerId,
+                    Number = 1,
+                    AvailabilityId = slot.Id,
+                    ScheduledAt = slot.StartTime,
+                    Status = bookingStatus == MentorStatus.Cancelled ? "Cancelled" : "Scheduled"
+                }
+            ]
+        };
+        db.StudyCourses.Add(course);
+
         await db.SaveChangesAsync();
         return (mentor, learner, slot, booking);
     }
@@ -197,6 +222,12 @@ public sealed class MentorAttendanceTests
             {
                 Id = 900 + learnerId, UserSubscriptionId = 500 + learnerId,
                 MentorAvailabilityId = slot.Id, LearnerId = learnerId, Status = MentorStatus.Accepted
+            });
+            db.StudyCourses.Add(new StudyCourse
+            {
+                Id = 1500 + learnerId, LearnerId = learnerId, MentorId = mentor.Id, PlanId = 1, Name = "Cohort Session",
+                CertificateLevelId = 1, PurchaseKey = Guid.NewGuid(), PaymentStatus = "Paid", Status = "Active",
+                Sessions = [new StudyCourseSession { Id = 2500 + learnerId, Number = 1, AvailabilityId = slot.Id, ScheduledAt = slot.StartTime, Status = "Scheduled" }]
             });
         }
         await db.SaveChangesAsync();
@@ -338,7 +369,7 @@ public sealed class MentorAttendanceTests
 
         var savedRecord = await db.MentorAttendanceRecords.FirstOrDefaultAsync(r => r.RoomId == slot.RoomId && r.UserId == learner.Id);
         Assert.NotNull(savedRecord);
-        Assert.Equal(booking.Id, savedRecord.MentorBookingId);
+        Assert.Equal(2500 + learner.Id, savedRecord.CourseSessionId);
         Assert.Equal(MentorAttendanceStatus.Joined, savedRecord.Status);
     }
 
@@ -363,8 +394,8 @@ public sealed class MentorAttendanceTests
         Assert.Equal(MentorAttendanceStatus.Joined, reconnectResult.Result.Status);
         Assert.True(reconnectResult.Result.IsOnline);
 
-        // Đảm bảo không tạo thêm bản ghi mới trong DB (duy trì 1 bản ghi duy nhất cho cặp booking + user)
-        var totalRecords = await db.MentorAttendanceRecords.CountAsync(r => r.MentorBookingId == booking.Id && r.UserId == learner.Id);
+        // Đảm bảo không tạo thêm bản ghi mới trong DB (duy trì 1 bản ghi duy nhất cho cặp room + user)
+        var totalRecords = await db.MentorAttendanceRecords.CountAsync(r => r.RoomId == slot.RoomId && r.UserId == learner.Id);
         Assert.Equal(1, totalRecords);
     }
 
@@ -484,6 +515,9 @@ public sealed class MentorAttendanceTests
         var setupClaims = MockClaims(Role.Admin, 99);
         var setupService = new MentorAttendanceService(db, setupClaims, NullLogger<MentorAttendanceService>.Instance);
         await setupService.RecordJoinAsync(slot.RoomId, learner.Id, "conn-l-book");
+        var rec = await db.MentorAttendanceRecords.SingleAsync(r => r.RoomId == slot.RoomId && r.UserId == learner.Id);
+        rec.MentorBookingId = booking.Id;
+        await db.SaveChangesAsync();
 
         // Learner chính chủ
         var learnerClaims = MockClaims(Role.Learner, learner.Id);

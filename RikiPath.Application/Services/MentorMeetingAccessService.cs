@@ -80,19 +80,11 @@ namespace RikiPath.Application.Services
                 IsMentor = true
             };
 
-            // Mỗi booking hợp lệ (Paid + Assigned/Accepted) = 1 learner đã đặt chung slot này.
-            // GroupBy phòng hờ trường hợp hiếm: cùng 1 learner lỡ có 2 booking cho cùng 1 slot.
-            var learners = (slot.MentorBookings ?? [])
-                .Select(b => ToLearner(b.UserSubscription))
-                .GroupBy(l => l.UserId)
-                .Select(g => g.First())
-                .ToList();
-
             var courseLearners = await unitOfWork.StudyCourses.Query().Where(c => c.PaymentStatus == "Paid"
                 && c.Status == "Active" && c.Sessions.Any(s => s.AvailabilityId == slot.Id && s.Status == "Scheduled"))
                 .Select(c => new MeetingParticipantResponse { UserId = c.LearnerId,
-                    Name = c.Learner.FirstName + " " + c.Learner.LastName, IsMentor = false }).ToListAsync(cancellationToken);
-            learners = learners.Concat(courseLearners).DistinctBy(x => x.UserId).ToList();
+                    Name = (c.Learner.FirstName + " " + c.Learner.LastName).Trim(), IsMentor = false }).ToListAsync(cancellationToken);
+            var learners = courseLearners.DistinctBy(x => x.UserId).ToList();
             return new MeetingAccessInfoResponse
             {
                 Capacity = slot.MaxLearners,
@@ -101,18 +93,10 @@ namespace RikiPath.Application.Services
             };
         }
 
-        public async Task RecordAttendanceAsync(Guid roomId, int mentorId, int[] learnerIds,
+        public Task RecordAttendanceAsync(Guid roomId, int mentorId, int[] learnerIds,
             CancellationToken cancellationToken)
         {
-            if (learnerIds.Length == 0) return;
-            var now = DateTime.UtcNow;
-            var latestStart = now.AddMinutes(10);
-            await HomeworkService.ScheduledBookings(unitOfWork)
-                .Where(booking => booking.AttendedAt == null && booking.MentorAvailability!.RoomId == roomId &&
-                    booking.MentorAvailability.AttendanceTrackingEnabled &&
-                    booking.MentorAvailability.MentorId == mentorId && booking.MentorAvailability.StartTime <= latestStart &&
-                    booking.MentorAvailability.EndTime > now && learnerIds.Contains(booking.UserSubscription.UserId))
-                .ExecuteUpdateAsync(setters => setters.SetProperty(booking => booking.AttendedAt, now), cancellationToken);
+            return Task.CompletedTask;
         }
 
         /// <summary>Hub gọi khi có 1 connection mới vào phòng (đếm người để biết khi nào phòng trống).</summary>

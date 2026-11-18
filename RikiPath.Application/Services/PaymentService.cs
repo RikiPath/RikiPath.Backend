@@ -10,14 +10,15 @@ using RikiPath.Domain;
 
 namespace RikiPath.Application.Services;
 
-/// <summary>Processes PayOS callbacks and finalizes paid Mentor meeting packages.</summary>
+/// <summary>Processes PayOS callbacks for learner subscriptions, AI top-ups, and cohort courses.</summary>
 public sealed class PaymentService(
     IUnitOfWork unitOfWork,
     IPaymentGatewayClient paymentGatewayClient,
     AppSettings appSettings,
-    IMentorCreditLedgerService creditLedgerService,
     IStudyCourseService? studyCourses = null) : IPaymentService
 {
+    private readonly AppSettings _appSettings = appSettings;
+
     public async Task<ApiResponse<bool>> HandlePayOsWebhookAsync(
     PayOsWebhookRequest webhook, CancellationToken ct)
     {
@@ -36,7 +37,7 @@ public sealed class PaymentService(
                 >= 900_000_000 => await HandlePlanPaymentAsync((int)(code - 900_000_000), callback, webhook, ct),
                 >= 800_000_000 => await HandleAiTopUpAsync((int)(code - 800_000_000), callback, webhook, ct),
                 >= 700_000_000 => await HandleCoursePaymentAsync((int)(code - 700_000_000), callback, webhook.Data.Reference, ct),
-                _ => await HandleMentorPaymentAsync((int)code, callback, webhook, ct) // code cũ của bạn
+                _ => ApiResponse<bool>.Fail("Gói tư vấn 1-1 đã ngừng hỗ trợ.", HttpStatusCode.Conflict, "INDIVIDUAL_MENTOR_PLAN_DISCONTINUED")
             };
         }
         catch (DbUpdateConcurrencyException)
@@ -79,57 +80,9 @@ public sealed class PaymentService(
             topUp.PaymentStatus = PaymentStatus.Paid;
             topUp.PaymentTransactionId = webhook.Data.Reference;
             topUp.ActivatedAt = DateTime.UtcNow;
-
-            // TODO: cộng topUp.Quantity điểm vào nơi bạn lưu số dư điểm AI của user
         }
 
         await unitOfWork.SaveChangesAsync(ct);
-        return ApiResponse<bool>.Success(true);
-    }
-
-    private async Task<ApiResponse<bool>> HandleMentorPaymentAsync(
-    int orderCode, PaymentCallbackResult callback, PayOsWebhookRequest webhook, CancellationToken ct)
-    {
-        var subscription = await unitOfWork.UserSubscriptions
-            .GetMeetingPurchaseWithBookingsAsync(orderCode, ct);
-        if (subscription is null || subscription.MeetingSessionsIncluded <= 0)
-            return ApiResponse<bool>.Fail("Không tìm thấy đơn mua gói tư vấn.");
-        if (callback.Amount != subscription.AmountPaid)
-            return ApiResponse<bool>.Fail("Số tiền thanh toán không khớp với đơn hàng.");
-
-        if (subscription.PaymentStatus == PaymentStatus.Paid)
-        {
-            if (subscription.MeetingSessionsUsed < subscription.MeetingSessionsIncluded)
-            {
-                var existingGrant = await creditLedgerService.CreateGrantFromPaidSubscriptionAsync(orderCode, cancellationToken: ct);
-                if (!existingGrant.IsSuccess)
-                    return ApiResponse<bool>.Fail("Thanh toán đã xác nhận nhưng chưa cấp được lượt tư vấn.");
-            }
-            return ApiResponse<bool>.Success(true, message: "Webhook thanh toán đã được xử lý trước đó.");
-        }
-        if (subscription.PaymentStatus != PaymentStatus.Pending)
-            return ApiResponse<bool>.Success(true, message: "Đơn hàng không còn ở trạng thái chờ thanh toán.");
-        if (!string.IsNullOrWhiteSpace(subscription.PaymentTransactionId) &&
-            !string.Equals(subscription.PaymentTransactionId, webhook.Data.PaymentLinkId, StringComparison.Ordinal))
-            return ApiResponse<bool>.Fail("Mã liên kết thanh toán không khớp với đơn hàng.");
-
-        if (!callback.IsSuccess)
-        {
-            MentorPurchaseFinalizer.MarkFailed(subscription);
-        }
-        else
-        {
-            MentorPurchaseFinalizer.MarkPaid(subscription, appSettings, webhook.Data.Reference);
-        }
-
-        subscription.PaymentExpiresAt = null;
-        await unitOfWork.SaveChangesAsync(ct);
-        if (callback.IsSuccess && subscription.MeetingSessionsUsed < subscription.MeetingSessionsIncluded)
-        {
-            var grantResult = await creditLedgerService.CreateGrantFromPaidSubscriptionAsync(orderCode, cancellationToken: ct);
-            if (!grantResult.IsSuccess)
-                return ApiResponse<bool>.Fail("Thanh toán đã xác nhận nhưng chưa cấp được lượt tư vấn.");
-        }
         return ApiResponse<bool>.Success(true);
     }
 
