@@ -2,6 +2,7 @@ namespace RikiPath.Application.Responses.PracticeExercises
 {
     public class StartPracticeAttemptResponse
     {
+        public string? ImageUrl { get; set; }
         public int AttemptId { get; init; }
         public int PracticeExerciseId { get; init; }
         public string Title { get; init; } = string.Empty;
@@ -15,6 +16,7 @@ namespace RikiPath.Application.Responses.PracticeExercises
     /// <summary>Câu hỏi gửi cho learner — cố ý KHÔNG chứa IsCorrect / Explanation.</summary>
     public class PracticeQuestionResponse
     {
+        public string? ImageUrl { get; set; }
         public int Id { get; init; }
         public string QuestionText { get; init; } = string.Empty;
         public int SortOrder { get; init; }
@@ -23,6 +25,7 @@ namespace RikiPath.Application.Responses.PracticeExercises
 
     public class PracticeOptionResponse
     {
+        public string? ImageUrl { get; set; }
         public int Id { get; init; }
         public string OptionText { get; init; } = string.Empty;
         public int SortOrder { get; init; }

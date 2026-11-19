@@ -993,6 +993,7 @@ public sealed partial class MentorMeetingService(
             RoomId = booking.MentorAvailability?.RoomId,
             Question = booking.Question,
             EndsAt = booking.MentorAvailability?.EndTime,
+            AttendedAt = booking.AttendedAt,
             CreatedAt = booking.CreatedDate,
             CompensationLevelId = levelId,
             JlptLevel = levelCode,

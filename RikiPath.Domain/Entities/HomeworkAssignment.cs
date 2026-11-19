@@ -14,6 +14,7 @@ public class HomeworkAssignment : Base
     public List<HomeworkAssignmentExercise> Exercises { get; set; } = new();
     public string Title { get; set; } = string.Empty;
     public string? Instructions { get; set; }
+    public string? AuthoredDefinitionJson { get; set; }
     public DateTime? DueAt { get; set; }
     public string Status { get; set; } = "Assigned";
     public HomeworkSubmission? Submission { get; set; }

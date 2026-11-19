@@ -41,7 +41,8 @@ public sealed partial class HomeworkService
                 MentorId = b.MentorAvailability.MentorId, b.Status, b.MentorAvailability.StartTime, b.MentorAvailability.EndTime,
                 b.MentorAvailability.ChangeResolution, b.MentorAvailability.ChangeRequestedAt, b.CancellationReason,
                 b.PracticeScore, b.PracticeFeedback, b.PracticeFeedbackAt, b.AttendedAt,
-                Review = reviews.Where(r => r.MentorBookingId == b.Id)
+                Review = reviews.Where(r => r.MentorBookingId == b.Id &&
+                        (actor.Role == Role.Admin || (actor.Role == Role.Learner && r.LearnerId == actor.Id)))
                     .Select(r => new { r.Id, r.Rating, r.Comment }).FirstOrDefault()
             }).ToListAsync(ct);
         var moved = await unit.MentorBookings.GetRescheduledBookingKeysAsync(rows.Select(row => row.BookingId), ct);

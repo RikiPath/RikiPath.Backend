@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using RikiPath.Application.Helpers;
 using RikiPath.Application.Responses.Content;
@@ -86,6 +86,9 @@ namespace RikiPath.Application.Handlers
                 },
             };
 
+            diff.Errors.AddRange(row.MediaImportErrors);
+            var imageUrl = ImportHandlerSupport.CheckUrl(row.Get("ImageUrl"), "ImageUrl", "", diff.Errors);
+
             // ---- Validate ----
             if (string.IsNullOrWhiteSpace(word)) diff.Errors.Add("Thiếu cột Word.");
             if (string.IsNullOrWhiteSpace(reading)) diff.Errors.Add("Thiếu cột Reading.");
@@ -112,6 +115,7 @@ namespace RikiPath.Application.Handlers
             // ---- Build payload (đã qua validate) ----
             var payload = new VocabularyImportPayloadResponse
             {
+                ImageUrl = imageUrl,
                 Word = word!,
                 Reading = reading!,
                 Meaning = meaning!,
@@ -133,6 +137,8 @@ namespace RikiPath.Application.Handlers
 
             diff.TargetEntityId = existing.Id;
             var changed = new Dictionary<string, string>();
+            if (payload.ImageUrl is not null)
+                ImportHandlerSupport.CompareField(changed, "imageUrl", existing.ImageUrl, payload.ImageUrl);
 
             ImportHandlerSupport.CompareField(changed, "meaning", existing.Meaning, payload.Meaning);
             ImportHandlerSupport.CompareField(changed, "exampleSentence", existing.ExampleSentence, payload.ExampleSentence);

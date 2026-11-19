@@ -212,6 +212,7 @@ public sealed class SubscriptionAccessService(
         "learning_path" => id == LearningPathCredit,
         "speaking" => id is SpeakingPlan or GradingCredit || IsStudy(id),
         "writing" => id is WritingPlan or GradingCredit || IsStudy(id),
+        MockTestExplanationService.CreditFeature => id == GradingCredit || IsStudy(id),
         _ => false
     };
 

@@ -1,7 +1,8 @@
-﻿namespace RikiPath.Application.Responses.Content
+namespace RikiPath.Application.Responses.Content
 {
     public class KanjiImportPayloadResponse
     {
+        public string? ImageUrl { get; set; }
         public string Character { get; set; } = string.Empty;
         public string Meaning { get; set; } = string.Empty;
         public string? SinoVietnamese { get; set; }

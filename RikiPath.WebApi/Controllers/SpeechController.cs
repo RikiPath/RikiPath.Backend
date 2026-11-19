@@ -23,7 +23,7 @@ public class SpeechController(ISpeechToTextService speechService, SubscriptionAc
         return StatusCode((int)result.StatusCode, result);
     }
 
-    /// <summary>Transcribe Japanese audio through OpenAI. Multipart field: audioFile.</summary>
+    /// <summary>Save audio to S3 and transcribe Japanese with the dedicated AwsAudio configuration.</summary>
     [HttpPost("transcribe")]
     [Authorize(Roles = "Learner,Mentor")]
     [RequestSizeLimit(27 * 1024 * 1024)]
@@ -33,15 +33,18 @@ public class SpeechController(ISpeechToTextService speechService, SubscriptionAc
         {
             var result = await subscriptions.UseAiAsync("speaking", async () =>
             {
-                var text = await speechService.ConvertAudioToTextAsync(audioFile, cancellationToken);
-                return ApiResponse<string>.Success(text);
+                var audio = await speechService.ConvertAndSaveAudioAsync(audioFile, cancellationToken);
+                return ApiResponse<RikiPath.Application.Responses.SpeechToText.RecordedSpeechResult>.Success(audio);
             }, cancellationToken);
-            return result.IsSuccess ? Ok(new { text = result.Result }) : StatusCode(result.StatusCode, result);
+            return result.IsSuccess ? Ok(new { text = result.Result?.Transcript, audioUrl = result.Result?.AudioUrl })
+                : StatusCode(result.StatusCode, result);
         }
         catch (ArgumentException ex) { return BadRequest(new { message = ex.Message }); }
         catch (AiQuotaExceededException ex) { return StatusCode(429, new { message = ex.Message }); }
         catch (AiServiceException ex) { return StatusCode(502, new { message = ex.Message }); }
-        catch (HttpRequestException) { return StatusCode(502, new { message = "Không thể kết nối OpenAI." }); }
+        catch (InvalidOperationException) { return StatusCode(503, new { message = "Dịch vụ audio AWS chưa sẵn sàng. Kiểm tra cấu hình AwsAudio." }); }
+        catch (Amazon.Runtime.AmazonServiceException) { return StatusCode(502, new { message = "Không thể lưu hoặc nhận dạng audio trên AWS. Kiểm tra quyền S3 và Transcribe." }); }
+        catch (HttpRequestException) { return StatusCode(502, new { message = "Không thể kết nối dịch vụ nhận dạng audio." }); }
     }
 
     [HttpPost("grade")]
@@ -57,12 +60,13 @@ public class SpeechController(ISpeechToTextService speechService, SubscriptionAc
         {
             var result = await subscriptions.UseAiAsync("speaking", async () =>
             {
-                var text = await speechService.ConvertAudioToTextAsync(audioFile, cancellationToken);
+                var audio = await speechService.ConvertAndSaveAudioAsync(audioFile, cancellationToken);
                 return await practice.SubmitAsync(new SubmitPracticeRequest
                 {
                     Type = SubmissionType.Speaking,
                     CertificateLevelId = certificateLevelId,
-                    TextContent = text,
+                    TextContent = audio.Transcript,
+                    AudioUrl = audio.AudioUrl,
                     Topic = topic,
                 }, cancellationToken);
             }, cancellationToken, value => value?.Grading is not null);
@@ -71,7 +75,9 @@ public class SpeechController(ISpeechToTextService speechService, SubscriptionAc
         catch (ArgumentException ex) { return BadRequest(new { message = ex.Message }); }
         catch (AiQuotaExceededException ex) { return StatusCode(429, new { message = ex.Message }); }
         catch (AiServiceException ex) { return StatusCode(502, new { message = ex.Message }); }
-        catch (HttpRequestException) { return StatusCode(502, new { message = "Không thể kết nối OpenAI." }); }
+        catch (InvalidOperationException) { return StatusCode(503, new { message = "Dịch vụ audio AWS chưa sẵn sàng. Kiểm tra cấu hình AwsAudio." }); }
+        catch (Amazon.Runtime.AmazonServiceException) { return StatusCode(502, new { message = "Không thể lưu hoặc nhận dạng audio trên AWS. Kiểm tra quyền S3 và Transcribe." }); }
+        catch (HttpRequestException) { return StatusCode(502, new { message = "Không thể kết nối dịch vụ chấm bài." }); }
     }
 
     /// <summary>Creates a short-lived Japanese PCM streaming session for Amazon Transcribe.</summary>

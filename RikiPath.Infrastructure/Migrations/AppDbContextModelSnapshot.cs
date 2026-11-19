@@ -739,6 +739,92 @@ namespace RikiPath.Infrastructure.Migrations
                     b.ToTable("ContentApprovalRequests");
                 });
 
+            modelBuilder.Entity("RikiPath.Domain.Entities.ContentAudioTranscription", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("AttemptCount")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("AudioUrl")
+                        .IsRequired()
+                        .HasMaxLength(2048)
+                        .HasColumnType("character varying(2048)");
+
+                    b.Property<string>("AudioUrlHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime?>("CompletedAtUtc")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<double?>("Confidence")
+                        .HasColumnType("double precision");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("CreatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ErrorCode")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<string>("ErrorMessage")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("LanguageCode")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)");
+
+                    b.Property<DateTime?>("LeaseExpiresAtUtc")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<Guid?>("LeaseId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("NextAttemptAtUtc")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("RawTranscriptJson")
+                        .HasColumnType("jsonb");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<string>("Transcript")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AudioUrlHash")
+                        .IsUnique();
+
+                    b.HasIndex("CreatedByUserId");
+
+                    b.HasIndex("Status", "NextAttemptAtUtc", "LeaseExpiresAtUtc");
+
+                    b.ToTable("ContentAudioTranscriptions", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_ContentAudioTranscription_Attempts", "\"AttemptCount\" >= 0");
+
+                            t.HasCheckConstraint("CK_ContentAudioTranscription_Language", "\"LanguageCode\" = 'ja-JP'");
+
+                            t.HasCheckConstraint("CK_ContentAudioTranscription_Status", "\"Status\" IN ('Pending', 'Processing', 'Completed', 'Failed')");
+                        });
+                });
+
             modelBuilder.Entity("RikiPath.Domain.Entities.ContentLevelMapping", b =>
                 {
                     b.Property<int>("Id")
@@ -1086,6 +1172,9 @@ namespace RikiPath.Infrastructure.Migrations
                         .HasMaxLength(1000)
                         .HasColumnType("character varying(1000)");
 
+                    b.Property<string>("ImageUrl")
+                        .HasColumnType("text");
+
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
 
@@ -1128,6 +1217,9 @@ namespace RikiPath.Infrastructure.Migrations
                         .HasColumnType("integer");
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("AuthoredDefinitionJson")
+                        .HasColumnType("text");
 
                     b.Property<Guid?>("CreatedBy")
                         .HasColumnType("uuid");
@@ -1245,9 +1337,16 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Property<DateTime?>("ModifiedDate")
                         .HasColumnType("timestamp without time zone");
 
+                    b.Property<string>("PrivateAudioReference")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
                     b.Property<string>("PrivateScanReference")
                         .HasMaxLength(2000)
                         .HasColumnType("character varying(2000)");
+
+                    b.Property<string>("SelectedOptionsJson")
+                        .HasColumnType("text");
 
                     b.Property<DateTime>("SubmittedAt")
                         .HasColumnType("timestamp without time zone");
@@ -2503,6 +2602,9 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Property<DateTime?>("CreatedDate")
                         .HasColumnType("timestamp without time zone");
 
+                    b.Property<string>("ImageUrl")
+                        .HasColumnType("text");
+
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
 
@@ -2809,6 +2911,55 @@ namespace RikiPath.Infrastructure.Migrations
                     b.ToTable("LearnerEssays");
                 });
 
+            modelBuilder.Entity("RikiPath.Domain.Entities.LearnerFeedback", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Comment")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int>("LearnerId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Rating")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("TargetId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("TargetTitle")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("TargetType")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UpdatedAtUtc", "Id");
+
+                    b.HasIndex("LearnerId", "TargetType", "TargetId")
+                        .IsUnique();
+
+                    b.ToTable("LearnerFeedback", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_LearnerFeedback_Rating", "\"Rating\" BETWEEN 1 AND 5");
+                        });
+                });
+
             modelBuilder.Entity("RikiPath.Domain.Entities.LearnerNote", b =>
                 {
                     b.Property<int>("Id")
@@ -2983,6 +3134,9 @@ namespace RikiPath.Infrastructure.Migrations
                         .HasColumnType("timestamp without time zone");
 
                     b.Property<string>("Description")
+                        .HasColumnType("text");
+
+                    b.Property<string>("ImageUrl")
                         .HasColumnType("text");
 
                     b.Property<bool>("IsDeleted")
@@ -5251,6 +5405,9 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Property<string>("AnswerKeyJson")
                         .HasColumnType("jsonb");
 
+                    b.Property<string>("AudioTranscript")
+                        .HasColumnType("text");
+
                     b.Property<string>("AudioUrl")
                         .HasColumnType("text");
 
@@ -5826,6 +5983,9 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Property<string>("Description")
                         .HasColumnType("text");
 
+                    b.Property<string>("ImageUrl")
+                        .HasColumnType("text");
+
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
 
@@ -5931,6 +6091,9 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Property<string>("Explanation")
                         .HasColumnType("text");
 
+                    b.Property<string>("ImageUrl")
+                        .HasColumnType("text");
+
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
 
@@ -5970,6 +6133,9 @@ namespace RikiPath.Infrastructure.Migrations
 
                     b.Property<DateTime?>("CreatedDate")
                         .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("ImageUrl")
+                        .HasColumnType("text");
 
                     b.Property<bool>("IsCorrect")
                         .HasColumnType("boolean");
@@ -7123,6 +7289,9 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Property<string>("ExampleSentenceMeaning")
                         .HasColumnType("text");
 
+                    b.Property<string>("ImageUrl")
+                        .HasColumnType("text");
+
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
 
@@ -7216,6 +7385,16 @@ namespace RikiPath.Infrastructure.Migrations
                         .IsRequired();
 
                     b.Navigation("SubmittedBy");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.ContentAudioTranscription", b =>
+                {
+                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "CreatedByUser")
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("CreatedByUser");
                 });
 
             modelBuilder.Entity("RikiPath.Domain.Entities.ContentLevelMapping", b =>
@@ -7440,6 +7619,17 @@ namespace RikiPath.Infrastructure.Migrations
                         .IsRequired();
 
                     b.Navigation("UserAccount");
+                });
+
+            modelBuilder.Entity("RikiPath.Domain.Entities.LearnerFeedback", b =>
+                {
+                    b.HasOne("RikiPath.Domain.Entities.UserAccount", "Learner")
+                        .WithMany()
+                        .HasForeignKey("LearnerId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Learner");
                 });
 
             modelBuilder.Entity("RikiPath.Domain.Entities.LearnerNote", b =>

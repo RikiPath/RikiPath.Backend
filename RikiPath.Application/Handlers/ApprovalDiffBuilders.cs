@@ -148,6 +148,7 @@ namespace RikiPath.Application.Handlers
                 result.Fields.Add(Field("exampleSentence", "Câu ví dụ", existing?.ExampleSentence, p.ExampleSentence, hasOld));
                 result.Fields.Add(Field("exampleSentenceMeaning", "Nghĩa câu ví dụ", existing?.ExampleSentenceMeaning, p.ExampleSentenceMeaning, hasOld));
                 result.Fields.Add(Field("audioUrl", "Audio", existing?.AudioUrl, p.AudioUrl, hasOld, skipWhenNewEmpty: true));
+                result.Fields.Add(Field("imageUrl", "Ảnh minh họa", existing?.ImageUrl, p.ImageUrl, hasOld, skipWhenNewEmpty: true));
 
                 // Đã sửa: Lấy Level Code từ tập hợp ContentLevelMappings
                 var existingLevelCode = existing?.ContentLevelMappings?

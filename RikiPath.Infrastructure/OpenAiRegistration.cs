@@ -20,11 +20,12 @@ public static class OpenAiRegistration
         services.AddHttpClient<OpenAiClient>(http => http.Timeout = Timeout.InfiniteTimeSpan);
         services.AddScoped<IAiLearningPathClient, OpenAiLearningPathClient>();
         services.AddScoped<IAiGradingClient, OpenAiGradingClient>();
+        services.AddScoped<IAiMockTestExplanationClient, OpenAiMockTestExplanationClient>();
         services.AddScoped<IAiContentAuthoringClient, OpenAiContentAuthoringClient>();
         services.AddScoped<IAiEssayGradingClient, OpenAiEssayGradingClient>();
         services.AddScoped<IAiContentReviewClient, OpenAiContentReviewClient>();
         services.AddScoped<IAiOcrClient, OpenAiOcrClient>();
-        services.AddScoped<ISpeechRecognitionClient, OpenAiSpeechToTextClient>();
+        services.AddScoped<ISpeechRecognitionClient, AwsAudioTranscriptionClient>();
         return services;
     }
 }

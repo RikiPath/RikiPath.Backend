@@ -3,6 +3,7 @@ namespace RikiPath.Application.Responses.Content
     /// <summary>Dữ liệu 1 từ vựng đã parse + resolve, serialize vào ContentApprovalRequest.PayloadJson. Khóa tự nhiên: Word + Reading.</summary>
     public class VocabularyImportPayloadResponse
     {
+        public string? ImageUrl { get; set; }
         public string Word { get; set; } = string.Empty;
         public string Reading { get; set; } = string.Empty;
         public string Meaning { get; set; } = string.Empty;

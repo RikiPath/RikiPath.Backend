@@ -6,6 +6,11 @@ namespace RikiPath.Application.Responses.MockTests
         public int QuestionId { get; set; }
         public string QuestionText { get; set; } = string.Empty;
         public string QuestionType { get; set; } = "SingleChoice";
+        public System.Text.Json.JsonElement? InteractionData { get; set; }
+        public string? ImageUrl { get; set; }
+        public string? AudioUrl { get; set; }
+        [System.Text.Json.Serialization.JsonIgnore]
+        public string? AudioTranscript { get; set; }
         public System.Text.Json.JsonElement? Response { get; set; }
         public System.Text.Json.JsonElement? AnswerKey { get; set; }
         public List<QuestionOptionReview> Options { get; set; } = new();

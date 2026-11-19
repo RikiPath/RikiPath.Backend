@@ -10,6 +10,7 @@ public class HomeworkSubmissionConfig : IEntityTypeConfiguration<HomeworkSubmiss
     {
         builder.HasKey(x => x.Id);
         builder.Property(x => x.PrivateScanReference).HasMaxLength(2000);
+        builder.Property(x => x.PrivateAudioReference).HasMaxLength(2000);
         builder.HasOne(x => x.HomeworkAssignment).WithOne(x => x.Submission).HasForeignKey<HomeworkSubmission>(x => x.HomeworkAssignmentId).OnDelete(DeleteBehavior.Cascade);
         builder.HasOne(x => x.Learner).WithMany().HasForeignKey(x => x.LearnerId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne(x => x.Lesson).WithMany().HasForeignKey(x => x.LessonId).OnDelete(DeleteBehavior.Restrict);

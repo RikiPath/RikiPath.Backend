@@ -26,7 +26,7 @@ public sealed class MentorReview
     public string? Comment { get; set; }
 
     // Cờ hiển thị công khai trên hồ sơ chuyên gia
-    public bool IsPublic { get; set; } = true;
+    public bool IsPublic { get; set; }
 
     // Trạng thái kiểm duyệt nội dung
     public MentorReviewStatus ModerationStatus { get; set; } = MentorReviewStatus.Approved;

@@ -27,7 +27,7 @@ public sealed partial class MentorMeetingService
             return ApiResponse<List<MentorRecommendationResponse>>.Success([]);
 
         var reviews = await unitOfWork.MentorReviews.Query().AsNoTracking()
-            .Where(review => mentorIds.Contains(review.MentorId) && review.IsPublic &&
+            .Where(review => mentorIds.Contains(review.MentorId) &&
                 review.ModerationStatus == MentorReviewStatus.Approved)
             .GroupBy(review => review.MentorId)
             .Select(group => new { MentorId = group.Key, Count = group.Count(), Average = group.Average(review => review.Rating) })
@@ -38,7 +38,7 @@ public sealed partial class MentorMeetingService
             var mentor = group.First().Mentor;
             var rating = reviews.GetValueOrDefault(group.Key);
             return new MentorRecommendationResponse(mentor.Id, $"{mentor.FirstName} {mentor.LastName}".Trim(),
-                mentor.AvatarUrl, rating?.Average, rating?.Count ?? 0, rating?.Average >= HighRatingThreshold,
+                mentor.AvatarUrl, rating is null ? null : Math.Round(rating.Average, 1), rating?.Count ?? 0, rating?.Average >= HighRatingThreshold,
                 group.OrderBy(slot => slot.StartTime).ThenBy(slot => slot.Id).Select(MapAvailability).ToList());
         }).OrderByDescending(item => item.IsRecommended)
             .ThenByDescending(item => item.AverageRating).ThenByDescending(item => item.ReviewCount)

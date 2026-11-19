@@ -7,4 +7,7 @@ public interface IAiEssayGradingClient
     /// cấp độ/đề bài) tới AI, trả về JSON thô (string) do AI sinh ra.</summary>
     Task<string> GenerateGradingJsonAsync(
         int userId, string systemPrompt, string userPrompt, CancellationToken cancellationToken);
+
+    Task<string> GenerateGradingJsonAsync(
+        int userId, string systemPrompt, string userPrompt, CancellationToken cancellationToken, int maxOutputTokens);
 }

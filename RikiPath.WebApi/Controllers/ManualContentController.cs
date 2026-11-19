@@ -26,7 +26,7 @@ public sealed class ManualContentController(ManualContentService service, IUnitO
             .OrderBy(x => x.SortOrder).Select(x => new { x.Code, x.Name, x.CertificateLevelId }).ToListAsync(ct);
         var topics = await uow.Topics.Query().Where(x => !x.IsDeleted)
             .OrderBy(x => x.Title).ThenBy(x => x.Id).Select(x => new { x.Id, x.Title }).ToListAsync(ct);
-        return Ok(new { levels, skills, sections, topics });
+        return Ok(new { levels, skills, sections, topics, jlptQuestionFormats = JlptMockQuestionFormats.All });
     }
 
     [HttpGet("lessons/{levelId:int}")]

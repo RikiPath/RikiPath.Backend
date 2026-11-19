@@ -1,0 +1,14 @@
+{
+  "AwsAudio": {
+    "AccessKeyId": "",
+    "SecretAccessKey": "",
+    "SessionToken": "",
+    "Region": "ap-southeast-1",
+    "Bucket": "rikipath-audio",
+    "PublicBaseUrl": "https://localhost:7237",
+    "ContentPrefix": "rikipath-audio/content",
+    "RecordingPrefix": "rikipath-audio/recordings",
+    "TemporaryPrefix": "rikipath-audio/processing",
+    "JobTimeoutSeconds": 900
+  }
+}

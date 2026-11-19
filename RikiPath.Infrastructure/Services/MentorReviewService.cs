@@ -1,5 +1,4 @@
 using System.Net;
-using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using RikiPath.Application.IServices;
@@ -37,6 +36,8 @@ public sealed class MentorReviewService : IMentorReviewService
 
         if (request.Rating < 1 || request.Rating > 5)
             return ApiResponse<MentorReviewResponse>.Fail("Điểm đánh giá phải nằm trong khoảng từ 1 đến 5 sao.");
+        if (request.Comment?.Length > 1000)
+            return ApiResponse<MentorReviewResponse>.Fail("Nhận xét tối đa 1000 ký tự.");
 
         try
         {
@@ -52,9 +53,9 @@ public sealed class MentorReviewService : IMentorReviewService
                 return ApiResponse<MentorReviewResponse>.Fail("Không tìm thấy thông tin lịch hẹn tư vấn.", HttpStatusCode.NotFound);
 
             // Kiểm tra quyền sở hữu lịch hẹn
-            var isOwner = booking.UserSubscription != null && booking.UserSubscription.UserId == claim.Id;
-            var isAdmin = claim.Role == Role.Admin;
-            if (!isOwner && !isAdmin)
+            var isOwner = booking.UserSubscription != null && !booking.UserSubscription.IsDeleted &&
+                booking.UserSubscription.UserId == claim.Id && booking.UserSubscription.PaymentStatus == PaymentStatus.Paid;
+            if (!isOwner || claim.Role != Role.Learner)
                 return ApiResponse<MentorReviewResponse>.Fail("Bạn không có quyền đánh giá lịch hẹn này.", HttpStatusCode.Forbidden);
 
             // Không được đánh giá lịch hẹn đã hủy
@@ -65,7 +66,9 @@ public sealed class MentorReviewService : IMentorReviewService
             var slot = booking.MentorAvailability;
 
             // Kiểm tra điều kiện hoàn thành buổi tư vấn
-            var isCompleted = booking.Status == MentorStatus.Completed || (slot != null && slot.EndTime <= nowUtc);
+            var isCompleted = booking.Status == MentorStatus.Completed ||
+                (slot != null && slot.EndTime <= nowUtc && booking.AttendedAt.HasValue &&
+                    booking.Status is MentorStatus.Assigned or MentorStatus.Accepted);
             if (!isCompleted)
                 return ApiResponse<MentorReviewResponse>.Fail("Chỉ có thể đánh giá sau khi buổi tư vấn đã hoàn thành.", HttpStatusCode.Conflict);
 
@@ -91,34 +94,13 @@ public sealed class MentorReviewService : IMentorReviewService
                 LearnerId = claim.Id,
                 Rating = request.Rating,
                 Comment = request.Comment?.Trim(),
-                IsPublic = true,
+                IsPublic = false,
                 ModerationStatus = MentorReviewStatus.Approved,
                 CreatedAtUtc = nowUtc,
                 UpdatedAtUtc = nowUtc
             };
 
             _context.MentorReviews.Add(review);
-
-            // Ghi sự kiện Outbox phục vụ đồng bộ chỉ số và thông báo
-            var outboxEvent = new MentorOutboxEvent
-            {
-                EventKey = $"review:submitted:{booking.Id}:{nowUtc.Ticks}",
-                AggregateType = "MentorReview",
-                AggregateId = booking.Id.ToString(),
-                EventType = "ReviewSubmitted",
-                EventVersion = 1,
-                PayloadJson = JsonSerializer.Serialize(new
-                {
-                    BookingId = booking.Id,
-                    MentorId = mentorId,
-                    LearnerId = claim.Id,
-                    Rating = review.Rating,
-                    TimestampUtc = nowUtc
-                }),
-                CreatedAtUtc = nowUtc,
-                AvailableAtUtc = nowUtc
-            };
-            _context.MentorOutboxEvents.Add(outboxEvent);
 
             await _context.SaveChangesAsync(cancellationToken);
 
@@ -143,6 +125,11 @@ public sealed class MentorReviewService : IMentorReviewService
 
             return ApiResponse<MentorReviewResponse>.Success(response, HttpStatusCode.OK, "Đánh giá buổi tư vấn thành công.");
         }
+        catch (DbUpdateException ex) when (ex.InnerException is Npgsql.PostgresException
+            { SqlState: Npgsql.PostgresErrorCodes.UniqueViolation, ConstraintName: "IX_MentorReviews_MentorBookingId" })
+        {
+            return ApiResponse<MentorReviewResponse>.Fail("Lịch hẹn này đã được gửi đánh giá trước đó.", HttpStatusCode.Conflict);
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Lỗi khi tạo đánh giá cho lịch hẹn {BookingId}: {Message}", request.MentorBookingId, ex.Message);
@@ -160,27 +147,29 @@ public sealed class MentorReviewService : IMentorReviewService
 
         if (request.Rating < 1 || request.Rating > 5)
             return ApiResponse<MentorReviewResponse>.Fail("Điểm đánh giá phải nằm trong khoảng từ 1 đến 5 sao.");
+        if (request.Comment?.Length > 1000)
+            return ApiResponse<MentorReviewResponse>.Fail("Nhận xét tối đa 1000 ký tự.");
 
         try
         {
             var claim = _claimService.GetUserClaim();
 
-            var review = await _context.MentorReviews
+            if (claim.Role is not (Role.Admin or Role.Learner))
+                return ApiResponse<MentorReviewResponse>.Fail("Bạn không có quyền chỉnh sửa phản hồi.", HttpStatusCode.Forbidden);
+
+            var review = await _context.MentorReviews.AsTracking()
                 .Include(r => r.Mentor)
                 .Include(r => r.Learner)
-                .FirstOrDefaultAsync(r => r.Id == reviewId, cancellationToken);
+                .FirstOrDefaultAsync(r => r.Id == reviewId && (claim.Role == Role.Admin || r.LearnerId == claim.Id), cancellationToken);
 
             if (review is null)
                 return ApiResponse<MentorReviewResponse>.Fail("Không tìm thấy thông tin đánh giá.", HttpStatusCode.NotFound);
 
-            if (review.LearnerId != claim.Id && claim.Role != Role.Admin)
-                return ApiResponse<MentorReviewResponse>.Fail("Bạn không có quyền chỉnh sửa đánh giá này.", HttpStatusCode.Forbidden);
-
             review.Rating = request.Rating;
             review.Comment = request.Comment?.Trim();
+            review.IsPublic = false;
             review.UpdatedAtUtc = DateTime.UtcNow;
 
-            _context.MentorReviews.Update(review);
             await _context.SaveChangesAsync(cancellationToken);
 
             var response = new MentorReviewResponse
@@ -224,11 +213,12 @@ public sealed class MentorReviewService : IMentorReviewService
 
         try
         {
-            var query = _context.MentorReviews
-                .Include(r => r.Mentor)
-                .Include(r => r.Learner)
-                .Where(r => r.MentorId == mentorId && r.IsPublic && r.ModerationStatus == MentorReviewStatus.Approved)
-                .OrderByDescending(r => r.CreatedAtUtc);
+            var actor = _claimService.GetUserClaim();
+            if (actor.Role is not (Role.Admin or Role.Learner))
+                return ApiResponse<List<MentorReviewResponse>>.Fail("Bạn không có quyền xem phản hồi.", HttpStatusCode.Forbidden);
+            var query = _context.MentorReviews.AsNoTracking()
+                .Where(r => r.MentorId == mentorId && (actor.Role == Role.Admin || r.LearnerId == actor.Id))
+                .OrderByDescending(r => r.CreatedAtUtc).ThenByDescending(r => r.Id);
 
             var reviews = await query
                 .Skip((page - 1) * pageSize)
@@ -271,7 +261,7 @@ public sealed class MentorReviewService : IMentorReviewService
         try
         {
             var ratings = await _context.MentorReviews
-                .Where(r => r.MentorId == mentorId && r.IsPublic && r.ModerationStatus == MentorReviewStatus.Approved)
+                .Where(r => r.MentorId == mentorId && r.ModerationStatus == MentorReviewStatus.Approved)
                 .Select(r => r.Rating)
                 .ToListAsync(cancellationToken);
 
@@ -318,12 +308,16 @@ public sealed class MentorReviewService : IMentorReviewService
 
         if (string.IsNullOrWhiteSpace(request.Reply))
             return ApiResponse<MentorReviewResponse>.Fail("Nội dung phản hồi không được để trống.");
+        if (request.Reply.Length > 1000)
+            return ApiResponse<MentorReviewResponse>.Fail("Nội dung phản hồi tối đa 1000 ký tự.");
 
         try
         {
             var claim = _claimService.GetUserClaim();
+            if (claim.Role != Role.Admin)
+                return ApiResponse<MentorReviewResponse>.Fail("Bạn không có quyền xem phản hồi.", HttpStatusCode.Forbidden);
 
-            var review = await _context.MentorReviews
+            var review = await _context.MentorReviews.AsTracking()
                 .Include(r => r.Mentor)
                 .Include(r => r.Learner)
                 .FirstOrDefaultAsync(r => r.Id == reviewId, cancellationToken);
@@ -331,15 +325,10 @@ public sealed class MentorReviewService : IMentorReviewService
             if (review is null)
                 return ApiResponse<MentorReviewResponse>.Fail("Không tìm thấy thông tin đánh giá.", HttpStatusCode.NotFound);
 
-            // Chỉ Mentor được đánh giá hoặc Admin mới có quyền phản hồi
-            if (review.MentorId != claim.Id && claim.Role != Role.Admin)
-                return ApiResponse<MentorReviewResponse>.Fail("Chỉ chuyên gia tư vấn được đánh giá mới có quyền phản hồi.", HttpStatusCode.Forbidden);
-
             review.MentorReply = request.Reply.Trim();
             review.MentorRepliedAtUtc = DateTime.UtcNow;
             review.UpdatedAtUtc = DateTime.UtcNow;
 
-            _context.MentorReviews.Update(review);
             await _context.SaveChangesAsync(cancellationToken);
 
             var response = new MentorReviewResponse
@@ -383,7 +372,7 @@ public sealed class MentorReviewService : IMentorReviewService
             if (claim.Role != Role.Admin)
                 return ApiResponse<MentorReviewResponse>.Fail("Chỉ Quản trị viên mới có quyền kiểm duyệt đánh giá.", HttpStatusCode.Forbidden);
 
-            var review = await _context.MentorReviews
+            var review = await _context.MentorReviews.AsTracking()
                 .Include(r => r.Mentor)
                 .Include(r => r.Learner)
                 .FirstOrDefaultAsync(r => r.Id == reviewId, cancellationToken);
@@ -391,11 +380,10 @@ public sealed class MentorReviewService : IMentorReviewService
             if (review is null)
                 return ApiResponse<MentorReviewResponse>.Fail("Không tìm thấy thông tin đánh giá.", HttpStatusCode.NotFound);
 
-            review.IsPublic = request.IsPublic;
+            review.IsPublic = false;
             review.ModerationStatus = request.Status;
             review.UpdatedAtUtc = DateTime.UtcNow;
 
-            _context.MentorReviews.Update(review);
             await _context.SaveChangesAsync(cancellationToken);
 
             var response = new MentorReviewResponse

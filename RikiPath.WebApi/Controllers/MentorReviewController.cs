@@ -13,7 +13,7 @@ public sealed class MentorReviewController(IMentorReviewService reviewService) :
 {
     // Học viên tạo đánh giá cho buổi tư vấn đã hoàn thành
     [HttpPost("api/mentor-reviews")]
-    [Authorize(Roles = "Learner,Admin")]
+    [Authorize(Roles = "Learner")]
     [ProducesResponseType(typeof(ApiResponse<MentorReviewResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse<MentorReviewResponse>), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ApiResponse<MentorReviewResponse>), StatusCodes.Status403Forbidden)]
@@ -43,9 +43,10 @@ public sealed class MentorReviewController(IMentorReviewService reviewService) :
         return StatusCode(result.StatusCode, result);
     }
 
-    // Khách hoặc học viên xem danh sách đánh giá công khai của Mentor
+    // Người gửi và quản trị viên xem phản hồi riêng.
     [HttpGet("api/mentors/{mentorId:int}/reviews")]
-    [AllowAnonymous]
+    [Authorize(Roles = "Learner,Admin")]
+    [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
     [ProducesResponseType(typeof(ApiResponse<List<MentorReviewResponse>>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse<List<MentorReviewResponse>>), StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> GetMentorReviews(
@@ -58,22 +59,25 @@ public sealed class MentorReviewController(IMentorReviewService reviewService) :
         return StatusCode(result.StatusCode, result);
     }
 
-    // Lấy thông tin xếp hạng tổng hợp (sao trung bình, biểu đồ sao) của Mentor
+    // Điểm trung bình của Mentor.
     [HttpGet("api/mentors/{mentorId:int}/rating-summary")]
     [AllowAnonymous]
-    [ProducesResponseType(typeof(ApiResponse<MentorRatingSummaryResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<PublicMentorRating>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse<MentorRatingSummaryResponse>), StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> GetMentorRatingSummary(
         [FromRoute] int mentorId,
         CancellationToken cancellationToken = default)
     {
         var result = await reviewService.GetMentorRatingSummaryAsync(mentorId, cancellationToken);
-        return StatusCode(result.StatusCode, result);
+        if (!result.IsSuccess || result.Result is null) return StatusCode(result.StatusCode, result);
+        var average = result.Result.TotalReviews > 0 ? (double?)result.Result.AverageRating : null;
+        return Ok(ApiResponse<PublicMentorRating>.Success(new(average)));
     }
 
-    // Mentor nộp phản hồi chính thức cho đánh giá
+    public sealed record PublicMentorRating(double? AverageRating);
+
     [HttpPost("api/mentor-reviews/{reviewId:int}/reply")]
-    [Authorize(Roles = "Mentor,Admin")]
+    [Authorize(Roles = "Admin")]
     [ProducesResponseType(typeof(ApiResponse<MentorReviewResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse<MentorReviewResponse>), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ApiResponse<MentorReviewResponse>), StatusCodes.Status403Forbidden)]
@@ -87,7 +91,7 @@ public sealed class MentorReviewController(IMentorReviewService reviewService) :
         return StatusCode(result.StatusCode, result);
     }
 
-    // Quản trị viên kiểm duyệt đánh giá (ẩn/hiện, phê duyệt)
+    // Quản trị viên cập nhật trạng thái kiểm duyệt.
     [HttpPost("api/admin/mentor-reviews/{reviewId:int}/moderate")]
     [Authorize(Roles = "Admin")]
     [ProducesResponseType(typeof(ApiResponse<MentorReviewResponse>), StatusCodes.Status200OK)]

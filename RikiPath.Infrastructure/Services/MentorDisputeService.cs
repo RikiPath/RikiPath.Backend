@@ -614,7 +614,7 @@ public sealed class MentorDisputeService : IMentorDisputeService
                 .ToListAsync(cancellationToken);
 
             var reviews = await _context.MentorReviews
-                .Where(r => mentorIds.Contains(r.MentorId) && r.IsPublic && r.ModerationStatus == MentorReviewStatus.Approved)
+                .Where(r => mentorIds.Contains(r.MentorId) && r.ModerationStatus == MentorReviewStatus.Approved)
                 .Select(r => new { r.MentorId, r.Rating })
                 .ToListAsync(cancellationToken);
 

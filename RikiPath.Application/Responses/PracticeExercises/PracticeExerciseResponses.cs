@@ -1,7 +1,8 @@
-﻿namespace RikiPath.Application.Responses.PracticeExercises;
+namespace RikiPath.Application.Responses.PracticeExercises;
 
 public class PracticeExerciseSummaryResponse
 {
+    public string? ImageUrl { get; set; }
     public int Id { get; set; }
     public int PracticeExerciseId => Id;
     public double MinimumPassingScorePercent { get; set; } = 70;
@@ -19,6 +20,7 @@ public class PracticeExerciseSummaryResponse
 
 public class PracticeExerciseAttemptResponse
 {
+    public string? ImageUrl { get; set; }
     public int AttemptId { get; set; }
     public int PracticeExerciseId { get; set; }
     public string ExerciseTitle { get; set; } = string.Empty;
@@ -28,6 +30,7 @@ public class PracticeExerciseAttemptResponse
 
 public class PracticeExerciseQuestionResponse
 {
+    public string? ImageUrl { get; set; }
     public int QuestionId { get; set; }
     public string QuestionText { get; set; } = string.Empty;
     public int SortOrder { get; set; }
@@ -36,6 +39,7 @@ public class PracticeExerciseQuestionResponse
 
 public class PracticeExerciseOptionResponse
 {
+    public string? ImageUrl { get; set; }
     public int OptionId { get; set; }
     public string OptionText { get; set; } = string.Empty;
     public int SortOrder { get; set; }

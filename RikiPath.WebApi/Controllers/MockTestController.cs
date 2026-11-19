@@ -6,6 +6,7 @@ using RikiPath.Application.Requests.PlacementTests;
 using RikiPath.Application.Responses;
 using RikiPath.Application.Responses.MockTests;
 using RikiPath.Application.Responses.PlacementTests;
+using RikiPath.Application.Services;
 
 namespace RikiPath.WebApi.Controllers
 {
@@ -46,6 +47,14 @@ namespace RikiPath.WebApi.Controllers
         public async Task<IActionResult> MockTestHistory(CancellationToken ct)
         {
             var result = await mockTestService.GetHistoryAsync(ct);
+            return StatusCode(result.StatusCode, result);
+        }
+
+        [HttpPost("attempts/{attemptId:int}/questions/{questionId:int}/ai-explanation")]
+        public async Task<IActionResult> ExplainMockQuestion(int attemptId, int questionId,
+            [FromServices] MockTestExplanationService explanations, CancellationToken ct)
+        {
+            var result = await explanations.ExplainAsync(attemptId, questionId, ct);
             return StatusCode(result.StatusCode, result);
         }
 

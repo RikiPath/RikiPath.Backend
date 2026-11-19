@@ -18,7 +18,8 @@ namespace RikiPath.Application.Services
         IUnitOfWork unitOfWork,
         IAiEssayGradingClient aiClient,
         IClaimService claimService,
-        ILogger<PracticeSubmissionService> logger) : IPracticeSubmissionService
+        ILogger<PracticeSubmissionService> logger, IFileStorageService? storage = null,
+        IAwsAudioFileStorageService? audioStorage = null) : IPracticeSubmissionService
     {
         private const int MaxAiAttempts = 2;
         private const int MaxTextContentLength = 4000;
@@ -65,6 +66,10 @@ namespace RikiPath.Application.Services
             try
             {
                 var userId = claimService.GetUserClaim().Id;
+                if (request.AudioUrl?.StartsWith("s3://", StringComparison.Ordinal) == true &&
+                    audioStorage?.IsRecordingOwnedBy(request.AudioUrl, userId) != true)
+                    return ApiResponse<SubmitPracticeResponse>.Fail("Bản ghi âm không thuộc tài khoản của bạn.",
+                        HttpStatusCode.Forbidden);
 
                 var level = await unitOfWork.CertificateLevels.GetActiveJlptLevelByIdAsync(request.CertificateLevelId);
                 if (level is null)
@@ -151,13 +156,18 @@ namespace RikiPath.Application.Services
                     return ApiResponse<PracticeSubmissionDetailResponse>.Fail(
                         "Bạn không có quyền xem bài nộp này.", HttpStatusCode.Forbidden);
 
+                var audioUrl = submission.AudioUrl;
+                if (audioUrl?.StartsWith("s3://", StringComparison.Ordinal) == true)
+                    audioUrl = storage is not null && audioStorage?.IsRecordingOwnedBy(audioUrl, userId) == true
+                        ? await storage.CreateSignedReadUrlAsync(audioUrl, cancellationToken) : null;
+
                 return ApiResponse<PracticeSubmissionDetailResponse>.Success(new PracticeSubmissionDetailResponse
                 {
                     Id = submission.Id,
                     Type = submission.Type,
                     TextContent = submission.TextContent,
                     ImageUrl = submission.ImageUrl,
-                    AudioUrl = submission.AudioUrl,
+                    AudioUrl = audioUrl,
                     CertificateLevelCode = submission.CertificateLevel?.Code ?? string.Empty,
                     SubmittedAt = submission.SubmittedAt,
                     Grading = DeserializeGrading(submission.GradingResult),

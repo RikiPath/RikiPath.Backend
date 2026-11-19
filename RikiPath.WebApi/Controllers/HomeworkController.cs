@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.ModelBinding;
 using RikiPath.Application.IServices;
 using RikiPath.Application.Requests.Homework;
 using RikiPath.Application.Requests.PracticeExercises;
@@ -56,8 +57,27 @@ public sealed class HomeworkController(HomeworkService homework, IPracticeQuizSe
     }
 
     [HttpPost("{assignmentId:int}/ai-draft"), Authorize(Roles = "Mentor")]
-    public async Task<IActionResult> Draft(int assignmentId, CancellationToken ct)
-        => Send(await homework.CreateDraftAsync(assignmentId, ct));
+    public async Task<IActionResult> Draft(int assignmentId,
+        [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] HomeworkAiDraftRequest? request, CancellationToken ct)
+        => Send(await homework.CreateDraftAsync(assignmentId, ct, request?.JlptLevel, request?.MentorPrompt));
+
+    [HttpPost("ai-drafts"), Authorize(Roles = "Mentor")]
+    public async Task<IActionResult> BatchDraft(HomeworkAiBatchDraftRequest request, CancellationToken ct)
+        => Send(await homework.CreateDraftsAsync(request, ct));
+
+    [HttpPost("{assignmentId:int}/audio"), Authorize(Roles = "Learner"), RequestSizeLimit(5500000)]
+    [Consumes("multipart/form-data")]
+    public async Task<IActionResult> SubmitAudio(int assignmentId, IFormFile? file, CancellationToken ct)
+        => Send(await homework.SubmitAudioAsync(assignmentId, file, ct));
+
+    [HttpGet("{assignmentId:int}/audio")]
+    public async Task<IActionResult> Audio(int assignmentId, CancellationToken ct)
+    {
+        var audio = await homework.ReadAudioAsync(assignmentId, ct);
+        Response.Headers.CacheControl = "no-store";
+        Response.Headers.XContentTypeOptions = "nosniff";
+        return audio is null ? NotFound() : File(audio.Content, audio.ContentType);
+    }
 
     [HttpPut("{assignmentId:int}/grade"), Authorize(Roles = "Mentor")]
     public async Task<IActionResult> Grade(int assignmentId, PublishHomeworkGradeRequest request, CancellationToken ct)
@@ -78,6 +98,11 @@ public sealed class HomeworkController(HomeworkService homework, IPracticeQuizSe
     [Authorize(Roles = "Mentor")]
     public async Task<IActionResult> Create(CreateHomeworkRequest request, CancellationToken ct)
         => Send(await homework.CreateAsync(request, ct));
+
+    [HttpPost("group")]
+    [Authorize(Roles = "Mentor")]
+    public async Task<IActionResult> CreateGroup(CreateHomeworkGroupRequest request, CancellationToken ct)
+        => Send(await homework.CreateGroupAsync(request, ct));
 
     [HttpGet("{assignmentId:int}/lessons/{lessonId:int}")]
     [Authorize(Roles = "Learner")]

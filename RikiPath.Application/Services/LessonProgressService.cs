@@ -300,6 +300,7 @@ namespace RikiPath.Application.Services
             Title = lesson.Title,
             Content = lesson.Description ?? string.Empty,
             AudioUrl = lesson.AudioUrl,
+            ImageUrl = lesson.ImageUrl,
             AttachmentUrl = null,
             OrderIndex = lesson.SortOrder,
             ProgressPercent = progress?.ProgressPercent ?? 0,
@@ -313,6 +314,7 @@ namespace RikiPath.Application.Services
                 {
                     VocabularyId = link.VocabularyId,
                     Word = link.Vocabulary.Word,
+                    ImageUrl = link.Vocabulary.ImageUrl,
                     Reading = link.Vocabulary.Reading,
                     Meaning = link.Vocabulary.Meaning,
                     ExampleSentence = link.Vocabulary.ExampleSentence,
@@ -327,6 +329,7 @@ namespace RikiPath.Application.Services
                 {
                     KanjiId = link.KanjiId,
                     Character = link.Kanji.Character,
+                    ImageUrl = link.Kanji.ImageUrl,
                     Meaning = link.Kanji.Meaning,
                     SinoVietnamese = link.Kanji.SinoVietnamese,
                     OnYomi = link.Kanji.OnYomi,
@@ -344,6 +347,7 @@ namespace RikiPath.Application.Services
                     GrammarPatternId = link.GrammarPatternId,
                     Title = link.GrammarPattern.Title,
                     Structure = link.GrammarPattern.Structure,
+                    ImageUrl = link.GrammarPattern.ImageUrl,
                     UsageNotes = link.GrammarPattern.UsageNotes,
                     ExampleSentence = link.GrammarPattern.ExampleSentence,
                     ExampleSentenceMeaning = link.GrammarPattern.ExampleSentenceMeaning,

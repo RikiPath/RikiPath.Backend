@@ -3,6 +3,7 @@ namespace RikiPath.Application.Responses.Content
     /// <summary>Dữ liệu 1 bài học đã parse + resolve, serialize vào ContentApprovalRequest.PayloadJson. Khóa tự nhiên: Title + CertificateLevelId.</summary>
     public class LessonImportPayloadResponse
     {
+        public string? ImageUrl { get; set; }
         public string Title { get; set; } = string.Empty;
         public string? Description { get; set; }
         public string? AudioUrl { get; set; }

@@ -91,6 +91,7 @@ namespace RikiPath.Infrastructure
         public DbSet<MentorPayoutObligation> MentorPayoutObligations { get; set; }
         public DbSet<MentorPayoutAttempt> MentorPayoutAttempts { get; set; }
         public DbSet<MentorReview> MentorReviews { get; set; }
+        public DbSet<LearnerFeedback> LearnerFeedbacks { get; set; }
         public DbSet<MentorDispute> MentorDisputes { get; set; }
         public DbSet<MentorDisputeHistory> MentorDisputeHistories { get; set; }
         public DbSet<MentorAbuseReport> MentorAbuseReports { get; set; }
@@ -112,6 +113,7 @@ namespace RikiPath.Infrastructure
         public DbSet<ContentApprovalRequest> ContentApprovalRequests { get; set; }
 
         public DbSet<ContentAiReview> ContentAiReviews { get; set; }
+        public DbSet<ContentAudioTranscription> ContentAudioTranscriptions { get; set; }
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             modelBuilder.ApplyConfiguration(new MentorWeeklyAvailabilityConfig());
@@ -189,6 +191,7 @@ namespace RikiPath.Infrastructure
             modelBuilder.ApplyConfiguration(new MentorPayoutObligationConfig());
             modelBuilder.ApplyConfiguration(new MentorPayoutAttemptConfig());
             modelBuilder.ApplyConfiguration(new MentorReviewConfig());
+            modelBuilder.ApplyConfiguration(new LearnerFeedbackConfig());
             modelBuilder.ApplyConfiguration(new MentorDisputeConfig());
             modelBuilder.ApplyConfiguration(new MentorDisputeHistoryConfig());
             modelBuilder.ApplyConfiguration(new MentorAbuseReportConfig());
@@ -211,6 +214,7 @@ namespace RikiPath.Infrastructure
             modelBuilder.ApplyConfiguration(new EmailVerificationsConfig());
 
             modelBuilder.ApplyConfiguration(new ContentAiReviewConfig());
+            modelBuilder.ApplyConfiguration(new ContentAudioTranscriptionConfig());
         }
     }
 }

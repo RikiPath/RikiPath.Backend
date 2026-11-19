@@ -12,6 +12,7 @@ using Microsoft.Extensions.Options;
 using RikiPath.Application.IClients;
 using RikiPath.Application.Responses.SpeechToText;
 using RikiPath.Domain;
+using RikiPath.Application.Services;
 
 namespace RikiPath.Infrastructure.Clients;
 
@@ -23,6 +24,8 @@ public sealed class AmazonTranscribeSpeechClient(
     ILogger<AmazonTranscribeSpeechClient> logger) : ITranscribeSpeechClient
 {
     private const int MaxAudioBytes = 10 * 1024 * 1024;
+    public bool IsConfigured => !string.IsNullOrWhiteSpace(options.Value.AudioBucket);
+    public int TimeoutSeconds => Math.Clamp(options.Value.ContentJobTimeoutSeconds, 30, 3600);
 
     public async Task<SpeechStreamingSessionResponse> CreateStreamingSessionAsync(CancellationToken cancellationToken)
     {
@@ -33,7 +36,15 @@ public sealed class AmazonTranscribeSpeechClient(
         return new("AmazonTranscribe", url, settings.Language, settings.SampleRate, "pcm", settings.SessionUrlLifetimeSeconds);
     }
 
-    public async Task<SpeechToTextResult> TranscribeFromUrlAsync(string audioUrl, CancellationToken cancellationToken)
+    public Task<SpeechToTextResult> TranscribeFromUrlAsync(string audioUrl, CancellationToken cancellationToken)
+        => TranscribeAsync(audioUrl, MaxAudioBytes,
+            Math.Clamp(options.Value.JobTimeoutSeconds, 15, 300), false, cancellationToken);
+
+    public Task<SpeechToTextResult> TranscribeListeningAsync(string audioUrl, CancellationToken cancellationToken)
+        => TranscribeAsync(audioUrl, ListeningAudioFilePolicy.MaxBytes, TimeoutSeconds, true, cancellationToken);
+
+    private async Task<SpeechToTextResult> TranscribeAsync(
+        string audioUrl, int maxBytes, int timeoutSeconds, bool contentAudio, CancellationToken cancellationToken)
     {
         var settings = options.Value;
         if (string.IsNullOrWhiteSpace(settings.AudioBucket))
@@ -44,18 +55,23 @@ public sealed class AmazonTranscribeSpeechClient(
             uri.GetLeftPart(UriPartial.Authority) != storageUri.GetLeftPart(UriPartial.Authority) ||
             !uri.AbsolutePath.StartsWith("/storage/v1/object/", StringComparison.Ordinal))
             throw new ArgumentException("Audio must be an HTTPS object from the configured storage.", nameof(audioUrl));
+        if (contentAudio && (string.IsNullOrWhiteSpace(appSettings.Supabase?.Bucket) || uri.UserInfo.Length != 0 ||
+            uri.Query.Length != 0 || uri.Fragment.Length != 0 ||
+            !uri.AbsolutePath.StartsWith("/storage/v1/object/public/" +
+                Uri.EscapeDataString(appSettings.Supabase.Bucket) + "/", StringComparison.Ordinal)))
+            throw new ArgumentException("Listening audio must be a public object from the configured storage.", nameof(audioUrl));
         var format = Path.GetExtension(uri.AbsolutePath).TrimStart('.').ToLowerInvariant();
         if (!new[] { "mp3", "mp4", "wav", "flac", "ogg", "amr", "webm", "m4a" }.Contains(format))
             throw new ArgumentException("Unsupported audio format.", nameof(audioUrl));
 
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(TimeSpan.FromSeconds(Math.Clamp(settings.JobTimeoutSeconds, 15, 300)));
+        timeout.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
         var ct = timeout.Token;
         using var download = await httpClients.CreateClient("TranscribeAudioDownload")
             .GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, ct);
         download.EnsureSuccessStatusCode();
-        if (download.Content.Headers.ContentLength > MaxAudioBytes)
-            throw new ArgumentException("Audio exceeds 10 MB.", nameof(audioUrl));
+        if (download.Content.Headers.ContentLength > maxBytes)
+            throw new ArgumentException("Audio exceeds the supported file size.", nameof(audioUrl));
         await using var audio = new MemoryStream();
         await using (var input = await download.Content.ReadAsStreamAsync(ct))
         {
@@ -63,7 +79,7 @@ public sealed class AmazonTranscribeSpeechClient(
             int length;
             while ((length = await input.ReadAsync(buffer, ct)) > 0)
             {
-                if (audio.Length + length > MaxAudioBytes) throw new ArgumentException("Audio exceeds 10 MB.");
+                if (audio.Length + length > maxBytes) throw new ArgumentException("Audio exceeds the supported file size.");
                 await audio.WriteAsync(buffer.AsMemory(0, length), ct);
             }
         }
@@ -89,7 +105,7 @@ public sealed class AmazonTranscribeSpeechClient(
             await transcribe.StartTranscriptionJobAsync(new StartTranscriptionJobRequest
             {
                 TranscriptionJobName = jobName,
-                LanguageCode = settings.Language,
+                LanguageCode = LanguageCode.JaJP,
                 MediaFormat = format,
                 Media = new Media { MediaFileUri = $"s3://{settings.AudioBucket}/{key}" },
             }, ct);

@@ -304,23 +304,7 @@ public class MentorOutboxDispatcherService : BackgroundService
                     }
 
                     case "ReviewSubmitted":
-                    {
-                        var bookingId = root.TryGetProperty("BookingId", out var bId) ? bId.GetInt32() : 0;
-                        var mentorId = root.TryGetProperty("MentorId", out var mId) ? mId.GetInt32() : 0;
-                        var rating = root.TryGetProperty("Rating", out var r) ? r.GetInt32() : 5;
-
-                        if (mentorId > 0)
-                        {
-                            await DispatchNotificationAsync(
-                                mentorId,
-                                "Đánh giá mới từ học viên",
-                                $"Bạn nhận được đánh giá {rating} sao cho một buổi tư vấn.",
-                                "MentorReview",
-                                "/mentor/reviews",
-                                cancellationToken);
-                        }
                         break;
-                    }
 
                     case "DisputeSubmitted":
                     {

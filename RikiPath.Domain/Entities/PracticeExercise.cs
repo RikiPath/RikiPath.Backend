@@ -5,6 +5,7 @@ namespace RikiPath.Domain.Entities;
 /// <summary>A skill-focused exercise attached to a lesson.</summary>
 public class PracticeExercise : Base
 {
+    public string? ImageUrl { get; set; }
     public int Id { get; set; }
     public string Title { get; set; } = string.Empty;
     public string? Description { get; set; }

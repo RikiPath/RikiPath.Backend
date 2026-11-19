@@ -4,6 +4,7 @@ namespace RikiPath.Domain.Entities
 {
     public class Kanji : Base
     {
+        public string? ImageUrl { get; set; }
         public int Id { get; set; }
         public string Character { get; set; }
         public string Meaning { get; set; }
