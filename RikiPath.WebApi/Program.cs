@@ -265,6 +265,7 @@ internal class Program
         builder.Services.AddScoped<RikiPath.Application.Services.SubscriptionAccessService>();
         builder.Services.AddScoped<RikiPath.Application.Services.ManualContentService>();
         builder.Services.AddScoped<RikiPath.Application.Services.HomeworkService>();
+        builder.Services.AddScoped<LearnerFeedbackService>();
         if (builder.Environment.IsEnvironment("M4E2E"))
         {
             // End-to-end fixtures must not call an external AI provider.
@@ -317,10 +318,12 @@ internal class Program
         builder.Services.AddHttpClient<IFcmTransport, DefaultFcmTransport>();
         builder.Services.AddScoped<IFcmPushService, FcmPushService>();
         // 7. JWT Authentication & Authorization
-        var secret = appSettings?.SecretToken?.Value ?? builder.Configuration["SecretToken:Value"];
+        // AuthService phát JWT từ AppSettings.SecretToken; không chấp nhận cấu hình
+        // dự phòng mà dịch vụ đăng nhập không đọc được (sẽ gây HTTP 500 sau startup).
+        var secret = appSettings?.SecretToken?.Value;
         if (string.IsNullOrWhiteSpace(secret))
         {
-            throw new InvalidOperationException("SecretToken:Value is not configured. Configure JWT secret in appsettings.");
+            throw new InvalidOperationException("AppSettings:SecretToken:Value is not configured. Configure JWT secret in appsettings.");
         }
 
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secret));

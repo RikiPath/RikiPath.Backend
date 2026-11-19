@@ -17,14 +17,36 @@ jobs:
       with:
         dotnet-version: '8.0.x'
 
+    - name: Check migration source and model parity before publishing
+      run: dotnet test RikiPath.Tests/RikiPath.Tests.csproj --filter "FullyQualifiedName~MigrationGovernanceTests|FullyQualifiedName~AppDbContextDesignTimeFactoryTests"
+
+    - name: Install read-only migration preflight tools
+      run: |
+        dotnet tool install --global dotnet-ef --version 8.0.8
+        sudo apt-get update -qq
+        sudo apt-get install -y postgresql-client
+
+    - name: Prepare private production settings for read-only preflight
+      env:
+        APPSETTINGS_PRODUCTION: ${{ secrets.APPSETTINGS_PRODUCTION }}
+      run: |
+        test -n "$APPSETTINGS_PRODUCTION"
+        printf '%s' "$APPSETTINGS_PRODUCTION" > RikiPath.WebApi/appsettings.Production.json
+
+    - name: Block deployment when shared database schema diverges
+      shell: pwsh
+      env:
+        ASPNETCORE_ENVIRONMENT: Production
+        MIGRATION_GATE_HOST: ${{ secrets.MIGRATION_GATE_HOST }}
+        MIGRATION_GATE_DATABASE: ${{ secrets.MIGRATION_GATE_DATABASE }}
+        MIGRATION_GATE_USERNAME: ${{ secrets.MIGRATION_GATE_USERNAME }}
+      run: ./tools/verify-migration-readiness.ps1 -NoBuild -RequireSharedRemote -ExpectedHost $env:MIGRATION_GATE_HOST -ExpectedDatabase $env:MIGRATION_GATE_DATABASE -ExpectedUsername $env:MIGRATION_GATE_USERNAME
+
     - name: Publish Web API
       run: dotnet publish RikiPath.WebApi/RikiPath.WebApi.csproj -c Release -o ./publish
 
     - name: Create appsettings.Production.json
-      run: |
-        cat << 'EOF' > ./publish/appsettings.Production.json
-        ${{ secrets.APPSETTINGS_PRODUCTION }}
-        EOF
+      run: cp RikiPath.WebApi/appsettings.Production.json ./publish/appsettings.Production.json
 
     - name: Transfer files to VPS
       uses: appleboy/scp-action@v0.1.7
