@@ -238,4 +238,63 @@ public sealed class AppDbContextDesignTimeFactoryTests
         var migrations = context.Database.GetMigrations().ToList();
         Assert.NotEmpty(migrations);
     }
+
+    [Fact]
+    public void ResolveConnectionString_BlocksUnapprovedRemoteSupabaseUpdate_WithoutPrintingCredentials()
+    {
+        var secretPassword = "SUPER_SECRET_PASSWORD_DO_NOT_LEAK";
+        var env = EnvMap(new Dictionary<string, string>
+        {
+            ["AppSettings__ConnectionStrings__DefaultConnection"] =
+                $"Host=aws-0-ap-southeast-1.pooler.supabase.com;Port=5432;Database=postgres;Username=postgres.demo;Password={secretPassword}"
+        });
+
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            AppDbContextDesignTimeFactory.ResolveConnectionString(
+                args: Array.Empty<string>(),
+                processArgs: ["dotnet", "ef.dll", "database", "update"],
+                getEnvironmentVariable: env,
+                includeDefaultConfigFiles: false));
+
+        Assert.Contains("aws-0-ap-southeast-1.pooler.supabase.com", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("RIKIPATH_ALLOW_REMOTE_DB_MIGRATION", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(secretPassword, ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ResolveConnectionString_AllowsRemoteSupabaseUpdate_WhenExplicitOptInEnvProvided()
+    {
+        var conn = "Host=aws-0-ap-southeast-1.pooler.supabase.com;Port=5432;Database=postgres;Username=postgres.demo;Password=qa_only";
+        var env = EnvMap(new Dictionary<string, string>
+        {
+            ["AppSettings__ConnectionStrings__DefaultConnection"] = conn,
+            ["RIKIPATH_ALLOW_REMOTE_DB_MIGRATION"] = "true"
+        });
+
+        var resolved = AppDbContextDesignTimeFactory.ResolveConnectionString(
+            args: Array.Empty<string>(),
+            processArgs: ["dotnet", "ef.dll", "database", "update"],
+            getEnvironmentVariable: env,
+            includeDefaultConfigFiles: false);
+
+        Assert.Equal(conn, resolved);
+    }
+
+    [Fact]
+    public void ResolveConnectionString_AllowsRemoteSupabaseMetadataCommand_WithoutOptIn()
+    {
+        var conn = "Host=aws-0-ap-southeast-1.pooler.supabase.com;Port=5432;Database=postgres";
+        var env = EnvMap(new Dictionary<string, string>
+        {
+            ["AppSettings__ConnectionStrings__DefaultConnection"] = conn
+        });
+
+        var resolved = AppDbContextDesignTimeFactory.ResolveConnectionString(
+            args: Array.Empty<string>(),
+            processArgs: ["dotnet", "ef.dll", "migrations", "list"],
+            getEnvironmentVariable: env,
+            includeDefaultConfigFiles: false);
+
+        Assert.Equal(conn, resolved);
+    }
 }
