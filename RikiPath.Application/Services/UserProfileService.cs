@@ -1,5 +1,6 @@
 using RikiPath.Domain.Entities;
 using Microsoft.AspNetCore.Http;
+using RikiPath.Application.Helpers;
 using RikiPath.Application.IServices;
 using RikiPath.Application.Requests.Profile;
 using RikiPath.Application.Responses;
@@ -44,15 +45,16 @@ namespace RikiPath.Application.Services
             try
             {
                 var userId = claimService.GetUserClaim().Id;
-                if (string.IsNullOrWhiteSpace(request.FirstName) || string.IsNullOrWhiteSpace(request.LastName))
+                var (firstName, lastName) = UserNameHelper.SplitFullName(request.FullName);
+                if (string.IsNullOrWhiteSpace(firstName))
                     return ApiResponse<UserProfileResponse>.Fail("Họ và tên không được để trống.");
 
                 var user = await unitOfWork.UserAccounts.GetByIdAsync(userId);
                 if (user is null)
                     return ApiResponse<UserProfileResponse>.NotFound("Không tìm thấy người dùng.");
 
-                user.FirstName = request.FirstName.Trim();
-                user.LastName = request.LastName.Trim();
+                user.FirstName = firstName;
+                user.LastName = lastName;
                 unitOfWork.UserAccounts.Update(user);
                 await unitOfWork.SaveChangesAsync();
 
@@ -349,8 +351,7 @@ namespace RikiPath.Application.Services
         {
             UserId = user.Id,
             Email = user.Email,
-            FirstName = user.FirstName,
-            LastName = user.LastName,
+            FullName = UserNameHelper.FormatFullName(user.FirstName, user.LastName),
             AvatarUrl = user.AvatarUrl,
             Role = user.Role.ToString(),
             IsEmailVerified = user.IsEmailVerified,

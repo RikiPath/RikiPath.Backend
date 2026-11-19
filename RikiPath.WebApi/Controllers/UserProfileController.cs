@@ -41,7 +41,7 @@ namespace RikiPath.WebApi.Controllers
         /// - Luồng xử lý: Validate và cập nhật các trường trong CSDL.
         /// - Lưu ý cho FE: Yêu cầu Bearer Token. Trường email nếu thay đổi có thể cần xác thực lại.
         /// </remarks>
-        /// <param name="request">UpdateProfileRequest: FullName (Optional), Bio (Optional), Locale (Optional).</param>
+        /// <param name="request">UpdateProfileRequest: FullName (Required).</param>
         /// <param name="cancellationToken">Token hủy request (Optional).</param>
         /// <response code="200">Thành công: Profile đã được cập nhật.</response>
         /// <response code="400">Dữ liệu không hợp lệ.</response>
