@@ -2,6 +2,7 @@ using RikiPath.Domain.Entities;
 using RikiPath.Domain.Enums;
 using Microsoft.IdentityModel.Tokens;
 using RikiPath.Application.IRepositories;
+using RikiPath.Application.Helpers;
 using RikiPath.Application.IServices;
 using RikiPath.Application.Requests.Auth;
 using RikiPath.Application.Responses;
@@ -39,14 +40,16 @@ namespace RikiPath.Application.Services
                     return ApiResponse<RegisterResponse>.Fail("Email này đã được đăng ký.");
 
                 var (hash, salt) = CreatePasswordHash(request.Password);
+                var (firstName, lastName) = UserNameHelper.SplitFullName(request.FullName);
+                var fullName = UserNameHelper.FormatFullName(firstName, lastName);
 
                 var user = new UserAccount
                 {
                     Email = email,
                     PasswordHash = hash,
                     PasswordSalt = salt,
-                    FirstName = request.FirstName,
-                    LastName = request.LastName,
+                    FirstName = firstName,
+                    LastName = lastName,
                     Role = Role.Learner, // ép cứng — tự đăng ký luôn là Learner
                     IsEmailVerified = false,
                 };
@@ -64,7 +67,8 @@ namespace RikiPath.Application.Services
                 }, cancellationToken);
                 await unitOfWork.SaveChangesAsync(cancellationToken);
 
-                var emailContent = $"Xin chào {user.FirstName},<br/>Mã xác thực email của bạn là: " +
+                var greetingName = string.IsNullOrEmpty(fullName) ? "bạn" : fullName;
+                var emailContent = $"Xin chào {greetingName},<br/>Mã xác thực email của bạn là: " +
                                     $"<strong>{verificationCode}</strong>.<br/>Mã có hiệu lực trong 30 phút.";
 
                 var emailResult = await emailService.SendValidationEmailAsync(user.Email, emailContent, cancellationToken);
@@ -72,7 +76,7 @@ namespace RikiPath.Application.Services
                     return ApiResponse<RegisterResponse>.Fail(
                         "Tạo tài khoản thành công nhưng gửi email xác thực thất bại.");
 
-                return ApiResponse<RegisterResponse>.Created(new RegisterResponse { UserId = user.Id, FullName = $"{user.FirstName} {user.LastName}".Trim(), Email = user.Email });
+                return ApiResponse<RegisterResponse>.Created(new RegisterResponse { UserId = user.Id, FullName = fullName, Email = user.Email });
             }
             catch (Exception ex)
             {
@@ -109,7 +113,7 @@ namespace RikiPath.Application.Services
                 return ApiResponse<RegisterResponse>.Created(new RegisterResponse
                 {
                     UserId = user.Id,
-                    FullName = $"{user.FirstName} {user.LastName}".Trim(),
+                    FullName = UserNameHelper.FormatFullName(user.FirstName, user.LastName),
                     PhoneNumber = user.PhoneNumber,
                 });
             }
@@ -175,7 +179,8 @@ namespace RikiPath.Application.Services
                     new ResendAttemptState(now.AddSeconds(ResendCooldownSeconds), attempts),
                     TimeSpan.FromHours(1));
 
-                var emailContent = $"Xin chào {user.FirstName},<br/>Mã xác thực email của bạn là: " +
+                var greetingName = UserNameHelper.FormatFullName(user.FirstName, user.LastName);
+                var emailContent = $"Xin chào {(string.IsNullOrEmpty(greetingName) ? "bạn" : greetingName)},<br/>Mã xác thực email của bạn là: " +
                                    $"<strong>{verificationCode}</strong>.<br/>Mã có hiệu lực trong {VerificationCodeLifetimeMinutes} phút.";
                 var emailResult = await emailService.SendValidationEmailAsync(
                     user.Email!,
@@ -249,7 +254,7 @@ namespace RikiPath.Application.Services
                     AccessToken = CreateToken(user),
                     UserId = user.Id,
                     Email = user.Email,
-                    FullName = $"{user.FirstName} {user.LastName}".Trim(),
+                    FullName = UserNameHelper.FormatFullName(user.FirstName, user.LastName),
                     Role = user.Role.ToString(),
                 };
 
@@ -287,7 +292,7 @@ namespace RikiPath.Application.Services
                     UserId = user.Id,
                     Email = user.Email,
                     PhoneNumber = user.PhoneNumber,
-                    FullName = $"{user.FirstName} {user.LastName}".Trim(),
+                    FullName = UserNameHelper.FormatFullName(user.FirstName, user.LastName),
                     Role = user.Role.ToString(),
                 };
 

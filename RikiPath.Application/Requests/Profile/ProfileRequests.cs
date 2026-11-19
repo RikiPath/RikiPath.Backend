@@ -1,9 +1,11 @@
+using System.ComponentModel.DataAnnotations;
+
 namespace RikiPath.Application.Requests.Profile
 {
     public class UpdateProfileRequest
     {
-        public string FirstName { get; set; } = string.Empty;
-        public string LastName { get; set; } = string.Empty;
+        [Required(ErrorMessage = "Họ và tên không được để trống."), MaxLength(200)]
+        public string FullName { get; set; } = string.Empty;
     }
 
     public class SetJlptGoalRequest

@@ -79,10 +79,11 @@ public sealed class AdminUserManagementTests
         Assert.IsType<NoContentResult>(await controller.DeactivateUser(2, default));
         Assert.True((await db.Users.SingleAsync()).IsDeleted);
         Assert.IsType<OkObjectResult>(await controller.UpdateUser(2, new AdminUpdateUserRequest
-        { FirstName = "Updated", Role = Role.Mentor, IsActive = true }, default));
+        { FullName = "Updated User", Role = Role.Mentor, IsActive = true }, default));
         var user = await db.Users.SingleAsync();
         Assert.False(user.IsDeleted);
         Assert.Equal(Role.Mentor, user.Role);
-        Assert.Equal("Updated", user.FirstName);
+        Assert.Equal("Updated User", user.FirstName);
+        Assert.Null(user.LastName);
     }
 }
