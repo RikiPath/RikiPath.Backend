@@ -1,0 +1,28 @@
+name: Migration governance
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  migration-governance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Restore & build solution
+        run: |
+          dotnet restore RikiPath.Backend.slnx
+          dotnet build RikiPath.Backend.slnx --no-restore -c Release
+      - name: Install EF CLI for offline preflight
+        run: dotnet tool install --global dotnet-ef --version 8.0.8
+      - name: Check migration source pairs and snapshot (no database connection)
+        shell: pwsh
+        run: ./tools/verify-migration-readiness.ps1 -SkipDatabaseCheck -NoBuild
+      - name: Check whitespace
+        run: git diff --check origin/main...HEAD

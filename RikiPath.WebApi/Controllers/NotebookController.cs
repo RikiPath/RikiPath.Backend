@@ -208,6 +208,27 @@ namespace RikiPath.WebApi.Controllers
         }
 
         /// <summary>
+        /// Cập nhật nội dung cá nhân hoặc chuyển mục ghi chú sang danh sách (note page) khác của Learner.
+        /// </summary>
+        [HttpPut("entries/{noteEntryId:int}")]
+        public async Task<IActionResult> UpdateEntry(
+            int noteEntryId, [FromBody] UpdateNotebookEntryRequest request, CancellationToken cancellationToken)
+        {
+            var result = await notebookService.UpdateEntryAsync(noteEntryId, request, cancellationToken);
+            return StatusCode((int)result.StatusCode, result);
+        }
+
+        /// <summary>
+        /// Đưa một mục trong sổ tay vào hàng chờ ôn tập SRS (nếu chưa có thẻ SRS, chống tạo trùng).
+        /// </summary>
+        [HttpPost("entries/{noteEntryId:int}/srs")]
+        public async Task<IActionResult> EnrollEntryToSrs(int noteEntryId, CancellationToken cancellationToken)
+        {
+            var result = await notebookService.EnrollEntryToSrsAsync(noteEntryId, cancellationToken);
+            return StatusCode((int)result.StatusCode, result);
+        }
+
+        /// <summary>
         /// Xóa một mục ghi chú trong notebook.
         /// </summary>
         /// <remarks>

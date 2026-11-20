@@ -8,6 +8,12 @@ public sealed class MentorSlotGenerationOptions
     public const string SectionName = "MentorSlotGeneration";
 
     public int DailyBookingCap { get; set; } = 4;
+    /// <summary>Số khung giờ tối đa được gửi trong một lần đăng ký / batch (mặc định 14).</summary>
+    public int MaxSlotsPerSubmission { get; set; } = 14;
+    /// <summary>Tổng số khung giờ đang chờ Admin duyệt tối đa của một Giáo viên tại một thời điểm (mặc định 24).</summary>
+    public int MaxPendingSlots { get; set; } = 24;
+    /// <summary>Thời gian chờ tối thiểu (giây) giữa hai lần gửi đăng ký lịch liên tiếp (mặc định 5 giây).</summary>
+    public int SubmissionCooldownSeconds { get; set; } = 5;
     public bool AutoPublicationEnabled { get; set; }
     public List<MentorDaypartWindowOptions>? Dayparts { get; set; }
 

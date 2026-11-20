@@ -25,7 +25,7 @@ public sealed partial class HomeworkService(
     IMentorGroupPolicyService? groupPolicies = null)
 {
     private static readonly TimeSpan VietnamOffset = TimeSpan.FromHours(7);
-    private static readonly string[] SupportedLevels = ["N5", "N4", "N3", "N2"];
+    private static readonly string[] SupportedLevels = ["N5", "N4", "N3", "N2", "N1"];
 
     public async Task<List<HomeworkLearner>> GetLearnersAsync(CancellationToken ct, bool includeAllBookings = false)
     {

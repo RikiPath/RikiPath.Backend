@@ -1,10 +1,13 @@
 using RikiPath.Infrastructure.Options;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.Http.Features;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
+using RikiPath.WebApi.Infrastructure;
 using RikiPath.WebApi.Swagger;
 using RikiPath.Application;
 using RikiPath.Application.Handlers;
@@ -31,6 +34,19 @@ internal class Program
     private static void Main(string[] args)
     {
         var builder = WebApplication.CreateBuilder(args);
+        builder.WebHost.ConfigureKestrel(server =>
+        {
+            server.AddServerHeader = false;
+            server.Limits.MaxRequestBodySize = 30 * 1024 * 1024;
+        });
+        builder.Services.Configure<FormOptions>(options =>
+        {
+            options.MultipartBodyLengthLimit = 30 * 1024 * 1024;
+        });
+        builder.Services.Configure<ForwardedHeadersOptions>(options =>
+        {
+            options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+        });
 
         // 1. Bind AppSettings
         var configuration = builder.Configuration;
@@ -63,12 +79,30 @@ internal class Program
         builder.Services.AddRateLimiter(options =>
         {
             options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+            options.AddPolicy("auth-sensitive", context =>
+                System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+                    context.Connection.RemoteIpAddress?.ToString() ?? "anonymous",
+                    _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+                    {
+                        PermitLimit = 20,
+                        Window = TimeSpan.FromMinutes(1),
+                        QueueLimit = 0,
+                    }));
             options.AddPolicy("speech-session", context =>
                 System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
                     context.User.FindFirstValue(ClaimTypes.NameIdentifier) ?? context.Connection.RemoteIpAddress?.ToString() ?? "anonymous",
                     _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
                     {
                         PermitLimit = 10,
+                        Window = TimeSpan.FromMinutes(1),
+                        QueueLimit = 0,
+                    }));
+            options.AddPolicy("mentor-availability-submit", context =>
+                System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+                    context.User.FindFirstValue(ClaimTypes.NameIdentifier) ?? context.Connection.RemoteIpAddress?.ToString() ?? "anonymous",
+                    _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+                    {
+                        PermitLimit = 20,
                         Window = TimeSpan.FromMinutes(1),
                         QueueLimit = 0,
                     }));
@@ -93,8 +127,10 @@ internal class Program
             }, "Cấu hình tạo khung giờ hỗ trợ Mentor không hợp lệ.")
             .ValidateOnStart();
 
-        // 2. Database Context - Npgsql using ConnectionStrings:DefaultConnection
-        builder.Services.AddDbContext<AppDbContext>(options =>
+        // 2. Database Context - Npgsql using ConnectionStrings:DefaultConnection + Slow query telemetry
+        builder.Services.AddSingleton<SlowDbCommandInterceptor>();
+        builder.Services.AddScoped<DatabaseSchemaReadinessService>();
+        builder.Services.AddDbContext<AppDbContext>((serviceProvider, options) =>
         {
             var connection = appSettings?.ConnectionStrings?.DefaultConnection
                              ?? builder.Configuration.GetConnectionString("DefaultConnection");
@@ -107,6 +143,7 @@ internal class Program
                 npgOptions.EnableRetryOnFailure();
             });
 
+            options.AddInterceptors(serviceProvider.GetRequiredService<SlowDbCommandInterceptor>());
             options.ConfigureWarnings(warnings => warnings.Ignore(RelationalEventId.MultipleCollectionIncludeWarning));
         });
 
@@ -270,7 +307,8 @@ internal class Program
         builder.Services.AddScoped<RikiPath.Application.Services.MockTestExplanationService>();
         builder.Services.AddScoped<RikiPath.Application.Services.ManualContentService>();
         builder.Services.AddScoped<RikiPath.Application.Services.HomeworkService>();
-        //builder.Services.AddScoped<LearnerFeedbackService>();
+
+        builder.Services.AddScoped<LearnerFeedbackService>();
         if (builder.Environment.IsEnvironment("M4E2E"))
         {
             // End-to-end fixtures must not call an external AI provider.
@@ -323,10 +361,12 @@ internal class Program
         builder.Services.AddHttpClient<IFcmTransport, DefaultFcmTransport>();
         builder.Services.AddScoped<IFcmPushService, FcmPushService>();
         // 7. JWT Authentication & Authorization
-        var secret = appSettings?.SecretToken?.Value ?? builder.Configuration["SecretToken:Value"];
+        // AuthService phát JWT từ AppSettings.SecretToken; không chấp nhận cấu hình
+        // dự phòng mà dịch vụ đăng nhập không đọc được (sẽ gây HTTP 500 sau startup).
+        var secret = appSettings?.SecretToken?.Value;
         if (string.IsNullOrWhiteSpace(secret))
         {
-            throw new InvalidOperationException("SecretToken:Value is not configured. Configure JWT secret in appsettings.");
+            throw new InvalidOperationException("AppSettings:SecretToken:Value is not configured. Configure JWT secret in appsettings.");
         }
 
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secret));
@@ -345,6 +385,8 @@ internal class Program
                 {
                     ValidateIssuerSigningKey = true,
                     IssuerSigningKey = key,
+                    ValidateLifetime = true,
+                    ClockSkew = TimeSpan.FromMinutes(2),
                     ValidateIssuer = false,
                     ValidateAudience = false
                 };
@@ -364,10 +406,15 @@ internal class Program
                         var db = context.HttpContext.RequestServices.GetRequiredService<AppDbContext>();
                         var user = await db.Users.AsNoTracking()
                             .Where(account => account.Id == userId)
-                            .Select(account => new { account.Role, account.IsDeleted })
+                            .Select(account => new { account.Role, account.IsDeleted, account.TokenVersion })
                             .SingleOrDefaultAsync(context.HttpContext.RequestAborted);
                         if (user is null || user.IsDeleted || !string.Equals(user.Role.ToString(), jwtRole, StringComparison.Ordinal))
+                        {
                             context.Fail("Quyền tài khoản đã thay đổi. Vui lòng đăng nhập lại.");
+                            return;
+                        }
+                        if (!int.TryParse(context.Principal?.FindFirstValue("tv"), out var tv) || tv != user.TokenVersion)
+                            context.Fail("Phiên đăng nhập đã hết hiệu lực. Vui lòng đăng nhập lại.");
                     },
                     OnMessageReceived = context =>
                     {
@@ -463,6 +510,8 @@ internal class Program
         var app = builder.Build();
 
         // 10. Middleware Pipeline
+        app.UseForwardedHeaders();
+        app.UseMiddleware<RequestObservabilityAndSecurityMiddleware>();
         if (app.Environment.IsDevelopment())
         {
             app.UseDeveloperExceptionPage();
@@ -473,18 +522,48 @@ internal class Program
             app.UseExceptionHandler();
             app.UseHsts();
         }
-        app.UseSwagger();
-        app.UseSwaggerUI(c =>
+        if (!app.Environment.IsProduction() || configuration.GetValue<bool>("Swagger:Enabled"))
         {
-            c.DocumentTitle = "RikiPath API Swagger";
-            c.SwaggerEndpoint("/swagger/v1/swagger.json", "RikiPath API v1");
-        });
+            app.UseSwagger();
+            app.UseSwaggerUI(c =>
+            {
+                c.DocumentTitle = "RikiPath API Swagger";
+                c.SwaggerEndpoint("/swagger/v1/swagger.json", "RikiPath API v1");
+            });
+        }
 
         app.UseHttpsRedirection();
         app.UseCors("DefaultCorsPolicy");
         app.UseAuthentication();
         app.UseAuthorization();
         app.UseRateLimiter();
+
+        // Liveness probe: checks process responsiveness only (never queries DB, avoids restart loops).
+        app.MapGet("/health/live", () => Results.Ok(new
+        {
+            status = "Live",
+            service = "RikiPath.WebApi",
+            timestampUtc = DateTime.UtcNow,
+        })).AllowAnonymous();
+
+        // Readiness probe: verifies PostgreSQL connectivity and critical schema/migration parity (read-only).
+        app.MapGet("/health/ready", async (DatabaseSchemaReadinessService readiness, CancellationToken ct) =>
+        {
+            var result = await readiness.CheckAsync(ct);
+            return result.IsReady
+                ? Results.Ok(new { status = result.Status, reason = result.Reason, timestampUtc = DateTime.UtcNow })
+                : Results.Json(
+                    new
+                    {
+                        status = result.Status,
+                        reason = result.Reason,
+                        missingRequiredTables = result.MissingRequiredTables,
+                        pendingMigrationCount = result.PendingMigrationCount,
+                        timestampUtc = DateTime.UtcNow,
+                    },
+                    statusCode: StatusCodes.Status503ServiceUnavailable);
+        }).AllowAnonymous();
+
         app.MapControllers();
 
         app.MapHub<MentorMeetingHub>("/hubs/mentor-meeting");

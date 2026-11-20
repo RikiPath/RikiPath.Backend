@@ -57,7 +57,7 @@ public partial class AuthService
             var linkedAccount = await accounts.FirstOrDefaultAsync(
                 user => user.GoogleSubject == identity.Subject, cancellationToken);
             if (linkedAccount is not null)
-                return GoogleLoginResponse(linkedAccount);
+                return GoogleLoginResponse(linkedAccount, identity);
 
             var email = identity.Email?.Trim().ToLowerInvariant();
             if (string.IsNullOrWhiteSpace(email) || !identity.EmailVerified)
@@ -135,7 +135,7 @@ public partial class AuthService
                 var savedAccount = await accounts.Query().AsNoTracking().FirstOrDefaultAsync(
                     user => user.GoogleSubject == identity.Subject, cancellationToken);
                 if (savedAccount is not null)
-                    return GoogleLoginResponse(savedAccount);
+                    return GoogleLoginResponse(savedAccount, identity);
 
                 var emailInUse = await accounts.Query().AsNoTracking().AnyAsync(
                     user => user.Email != null && user.Email.ToLower() == email &&
@@ -148,7 +148,7 @@ public partial class AuthService
                 return ApiResponse<LoginResponse>.Fail("Không thể lưu tài khoản Google.", HttpStatusCode.InternalServerError);
             }
 
-            return GoogleLoginResponse(account, created);
+            return GoogleLoginResponse(account, identity, created);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception ex)
@@ -158,19 +158,22 @@ public partial class AuthService
         }
     }
 
-    private ApiResponse<LoginResponse> GoogleLoginResponse(UserAccount account, bool created = false)
+    private ApiResponse<LoginResponse> GoogleLoginResponse(
+        UserAccount account, GoogleJsonWebSignature.Payload identity, bool created = false)
     {
         if (account.IsDeleted)
             return ApiResponse<LoginResponse>.Fail("Tài khoản RikiPath không còn hoạt động.", HttpStatusCode.Forbidden);
 
-        return ApiResponse<LoginResponse>.Success(new LoginResponse
-        {
-            AccessToken = CreateToken(account),
-            UserId = account.Id,
-            Email = account.Email ?? string.Empty,
-            FullName = UserNameHelper.FormatFullName(account.FirstName, account.LastName),
-            PhoneNumber = account.PhoneNumber,
-            Role = account.Role.ToString(),
-        }, created ? HttpStatusCode.Created : HttpStatusCode.OK);
+        // A previously linked subject is not sufficient when the local email was changed
+        // or is awaiting verification. Never issue a session for that intermediate state.
+        if (!identity.EmailVerified || !account.IsEmailVerified ||
+            !string.Equals(account.Email?.Trim(), identity.Email?.Trim(), StringComparison.OrdinalIgnoreCase))
+            return ApiResponse<LoginResponse>.Fail(
+                "Thông tin email của tài khoản đã thay đổi. Hãy xác thực email và liên kết lại Google.",
+                HttpStatusCode.Forbidden);
+
+        return ApiResponse<LoginResponse>.Success(
+            BuildLoginResponse(account, CreateToken(account)),
+            created ? HttpStatusCode.Created : HttpStatusCode.OK);
     }
 }

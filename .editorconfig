@@ -1,0 +1,27 @@
+root = true
+
+[*]
+charset = utf-8
+indent_style = space
+indent_size = 4
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.{json,yml,yaml,xml,csproj,props,targets,ps1}]
+indent_size = 2
+
+[*.cs]
+indent_size = 4
+csharp_new_line_before_open_brace = all
+csharp_prefer_braces = when_multiline:suggestion
+dotnet_sort_system_directives_first = true
+
+# Critical Security Analyzers -> Build Errors (prevent SQLi, insecure crypto, insecure PRNG, unsafe deserialization)
+dotnet_diagnostic.CA2100.severity = error
+dotnet_diagnostic.CA2300.severity = error
+dotnet_diagnostic.CA2301.severity = error
+dotnet_diagnostic.CA2326.severity = error
+dotnet_diagnostic.CA5350.severity = error
+dotnet_diagnostic.CA5351.severity = error
+dotnet_diagnostic.CA5364.severity = error
+dotnet_diagnostic.CA5394.severity = error

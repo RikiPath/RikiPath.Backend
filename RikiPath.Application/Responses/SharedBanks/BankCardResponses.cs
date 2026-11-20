@@ -35,4 +35,32 @@ namespace RikiPath.Application.Responses.SharedBanks
         public string ExampleSentence { get; set; } = string.Empty;
         public string JlptLevelName { get; set; } = string.Empty;
     }
+
+    public class QuestionBankOptionResponse
+    {
+        public int Id { get; set; }
+        public string OptionText { get; set; } = string.Empty;
+        public string? ImageUrl { get; set; }
+        public bool IsCorrect { get; set; }
+        public int SortOrder { get; set; }
+    }
+
+    public class QuestionBankCardResponse
+    {
+        public int Id { get; set; }
+        public string QuestionText { get; set; } = string.Empty;
+        public string QuestionType { get; set; } = string.Empty;
+        public string? Explanation { get; set; }
+        public string? AudioUrl { get; set; }
+        public string? ImageUrl { get; set; }
+        public string JlptLevelName { get; set; } = string.Empty;
+        public int? CertificateLevelId { get; set; }
+        public string SkillName { get; set; } = string.Empty;
+        public int? LanguageSkillId { get; set; }
+        public string MockTestTitle { get; set; } = string.Empty;
+        public int MockTestId { get; set; }
+        public string SectionTitle { get; set; } = string.Empty;
+        public string? AnswerSummary { get; set; }
+        public IReadOnlyList<QuestionBankOptionResponse> Options { get; set; } = [];
+    }
 }

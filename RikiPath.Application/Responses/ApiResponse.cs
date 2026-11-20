@@ -10,6 +10,7 @@ namespace RikiPath.Application.Responses
         public string? ErrorMessage { get; protected set; }
         public string? ErrorCode { get; protected set; }
         public bool? Retryable { get; protected set; }
+        public int? RetryAfterSeconds { get; protected set; }
         public List<string>? Errors { get; protected set; }
         public T? Result { get; protected set; }
 
@@ -70,6 +71,13 @@ namespace RikiPath.Application.Responses
     // Lớp non-generic cho API không trả về Result
     public class ApiResponse : ApiResponse<object>
     {
+        public static ApiResponse SuccessWithRetryAfter(int seconds) => new()
+        {
+            IsSuccess = true,
+            StatusCode = (int)HttpStatusCode.OK,
+            RetryAfterSeconds = seconds,
+        };
+
         public static ApiResponse Success(HttpStatusCode statusCode = HttpStatusCode.OK)
         {
             return new ApiResponse

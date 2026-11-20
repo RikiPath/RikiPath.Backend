@@ -10,8 +10,23 @@ namespace RikiPath.Application.Services
 {
     public sealed class AdminCertificateSectionService(
         IUnitOfWork unitOfWork,
-        ILogger<AdminCertificateSectionService> logger) : IAdminCertificateSectionService
+        ILogger<AdminCertificateSectionService> logger,
+        IClaimService? claimService = null) : IAdminCertificateSectionService
     {
+        private void TryQueueAudit(string action, int entityId, object? after, CancellationToken _)
+        {
+            var actorId = claimService?.GetUserClaim().Id ?? 0;
+            if (actorId <= 0 || unitOfWork.AdminAuditLogs is null) return;
+            unitOfWork.AdminAuditLogs.AddAsync(new AdminAuditLog
+            {
+                ActorUserId = actorId,
+                EntityType = "CertificateSection",
+                EntityId = entityId,
+                Action = action,
+                AfterJson = after is null ? null : System.Text.Json.JsonSerializer.Serialize(after),
+                CreatedAtUtc = DateTime.UtcNow,
+            }).GetAwaiter().GetResult();
+        }
         public async Task<ApiResponse<List<CertificateSectionResponse>>> GetAllAsync(
             int? certificateLevelId,
             bool includeArchived,
@@ -113,6 +128,8 @@ namespace RikiPath.Application.Services
 
                 await unitOfWork.CertificateSections.AddAsync(section, cancellationToken);
                 await unitOfWork.SaveChangesAsync(cancellationToken);
+                TryQueueAudit("Created", section.Id, new { section.Id, section.CertificateLevelId, section.Code, section.Name }, cancellationToken);
+                await unitOfWork.SaveChangesAsync(cancellationToken);
 
                 return ApiResponse<CertificateSectionResponse>.Created(Map(section, level.Code));
             }
@@ -170,6 +187,7 @@ namespace RikiPath.Application.Services
                 section.ModifiedDate = DateTime.UtcNow;
 
                 unitOfWork.CertificateSections.Update(section);
+                TryQueueAudit("Updated", section.Id, new { section.Id, section.CertificateLevelId, section.Code, section.Name }, cancellationToken);
                 await unitOfWork.SaveChangesAsync(cancellationToken);
 
                 return ApiResponse<CertificateSectionResponse>.Success(Map(section, level.Code));
@@ -203,6 +221,7 @@ namespace RikiPath.Application.Services
                     section.IsDeleted = true;
                     section.ModifiedDate = DateTime.UtcNow;
                     unitOfWork.CertificateSections.Update(section);
+                    TryQueueAudit("Archived", section.Id, new { section.Id, IsDeleted = true }, cancellationToken);
                     await unitOfWork.SaveChangesAsync(cancellationToken);
                 }
 

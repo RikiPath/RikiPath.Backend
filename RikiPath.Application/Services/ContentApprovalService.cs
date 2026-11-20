@@ -333,6 +333,13 @@ namespace RikiPath.Application.Services
             }
         }
 
+        private async Task<string> ResolveReviewerNameAsync(CancellationToken ct)
+        {
+            var claim = claimService.GetUserClaim();
+            var admin = await unitOfWork.UserAccounts.GetByIdAsync(claim.Id, ct);
+            return admin is null ? $"Admin #{claim.Id}" : UserNameHelper.FormatFullName(admin.FirstName, admin.LastName);
+        }
+
         public async Task<ApiResponse<bool>> ReviewRequestAsync(
               int requestId, ReviewContentRequest request, CancellationToken cancellationToken)
         {
@@ -341,21 +348,64 @@ namespace RikiPath.Application.Services
 
             try
             {
-                var req = await unitOfWork.ContentApprovalRequests.GetByIdAsync(requestId, cancellationToken);
+                var actor = claimService.GetUserClaim();
+                var reviewerName = await ResolveReviewerNameAsync(cancellationToken);
+                ApiResponse<bool>? conflictOrFail = null;
+                ContentApprovalRequest? processed = null;
 
-                if (req is null || req.IsDeleted || !IsReviewable(req.Status))
-                    return ApiResponse<bool>.Fail("Yêu cầu không tồn tại hoặc đã được xử lý.");
+                await unitOfWork.ExecuteInTransactionAsync(async token =>
+                {
+                    var req = await unitOfWork.ContentApprovalRequests.Query()
+                        .FirstOrDefaultAsync(r => r.Id == requestId && !r.IsDeleted, token);
 
-                await ApplyReviewAsync(req, request.Approve, request.ReviewNote, cancellationToken);
+                    if (req is null)
+                    {
+                        conflictOrFail = ApiResponse<bool>.NotFound("Không tìm thấy yêu cầu duyệt nội dung.");
+                        return;
+                    }
+                    if (!IsReviewable(req.Status))
+                    {
+                        conflictOrFail = ApiResponse<bool>.Fail("Yêu cầu đã được quản trị viên khác xử lý. Vui lòng tải lại.", System.Net.HttpStatusCode.Conflict);
+                        return;
+                    }
 
-                await unitOfWork.SaveChangesAsync(cancellationToken);
-                await NotifyAuthorsAsync([req], cancellationToken);
+                    req.ReviewedByName = reviewerName;
+                    await ApplyReviewAsync(req, request.Approve, request.ReviewNote, token);
+
+                    if (unitOfWork.AdminAuditLogs is not null)
+                    {
+                        await unitOfWork.AdminAuditLogs.AddAsync(new AdminAuditLog
+                        {
+                            ActorUserId = actor.Id,
+                            EntityType = "ContentApprovalRequest",
+                            EntityId = req.Id,
+                            Action = request.Approve ? "Approved" : "Rejected",
+                            AfterJson = JsonSerializer.Serialize(new { req.Id, EntityType = req.EntityType.ToString(), req.RowKey, Status = req.Status.ToString() }),
+                            Reason = request.ReviewNote?.Trim(),
+                            CreatedAtUtc = DateTime.UtcNow,
+                        }, token);
+                    }
+
+                    await unitOfWork.SaveChangesAsync(token);
+                    processed = req;
+                }, cancellationToken);
+
+                if (conflictOrFail is not null) return conflictOrFail;
+                if (processed is not null) await NotifyAuthorsAsync([processed], cancellationToken);
 
                 return ApiResponse<bool>.Success(true);
             }
-            catch (Exception ex)
+            catch (InvalidOperationException ex)
             {
-                return ApiResponse<bool>.Fail($"Duyệt yêu cầu thất bại: {ex.Message}");
+                return ApiResponse<bool>.Fail(ex.Message, System.Net.HttpStatusCode.BadRequest);
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                return ApiResponse<bool>.Fail("Yêu cầu vừa được xử lý bởi thao tác khác. Vui lòng tải lại.", System.Net.HttpStatusCode.Conflict);
+            }
+            catch (Exception)
+            {
+                return ApiResponse<bool>.Fail("Không thể duyệt yêu cầu lúc này. Vui lòng thử lại sau.", System.Net.HttpStatusCode.InternalServerError);
             }
         }
 
@@ -366,50 +416,94 @@ namespace RikiPath.Application.Services
                 return ApiResponse<BulkReviewResponse>.Fail("Vui lòng nhập lý do từ chối.");
             try
             {
-                var lessonRequest = await unitOfWork.ContentApprovalRequests.GetByIdAsync(lessonRequestId, cancellationToken);
-                if (lessonRequest is null || lessonRequest.IsDeleted || lessonRequest.EntityType != ImportEntityType.Lesson || !IsReviewable(lessonRequest.Status))
-                    return ApiResponse<BulkReviewResponse>.Fail("Yêu cầu Lesson không tồn tại hoặc đã được xử lý.");
-
-                var payload = JsonSerializer.Deserialize<LessonImportPayloadResponse>(lessonRequest.PayloadJson, JsonOptions)
-                    ?? throw new InvalidOperationException("Payload Lesson rỗng.");
-                var requests = await unitOfWork.ContentApprovalRequests.Query()
-                    .Where(r => !r.IsDeleted && r.Status == ContentApprovalStatus.PendingReview &&
-                        r.SubmittedByUserId == lessonRequest.SubmittedByUserId)
-                    .ToListAsync(cancellationToken);
-
-                var group = new List<ContentApprovalRequest> { lessonRequest };
-                foreach (var candidate in requests.Where(r => r.Id != lessonRequest.Id && r.EntityType is ImportEntityType.Kanji or ImportEntityType.Grammar or ImportEntityType.Vocabulary or ImportEntityType.PracticeExercise))
-                {
-                    try
-                    {
-                        using var doc = JsonDocument.Parse(candidate.PayloadJson);
-                        if (doc.RootElement.TryGetProperty("LessonTitle", out var titleNode)
-                            && titleNode.GetString() == payload.Title
-                            && doc.RootElement.TryGetProperty("CertificateLevelId", out var levelNode)
-                            && levelNode.GetInt32() == payload.CertificateLevelId)
-                            group.Add(candidate);
-                    }
-                    catch (JsonException) { }
-                }
-
+                var actor = claimService.GetUserClaim();
+                var reviewerName = await ResolveReviewerNameAsync(cancellationToken);
+                ApiResponse<BulkReviewResponse>? fail = null;
                 var result = new BulkReviewResponse();
-                // For approval, save the parent first so a new Lesson has an ID before child links are written.
-                if (request.Approve)
-                {
-                    await ApplyReviewAsync(lessonRequest, true, request.ReviewNote, cancellationToken);
-                    await unitOfWork.SaveChangesAsync(cancellationToken);
-                }
-                else
-                    foreach (var item in group) await ApplyReviewAsync(item, false, request.ReviewNote, cancellationToken);
+                List<ContentApprovalRequest> notifyTargets = [];
 
-                result.SuccessCount = group.Count;
-                await unitOfWork.SaveChangesAsync(cancellationToken);
-                await NotifyAuthorsAsync(request.Approve ? [lessonRequest] : group, cancellationToken);
+                await unitOfWork.ExecuteInTransactionAsync(async token =>
+                {
+                    var lessonRequest = await unitOfWork.ContentApprovalRequests.Query()
+                        .FirstOrDefaultAsync(r => r.Id == lessonRequestId && !r.IsDeleted, token);
+                    if (lessonRequest is null || lessonRequest.EntityType != ImportEntityType.Lesson)
+                    {
+                        fail = ApiResponse<BulkReviewResponse>.NotFound("Không tìm thấy yêu cầu Lesson.");
+                        return;
+                    }
+                    if (!IsReviewable(lessonRequest.Status))
+                    {
+                        fail = ApiResponse<BulkReviewResponse>.Fail("Yêu cầu Lesson đã được xử lý trước đó.", System.Net.HttpStatusCode.Conflict);
+                        return;
+                    }
+
+                    var payload = JsonSerializer.Deserialize<LessonImportPayloadResponse>(lessonRequest.PayloadJson, JsonOptions)
+                        ?? throw new InvalidOperationException("Payload Lesson rỗng.");
+                    var requests = await unitOfWork.ContentApprovalRequests.Query()
+                        .Where(r => !r.IsDeleted && r.Status == ContentApprovalStatus.PendingReview &&
+                            r.SubmittedByUserId == lessonRequest.SubmittedByUserId)
+                        .ToListAsync(token);
+
+                    var group = new List<ContentApprovalRequest> { lessonRequest };
+                    foreach (var candidate in requests.Where(r => r.Id != lessonRequest.Id && r.EntityType is ImportEntityType.Kanji or ImportEntityType.Grammar or ImportEntityType.Vocabulary or ImportEntityType.PracticeExercise))
+                    {
+                        try
+                        {
+                            using var doc = JsonDocument.Parse(candidate.PayloadJson);
+                            if (doc.RootElement.TryGetProperty("LessonTitle", out var titleNode)
+                                && titleNode.GetString() == payload.Title
+                                && doc.RootElement.TryGetProperty("CertificateLevelId", out var levelNode)
+                                && levelNode.GetInt32() == payload.CertificateLevelId)
+                                group.Add(candidate);
+                        }
+                        catch (JsonException) { }
+                    }
+
+                    if (request.Approve)
+                    {
+                        lessonRequest.ReviewedByName = reviewerName;
+                        await ApplyReviewAsync(lessonRequest, true, request.ReviewNote, token);
+                        await unitOfWork.SaveChangesAsync(token);
+                    }
+                    else
+                    {
+                        foreach (var item in group)
+                        {
+                            item.ReviewedByName = reviewerName;
+                            await ApplyReviewAsync(item, false, request.ReviewNote, token);
+                        }
+                    }
+
+                    if (unitOfWork.AdminAuditLogs is not null)
+                    {
+                        await unitOfWork.AdminAuditLogs.AddAsync(new AdminAuditLog
+                        {
+                            ActorUserId = actor.Id,
+                            EntityType = "ContentApprovalLessonGroup",
+                            EntityId = lessonRequest.Id,
+                            Action = request.Approve ? "Approved" : "Rejected",
+                            AfterJson = JsonSerializer.Serialize(new { LessonRequestId = lessonRequest.Id, Count = group.Count }),
+                            Reason = request.ReviewNote?.Trim(),
+                            CreatedAtUtc = DateTime.UtcNow,
+                        }, token);
+                    }
+
+                    result.SuccessCount = group.Count;
+                    await unitOfWork.SaveChangesAsync(token);
+                    notifyTargets = request.Approve ? [lessonRequest] : group;
+                }, cancellationToken);
+
+                if (fail is not null) return fail;
+                if (notifyTargets.Count > 0) await NotifyAuthorsAsync(notifyTargets, cancellationToken);
                 return ApiResponse<BulkReviewResponse>.Success(result);
             }
-            catch (Exception ex)
+            catch (InvalidOperationException ex)
             {
-                return ApiResponse<BulkReviewResponse>.Fail($"Duyệt nhóm Lesson thất bại: {ex.Message}");
+                return ApiResponse<BulkReviewResponse>.Fail(ex.Message, System.Net.HttpStatusCode.BadRequest);
+            }
+            catch (Exception)
+            {
+                return ApiResponse<BulkReviewResponse>.Fail("Không thể duyệt nhóm Lesson lúc này. Vui lòng thử lại.", System.Net.HttpStatusCode.InternalServerError);
             }
         }
 
@@ -419,52 +513,73 @@ namespace RikiPath.Application.Services
             if (request.Items is not { Count: > 0 })
                 return ApiResponse<BulkReviewResponse>.Fail("Chưa chọn yêu cầu nào để duyệt.");
 
+            var actor = claimService.GetUserClaim();
+            var reviewerName = await ResolveReviewerNameAsync(cancellationToken);
             var result = new BulkReviewResponse();
             var seen = new HashSet<int>();
             var reviewed = new List<ContentApprovalRequest>();
 
-            foreach (var item in request.Items)
+            await unitOfWork.ExecuteInTransactionAsync(async token =>
             {
-                // Bỏ qua nếu FE lỡ gửi trùng RequestId nhiều lần trong cùng 1 lô.
-                if (!seen.Add(item.RequestId)) continue;
-
-                if (!item.Approve && string.IsNullOrWhiteSpace(item.ReviewNote))
+                foreach (var item in request.Items)
                 {
-                    result.Failures.Add(new BulkReviewItemResult
-                    {
-                        RequestId = item.RequestId,
-                        Reason = "Vui lòng nhập lý do từ chối."
-                    });
-                    continue;
-                }
+                    if (!seen.Add(item.RequestId)) continue;
 
-                try
-                {
-                    var req = await unitOfWork.ContentApprovalRequests.GetByIdAsync(item.RequestId, cancellationToken);
-                    if (req is null || req.IsDeleted || !IsReviewable(req.Status))
+                    if (!item.Approve && string.IsNullOrWhiteSpace(item.ReviewNote))
                     {
                         result.Failures.Add(new BulkReviewItemResult
                         {
                             RequestId = item.RequestId,
-                            Reason = "Yêu cầu không tồn tại hoặc đã được xử lý."
+                            Reason = "Vui lòng nhập lý do từ chối."
                         });
                         continue;
                     }
 
-                    await ApplyReviewAsync(req, item.Approve, item.ReviewNote, cancellationToken);
-                    unitOfWork.ContentApprovalRequests.Update(req);
-                    reviewed.Add(req);
-                    result.SuccessCount++;
-                }
-                catch (Exception ex)
-                {
-                    result.Failures.Add(new BulkReviewItemResult { RequestId = item.RequestId, Reason = ex.Message });
-                }
-            }
+                    try
+                    {
+                        var req = await unitOfWork.ContentApprovalRequests.GetByIdAsync(item.RequestId, token);
+                        if (req is null || req.IsDeleted || !IsReviewable(req.Status))
+                        {
+                            result.Failures.Add(new BulkReviewItemResult
+                            {
+                                RequestId = item.RequestId,
+                                Reason = "Yêu cầu không tồn tại hoặc đã được xử lý."
+                            });
+                            continue;
+                        }
 
-            // Lưu 1 lần cho cả lô: các request đã xử lý thành công (staged ở trên) được ghi xuống DB,
-            // các request lỗi/bị bỏ qua ở trên không ảnh hưởng tới các request khác.
-            await unitOfWork.SaveChangesAsync(cancellationToken);
+                        req.ReviewedByName = reviewerName;
+                        await ApplyReviewAsync(req, item.Approve, item.ReviewNote, token);
+                        unitOfWork.ContentApprovalRequests.Update(req);
+                        reviewed.Add(req);
+                        result.SuccessCount++;
+                    }
+                    catch (InvalidOperationException ex)
+                    {
+                        result.Failures.Add(new BulkReviewItemResult { RequestId = item.RequestId, Reason = ex.Message });
+                    }
+                    catch (Exception)
+                    {
+                        result.Failures.Add(new BulkReviewItemResult { RequestId = item.RequestId, Reason = "Dữ liệu mục này không hợp lệ hoặc bị xung đột." });
+                    }
+                }
+
+                if (reviewed.Count > 0 && unitOfWork.AdminAuditLogs is not null)
+                {
+                    await unitOfWork.AdminAuditLogs.AddAsync(new AdminAuditLog
+                    {
+                        ActorUserId = actor.Id,
+                        EntityType = "ContentApprovalBatch",
+                        EntityId = reviewed[0].Id,
+                        Action = "BatchReviewed",
+                        AfterJson = JsonSerializer.Serialize(new { Succeeded = result.SuccessCount, Failed = result.Failures.Count }),
+                        CreatedAtUtc = DateTime.UtcNow,
+                    }, token);
+                }
+
+                await unitOfWork.SaveChangesAsync(token);
+            }, cancellationToken);
+
             await NotifyAuthorsAsync(reviewed, cancellationToken);
 
             if (result.SuccessCount == 0 && result.Failures.Count > 0)
@@ -478,26 +593,42 @@ namespace RikiPath.Application.Services
         {
             var userId = claimService.GetUserClaim().Id;
             var rows = await unitOfWork.ContentApprovalRequests.Query()
+                .AsNoTracking()
                 .Where(request => !request.IsDeleted && request.SubmittedByUserId == userId)
-                .OrderByDescending(request => request.SubmittedAt)
-                .Take(50)
+                .OrderByDescending(request => request.ModifiedDate ?? request.SubmittedAt)
+                .Take(200)
                 .ToListAsync(cancellationToken);
-            return ApiResponse<List<ContentApprovalListItemResponse>>.Success(rows.Select(request => new ContentApprovalListItemResponse
+
+            var levelCodes = await unitOfWork.CertificateLevels.Query()
+                .AsNoTracking()
+                .Where(l => !l.IsDeleted)
+                .ToDictionaryAsync(l => l.Id, l => l.Code, cancellationToken);
+
+            return ApiResponse<List<ContentApprovalListItemResponse>>.Success(rows.Select(request =>
             {
-                Id = request.Id,
-                BatchId = request.BatchId,
-                EntityType = request.EntityType,
-                Action = request.Action,
-                TargetEntityId = request.TargetEntityId,
-                RowKey = request.RowKey,
-                Status = request.Status,
-                SourceFileName = request.SourceFileName,
-                SourceRowNumber = request.SourceRowNumber,
-                SubmittedByUserId = request.SubmittedByUserId,
-                SubmittedAt = request.SubmittedAt,
-                ReviewedByName = request.ReviewedByName,
-                ReviewedAt = request.ReviewedAt,
-                ReviewNote = request.ReviewNote,
+                var info = ManualContentService.ReadListInfo(request.PayloadJson);
+                var levelId = info?.CertificateLevelId;
+                var levelCode = levelId is int lid && levelCodes.TryGetValue(lid, out var code) ? code : null;
+                return new ContentApprovalListItemResponse
+                {
+                    Id = request.Id,
+                    BatchId = request.BatchId,
+                    EntityType = request.EntityType,
+                    Action = request.Action,
+                    TargetEntityId = request.TargetEntityId,
+                    RowKey = request.RowKey,
+                    Status = request.Status,
+                    SourceFileName = request.SourceFileName,
+                    SourceRowNumber = request.SourceRowNumber,
+                    SubmittedByUserId = request.SubmittedByUserId,
+                    SubmittedAt = request.SubmittedAt,
+                    UpdatedAt = request.ModifiedDate ?? request.CreatedDate ?? request.SubmittedAt,
+                    ReviewedByName = request.ReviewedByName,
+                    ReviewedAt = request.ReviewedAt,
+                    ReviewNote = request.ReviewNote,
+                    CertificateLevelId = levelId,
+                    CertificateLevelCode = levelCode,
+                };
             }).ToList());
         }
 
@@ -572,7 +703,9 @@ namespace RikiPath.Application.Services
         private async Task ApplyVocabularyApprovalAsync(ContentApprovalRequest req, CancellationToken cancellationToken)
         {
             var p = JsonSerializer.Deserialize<VocabularyImportPayloadResponse>(req.PayloadJson, JsonOptions)
-                ?? throw new InvalidOperationException("Payload Vocabulary rỗng.");
+                ?? throw new InvalidOperationException("Payload Từ vựng rỗng.");
+            if (string.IsNullOrWhiteSpace(p.Word) || string.IsNullOrWhiteSpace(p.Meaning))
+                throw new InvalidOperationException("Từ vựng thiếu từ hoặc nghĩa bắt buộc.");
 
             Vocabulary vocab;
             if (req.Action == ImportRowAction.New)
@@ -629,7 +762,9 @@ namespace RikiPath.Application.Services
         private async Task ApplyKanjiApprovalAsync(ContentApprovalRequest req, CancellationToken cancellationToken)
         {
             var p = JsonSerializer.Deserialize<KanjiImportPayloadResponse>(req.PayloadJson, JsonOptions)
-                ?? throw new InvalidOperationException("Payload Kanji rỗng.");
+                ?? throw new InvalidOperationException("Payload Hán tự rỗng.");
+            if (string.IsNullOrWhiteSpace(p.Character) || string.IsNullOrWhiteSpace(p.Meaning) || p.StrokeCount <= 0)
+                throw new InvalidOperationException("Hán tự thiếu ký tự, nghĩa hoặc số nét hợp lệ.");
 
             Kanji kanji;
             if (req.Action == ImportRowAction.New)

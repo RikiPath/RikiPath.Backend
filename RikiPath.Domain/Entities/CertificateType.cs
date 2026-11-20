@@ -7,6 +7,7 @@ namespace RikiPath.Domain.Entities
         public string? Description { get; set; }
         public bool IsActive { get; set; } = true;
         public int SortOrder { get; set; }
+        public int Revision { get; set; } = 1;
 
         public List<CertificateLevel>? Levels { get; set; }
     }

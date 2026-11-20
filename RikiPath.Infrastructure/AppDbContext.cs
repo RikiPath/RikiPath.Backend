@@ -24,6 +24,7 @@ namespace RikiPath.Infrastructure
 
         // Users
         public DbSet<UserAccount> Users { get; set; }
+        public DbSet<LearnerFeedback> LearnerFeedbacks { get; set; }
 
         // Catalog / master data
         public DbSet<CertificateType> CertificateTypes { get; set; }
@@ -106,7 +107,6 @@ namespace RikiPath.Infrastructure
         public DbSet<MentorPayoutObligation> MentorPayoutObligations { get; set; }
         public DbSet<MentorPayoutAttempt> MentorPayoutAttempts { get; set; }
         public DbSet<MentorReview> MentorReviews { get; set; }
-        public DbSet<LearnerFeedback> LearnerFeedbacks { get; set; }
         public DbSet<MentorDispute> MentorDisputes { get; set; }
         public DbSet<MentorDisputeHistory> MentorDisputeHistories { get; set; }
         public DbSet<MentorAbuseReport> MentorAbuseReports { get; set; }
@@ -116,6 +116,7 @@ namespace RikiPath.Infrastructure
         public DbSet<Feature> Features { get; set; }
         public DbSet<UserSubscription> UserSubscriptions { get; set; }
         public DbSet<AiCreditTopUp> AiCreditTopUps { get; set; }
+        public DbSet<AdminAuditLog> AdminAuditLogs { get; set; }
 
         // Spaced-repetition review queue
         public DbSet<ReviewCard> ReviewCards { get; set; }
@@ -250,6 +251,8 @@ namespace RikiPath.Infrastructure
 
             modelBuilder.ApplyConfiguration(new ContentAiReviewConfig());
             modelBuilder.ApplyConfiguration(new ContentAudioTranscriptionConfig());
+            modelBuilder.ApplyConfiguration(new AdminAuditLogConfig());
+            modelBuilder.ApplyConfiguration(new LearnerFeedbackConfig());
         }
     }
 }

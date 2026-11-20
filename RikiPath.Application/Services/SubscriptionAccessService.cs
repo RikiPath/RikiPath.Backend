@@ -21,21 +21,93 @@ public sealed class SubscriptionAccessService(
     public const int LearningPathCredit = 8104;
     public const int OrderPrefix = 900_000_000;
 
-    private static bool IsStudy(int planId) => planId is >= 1 and <= 6;
+    public const string CategorySelfStudy = "self_study";
+    public const string CategorySpeaking = "speaking";
+    public const string CategoryWriting = "writing";
+    public const string CategoryAiGrading = "ai_grading";
+    public const string CategoryLearningPath = "learning_path";
+    public const string CategoryMentorLegacy = "mentor_legacy";
+
+    public static readonly IReadOnlySet<string> SellableCategories = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        CategorySelfStudy,
+        CategorySpeaking,
+        CategoryWriting,
+        CategoryAiGrading,
+        CategoryLearningPath,
+    };
+
+    public static string ResolveCategory(SubscriptionPlan? plan, int planId)
+    {
+        if (plan is not null)
+        {
+            if (plan.MeetingSessionCount > 0 || string.Equals(plan.PlanCategory, CategoryMentorLegacy, StringComparison.OrdinalIgnoreCase))
+                return CategoryMentorLegacy;
+
+            var normalized = plan.PlanCategory?.Trim().ToLowerInvariant();
+            if (!string.IsNullOrEmpty(normalized) && SellableCategories.Contains(normalized))
+            {
+                if (normalized == CategorySelfStudy && planId is SpeakingPlan or WritingPlan or GradingCredit or LearningPathCredit)
+                {
+                    return planId switch
+                    {
+                        SpeakingPlan => CategorySpeaking,
+                        WritingPlan => CategoryWriting,
+                        GradingCredit => CategoryAiGrading,
+                        LearningPathCredit => CategoryLearningPath,
+                        _ => CategorySelfStudy,
+                    };
+                }
+                return normalized;
+            }
+        }
+
+        return planId switch
+        {
+            SpeakingPlan => CategorySpeaking,
+            WritingPlan => CategoryWriting,
+            GradingCredit => CategoryAiGrading,
+            LearningPathCredit => CategoryLearningPath,
+            7 or 8105 => CategoryMentorLegacy,
+            _ => CategorySelfStudy,
+        };
+    }
+
+    public static bool IsCreditCategory(string? category)
+        => string.Equals(category, CategoryAiGrading, StringComparison.OrdinalIgnoreCase)
+        || string.Equals(category, CategoryLearningPath, StringComparison.OrdinalIgnoreCase);
+
     public static bool IsCredit(int planId) => planId is GradingCredit or LearningPathCredit;
+
+    public static bool IsSellable(SubscriptionPlan? plan)
+        => plan is not null
+           && plan.IsActive
+           && !plan.IsDeleted
+           && plan.MeetingSessionCount == 0
+           && ResolveCategory(plan, plan.Id) != CategoryMentorLegacy;
+
+    private static string OrderCategory(UserSubscription order)
+        => !string.IsNullOrWhiteSpace(order.PlanCategorySnapshot)
+            ? order.PlanCategorySnapshot.Trim().ToLowerInvariant()
+            : ResolveCategory(order.SubscriptionPlan, order.SubscriptionPlanId);
 
     public async Task<IReadOnlyList<StudyPlanOffer>> GetPlansAsync(CancellationToken ct)
     {
-        var plans = await unitOfWork.SubscriptionPlans.Query().AsNoTracking()
-            .Where(p => p.IsActive && !p.IsDeleted && (p.Id >= 1 && p.Id <= 6 ||
-                p.Id >= SpeakingPlan && p.Id <= LearningPathCredit))
+        var candidates = await unitOfWork.SubscriptionPlans.Query().AsNoTracking()
+            .Where(p => p.IsActive && !p.IsDeleted && p.MeetingSessionCount == 0 && p.PlanCategory != CategoryMentorLegacy)
             .OrderBy(p => p.SortOrder).ThenBy(p => p.Id).ToListAsync(ct);
-        return plans.Select(p => new StudyPlanOffer(p.Id, p.Name, p.Description, p.Price, p.DurationDays,
-            p.AiGradingQuota, p.IsPopular, p.Id switch
-            {
-                SpeakingPlan => "speaking", WritingPlan => "writing", GradingCredit => "ai_grading",
-                LearningPathCredit => "learning_path", _ => "self_study"
-            })).ToList();
+        return candidates
+            .Where(IsSellable)
+            .Select(p => new StudyPlanOffer(
+                p.Id,
+                p.Name,
+                p.Description,
+                p.Price,
+                p.DurationDays,
+                p.AiGradingQuota,
+                p.IsPopular,
+                ResolveCategory(p, p.Id)))
+            .ToList();
     }
 
     public async Task<StudyAccessResponse> GetAccessAsync(CancellationToken ct)
@@ -46,30 +118,43 @@ public sealed class SubscriptionAccessService(
             .OrderByDescending(s => s.Id).ToListAsync(ct);
         var now = DateTime.UtcNow;
         var active = purchases.Where(s => IsActive(s, now)).ToList();
-        var study = active.Where(s => IsStudy(s.SubscriptionPlanId))
+        var study = active.Where(s => OrderCategory(s) == CategorySelfStudy)
             .OrderByDescending(s => s.EndDate is null).ThenByDescending(s => s.EndDate).FirstOrDefault();
         var studyExpiresAt = study?.EndDate is { } end ? DateTime.SpecifyKind(end, DateTimeKind.Utc) : (DateTime?)null;
         int? studyDaysRemaining = studyExpiresAt is { } expiry
             ? (int)Math.Ceiling((expiry - now).TotalDays)
             : study is null ? 0 : null;
-        var grading = active.Where(s => s.SubscriptionPlanId == GradingCredit || IsStudy(s.SubscriptionPlanId))
+        var grading = active.Where(s => OrderCategory(s) is CategoryAiGrading or CategorySelfStudy)
             .Sum(RemainingAi);
-        var speaking = active.Any(s => s.SubscriptionPlanId == SpeakingPlan) || study is not null || grading > 0;
-        var writing = active.Any(s => s.SubscriptionPlanId == WritingPlan) || study is not null || grading > 0;
-        return new StudyAccessResponse(study is not null, study?.SubscriptionPlan.Name, speaking, writing, grading,
-            active.Where(s => s.SubscriptionPlanId == SpeakingPlan).Sum(RemainingAi),
-            active.Where(s => s.SubscriptionPlanId == WritingPlan).Sum(RemainingAi),
-            active.Where(s => s.SubscriptionPlanId == LearningPathCredit).Sum(RemainingAi),
+        var speaking = active.Any(s => OrderCategory(s) == CategorySpeaking) || study is not null || grading > 0;
+        var writing = active.Any(s => OrderCategory(s) == CategoryWriting) || study is not null || grading > 0;
+        return new StudyAccessResponse(
+            study is not null,
+            study is null ? null : (study.PlanNameSnapshot ?? study.SubscriptionPlan?.Name),
+            speaking,
+            writing,
+            grading,
+            active.Where(s => OrderCategory(s) == CategorySpeaking).Sum(RemainingAi),
+            active.Where(s => OrderCategory(s) == CategoryWriting).Sum(RemainingAi),
+            active.Where(s => OrderCategory(s) == CategoryLearningPath).Sum(RemainingAi),
             0,
-            purchases.Select(s => new PurchasedStudyPlan(s.Id, s.SubscriptionPlanId, s.SubscriptionPlan.Name,
-                s.AmountPaid, s.StartDate, s.EndDate, IsActive(s, now), RemainingAi(s))).ToList(),
-            studyExpiresAt, studyDaysRemaining);
+            purchases.Select(s => new PurchasedStudyPlan(
+                s.Id,
+                s.SubscriptionPlanId,
+                s.PlanNameSnapshot ?? s.SubscriptionPlan?.Name ?? $"Gói #{s.SubscriptionPlanId}",
+                s.AmountPaid,
+                s.StartDate,
+                s.EndDate,
+                IsActive(s, now),
+                RemainingAi(s))).ToList(),
+            studyExpiresAt,
+            studyDaysRemaining);
     }
 
     public async Task<ApiResponse<StudyCheckout>> PurchaseAsync(int planId, CancellationToken ct)
     {
         var plan = await unitOfWork.SubscriptionPlans.GetByIdAsync(planId, ct);
-        if (plan is null || !plan.IsActive || plan.IsDeleted || !(IsStudy(planId) || planId is >= SpeakingPlan and <= LearningPathCredit))
+        if (!IsSellable(plan))
             return ApiResponse<StudyCheckout>.NotFound("Gói học không còn mở bán.");
         var returnBase = settings.PayOs?.WebReturnUrl;
         var cancelBase = settings.PayOs?.WebCancelUrl;
@@ -79,10 +164,14 @@ public sealed class SubscriptionAccessService(
         var order = new UserSubscription
         {
             UserId = claims.GetUserClaim().Id,
-            SubscriptionPlanId = plan.Id,
+            SubscriptionPlanId = plan!.Id,
             AmountPaid = plan.Price,
             PurchasedAt = DateTime.UtcNow,
             AiGradingQuota = plan.AiGradingQuota,
+            DurationDaysSnapshot = plan.DurationDays,
+            PlanNameSnapshot = plan.Name,
+            PlanCategorySnapshot = ResolveCategory(plan, plan.Id),
+            PlanRevisionSnapshot = plan.Revision,
         };
         await unitOfWork.UserSubscriptions.AddAsync(order, ct);
         await unitOfWork.SaveChangesAsync(ct);
@@ -146,10 +235,14 @@ public sealed class SubscriptionAccessService(
     internal static void Activate(UserSubscription order, string? reference)
     {
         var now = DateTime.UtcNow;
+        var category = OrderCategory(order);
+        var durationDays = order.DurationDaysSnapshot ?? order.SubscriptionPlan?.DurationDays ?? 0;
         order.PaymentStatus = PaymentStatus.Paid;
         order.PaymentTransactionId = reference;
         order.StartDate = now;
-        order.EndDate = IsCredit(order.SubscriptionPlanId) ? null : now.AddDays(order.SubscriptionPlan.DurationDays);
+        order.EndDate = IsCreditCategory(category) || IsCredit(order.SubscriptionPlanId)
+            ? null
+            : now.AddDays(durationDays);
         order.AiGradingUsedCount = 0;
     }
 
@@ -167,10 +260,11 @@ public sealed class SubscriptionAccessService(
             if (await unitOfWork.UserAccounts.GetByIdForUpdateAsync(userId, token) is null) return;
             var now = DateTime.UtcNow;
             var orders = await unitOfWork.UserSubscriptions.Query()
+                .Include(s => s.SubscriptionPlan)
                 .Where(s => s.UserId == userId && !s.IsDeleted && s.PaymentStatus == PaymentStatus.Paid &&
                     s.AiGradingUsedCount < s.AiGradingQuota)
                 .OrderBy(s => s.EndDate == null).ThenBy(s => s.EndDate).ThenBy(s => s.Id).ToListAsync(token);
-            var credit = orders.FirstOrDefault(s => IsActive(s, now) && Supports(s.SubscriptionPlanId, feature));
+            var credit = orders.FirstOrDefault(s => IsActive(s, now) && Supports(s, feature));
             if (credit is null) return;
             credit.AiGradingUsedCount++;
             await unitOfWork.SaveChangesAsync(token);
@@ -206,14 +300,19 @@ public sealed class SubscriptionAccessService(
         }
     }
 
-    private static bool Supports(int id, string feature) => feature switch
+    private static bool Supports(UserSubscription order, string feature)
     {
-        "learning_path" => id == LearningPathCredit,
-        "speaking" => id is SpeakingPlan or GradingCredit || IsStudy(id),
-        "writing" => id is WritingPlan or GradingCredit || IsStudy(id),
-        MockTestExplanationService.CreditFeature => id == GradingCredit || IsStudy(id),
-        _ => false
-    };
+        var category = OrderCategory(order);
+        return feature switch
+        {
+            "learning_path" => category == CategoryLearningPath,
+            "speaking" => category is CategorySpeaking or CategoryAiGrading or CategorySelfStudy,
+            "writing" => category is CategoryWriting or CategoryAiGrading or CategorySelfStudy,
+            MockTestExplanationService.CreditFeature => category is CategoryAiGrading or CategorySelfStudy,
+            _ => false
+        };
+    }
+
 
     private static bool IsActive(UserSubscription order, DateTime now)
         => (order.StartDate is null || order.StartDate <= now) && (order.EndDate is null || order.EndDate > now);

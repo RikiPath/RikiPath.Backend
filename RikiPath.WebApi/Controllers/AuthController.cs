@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using RikiPath.Application.IServices;
 using RikiPath.Application.Requests.Auth;
 
@@ -24,10 +25,29 @@ namespace RikiPath.WebApi.Controllers
         /// <response code="400">Dữ liệu không hợp lệ: email đã tồn tại hoặc password không đủ mạnh.</response>
         /// <response code="500">Lỗi server khi tạo user hoặc gửi email.</response>
         [HttpPost("register")]
+        [EnableRateLimiting("auth-sensitive")]
         public async Task<IActionResult> Register([FromBody] RegisterRequest request, CancellationToken cancellationToken)
         {
             var result = await authService.RegisterAsync(request, cancellationToken);
             return StatusCode((int)result.StatusCode, result);
+        }
+
+        /// <summary>Gửi liên kết đặt lại mật khẩu đến email đã xác thực, không tiết lộ tài khoản có tồn tại hay không.</summary>
+        [HttpPost("forgot-password")]
+        [EnableRateLimiting("auth-sensitive")]
+        public async Task<IActionResult> ForgotPassword([FromBody] ForgotPasswordRequest request, CancellationToken cancellationToken)
+        {
+            var result = await authService.ForgotPasswordAsync(request, cancellationToken);
+            return StatusCode(result.StatusCode, result);
+        }
+
+        /// <summary>Đặt mật khẩu mới bằng liên kết đã ký, còn hạn và chưa được sử dụng.</summary>
+        [HttpPost("reset-password")]
+        [EnableRateLimiting("auth-sensitive")]
+        public async Task<IActionResult> ResetPassword([FromBody] ResetPasswordRequest request, CancellationToken cancellationToken)
+        {
+            var result = await authService.ResetPasswordAsync(request, cancellationToken);
+            return StatusCode(result.StatusCode, result);
         }
 
         /// <summary>
@@ -37,12 +57,24 @@ namespace RikiPath.WebApi.Controllers
         /// Mỗi email được gửi lại tối đa 5 lần trong 1 giờ và cách nhau ít nhất 60 giây.
         /// </remarks>
         [HttpPost("resend-verification-email")]
+        [EnableRateLimiting("auth-sensitive")]
         public async Task<IActionResult> ResendVerificationEmail(
             [FromBody] ResendVerificationEmailRequest request,
             CancellationToken cancellationToken)
         {
             var result = await authService.ResendVerificationEmailAsync(request, cancellationToken);
             return StatusCode((int)result.StatusCode, result);
+        }
+
+        /// <summary>Đổi địa chỉ email của tài khoản chưa xác thực sau khi kiểm tra mật khẩu đăng ký.</summary>
+        [HttpPost("change-unverified-email")]
+        [EnableRateLimiting("auth-sensitive")]
+        public async Task<IActionResult> ChangeUnverifiedEmail(
+            [FromBody] ChangeUnverifiedEmailRequest request,
+            CancellationToken cancellationToken)
+        {
+            var result = await authService.ChangeUnverifiedEmailAsync(request, cancellationToken);
+            return StatusCode(result.StatusCode, result);
         }
 
         /// <summary>
@@ -81,6 +113,7 @@ namespace RikiPath.WebApi.Controllers
         /// <response code="404">Không tìm thấy user với email này.</response>
         /// <response code="500">Lỗi server khi cập nhật trạng thái.</response>
         [HttpPost("verify-email")]
+        [EnableRateLimiting("auth-sensitive")]
         public async Task<IActionResult> VerifyEmail([FromBody] VerifyEmailRequest request, CancellationToken cancellationToken)
         {
             var result = await authService.VerifyEmailAsync(request, cancellationToken);
@@ -102,6 +135,7 @@ namespace RikiPath.WebApi.Controllers
         /// <response code="401">Email hoặc mật khẩu sai.</response>
         /// <response code="500">Lỗi server khi xác thực.</response>
         [HttpPost("login")]
+        [EnableRateLimiting("auth-sensitive")]
         public async Task<IActionResult> Login([FromBody] LoginRequest request, CancellationToken cancellationToken)
         {
             var result = await authService.LoginAsync(request, cancellationToken);
@@ -158,10 +192,28 @@ namespace RikiPath.WebApi.Controllers
         /// </response>
         /// <response code="500">Lỗi server khi cập nhật hoặc gửi mail.</response>
         [Authorize]
+        [HttpGet("me")]
+        public async Task<IActionResult> GetMe(CancellationToken cancellationToken)
+        {
+            var result = await authService.GetMeAsync(cancellationToken);
+            return StatusCode((int)result.StatusCode, result);
+        }
+
+        [Authorize]
+        [EnableRateLimiting("auth-sensitive")]
         [HttpPut("update-email/{userId:int}")]
         public async Task<IActionResult> UpdateEmail(int userId, [FromBody] UpdateEmailRequest request, CancellationToken cancellationToken)
         {
             var result = await authService.UpdateEmailAsync(userId, request, cancellationToken);
+            return StatusCode((int)result.StatusCode, result);
+        }
+
+        [Authorize]
+        [EnableRateLimiting("auth-sensitive")]
+        [HttpPost("resend-pending-email")]
+        public async Task<IActionResult> ResendPendingEmail(CancellationToken cancellationToken)
+        {
+            var result = await authService.ResendPendingEmailAsync(cancellationToken);
             return StatusCode((int)result.StatusCode, result);
         }
 
@@ -184,10 +236,20 @@ namespace RikiPath.WebApi.Controllers
         /// </response>
         /// <response code="500">Lỗi server khi cập nhật mật khẩu.</response>
         [Authorize]
+        [EnableRateLimiting("auth-sensitive")]
         [HttpPost("change-password/{userId:int}")]
         public async Task<IActionResult> ChangePassword(int userId, [FromBody] ChangePasswordRequest request, CancellationToken cancellationToken)
         {
             var result = await authService.ChangePasswordAsync(userId, request, cancellationToken);
+            return StatusCode((int)result.StatusCode, result);
+        }
+
+        [Authorize]
+        [EnableRateLimiting("auth-sensitive")]
+        [HttpPost("set-password")]
+        public async Task<IActionResult> SetPassword([FromBody] SetPasswordRequest request, CancellationToken cancellationToken)
+        {
+            var result = await authService.SetPasswordAsync(request, cancellationToken);
             return StatusCode((int)result.StatusCode, result);
         }
 

@@ -107,8 +107,22 @@ public sealed class CohortEnrollmentEntitlementService(IUnitOfWork uow, IClaimSe
             ExpiresAtUtc = request.ExpiresAtUtc?.ToUniversalTime()
         };
 
-        await uow.CohortEnrollmentEntitlements.AddAsync(row, ct);
-        await uow.SaveChangesAsync(ct);
+        await uow.ExecuteInTransactionAsync(async token =>
+        {
+            await uow.CohortEnrollmentEntitlements.AddAsync(row, token);
+            await uow.SaveChangesAsync(token);
+            await uow.AdminAuditLogs.AddAsync(new AdminAuditLog
+            {
+                ActorUserId = actor.Id,
+                EntityType = "CohortEnrollmentEntitlement",
+                EntityId = row.Id,
+                Action = "Granted",
+                AfterJson = System.Text.Json.JsonSerializer.Serialize(new { row.Id, row.StudyCohortId, row.LearnerId, row.EntitlementReference, row.SourceType }),
+                Reason = row.Note,
+                CreatedAtUtc = now,
+            }, token);
+            await uow.SaveChangesAsync(token);
+        }, ct);
 
         return ApiResponse<object>.Created(new
         {
@@ -188,13 +202,28 @@ public sealed class CohortEnrollmentEntitlementService(IUnitOfWork uow, IClaimSe
         if (row.Status != "Active")
             return ApiResponse<object>.Fail("Chỉ có thể thu hồi quyền ghi danh đang ở trạng thái Active.", HttpStatusCode.Conflict);
 
+        var revokeNow = DateTime.UtcNow;
         row.Status = "Revoked";
-        row.RevokedAtUtc = DateTime.UtcNow;
+        row.RevokedAtUtc = revokeNow;
         row.RevokedById = actor.Id;
         row.RevocationReason = reason;
-        row.ModifiedDate = DateTime.UtcNow;
-        uow.CohortEnrollmentEntitlements.Update(row);
-        await uow.SaveChangesAsync(ct);
+        row.ModifiedDate = revokeNow;
+        await uow.ExecuteInTransactionAsync(async token =>
+        {
+            uow.CohortEnrollmentEntitlements.Update(row);
+            await uow.AdminAuditLogs.AddAsync(new AdminAuditLog
+            {
+                ActorUserId = actor.Id,
+                EntityType = "CohortEnrollmentEntitlement",
+                EntityId = row.Id,
+                Action = "Revoked",
+                BeforeJson = System.Text.Json.JsonSerializer.Serialize(new { row.Id, Status = "Active" }),
+                AfterJson = System.Text.Json.JsonSerializer.Serialize(new { row.Id, Status = "Revoked" }),
+                Reason = reason,
+                CreatedAtUtc = revokeNow,
+            }, token);
+            await uow.SaveChangesAsync(token);
+        }, ct);
 
         return ApiResponse<object>.Success(new
         {

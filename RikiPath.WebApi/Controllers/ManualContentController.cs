@@ -18,12 +18,13 @@ public sealed class ManualContentController(ManualContentService service, IUnitO
     {
         var levels = await uow.CertificateLevels.Query().Where(x => !x.IsDeleted
             && !x.CertificateType.IsDeleted && x.CertificateType.IsActive)
-            .OrderBy(x => x.CertificateType.Name).ThenBy(x => x.SortOrder)
-            .Select(x => new { x.Id, x.Code, Certificate = x.CertificateType.Name }).ToListAsync(ct);
+            .OrderBy(x => x.CertificateType.SortOrder).ThenBy(x => x.SortOrder).ThenBy(x => x.Id)
+            .Select(x => new { x.Id, x.Code, x.SortOrder, x.CertificateTypeId, Certificate = x.CertificateType.Name }).ToListAsync(ct);
         var skills = await uow.LanguageSkills.Query().Where(x => !x.IsDeleted)
             .OrderBy(x => x.Name).Select(x => new { x.Id, x.Name }).ToListAsync(ct);
         var sections = await uow.CertificateSections.Query().Where(x => !x.IsDeleted)
-            .OrderBy(x => x.SortOrder).Select(x => new { x.Code, x.Name, x.CertificateLevelId }).ToListAsync(ct);
+            .OrderBy(x => x.SortOrder).ThenBy(x => x.Id)
+            .Select(x => new { x.Id, x.Code, x.Name, x.CertificateLevelId, x.DurationMinutes, x.MaxScore, x.PassingScore, x.SortOrder }).ToListAsync(ct);
         var topics = await uow.Topics.Query().Where(x => !x.IsDeleted)
             .OrderBy(x => x.Title).ThenBy(x => x.Id).Select(x => new { x.Id, x.Title }).ToListAsync(ct);
         return Ok(new { levels, skills, sections, topics, jlptQuestionFormats = JlptMockQuestionFormats.All });
@@ -74,6 +75,13 @@ public sealed class ManualContentController(ManualContentService service, IUnitO
     public async Task<IActionResult> Submit(int id, CancellationToken ct)
     {
         var result = await service.SubmitAsync(id, ct);
+        return StatusCode(result.StatusCode, result);
+    }
+
+    [HttpDelete("items/{id:int}")]
+    public async Task<IActionResult> DeleteDraft(int id, CancellationToken ct)
+    {
+        var result = await service.DeleteDraftAsync(id, ct);
         return StatusCode(result.StatusCode, result);
     }
 }

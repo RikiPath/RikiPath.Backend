@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using RikiPath.Application.IServices;
 using RikiPath.Application.Requests.MentorMeetings;
 using RikiPath.Application.Responses;
@@ -15,11 +16,25 @@ public sealed class MentorAvailabilityController(IMentorAvailabilityReviewServic
     public async Task<IActionResult> GetMine(CancellationToken cancellationToken)
         => ToActionResult(await service.GetMyAvailabilityAsync(cancellationToken));
 
+    [HttpGet("query")]
+    public async Task<IActionResult> QueryMine(
+        [FromQuery] RikiPath.Application.Responses.MentorMeetings.MentorAvailabilityQueryRequest request,
+        CancellationToken cancellationToken)
+        => ToActionResult(await service.QueryMyAvailabilityAsync(request, cancellationToken));
+
     [HttpPost]
+    [EnableRateLimiting("mentor-availability-submit")]
     public async Task<IActionResult> Create(
         [FromBody] CreateMentorAvailabilityRequest request,
         CancellationToken cancellationToken)
         => ToActionResult(await service.CreateAvailabilityAsync(request, cancellationToken));
+
+    [HttpPost("batch")]
+    [EnableRateLimiting("mentor-availability-submit")]
+    public async Task<IActionResult> CreateBatch(
+        [FromBody] CreateMentorAvailabilityBatchRequest request,
+        CancellationToken cancellationToken)
+        => ToActionResult(await service.CreateAvailabilityBatchAsync(request, cancellationToken));
 
     [HttpDelete("{id:int}")]
     public async Task<IActionResult> Delete(int id, CancellationToken cancellationToken)

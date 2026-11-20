@@ -27,8 +27,29 @@ public sealed record CohortSchedulePreviewRequest(int MentorId, List<int> Availa
 public sealed record CohortDiscoveryFilter(int? MentorId = null, string? Level = null, string? Intensity = null,
     int? Weekday = null, TimeOnly? FromTime = null, TimeOnly? ToTime = null);
 public sealed record BookCourseSlot(int AvailabilityId);
-public sealed record SaveCourseCertificate(string Name, string? Description, int SortOrder, bool IsActive);
-public sealed record SaveCourseLevel(int CertificateTypeId, string Code, string? Description, int SortOrder, bool IsActive);
+public sealed record SaveCourseCertificate(
+    string Name,
+    string? Description,
+    int? SortOrder,
+    bool IsActive,
+    bool AllowShift = false,
+    int? ExpectedRevision = null,
+    string? ExpectedOrderToken = null);
+
+public sealed record SaveCourseLevel(
+    int CertificateTypeId,
+    string Code,
+    string? Description,
+    int? SortOrder,
+    bool IsActive,
+    bool AllowShift = false,
+    int? ExpectedRevision = null,
+    string? ExpectedOrderToken = null);
+
+public sealed record ReorderCourseCatalogRequest(
+    int TargetSortOrder,
+    int? ExpectedRevision = null,
+    string? ExpectedOrderToken = null);
 
 public sealed record ReviewJlptExam(DateOnly ExamDate, string Location, bool Approve, string Note);
 

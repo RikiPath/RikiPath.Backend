@@ -26,15 +26,24 @@ public sealed class ManualContentService(IUnitOfWork uow, IClaimService claims, 
             .OrderByDescending(x => x.ModifiedDate ?? x.SubmittedAt)
             .Select(x => new
             {
-                x.Id, x.EntityType, x.RowKey, x.Status, x.SourceFileName, x.SourceRowNumber, x.ReviewNote, x.PayloadJson
+                x.Id, x.EntityType, x.RowKey, x.Status, x.SourceFileName, x.SourceRowNumber, x.ReviewNote, x.PayloadJson,
+                UpdatedAt = x.ModifiedDate ?? x.CreatedDate ?? x.SubmittedAt,
+                x.SubmittedAt,
+                x.ReviewedAt,
             })
             .ToListAsync(ct);
+
+        var levelCodes = await uow.CertificateLevels.Query().AsNoTracking()
+            .Where(x => !x.IsDeleted)
+            .ToDictionaryAsync(x => x.Id, x => x.Code, ct);
 
         return rows.Select(row =>
         {
             var info = ReadListInfo(row.PayloadJson);
+            var levelCode = info?.CertificateLevelId is int lvlId && levelCodes.TryGetValue(lvlId, out var code) ? code : null;
             return new ManualContentItem(row.Id, row.EntityType, row.RowKey, row.Status,
-                row.SourceFileName, row.SourceRowNumber, row.ReviewNote, info?.CertificateLevelId, info?.TopicTitle);
+                row.SourceFileName, row.SourceRowNumber, row.ReviewNote, info?.CertificateLevelId, info?.TopicTitle,
+                row.UpdatedAt, row.SubmittedAt, row.ReviewedAt, levelCode);
         }).ToList();
     }
 
@@ -174,6 +183,29 @@ public sealed class ManualContentService(IUnitOfWork uow, IClaimService claims, 
             result.ErrorMessage ?? "Không thể gửi duyệt.", (HttpStatusCode)result.StatusCode);
     }
 
+    public async Task<ApiResponse<bool>> DeleteDraftAsync(int id, CancellationToken ct)
+    {
+        var userId = claims.GetUserClaim().Id;
+        var result = ApiResponse<bool>.NotFound("Không tìm thấy bản nháp.");
+        await uow.ExecuteContentAuthorWriteAsync(userId, async token =>
+        {
+            var item = await FindMineAsync(id, token);
+            if (item is null) return;
+            if (item.Status is not (ContentApprovalStatus.Draft or ContentApprovalStatus.Rejected))
+            {
+                result = ApiResponse<bool>.Fail(
+                    "Chỉ có thể xóa bản nháp hoặc nội dung bị từ chối.",
+                    HttpStatusCode.Conflict);
+                return;
+            }
+            item.IsDeleted = true;
+            item.ModifiedDate = DateTime.UtcNow;
+            await uow.SaveChangesAsync(token);
+            result = ApiResponse<bool>.Success(true);
+        }, ct);
+        return result;
+    }
+
     public Task<ApiResponse<int>> SubmitBatchAsync(Guid batchId, CancellationToken ct)
         => batchId == Guid.Empty ? Task.FromResult(ApiResponse<int>.NotFound("Không tìm thấy lô import."))
             : SubmitDraftsAsync(null, batchId, ct);
@@ -268,8 +300,6 @@ public sealed class ManualContentService(IUnitOfWork uow, IClaimService claims, 
         var level = await uow.CertificateLevels.Query().SingleOrDefaultAsync(x => x.Id == levelId && !x.IsDeleted
             && x.CertificateType.IsActive && !x.CertificateType.IsDeleted, ct)
             ?? throw new ArgumentException("Hãy chọn cấp độ hợp lệ.");
-        if (level.Code is not ("N5" or "N4" or "N3" or "N2"))
-            throw new ArgumentException("Cấp độ phải từ N5 đến N2.");
 
         switch (type)
         {
@@ -336,6 +366,8 @@ public sealed class ManualContentService(IUnitOfWork uow, IClaimService claims, 
             .ToDictionaryAsync(x => x.Id, x => x.Name, ct);
         var codes = await uow.CertificateSections.Query().Where(x => !x.IsDeleted && x.CertificateLevelId == level.Id)
             .Select(x => x.Code).ToListAsync(ct);
+        if (codes.Count == 0)
+            throw new ArgumentException($"Cấp độ {level.Code} chưa có phần thi nào được quản trị viên cấu hình.");
         if (test.Sections is not { Count: > 0 }) throw new ArgumentException("Hãy thêm phần thi.");
         var questionOrder = 0;
         for (var i = 0; i < test.Sections.Count; i++)
@@ -481,6 +513,7 @@ public sealed class ManualContentService(IUnitOfWork uow, IClaimService claims, 
 }
 
 public sealed record ManualContentItem(int Id, ImportEntityType EntityType, string RowKey, ContentApprovalStatus Status,
-    string SourceFileName, int SourceRowNumber, string? ReviewNote, int? CertificateLevelId, string? TopicTitle);
+    string SourceFileName, int SourceRowNumber, string? ReviewNote, int? CertificateLevelId, string? TopicTitle,
+    DateTime? UpdatedAt = null, DateTime? SubmittedAt = null, DateTime? ReviewedAt = null, string? CertificateLevelCode = null);
 public sealed record AuthorImportBatch(Guid BatchId, string SourceFileName, DateTime SavedAt, int ItemCount, int DraftCount,
     int PendingCount, int ApprovedCount, int RejectedCount);

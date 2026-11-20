@@ -8,10 +8,10 @@ namespace RikiPath.Application.Requests.Auth
         [Required, EmailAddress]
         public string Email { get; set; } = string.Empty;
 
-        [Required, MinLength(6)]
+        [Required, MinLength(6), MaxLength(128)]
         public string Password { get; set; } = string.Empty;
 
-        [Required, Compare(nameof(Password), ErrorMessage = "Mật khẩu xác nhận không khớp.")]
+        [Required, MaxLength(128), Compare(nameof(Password), ErrorMessage = "Mật khẩu xác nhận không khớp.")]
         public string ConfirmPassword { get; set; } = string.Empty;
 
         [MaxLength(200)]

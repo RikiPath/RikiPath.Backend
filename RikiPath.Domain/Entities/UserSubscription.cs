@@ -28,6 +28,12 @@ namespace RikiPath.Domain.Entities
         public int AiGradingQuota { get; set; }
         public int AiGradingUsedCount { get; set; } = 0;
 
+        /// <summary>Ảnh chụp thời hạn, tên, phân loại và revision của gói tại thời điểm checkout để không bị ảnh hưởng khi Admin đổi cấu hình gói.</summary>
+        public int? DurationDaysSnapshot { get; set; }
+        public string? PlanNameSnapshot { get; set; }
+        public string? PlanCategorySnapshot { get; set; }
+        public int? PlanRevisionSnapshot { get; set; }
+
         public int MeetingSessionsIncluded { get; set; }
         public int MeetingSessionsUsed { get; set; }
         public string? MentorPracticeOutcomeJson { get; set; }

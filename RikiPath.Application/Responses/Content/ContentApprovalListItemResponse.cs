@@ -21,5 +21,8 @@ namespace RikiPath.Application.Responses.Content
         public string? ReviewNote { get; set; }
         /// <summary>Số trường thay đổi theo bản tóm tắt lưu lúc import (null nếu không có).</summary>
         public int? ChangedFieldCount { get; set; }
+        public int? CertificateLevelId { get; set; }
+        public string? CertificateLevelCode { get; set; }
+        public DateTime? UpdatedAt { get; set; }
     }
 }

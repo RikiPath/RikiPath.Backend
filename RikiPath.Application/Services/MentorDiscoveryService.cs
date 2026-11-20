@@ -26,7 +26,7 @@ public sealed class MentorDiscoveryService(
                 if (!TryNormalizeSupportedLevel(request.TeachingJlptLevel, out var normalizedTeachingLevel))
                 {
                     return ApiResponse<PagedResult<PublicMentorCardResponse>>.Fail(
-                        "Chỉ hỗ trợ lọc cố vấn dạy trình độ JLPT N5, N4, N3 hoặc N2 (không hỗ trợ N1).",
+                        "Chỉ hỗ trợ lọc Giáo viên dạy trình độ JLPT N5, N4, N3, N2 hoặc N1.",
                         HttpStatusCode.BadRequest);
                 }
 
@@ -145,7 +145,7 @@ public sealed class MentorDiscoveryService(
             return false;
 
         var candidate = rawLevel.Trim().ToUpperInvariant();
-        if (candidate is "N5" or "N4" or "N3" or "N2")
+        if (candidate is "N5" or "N4" or "N3" or "N2" or "N1")
         {
             normalizedLevel = candidate;
             return true;
@@ -159,6 +159,7 @@ public sealed class MentorDiscoveryService(
         2 => "N4",
         3 => "N3",
         4 => "N2",
+        5 => "N1",
         _ => null
     };
 
@@ -177,6 +178,7 @@ public sealed class MentorDiscoveryService(
             "N4" => 2,
             "N3" => 3,
             "N2" => 4,
+            "N1" => 5,
             _ => 0
         };
     }
