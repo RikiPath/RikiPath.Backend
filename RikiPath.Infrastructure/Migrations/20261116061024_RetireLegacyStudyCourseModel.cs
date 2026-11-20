@@ -1,9 +1,12 @@
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
 
 namespace RikiPath.Infrastructure.Migrations
 {
+    [DbContext(typeof(AppDbContext))]
+    [Migration("20261116061024_RetireLegacyStudyCourseModel")]
     public partial class RetireLegacyStudyCourseModel : Migration
     {
         protected override void Up(MigrationBuilder migrationBuilder)
