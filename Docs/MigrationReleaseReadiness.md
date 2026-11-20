@@ -2,9 +2,11 @@
 
 > Current decision and latest evidence: [TASK 05C release package](MigrationTask05CReleasePackage.md). Sections below preserve the earlier TASK 05/05B audit and may describe a superseded baseline; do not execute them without the TASK 05C gates.
 
-**Branch Baseline:** `feat/single-full-name-field` (`f3694c5`) / `origin/main` (`1100de5`, PR #74 — identical tree)  
-**Canonical Source Migrations:** `41` (`20261027081217_InitalCreate` → `20261117171728_AddGroupLearningRulesLifecycleFeedback`)  
-**Audited Shared Supabase Cross-Branch Migrations:** `6` including the structurally verified `20261117121238_AddLearnerFeedback`; canonical source integration remains pending  
+**Branch Baseline:** `feat/single-full-name-field` (`f3694c5`) / `origin/main` (`1100de5`, PR #74 — identical tree).
+
+**Current integration:** `fix/backend-migration-release-20261119` adds canonical `20261119125713_AdoptLearnerFeedback` (42 source migrations). QA clone has 48 history rows after adoption. Shared still has 36 rows and remains READ-ONLY/BLOCKED.
+
+**Audited Shared Supabase Cross-Branch Migrations:** `6` including the structurally verified external `20261117121238_AddLearnerFeedback`; canonical integration is now source-complete, not deployed to Shared.
 **Deployment Gate Status (TASK 05 — 2026-11-19):** **`BLOCKED`** — **DO NOT apply to Shared Supabase.** Live `"__EFMigrationsHistory"` drifted from the `27`-row TASK 04 baseline to `36` rows (`verify-migration-readiness.ps1` exits `2`; `ReconcileSharedMigrationHistory.sql` aborts fail-closed).
 
 ---

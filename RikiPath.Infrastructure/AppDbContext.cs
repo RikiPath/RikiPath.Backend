@@ -24,6 +24,7 @@ namespace RikiPath.Infrastructure
 
         // Users
         public DbSet<UserAccount> Users { get; set; }
+        public DbSet<LearnerFeedback> LearnerFeedbacks { get; set; }
 
         // Catalog / master data
         public DbSet<CertificateType> CertificateTypes { get; set; }
@@ -248,6 +249,7 @@ namespace RikiPath.Infrastructure
 
             modelBuilder.ApplyConfiguration(new ContentAiReviewConfig());
             modelBuilder.ApplyConfiguration(new AdminAuditLogConfig());
+            modelBuilder.ApplyConfiguration(new LearnerFeedbackConfig());
         }
     }
 }

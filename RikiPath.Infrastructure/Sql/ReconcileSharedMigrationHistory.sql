@@ -8,7 +8,7 @@
 -- Fail-Closed Guarantees:
 --   1. Single atomic transaction (BEGIN; ... COMMIT;) — any validation error rolls back completely.
 --   2. Additive only: never drops tables, drops columns, truncates rows, or deletes user data.
---   3. Rejects unexpected "__EFMigrationsHistory" IDs outside the canonical 41 + 6 audited Supabase IDs.
+--   3. Rejects unexpected "__EFMigrationsHistory" IDs outside the canonical 45 + 6 audited Supabase IDs.
 --   4. Verifies btree_gist creation privilege AND visibility in current_schemas(false).
 --   5. Verifies constraint definitions (structural + check semantics) and fails closed on mismatch.
 --   6. Verifies index target table, uniqueness, columns, and partial predicate — fails closed on mismatch.
@@ -44,12 +44,12 @@ BEGIN
         RAISE EXCEPTION 'Aborted: "MentorProfiles" does not exist. Reconcile only databases that already carry unrecorded MentorProfile schema.';
     END IF;
 
-    -- Scenario 7: Reject unexpected migration history IDs outside canonical baseline (41) + audited cross-branch Supabase IDs (6).
+    -- Scenario 7: Reject unexpected migration history IDs outside canonical baseline (45) + audited cross-branch Supabase IDs (6).
     SELECT string_agg("MigrationId", ', ' ORDER BY "MigrationId")
     INTO unexpected_migrations
     FROM "__EFMigrationsHistory"
     WHERE "MigrationId" NOT IN (
-        -- Canonical 41 migrations in feat/single-full-name-field (synced with origin/main)
+        -- Canonical migrations in origin/main plus VNext forward migrations.
         '20261027081217_InitalCreate',
         '20261027094154_SeedCertificateSection',
         '20261027131637_AddFlow1PlacementAndLearningMode',
@@ -91,8 +91,10 @@ BEGIN
         '20261117053348_AddCohortCheckoutPaymentIntegrity',
         '20261117122910_AddMentorWeeklySessionCap',
         '20261117171728_AddGroupLearningRulesLifecycleFeedback',
+        '20261119125713_AdoptLearnerFeedback',
         '20261119184931_EnforceCatalogDataIntegrityAndOrdering',
         '20261119190751_AddAdminConfigAuditAndSubscriptionVersioning',
+        '20261119212046_AddUniversalProfileSecurityAndNotifications',
         -- Audited cross-branch Supabase migrations (PR #70 + unmerged Content/Homework/Feedback extensions)
         '20261116061024_RetireLegacyStudyCourseModel',
         '20261116143915_AddMentorAuthoredHomework',
