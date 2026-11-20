@@ -2,6 +2,7 @@
 
 Before modifying any code in `RikiPath.Backend`, read and follow:
 
+- `AGENTS.md` (canonical mandatory pre-push, migration safety, and delivery rules)
 - `Docs/BACKEND_SECURITY_AND_ENGINEERING_STANDARDS.md`
 - `README.md` (EF Core Migration & Database Safety Standards)
 
@@ -21,3 +22,8 @@ Before modifying any code in `RikiPath.Backend`, read and follow:
 3. **Security & Business Integrity:**
    - Never expose secrets (PayOS keys, JWT keys, connection strings) in HTTP responses, audit logs, or git-tracked files.
    - Protect historical orders/subscriptions using snapshots (`AmountPaid`, `DurationDaysSnapshot`, `PlanNameSnapshot`, `OrderSnapshot`, `PolicyVersionSnapshot`) and optimistic concurrency tokens (`Revision`).
+4. **Mandatory Delivery Gate:**
+   - Follow `AGENTS.md` before every commit, push, merge, or deployment preparation.
+   - Enable the tracked hook once per clone with `git config core.hooksPath .githooks`.
+   - Never push directly to `main`; the pre-push hook supplements, but never replaces, CI and protected pull requests.
+   - No verified build, no migration readiness, no safe push.
