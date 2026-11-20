@@ -182,6 +182,20 @@ public sealed partial class StudyCourseService(IUnitOfWork uow, IClaimService cl
         p.RetakeClaimDays = r.RetakeClaimDays; p.Price = r.Price; p.IsPublished = r.IsPublished;
         if (!id.HasValue) await uow.StudyCoursePlans.AddAsync(p, ct); else p.Revision++;
         await uow.SaveChangesAsync(ct);
+        await RecordAdminAuditAsync("StudyCoursePlan", p.Id, id.HasValue ? "Updated" : "Created", new
+        {
+            p.Id,
+            p.Name,
+            p.CertificateLevelId,
+            p.DurationMonths,
+            p.SessionsPerWeek,
+            p.SessionMinutes,
+            p.TotalSessions,
+            p.Capacity,
+            p.Price,
+            p.IsPublished,
+            p.Revision,
+        }, ct);
         return new { p.Id };
     });
 

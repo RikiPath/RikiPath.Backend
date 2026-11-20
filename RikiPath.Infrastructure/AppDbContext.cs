@@ -115,6 +115,7 @@ namespace RikiPath.Infrastructure
         public DbSet<Feature> Features { get; set; }
         public DbSet<UserSubscription> UserSubscriptions { get; set; }
         public DbSet<AiCreditTopUp> AiCreditTopUps { get; set; }
+        public DbSet<AdminAuditLog> AdminAuditLogs { get; set; }
 
         // Spaced-repetition review queue
         public DbSet<ReviewCard> ReviewCards { get; set; }
@@ -246,6 +247,7 @@ namespace RikiPath.Infrastructure
             modelBuilder.ApplyConfiguration(new EmailVerificationsConfig());
 
             modelBuilder.ApplyConfiguration(new ContentAiReviewConfig());
+            modelBuilder.ApplyConfiguration(new AdminAuditLogConfig());
         }
     }
 }

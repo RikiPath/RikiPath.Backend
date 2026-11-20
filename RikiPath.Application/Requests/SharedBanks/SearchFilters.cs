@@ -21,4 +21,10 @@ namespace RikiPath.Application.Requests.SharedBanks
     public class GrammarSearchFilter : PagedFilterBase
     {
     }
+
+    public class QuestionBankSearchFilter : PagedFilterBase
+    {
+        public string? QuestionType { get; set; }
+        public int? LanguageSkillId { get; set; }
+    }
 }

@@ -21,5 +21,10 @@ namespace RikiPath.Application.IServices
             GrammarSearchFilter filter, CancellationToken cancellationToken);
 
         Task<ApiResponse<GrammarCardResponse>> GetGrammarDetailAsync(int id, CancellationToken cancellationToken);
+
+        Task<ApiResponse<PagedResult<QuestionBankCardResponse>>> SearchQuestionsAsync(
+            QuestionBankSearchFilter filter, CancellationToken cancellationToken);
+
+        Task<ApiResponse<QuestionBankCardResponse>> GetQuestionDetailAsync(int id, CancellationToken cancellationToken);
     }
 }

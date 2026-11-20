@@ -9,7 +9,7 @@ namespace RikiPath.WebApi.Controllers
 {
     [Route("api/[controller]")]
     [ApiController]
-    [Authorize(Roles = "Learner")]
+    [Authorize]
     public class UserProfileController(IUserProfileService userProfileService) : ControllerBase
     {
         /// <summary>
@@ -70,10 +70,18 @@ namespace RikiPath.WebApi.Controllers
         /// <response code="401">Chưa xác thực: Thiếu Bearer Token.</response>
         /// <response code="500">Lỗi server khi upload hoặc cập nhật profile.</response>
         [HttpPost("me/avatar")]
+        [RequestSizeLimit(6 * 1024 * 1024)]
         public async Task<IActionResult> UpdateAvatar(IFormFile avatarFile, CancellationToken cancellationToken)
         {
 
             var result = await userProfileService.UpdateAvatarAsync(avatarFile, cancellationToken);
+            return StatusCode((int)result.StatusCode, result);
+        }
+
+        [HttpDelete("me/avatar")]
+        public async Task<IActionResult> DeleteAvatar(CancellationToken cancellationToken)
+        {
+            var result = await userProfileService.DeleteAvatarAsync(cancellationToken);
             return StatusCode((int)result.StatusCode, result);
         }
 
@@ -91,6 +99,7 @@ namespace RikiPath.WebApi.Controllers
         /// <response code="400">Dữ liệu không hợp lệ.</response>
         /// <response code="401">Chưa xác thực: Thiếu Bearer Token.</response>
         /// <response code="500">Lỗi server khi cập nhật mục tiêu.</response>
+        [Authorize(Roles = "Learner")]
         [HttpPost("me/jlpt-goal")]
         public async Task<IActionResult> SetJlptGoal([FromBody] SetJlptGoalRequest request, CancellationToken cancellationToken)
         {
@@ -101,6 +110,7 @@ namespace RikiPath.WebApi.Controllers
 
         /// <summary>Xác nhận cấp độ đang học cho Standard Roadmap, độc lập mục tiêu JLPT.</summary>
         /// <remarks>Chuyển mode về STANDARD; không xóa lộ trình AI, ngày thi hoặc tiến độ cũ.</remarks>
+        [Authorize(Roles = "Learner")]
         [HttpPut("me/study-level")]
         public async Task<IActionResult> SetStudyLevel([FromBody] SetStudyLevelRequest request, CancellationToken cancellationToken)
         {
@@ -109,6 +119,7 @@ namespace RikiPath.WebApi.Controllers
         }
 
         /// <summary>Atomically saves the complete learner goal, including the self-declared JLPT certificate.</summary>
+        [Authorize(Roles = "Learner")]
         [HttpPut("me/learning-goal")]
         public async Task<IActionResult> SetLearningGoal([FromBody] SetLearningGoalRequest request, CancellationToken cancellationToken)
         {

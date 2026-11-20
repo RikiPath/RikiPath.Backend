@@ -4,6 +4,7 @@ using System.Net;
 using Microsoft.AspNetCore.SignalR;
 
 using RikiPath.Application.Common;
+using RikiPath.Application.Helpers;
 
 using RikiPath.Application.Hubs;
 
@@ -370,6 +371,20 @@ namespace RikiPath.Application.Services
         {
             try
             {
+                var targetUser = await unitOfWork.UserAccounts.GetByIdAsync(targetUserId, cancellationToken);
+                if (targetUser is not null && !NotificationPreferenceHelper.ShouldDeliverInApp(targetUser, type))
+                {
+                    return ApiResponse<NotificationResponse>.Success(new NotificationResponse
+                    {
+                        Title = title,
+                        Message = message,
+                        Type = type,
+                        LinkUrl = linkUrl,
+                        IsRead = false,
+                        CreatedAt = DateTime.UtcNow,
+                    });
+                }
+
                 Notification? notification = null;
 
                 // 1. Precise idempotency check via IdempotencyKey (e.g. from outbox dispatcher)

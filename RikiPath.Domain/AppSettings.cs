@@ -20,6 +20,14 @@ namespace RikiPath.Domain
         public AzureSpeechSettings AzureSpeechSettings { get; set; } = new();
         public QaPaymentSimulatorSettings QaPaymentSimulator { get; set; } = new();
         public GroupLearningSettings GroupLearning { get; set; } = new();
+        public EmailVerificationSettings EmailVerification { get; set; } = new();
+    }
+
+    public sealed class EmailVerificationSettings
+    {
+        public int CodeLifetimeMinutes { get; set; } = 30;
+        public int ResendCooldownSeconds { get; set; } = 60;
+        public int MaxResendsPerHour { get; set; } = 5;
     }
 
     public sealed class GroupLearningSettings

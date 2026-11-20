@@ -95,6 +95,7 @@ namespace RikiPath.Application
         IGenericRepository<CohortMentorReview> CohortMentorReviews { get; }
         IGenericRepository<CohortComplaint> CohortComplaints { get; }
         IGenericRepository<JlptExamSchedule> JlptExamSchedules { get; }
+        IGenericRepository<AdminAuditLog> AdminAuditLogs { get; }
 
         // Db Helpers
         Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
@@ -103,7 +104,5 @@ namespace RikiPath.Application
             CancellationToken cancellationToken = default);
         Task ExecuteLessonTopicApprovalAsync(Func<CancellationToken, Task> operation, CancellationToken cancellationToken);
         Task ExecuteContentAuthorWriteAsync(int authorId, Func<CancellationToken, Task> operation, CancellationToken cancellationToken);
-        Task<T> ExecuteScalarAsync<T>(string sql);
-        Task ExecuteRawSqlAsync(string sql);
     }
 }

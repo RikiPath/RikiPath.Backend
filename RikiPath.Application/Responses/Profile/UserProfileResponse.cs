@@ -6,13 +6,25 @@ namespace RikiPath.Application.Responses.Profile
     {
         public int UserId { get; set; }
         public string Email { get; set; } = string.Empty;
+        [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+        public string? PendingEmail { get; set; }
         public string FullName { get; set; } = string.Empty;
+        [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+        public string? PhoneNumber { get; set; }
 
         [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
         public string? AvatarUrl { get; set; }
 
         public string Role { get; set; } = string.Empty;
         public bool IsEmailVerified { get; set; }
+        public bool IsPhoneVerified { get; set; }
+        public bool HasPassword { get; set; }
+        public bool GoogleLinked { get; set; }
+        public List<string> AuthProviders { get; set; } = [];
+        [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+        public string? StudyTimePreference { get; set; }
+        public int CurrentStreak { get; set; }
+        public int LongestStreak { get; set; }
 
         [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
         public int? TargetCertificateTypeId { get; set; }
@@ -61,5 +73,6 @@ namespace RikiPath.Application.Responses.Profile
 
         public bool EmailNotificationsEnabled { get; set; }
         public bool SystemNotificationsEnabled { get; set; }
+        public Dictionary<string, bool> NotificationCategories { get; set; } = new();
     }
 }

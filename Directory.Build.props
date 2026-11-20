@@ -1,5 +1,10 @@
 <Project>
   <PropertyGroup>
     <BaseOutputPath>$(MSBuildThisFileDirectory)_codex-build\$(MSBuildProjectName)\bin\</BaseOutputPath>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisLevel>8.0-recommended</AnalysisLevel>
+    <NuGetAudit>true</NuGetAudit>
+    <NuGetAuditMode>direct</NuGetAuditMode>
+    <NuGetAuditLevel>high</NuGetAuditLevel>
   </PropertyGroup>
 </Project>

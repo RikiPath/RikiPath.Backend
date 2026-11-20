@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using RikiPath.Application.IServices;
 using RikiPath.Application.Requests.SharedBanks;
@@ -125,6 +126,22 @@ namespace RikiPath.WebApi.Controllers
         public async Task<IActionResult> GetGrammarDetail(int id, CancellationToken cancellationToken)
         {
             var result = await sharedBankSearchService.GetGrammarDetailAsync(id, cancellationToken);
+            return StatusCode((int)result.StatusCode, result);
+        }
+
+        [HttpPost("questions/search")]
+        [Authorize(Roles = "ContentAuthor,Admin")]
+        public async Task<IActionResult> SearchQuestions([FromBody] QuestionBankSearchFilter filter, CancellationToken cancellationToken)
+        {
+            var result = await sharedBankSearchService.SearchQuestionsAsync(filter, cancellationToken);
+            return StatusCode((int)result.StatusCode, result);
+        }
+
+        [HttpGet("questions/{id:int}")]
+        [Authorize(Roles = "ContentAuthor,Admin")]
+        public async Task<IActionResult> GetQuestionDetail(int id, CancellationToken cancellationToken)
+        {
+            var result = await sharedBankSearchService.GetQuestionDetailAsync(id, cancellationToken);
             return StatusCode((int)result.StatusCode, result);
         }
     }

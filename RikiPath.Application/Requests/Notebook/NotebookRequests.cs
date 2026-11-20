@@ -31,5 +31,20 @@ namespace RikiPath.Application.Requests.Notebook
         public string? Reading { get; set; }
         public string Meaning { get; set; } = string.Empty;
         public string? Note { get; set; }
+        /// <summary>
+        /// Khi true (mặc định, tương thích Mobile), tự động thêm vào hàng chờ SRS (ReviewCard).
+        /// Khi false (ví dụ ghi chú bài học hoặc highlight đoạn văn), lưu entry vào Sổ tay nhưng không tự tạo ReviewCard.
+        /// </summary>
+        public bool EnrollSrs { get; set; } = true;
+    }
+
+    public class UpdateNotebookEntryRequest
+    {
+        /// <summary>Tùy chọn di chuyển mục sang trang ghi chú / danh sách khác thuộc cùng Learner.</summary>
+        public int? LearnerNoteId { get; set; }
+        public string? Word { get; set; }
+        public string? Reading { get; set; }
+        public string? Meaning { get; set; }
+        public string? Note { get; set; }
     }
 }

@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore;
 using RikiPath.Domain.Entities;
 using RikiPath.Application.Common;
 using RikiPath.Application.IServices;
@@ -157,6 +158,95 @@ namespace RikiPath.Application.Services
             }
         }
 
+        public async Task<ApiResponse<PagedResult<QuestionBankCardResponse>>> SearchQuestionsAsync(
+            QuestionBankSearchFilter filter, CancellationToken cancellationToken)
+        {
+            try
+            {
+                Normalize(filter);
+                var query = unitOfWork.MockQuestions.Query()
+                    .AsNoTracking()
+                    .Include(q => q.Options)
+                    .Include(q => q.MockTestSection)
+                        .ThenInclude(s => s.LanguageSkill)
+                    .Include(q => q.MockTestSection)
+                        .ThenInclude(s => s.MockTest)
+                            .ThenInclude(t => t.CertificateLevel)
+                    .Where(q => !q.IsDeleted
+                        && !q.MockTestSection.IsDeleted
+                        && !q.MockTestSection.MockTest.IsDeleted);
+
+                if (filter.JlptLevelId.HasValue)
+                    query = query.Where(q => q.MockTestSection.MockTest.CertificateLevelId == filter.JlptLevelId.Value);
+
+                if (filter.LanguageSkillId.HasValue)
+                    query = query.Where(q => q.MockTestSection.LanguageSkillId == filter.LanguageSkillId.Value);
+
+                if (!string.IsNullOrWhiteSpace(filter.QuestionType))
+                {
+                    var qt = filter.QuestionType.Trim();
+                    query = query.Where(q => q.QuestionType == qt);
+                }
+
+                if (!string.IsNullOrWhiteSpace(filter.Keyword))
+                {
+                    var kw = filter.Keyword.Trim().ToLower();
+                    query = query.Where(q =>
+                        q.QuestionText.ToLower().Contains(kw)
+                        || (q.Explanation != null && q.Explanation.ToLower().Contains(kw))
+                        || q.MockTestSection.MockTest.Title.ToLower().Contains(kw)
+                        || q.MockTestSection.Title.ToLower().Contains(kw));
+                }
+
+                var total = await query.CountAsync(cancellationToken);
+                var rows = await query
+                    .OrderByDescending(q => q.ModifiedDate ?? q.CreatedDate)
+                    .ThenByDescending(q => q.Id)
+                    .Skip((filter.Page - 1) * filter.PageSize)
+                    .Take(filter.PageSize)
+                    .ToListAsync(cancellationToken);
+
+                return ApiResponse<PagedResult<QuestionBankCardResponse>>.Success(new PagedResult<QuestionBankCardResponse>
+                {
+                    Page = filter.Page,
+                    PageSize = filter.PageSize,
+                    TotalCount = total,
+                    Items = rows.Select(MapQuestion).ToList(),
+                });
+            }
+            catch (Exception ex)
+            {
+                return ApiResponse<PagedResult<QuestionBankCardResponse>>.Fail(
+                    "Không thể tải ngân hàng câu hỏi.", HttpStatusCode.InternalServerError, errors: BuildDebugErrors(ex));
+            }
+        }
+
+        public async Task<ApiResponse<QuestionBankCardResponse>> GetQuestionDetailAsync(int id, CancellationToken cancellationToken)
+        {
+            try
+            {
+                var row = await unitOfWork.MockQuestions.Query()
+                    .AsNoTracking()
+                    .Include(q => q.Options)
+                    .Include(q => q.MockTestSection)
+                        .ThenInclude(s => s.LanguageSkill)
+                    .Include(q => q.MockTestSection)
+                        .ThenInclude(s => s.MockTest)
+                            .ThenInclude(t => t.CertificateLevel)
+                    .FirstOrDefaultAsync(q => q.Id == id && !q.IsDeleted && !q.MockTestSection.IsDeleted && !q.MockTestSection.MockTest.IsDeleted, cancellationToken);
+
+                if (row is null)
+                    return ApiResponse<QuestionBankCardResponse>.NotFound("Không tìm thấy câu hỏi.");
+
+                return ApiResponse<QuestionBankCardResponse>.Success(MapQuestion(row));
+            }
+            catch (Exception ex)
+            {
+                return ApiResponse<QuestionBankCardResponse>.Fail(
+                    "Không thể tải chi tiết câu hỏi.", HttpStatusCode.InternalServerError, errors: BuildDebugErrors(ex));
+            }
+        }
+
         private static void Normalize(Requests.SharedBanks.PagedFilterBase filter)
         {
             if (filter.Page < 1) filter.Page = 1;
@@ -209,6 +299,50 @@ namespace RikiPath.Application.Services
             ExampleSentence = g.ExampleSentence,
             JlptLevelName = GetLevelNames(g.ContentLevelMappings)
         };
+
+        private static QuestionBankCardResponse MapQuestion(MockQuestion q)
+        {
+            var options = (q.Options ?? [])
+                .Where(o => !o.IsDeleted)
+                .OrderBy(o => o.SortOrder)
+                .ThenBy(o => o.Id)
+                .Select(o => new QuestionBankOptionResponse
+                {
+                    Id = o.Id,
+                    OptionText = o.OptionText,
+                    ImageUrl = o.ImageUrl,
+                    IsCorrect = o.IsCorrect,
+                    SortOrder = o.SortOrder,
+                })
+                .ToList();
+
+            var correctTexts = options.Where(o => o.IsCorrect && !string.IsNullOrWhiteSpace(o.OptionText))
+                .Select(o => o.OptionText)
+                .ToList();
+
+            var summary = correctTexts.Count > 0
+                ? string.Join(", ", correctTexts)
+                : (!string.IsNullOrWhiteSpace(q.AnswerKeyJson) ? q.AnswerKeyJson : null);
+
+            return new QuestionBankCardResponse
+            {
+                Id = q.Id,
+                QuestionText = q.QuestionText,
+                QuestionType = q.QuestionType,
+                Explanation = q.Explanation,
+                AudioUrl = q.AudioUrl,
+                ImageUrl = q.ImageUrl,
+                JlptLevelName = q.MockTestSection?.MockTest?.CertificateLevel?.Code ?? string.Empty,
+                CertificateLevelId = q.MockTestSection?.MockTest?.CertificateLevelId,
+                SkillName = q.MockTestSection?.LanguageSkill?.Name ?? string.Empty,
+                LanguageSkillId = q.MockTestSection?.LanguageSkillId,
+                MockTestTitle = q.MockTestSection?.MockTest?.Title ?? string.Empty,
+                MockTestId = q.MockTestSection?.MockTestId ?? 0,
+                SectionTitle = q.MockTestSection?.Title ?? string.Empty,
+                AnswerSummary = summary,
+                Options = options,
+            };
+        }
 
         private static List<string> BuildDebugErrors(Exception ex)
         {

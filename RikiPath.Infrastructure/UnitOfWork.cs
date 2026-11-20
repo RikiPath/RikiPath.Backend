@@ -21,6 +21,7 @@ namespace RikiPath.Infrastructure
         public IGenericRepository<CohortMentorReview> CohortMentorReviews { get; }
         public IGenericRepository<CohortComplaint> CohortComplaints { get; }
         public IGenericRepository<JlptExamSchedule> JlptExamSchedules { get; }
+        public IGenericRepository<AdminAuditLog> AdminAuditLogs { get; }
 
         // 1. Users & Core Auth
         public IUserAccountRepository UserAccounts { get; }
@@ -114,6 +115,7 @@ namespace RikiPath.Infrastructure
             CohortMentorReviews = new GenericRepository<CohortMentorReview>(_context);
             CohortComplaints = new GenericRepository<CohortComplaint>(_context);
             JlptExamSchedules = new GenericRepository<JlptExamSchedule>(_context);
+            AdminAuditLogs = new GenericRepository<AdminAuditLog>(_context);
 
             // Initializing Repositories
             UserAccounts = new UserAccountRepository(_context);
@@ -254,53 +256,6 @@ namespace RikiPath.Infrastructure
                     throw;
                 }
             }, cancellationToken);
-        }
-
-        public async Task<T> ExecuteScalarAsync<T>(string sql)
-        {
-            var connection = _context.Database.GetDbConnection();
-            bool wasClosed = connection.State == ConnectionState.Closed;
-
-            try
-            {
-                if (wasClosed) await connection.OpenAsync();
-
-                using var command = connection.CreateCommand();
-                command.CommandText = sql;
-                var result = await command.ExecuteScalarAsync();
-
-                if (result == null || result == DBNull.Value) return default!;
-                return (T)Convert.ChangeType(result, typeof(T));
-            }
-            finally
-            {
-                if (wasClosed && connection.State == ConnectionState.Open)
-                {
-                    await connection.CloseAsync();
-                }
-            }
-        }
-
-        public async Task ExecuteRawSqlAsync(string sql)
-        {
-            var connection = _context.Database.GetDbConnection();
-            bool wasClosed = connection.State == ConnectionState.Closed;
-
-            try
-            {
-                if (wasClosed) await connection.OpenAsync();
-
-                using var command = connection.CreateCommand();
-                command.CommandText = sql;
-                await command.ExecuteNonQueryAsync();
-            }
-            finally
-            {
-                if (wasClosed && connection.State == ConnectionState.Open)
-                {
-                    await connection.CloseAsync();
-                }
-            }
         }
     }
 }

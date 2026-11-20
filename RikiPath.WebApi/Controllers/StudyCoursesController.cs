@@ -76,10 +76,14 @@ public sealed class StudyCoursesController(
     public async Task<IActionResult> CreateCertificate(SaveCourseCertificate r, CancellationToken ct) => Result(await service.SaveCertificateAsync(null, r, ct));
     [HttpPut("certificates/{id:int}"), Authorize(Roles = "Admin")]
     public async Task<IActionResult> SaveCertificate(int id, SaveCourseCertificate r, CancellationToken ct) => Result(await service.SaveCertificateAsync(id, r, ct));
+    [HttpPost("certificates/{id:int}/reorder"), Authorize(Roles = "Admin")]
+    public async Task<IActionResult> ReorderCertificate(int id, ReorderCourseCatalogRequest r, CancellationToken ct) => Result(await service.ReorderCertificateAsync(id, r, ct));
     [HttpPost("levels"), Authorize(Roles = "Admin")]
     public async Task<IActionResult> CreateLevel(SaveCourseLevel r, CancellationToken ct) => Result(await service.SaveLevelAsync(null, r, ct));
     [HttpPut("levels/{id:int}"), Authorize(Roles = "Admin")]
     public async Task<IActionResult> SaveLevel(int id, SaveCourseLevel r, CancellationToken ct) => Result(await service.SaveLevelAsync(id, r, ct));
+    [HttpPost("levels/{id:int}/reorder"), Authorize(Roles = "Admin")]
+    public async Task<IActionResult> ReorderLevel(int id, ReorderCourseCatalogRequest r, CancellationToken ct) => Result(await service.ReorderLevelAsync(id, r, ct));
     [HttpGet("plans")]
     public async Task<IActionResult> Plans(CancellationToken ct) => Result(await service.PlansAsync(ct));
     [HttpPost("plans"), Authorize(Roles = "Admin")]

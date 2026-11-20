@@ -72,6 +72,11 @@ public sealed class GlobalApiExceptionHandler(ILogger<GlobalApiExceptionHandler>
                         return (HttpStatusCode.Conflict, "CONCURRENCY_CONFLICT", "Hệ thống đang xử lý thao tác đồng thời. Vui lòng thử lại.");
                 }
                 break;
+            case KeyNotFoundException:
+                return (HttpStatusCode.NotFound, "NOT_FOUND", "Không tìm thấy tài nguyên yêu cầu.");
+            case ArgumentException:
+            case FormatException:
+                return (HttpStatusCode.BadRequest, "INVALID_ARGUMENT", "Dữ liệu gửi lên không hợp lệ. Vui lòng kiểm tra lại.");
             case TimeoutException:
             case TaskCanceledException:
                 return (HttpStatusCode.GatewayTimeout, "UPSTREAM_TIMEOUT", "Dịch vụ phản hồi quá lâu. Vui lòng thử lại sau.");

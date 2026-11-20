@@ -30,16 +30,18 @@ namespace RikiPath.WebApi.Controllers
             CancellationToken cancellationToken)
         {
             var result = await adminMentorService.CreateMentorAsync(request, cancellationToken);
-            return result.IsSuccess ? Ok(result) : BadRequest(result);
+            return StatusCode((int)result.StatusCode, result);
         }
 
         [HttpGet]
         [ProducesResponseType(typeof(ApiResponse<List<MentorResponse>>), StatusCodes.Status200OK)]
         [ProducesResponseType(typeof(ApiResponse<List<MentorResponse>>), StatusCodes.Status400BadRequest)]
-        public async Task<IActionResult> GetMentors(CancellationToken cancellationToken)
+        public async Task<IActionResult> GetMentors(
+            [FromQuery] bool includeInactive = false,
+            CancellationToken cancellationToken = default)
         {
-            var result = await adminMentorService.GetMentorsAsync(cancellationToken);
-            return result.IsSuccess ? Ok(result) : BadRequest(result);
+            var result = await adminMentorService.GetMentorsAsync(cancellationToken, includeInactive);
+            return StatusCode((int)result.StatusCode, result);
         }
 
         [HttpPut("{mentorId:int}/active")]
@@ -51,7 +53,38 @@ namespace RikiPath.WebApi.Controllers
             CancellationToken cancellationToken)
         {
             var result = await adminMentorService.SetMentorActiveAsync(mentorId, isActive, cancellationToken);
-            return result.IsSuccess ? Ok(result) : BadRequest(result);
+            return StatusCode((int)result.StatusCode, result);
+        }
+
+        [HttpGet("qualifications")]
+        [ProducesResponseType(typeof(ApiResponse<MentorQualificationsWorkspaceResponse>), StatusCodes.Status200OK)]
+        public async Task<IActionResult> GetTeachingQualifications(CancellationToken cancellationToken)
+        {
+            var result = await adminMentorService.GetTeachingQualificationsAsync(cancellationToken);
+            return StatusCode((int)result.StatusCode, result);
+        }
+
+        [HttpPost("{mentorId:int}/qualifications")]
+        [ProducesResponseType(typeof(ApiResponse<MentorQualificationBadgeResponse>), StatusCodes.Status200OK)]
+        public async Task<IActionResult> GrantTeachingQualification(
+            [FromRoute] int mentorId,
+            [FromBody] GrantMentorQualificationRequest request,
+            CancellationToken cancellationToken)
+        {
+            var result = await adminMentorService.GrantTeachingQualificationAsync(mentorId, request, cancellationToken);
+            return StatusCode((int)result.StatusCode, result);
+        }
+
+        [HttpPost("{mentorId:int}/qualifications/{certificateLevelId:int}/revoke")]
+        [ProducesResponseType(typeof(ApiResponse<bool>), StatusCodes.Status200OK)]
+        public async Task<IActionResult> RevokeTeachingQualification(
+            [FromRoute] int mentorId,
+            [FromRoute] int certificateLevelId,
+            [FromBody] RevokeMentorQualificationRequest request,
+            CancellationToken cancellationToken)
+        {
+            var result = await adminMentorService.RevokeTeachingQualificationAsync(mentorId, certificateLevelId, request, cancellationToken);
+            return StatusCode((int)result.StatusCode, result);
         }
 
         // ==========================================

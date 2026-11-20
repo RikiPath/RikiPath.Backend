@@ -1,0 +1,19 @@
+title = "RikiPath Backend Secret Scanning Rules"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Allowlist non-production documentation examples and anonymized unit test literals"
+paths = [
+  '''^RikiPath\.Tests/.*''',
+  '''^Docs/.*''',
+  '''^RIKI.*SWAGGER.*\.(md|json)$''',
+]
+regexTarget = "line"
+regexes = [
+  '''\.invalid\b''',
+  '''example\.invalid''',
+  '''<your-.*?>''',
+  '''\$\{\{\s*secrets\.[A-Z0-9_]+\s*\}\}''',
+]

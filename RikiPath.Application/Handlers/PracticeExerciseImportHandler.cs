@@ -101,8 +101,8 @@ namespace RikiPath.Application.Handlers
             CancellationToken cancellationToken)
         {
             var dbLessons = await unitOfWork.Lessons.Query()
-                .Where(l => !l.IsDeleted && (l.CertificateLevel.Code == "N5" || l.CertificateLevel.Code == "N4" ||
-                    l.CertificateLevel.Code == "N3" || l.CertificateLevel.Code == "N2"))
+                .Where(l => !l.IsDeleted && !l.CertificateLevel.IsDeleted
+                    && l.CertificateLevel.CertificateType.IsActive && !l.CertificateLevel.CertificateType.IsDeleted)
                 .Select(l => new { l.Id, l.Title, l.CertificateLevelId, Code = l.CertificateLevel.Code })
                 .ToListAsync(cancellationToken);
             var candidates = dbLessons.Select(l => new LessonRef(l.Id, l.Title, l.CertificateLevelId, l.Code)).ToList();
@@ -121,8 +121,7 @@ namespace RikiPath.Application.Handlers
                 LessonImportPayloadResponse? p;
                 try { p = JsonSerializer.Deserialize<LessonImportPayloadResponse>(json); }
                 catch (JsonException) { continue; }
-                if (p is null || string.IsNullOrWhiteSpace(p.Title) ||
-                    p.CertificateLevelCode is not ("N5" or "N4" or "N3" or "N2")) continue;
+                if (p is null || string.IsNullOrWhiteSpace(p.Title) || p.CertificateLevelId <= 0) continue;
                 if (candidates.Any(c => c.Title == p.Title && c.CertificateLevelId == p.CertificateLevelId)) continue;
                 candidates.Add(new LessonRef(null, p.Title, p.CertificateLevelId, p.CertificateLevelCode));
             }

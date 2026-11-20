@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net.Http;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
@@ -569,7 +570,7 @@ namespace RikiPath.Infrastructure.Services
                                 : _options.QuotaExceededDefaultDelaySeconds;
 
                             var expSeconds = (int)(baseSeconds * Math.Pow(2, attempt - 1));
-                            var jitterSeconds = baseSeconds <= 1 ? 0 : Random.Shared.Next(1, Math.Min(15, Math.Max(2, expSeconds / 4)));
+                            var jitterSeconds = baseSeconds <= 1 ? 0 : RandomNumberGenerator.GetInt32(1, Math.Min(15, Math.Max(2, expSeconds / 4)));
                             var totalSeconds = expSeconds + jitterSeconds;
                             calculatedDelay = totalSeconds * 1000;
                         }
@@ -578,7 +579,7 @@ namespace RikiPath.Infrastructure.Services
                             var expDelayMs = (int)(baseDelayMs * Math.Pow(2, attempt - 1));
                             var maxJitter = baseDelayMs <= 50 ? 5 : Math.Min(500, Math.Max(100, expDelayMs / 4));
                             var minJitter = baseDelayMs <= 50 ? 1 : Math.Min(100, maxJitter / 2);
-                            var jitterMs = Random.Shared.Next(minJitter, maxJitter + 1);
+                            var jitterMs = RandomNumberGenerator.GetInt32(minJitter, maxJitter + 1);
                             calculatedDelay = expDelayMs + jitterMs;
 
                             if (response.RetryAfterSeconds.HasValue && response.RetryAfterSeconds.Value > 0)

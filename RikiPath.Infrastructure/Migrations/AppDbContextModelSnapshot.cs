@@ -229,6 +229,52 @@ namespace RikiPath.Infrastructure.Migrations
                         });
                 });
 
+            modelBuilder.Entity("RikiPath.Domain.Entities.AdminAuditLog", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<int?>("ActorUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("AfterJson")
+                        .HasColumnType("text");
+
+                    b.Property<string>("BeforeJson")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int>("EntityId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("EntityType")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("Reason")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedAtUtc");
+
+                    b.HasIndex("EntityType", "EntityId");
+
+                    b.ToTable("AdminAuditLogs", (string)null);
+                });
+
             modelBuilder.Entity("RikiPath.Domain.Entities.AiCreditTopUp", b =>
                 {
                     b.Property<int>("Id")
@@ -318,6 +364,12 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Property<DateTime?>("ModifiedDate")
                         .HasColumnType("timestamp without time zone");
 
+                    b.Property<int>("Revision")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(1);
+
                     b.Property<int>("SortOrder")
                         .HasColumnType("integer");
 
@@ -326,7 +378,10 @@ namespace RikiPath.Infrastructure.Migrations
                     b.HasIndex("CertificateTypeId", "Code")
                         .IsUnique();
 
-                    b.ToTable("CertificateLevels");
+                    b.ToTable("CertificateLevels", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_CertificateLevels_SortOrder", "\"SortOrder\" >= 1");
+                        });
 
                     b.HasData(
                         new
@@ -337,6 +392,7 @@ namespace RikiPath.Infrastructure.Migrations
                             CreatedDate = new DateTime(2026, 9, 29, 0, 0, 0, 0, DateTimeKind.Utc),
                             Description = "JLPT N5",
                             IsDeleted = false,
+                            Revision = 1,
                             SortOrder = 1
                         },
                         new
@@ -347,6 +403,7 @@ namespace RikiPath.Infrastructure.Migrations
                             CreatedDate = new DateTime(2026, 9, 29, 0, 0, 0, 0, DateTimeKind.Utc),
                             Description = "JLPT N4",
                             IsDeleted = false,
+                            Revision = 1,
                             SortOrder = 2
                         },
                         new
@@ -357,6 +414,7 @@ namespace RikiPath.Infrastructure.Migrations
                             CreatedDate = new DateTime(2026, 9, 29, 0, 0, 0, 0, DateTimeKind.Utc),
                             Description = "JLPT N3",
                             IsDeleted = false,
+                            Revision = 1,
                             SortOrder = 3
                         },
                         new
@@ -367,6 +425,7 @@ namespace RikiPath.Infrastructure.Migrations
                             CreatedDate = new DateTime(2026, 9, 29, 0, 0, 0, 0, DateTimeKind.Utc),
                             Description = "JLPT N2",
                             IsDeleted = false,
+                            Revision = 1,
                             SortOrder = 4
                         },
                         new
@@ -377,6 +436,7 @@ namespace RikiPath.Infrastructure.Migrations
                             CreatedDate = new DateTime(2026, 9, 29, 0, 0, 0, 0, DateTimeKind.Utc),
                             Description = "JLPT N1",
                             IsDeleted = false,
+                            Revision = 1,
                             SortOrder = 5
                         });
                 });
@@ -568,6 +628,12 @@ namespace RikiPath.Infrastructure.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
 
+                    b.Property<int>("Revision")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(1);
+
                     b.Property<int>("SortOrder")
                         .HasColumnType("integer");
 
@@ -576,7 +642,10 @@ namespace RikiPath.Infrastructure.Migrations
                     b.HasIndex("Name")
                         .IsUnique();
 
-                    b.ToTable("CertificateTypes");
+                    b.ToTable("CertificateTypes", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_CertificateTypes_SortOrder", "\"SortOrder\" >= 1");
+                        });
 
                     b.HasData(
                         new
@@ -587,6 +656,7 @@ namespace RikiPath.Infrastructure.Migrations
                             IsActive = true,
                             IsDeleted = false,
                             Name = "JLPT",
+                            Revision = 1,
                             SortOrder = 1
                         });
                 });
@@ -7852,8 +7922,21 @@ namespace RikiPath.Infrastructure.Migrations
                         .HasMaxLength(150)
                         .HasColumnType("character varying(150)");
 
+                    b.Property<string>("PlanCategory")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasDefaultValue("self_study");
+
                     b.Property<decimal>("Price")
                         .HasColumnType("decimal(18,0)");
+
+                    b.Property<int>("Revision")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(1);
 
                     b.Property<int>("SortOrder")
                         .HasColumnType("integer");
@@ -7862,7 +7945,16 @@ namespace RikiPath.Infrastructure.Migrations
 
                     b.HasIndex("CertificateLevelId");
 
-                    b.ToTable("SubscriptionPlans");
+                    b.ToTable("SubscriptionPlans", t =>
+                        {
+                            t.HasCheckConstraint("CK_SubscriptionPlans_AiGradingQuota", "\"AiGradingQuota\" >= 0");
+
+                            t.HasCheckConstraint("CK_SubscriptionPlans_DurationDays", "\"DurationDays\" >= 0");
+
+                            t.HasCheckConstraint("CK_SubscriptionPlans_Price", "\"Price\" >= 0");
+
+                            t.HasCheckConstraint("CK_SubscriptionPlans_SortOrder", "\"SortOrder\" >= 0");
+                        });
 
                     b.HasData(
                         new
@@ -7878,7 +7970,9 @@ namespace RikiPath.Infrastructure.Migrations
                             IsTrial = false,
                             MeetingSessionCount = 0,
                             Name = "Tự học tiếng Nhật - 1 tuần",
+                            PlanCategory = "self_study",
                             Price = 1000m,
+                            Revision = 1,
                             SortOrder = 6
                         },
                         new
@@ -7894,7 +7988,9 @@ namespace RikiPath.Infrastructure.Migrations
                             IsTrial = false,
                             MeetingSessionCount = 0,
                             Name = "Tự học tiếng Nhật - 2 tuần",
+                            PlanCategory = "self_study",
                             Price = 1000m,
+                            Revision = 1,
                             SortOrder = 5
                         },
                         new
@@ -7910,7 +8006,9 @@ namespace RikiPath.Infrastructure.Migrations
                             IsTrial = false,
                             MeetingSessionCount = 0,
                             Name = "Tự học tiếng Nhật - 3 tuần",
+                            PlanCategory = "self_study",
                             Price = 2000m,
+                            Revision = 1,
                             SortOrder = 4
                         },
                         new
@@ -7926,7 +8024,9 @@ namespace RikiPath.Infrastructure.Migrations
                             IsTrial = false,
                             MeetingSessionCount = 0,
                             Name = "Tự học tiếng Nhật - 1 tháng",
+                            PlanCategory = "self_study",
                             Price = 2000m,
+                            Revision = 1,
                             SortOrder = 3
                         },
                         new
@@ -7942,7 +8042,9 @@ namespace RikiPath.Infrastructure.Migrations
                             IsTrial = false,
                             MeetingSessionCount = 0,
                             Name = "Tự học tiếng Nhật - 2 tháng",
+                            PlanCategory = "self_study",
                             Price = 3000m,
+                            Revision = 1,
                             SortOrder = 2
                         },
                         new
@@ -7958,7 +8060,9 @@ namespace RikiPath.Infrastructure.Migrations
                             IsTrial = false,
                             MeetingSessionCount = 0,
                             Name = "Tự học tiếng Nhật - 3 tháng",
+                            PlanCategory = "self_study",
                             Price = 3000m,
+                            Revision = 1,
                             SortOrder = 1
                         },
                         new
@@ -7974,7 +8078,9 @@ namespace RikiPath.Infrastructure.Migrations
                             IsTrial = false,
                             MeetingSessionCount = 12,
                             Name = "Meeting 1-1 với Mentor - 12 buổi",
+                            PlanCategory = "mentor_legacy",
                             Price = 1000m,
+                            Revision = 1,
                             SortOrder = 7
                         });
                 });
@@ -8108,6 +8214,10 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Property<DateTime?>("ModifiedDate")
                         .HasColumnType("timestamp without time zone");
 
+                    b.Property<string>("NotificationPreferencesJson")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
                     b.Property<byte[]>("PasswordHash")
                         .IsRequired()
                         .HasColumnType("bytea");
@@ -8115,6 +8225,13 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Property<byte[]>("PasswordSalt")
                         .IsRequired()
                         .HasColumnType("bytea");
+
+                    b.Property<string>("PendingEmail")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<DateTime?>("PendingEmailRequestedAtUtc")
+                        .HasColumnType("timestamp without time zone");
 
                     b.Property<string>("PhoneNumber")
                         .HasMaxLength(20)
@@ -8149,6 +8266,11 @@ namespace RikiPath.Infrastructure.Migrations
 
                     b.Property<DateTime?>("TargetExamDate")
                         .HasColumnType("timestamp without time zone");
+
+                    b.Property<int>("TokenVersion")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(1);
 
                     b.HasKey("Id");
 
@@ -8189,7 +8311,8 @@ namespace RikiPath.Infrastructure.Migrations
                             PasswordSalt = new byte[] { 61, 240, 150, 172, 239, 48, 224, 17, 192, 54, 50, 58, 91, 100, 55, 168, 18, 69, 137, 112, 110, 59, 180, 37, 201, 241, 143, 238, 139, 33, 128, 70, 87, 158, 235, 219, 229, 184, 94, 72, 41, 160, 160, 197, 158, 217, 128, 188, 156, 255, 147, 13, 151, 37, 133, 164, 9, 252, 175, 124, 21, 15, 152, 196 },
                             PlacementDecision = "NotTaken",
                             Role = "Admin",
-                            SystemNotificationsEnabled = true
+                            SystemNotificationsEnabled = true,
+                            TokenVersion = 1
                         },
                         new
                         {
@@ -8211,7 +8334,8 @@ namespace RikiPath.Infrastructure.Migrations
                             PasswordSalt = new byte[] { 233, 77, 244, 252, 171, 97, 38, 140, 50, 138, 10, 54, 122, 165, 186, 85, 129, 82, 49, 10, 98, 44, 165, 57, 50, 7, 238, 166, 142, 224, 94, 49, 134, 226, 247, 110, 154, 139, 99, 204, 95, 39, 171, 235, 212, 26, 217, 87, 139, 118, 253, 125, 241, 255, 57, 22, 140, 171, 11, 168, 174, 202, 32, 17 },
                             PlacementDecision = "NotTaken",
                             Role = "Mentor",
-                            SystemNotificationsEnabled = true
+                            SystemNotificationsEnabled = true,
+                            TokenVersion = 1
                         },
                         new
                         {
@@ -8233,7 +8357,8 @@ namespace RikiPath.Infrastructure.Migrations
                             PasswordSalt = new byte[] { 240, 155, 254, 183, 129, 162, 74, 247, 41, 9, 67, 242, 128, 8, 226, 85, 5, 104, 104, 72, 101, 75, 130, 95, 47, 101, 116, 89, 207, 23, 119, 178, 38, 180, 185, 145, 58, 115, 14, 30, 85, 216, 169, 133, 94, 115, 11, 117, 96, 87, 227, 240, 204, 48, 51, 144, 170, 248, 167, 56, 175, 194, 253, 135 },
                             PlacementDecision = "NotTaken",
                             Role = "Mentor",
-                            SystemNotificationsEnabled = true
+                            SystemNotificationsEnabled = true,
+                            TokenVersion = 1
                         },
                         new
                         {
@@ -8255,7 +8380,8 @@ namespace RikiPath.Infrastructure.Migrations
                             PasswordSalt = new byte[] { 19, 216, 84, 143, 3, 184, 50, 39, 209, 137, 149, 82, 224, 206, 6, 240, 237, 242, 172, 27, 55, 92, 242, 101, 149, 76, 104, 38, 176, 43, 40, 8, 102, 202, 146, 224, 62, 43, 147, 132, 2, 158, 81, 170, 29, 103, 76, 248, 101, 105, 213, 205, 32, 51, 59, 39, 221, 11, 135, 250, 193, 8, 78, 219 },
                             PlacementDecision = "NotTaken",
                             Role = "ContentAuthor",
-                            SystemNotificationsEnabled = true
+                            SystemNotificationsEnabled = true,
+                            TokenVersion = 1
                         },
                         new
                         {
@@ -8277,7 +8403,8 @@ namespace RikiPath.Infrastructure.Migrations
                             PasswordSalt = new byte[] { 66, 178, 77, 56, 234, 206, 29, 78, 136, 190, 160, 142, 226, 249, 14, 17, 26, 101, 167, 36, 193, 55, 150, 94, 239, 81, 69, 54, 81, 171, 80, 22, 208, 38, 242, 2, 55, 171, 64, 38, 48, 224, 36, 216, 133, 132, 147, 100, 174, 32, 65, 134, 128, 35, 50, 138, 204, 59, 167, 96, 11, 128, 101, 102 },
                             PlacementDecision = "NotTaken",
                             Role = "ContentAuthor",
-                            SystemNotificationsEnabled = true
+                            SystemNotificationsEnabled = true,
+                            TokenVersion = 1
                         },
                         new
                         {
@@ -8299,7 +8426,8 @@ namespace RikiPath.Infrastructure.Migrations
                             PasswordSalt = new byte[] { 231, 202, 97, 95, 11, 9, 242, 47, 62, 77, 67, 36, 170, 78, 120, 81, 56, 69, 47, 36, 209, 212, 107, 244, 15, 34, 189, 110, 57, 66, 205, 213, 224, 19, 245, 192, 104, 146, 130, 44, 54, 107, 2, 15, 109, 136, 118, 220, 228, 44, 110, 219, 31, 100, 161, 164, 63, 231, 196, 79, 120, 106, 181, 71 },
                             PlacementDecision = "NotTaken",
                             Role = "Learner",
-                            SystemNotificationsEnabled = true
+                            SystemNotificationsEnabled = true,
+                            TokenVersion = 1
                         },
                         new
                         {
@@ -8321,7 +8449,8 @@ namespace RikiPath.Infrastructure.Migrations
                             PasswordSalt = new byte[] { 85, 97, 108, 158, 219, 70, 81, 106, 73, 23, 205, 163, 105, 159, 117, 19, 175, 147, 178, 99, 112, 116, 163, 243, 109, 178, 129, 229, 245, 175, 91, 174, 66, 198, 122, 88, 80, 68, 160, 64, 85, 118, 105, 41, 135, 89, 49, 160, 120, 13, 116, 148, 255, 27, 157, 207, 106, 203, 127, 74, 19, 61, 148, 120 },
                             PlacementDecision = "NotTaken",
                             Role = "Learner",
-                            SystemNotificationsEnabled = true
+                            SystemNotificationsEnabled = true,
+                            TokenVersion = 1
                         },
                         new
                         {
@@ -8343,7 +8472,8 @@ namespace RikiPath.Infrastructure.Migrations
                             PasswordSalt = new byte[] { 26, 188, 78, 205, 57, 115, 100, 129, 148, 135, 165, 205, 148, 203, 245, 36, 244, 177, 9, 104, 120, 140, 21, 164, 36, 75, 122, 51, 115, 69, 174, 180, 120, 155, 62, 37, 97, 227, 212, 134, 200, 7, 66, 255, 219, 10, 140, 149, 67, 86, 164, 170, 142, 165, 181, 103, 47, 100, 238, 24, 178, 29, 171, 226 },
                             PlacementDecision = "NotTaken",
                             Role = "Learner",
-                            SystemNotificationsEnabled = true
+                            SystemNotificationsEnabled = true,
+                            TokenVersion = 1
                         },
                         new
                         {
@@ -8365,7 +8495,8 @@ namespace RikiPath.Infrastructure.Migrations
                             PasswordSalt = new byte[] { 83, 214, 138, 3, 142, 91, 229, 97, 238, 61, 48, 237, 80, 82, 112, 249, 166, 81, 53, 95, 170, 120, 13, 87, 113, 159, 60, 37, 75, 229, 226, 107, 229, 89, 60, 57, 109, 196, 235, 81, 145, 154, 110, 120, 141, 13, 142, 77, 41, 132, 58, 80, 154, 57, 226, 168, 176, 251, 113, 167, 242, 139, 7, 177 },
                             PlacementDecision = "NotTaken",
                             Role = "Learner",
-                            SystemNotificationsEnabled = true
+                            SystemNotificationsEnabled = true,
+                            TokenVersion = 1
                         });
                 });
 
@@ -8464,6 +8595,9 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Property<DateTime?>("CreatedDate")
                         .HasColumnType("timestamp without time zone");
 
+                    b.Property<int?>("DurationDaysSnapshot")
+                        .HasColumnType("integer");
+
                     b.Property<DateTime?>("EndDate")
                         .HasColumnType("timestamp without time zone");
 
@@ -8520,6 +8654,17 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Property<string>("PendingMentorQuestion")
                         .HasMaxLength(2000)
                         .HasColumnType("character varying(2000)");
+
+                    b.Property<string>("PlanCategorySnapshot")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("PlanNameSnapshot")
+                        .HasMaxLength(150)
+                        .HasColumnType("character varying(150)");
+
+                    b.Property<int?>("PlanRevisionSnapshot")
+                        .HasColumnType("integer");
 
                     b.Property<DateTime>("PurchasedAt")
                         .HasColumnType("timestamp without time zone");

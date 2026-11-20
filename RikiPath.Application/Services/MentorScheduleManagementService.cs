@@ -1,7 +1,9 @@
 using System.Net;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using RikiPath.Application.IServices;
+using RikiPath.Application.Options;
 using RikiPath.Application.Requests.MentorScheduling;
 using RikiPath.Application.Responses;
 using RikiPath.Application.Responses.MentorScheduling;
@@ -19,7 +21,8 @@ namespace RikiPath.Application.Services
         IMentorSlotGenerator slotGenerator,
         ILogger<MentorScheduleManagementService> logger,
         IMentorGroupPolicyService? groupPolicies = null,
-        IMentorTeachingConflictService? teachingConflicts = null) : IMentorScheduleManagementService
+        IMentorTeachingConflictService? teachingConflicts = null,
+        IOptions<MentorSlotGenerationOptions>? slotOptions = null) : IMentorScheduleManagementService
     {
         private const int DefaultPolicyVersion = 3;
 
@@ -52,6 +55,7 @@ namespace RikiPath.Application.Services
                 if (claim.Role != Role.Mentor)
                     return ApiResponse<MentorScheduleResponse>.Fail("Chỉ cố vấn mới có quyền truy cập lịch tư vấn.", HttpStatusCode.Forbidden);
 
+                var policySummary = await BuildPolicySummaryAsync(cancellationToken);
                 var schedule = await unitOfWork.MentorSchedules.GetByMentorIdWithRulesAsync(claim.Id, DefaultPolicyVersion, cancellationToken);
                 if (schedule is null)
                 {
@@ -68,12 +72,13 @@ namespace RikiPath.Application.Services
                         EffectiveFrom = today,
                         GeneratedThrough = null,
                         CreatedAtUtc = DateTime.UtcNow,
+                        Policy = policySummary,
                         Rules = []
                     };
                     return ApiResponse<MentorScheduleResponse>.Success(defaultResponse);
                 }
 
-                return ApiResponse<MentorScheduleResponse>.Success(MapToMentorScheduleResponse(schedule));
+                return ApiResponse<MentorScheduleResponse>.Success(MapToMentorScheduleResponse(schedule, policySummary));
             }
             catch (Exception ex)
             {
@@ -145,9 +150,10 @@ namespace RikiPath.Application.Services
                 await unitOfWork.SaveChangesAsync(cancellationToken);
 
                 // Nạp lại kèm thông tin mentor
+                var policySummary = await BuildPolicySummaryAsync(cancellationToken);
                 var refreshed = await unitOfWork.MentorSchedules.GetByMentorIdWithRulesAsync(claim.Id, DefaultPolicyVersion, cancellationToken);
                 return ApiResponse<MentorScheduleResponse>.Success(
-                    MapToMentorScheduleResponse(refreshed ?? schedule),
+                    MapToMentorScheduleResponse(refreshed ?? schedule, policySummary),
                     message: "Cập nhật mẫu lịch làm việc và quy tắc ca thành công.");
             }
             catch (Exception ex)
@@ -715,7 +721,43 @@ namespace RikiPath.Application.Services
             return (slots, policy);
         }
 
-        private static MentorScheduleResponse MapToMentorScheduleResponse(MentorSchedule s) => new()
+        private async Task<MentorSchedulePolicySummary> BuildPolicySummaryAsync(CancellationToken cancellationToken)
+        {
+            var groupPolicy = await GetGroupPolicyAsync(DateTime.UtcNow, cancellationToken);
+            var opts = slotOptions?.Value ?? new MentorSlotGenerationOptions();
+            var slotPolicy = opts.ToPolicy();
+            var sessionMinutes = groupPolicy?.SessionMinutes ?? MentorSlotPolicy.AppointmentDurationMinutes;
+            var restMinutes = groupPolicy?.RestMinutes ?? MentorSlotPolicy.MinimumRestMinutes;
+            var gridStepMinutes = restMinutes % 15 == 0 || sessionMinutes % 15 == 0 ? 15 : 30;
+            var allowedGridSteps = gridStepMinutes == 15 ? new[] { 15, 30 } : new[] { 30 };
+
+            return new MentorSchedulePolicySummary
+            {
+                PolicyVersion = groupPolicy?.Version ?? 0,
+                SessionMinutes = sessionMinutes,
+                RestMinutes = restMinutes,
+                DailySessionCap = groupPolicy?.DailySessionCap ?? slotPolicy.DailyBookingCap,
+                WeeklySessionCap = groupPolicy?.WeeklySessionCap ?? 0,
+                MaxSlotsPerSubmission = Math.Clamp(opts.MaxSlotsPerSubmission, 1, 50),
+                MaxPendingSlots = Math.Clamp(opts.MaxPendingSlots, 1, 200),
+                SubmissionCooldownSeconds = Math.Clamp(opts.SubmissionCooldownSeconds, 0, 120),
+                PublicationHorizonDays = groupPolicy?.PublicationHorizonDays ?? MentorSlotPolicy.MaximumScheduleHorizonDays,
+                CourseDurationWeeks = groupPolicy?.CourseDurationWeeks ?? 10,
+                CancellationLeadHours = groupPolicy?.CancellationLeadHours ?? 24,
+                ReschedulingLeadHours = groupPolicy?.ReschedulingLeadHours ?? 24,
+                MaxLearners = groupPolicy?.MaxLearners ?? 4,
+                GridStepMinutes = gridStepMinutes,
+                AllowedGridSteps = allowedGridSteps,
+                Dayparts = slotPolicy.Dayparts.Select(dp => new MentorScheduleDaypartResponse
+                {
+                    Code = dp.Daypart.ToString(),
+                    LocalStart = dp.StartLocal.ToString("HH\\:mm"),
+                    LocalEnd = dp.EndLocal.ToString("HH\\:mm")
+                }).ToList()
+            };
+        }
+
+        private static MentorScheduleResponse MapToMentorScheduleResponse(MentorSchedule s, MentorSchedulePolicySummary? policySummary = null) => new()
         {
             ScheduleId = s.Id,
             MentorId = s.MentorId,
@@ -726,6 +768,7 @@ namespace RikiPath.Application.Services
             EffectiveFrom = s.EffectiveFrom,
             GeneratedThrough = s.GeneratedThrough,
             CreatedAtUtc = s.CreatedAtUtc,
+            Policy = policySummary,
             Rules = s.Rules.Select(r => new MentorScheduleRuleResponse
             {
                 Id = r.Id,

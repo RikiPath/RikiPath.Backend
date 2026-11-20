@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore.Design;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Configuration.UserSecrets;
+using Npgsql;
 
 namespace RikiPath.Infrastructure;
 
@@ -60,6 +61,7 @@ public sealed class AppDbContextDesignTimeFactory : IDesignTimeDbContextFactory<
 
         if (!string.IsNullOrWhiteSpace(configured))
         {
+            EnsureTargetDatabaseAllowed(configured!, cliArgs, effectiveProcessArgs, envGetter);
             return configured;
         }
 
@@ -73,6 +75,70 @@ public sealed class AppDbContextDesignTimeFactory : IDesignTimeDbContextFactory<
             "Configure 'AppSettings:ConnectionStrings:DefaultConnection' or 'ConnectionStrings:DefaultConnection' " +
             "(via appsettings, user secrets, environment variables 'AppSettings__ConnectionStrings__DefaultConnection' / " +
             "'ConnectionStrings__DefaultConnection'), or pass '--connection \"<connection-string>\"'.");
+    }
+
+    internal static void EnsureTargetDatabaseAllowed(
+        string connectionString,
+        string[] args,
+        string[] processArgs,
+        Func<string, string?> envGetter)
+    {
+        var combined = args.Concat(processArgs).Where(static s => !string.IsNullOrWhiteSpace(s)).ToArray();
+        var requiresMutatingGuard =
+            ContainsSubcommand(combined, "database", "update") ||
+            ContainsSubcommand(combined, "database", "drop");
+
+        if (!requiresMutatingGuard)
+        {
+            return;
+        }
+
+        var allowRemoteFlag = combined.Any(static a =>
+            string.Equals(a, "--allow-remote-database", StringComparison.OrdinalIgnoreCase));
+        var allowRemoteEnv = string.Equals(
+            envGetter("RIKIPATH_ALLOW_REMOTE_DB_MIGRATION"),
+            "true",
+            StringComparison.OrdinalIgnoreCase);
+
+        if (allowRemoteFlag || allowRemoteEnv)
+        {
+            return;
+        }
+
+        string? host = null;
+        string? database = null;
+        try
+        {
+            var builder = new NpgsqlConnectionStringBuilder(connectionString);
+            host = builder.Host;
+            database = builder.Database;
+        }
+        catch (ArgumentException)
+        {
+            return;
+        }
+
+        if (IsRemoteSharedDatabaseHost(host))
+        {
+            throw new InvalidOperationException(
+                $"Refusing unapproved EF Core database mutation against shared/remote host '{host}' (Database='{database}'). " +
+                "Target an isolated local/QA PostgreSQL instance via '--connection' or 'AppSettings__ConnectionStrings__DefaultConnection', " +
+                "or after verifying '__EFMigrationsHistory' and completing schema reconciliation (RikiPath.Infrastructure/Sql/ReconcileSharedMigrationHistory.sql) " +
+                "explicitly opt in with RIKIPATH_ALLOW_REMOTE_DB_MIGRATION=true or '-- --allow-remote-database'.");
+        }
+    }
+
+    internal static bool IsRemoteSharedDatabaseHost(string? host)
+    {
+        if (string.IsNullOrWhiteSpace(host))
+        {
+            return false;
+        }
+
+        var normalized = host.Trim().ToLowerInvariant();
+        return normalized.EndsWith(".supabase.co", StringComparison.Ordinal) ||
+               normalized.EndsWith(".supabase.com", StringComparison.Ordinal) ||
+               normalized.Contains("supabase.", StringComparison.Ordinal);
     }
 
     internal static string? ResolveConfiguredConnectionString(

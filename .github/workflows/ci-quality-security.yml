@@ -1,0 +1,56 @@
+name: CI Quality & Security Gate
+
+on:
+  pull_request:
+    branches: [ "main" ]
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-quality-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-test-audit:
+    name: Build, Analyzers & NuGet Vulnerability Audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET SDK (per global.json)
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore dependencies (with NuGetAudit enabled)
+        run: dotnet restore RikiPath.Backend.slnx --locked-mode || dotnet restore RikiPath.Backend.slnx
+
+      - name: Build solution (Release)
+        run: dotnet build RikiPath.Backend.slnx --no-restore -c Release
+
+      - name: Check vulnerable NuGet packages
+        run: |
+          dotnet list RikiPath.Backend.slnx package --vulnerable --include-transitive
+
+      - name: Run analyzer verification (error severity gate)
+        run: dotnet format analyzers RikiPath.Backend.slnx --verify-no-changes --severity error --no-restore
+
+  secret-scanning:
+    name: Secret Scan (Gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout full git history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Gitleaks secret scanner
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_CONFIG: .gitleaks.toml

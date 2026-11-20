@@ -155,15 +155,31 @@ public sealed partial class StudyCourseService
             if (id.HasValue) await uow.StudyCourses.LockCohortAsync(id.Value, token);
             var p = await uow.StudyCoursePlans.GetByIdAsync(r.PlanId, token);
             Require(p is { SessionType: "Group", SessionMinutes: not null, TotalSessions: not null }, "Chọn gói học nhóm đã cấu hình đủ buổi.");
-            Require(await uow.UserAccounts.AnyAsync(x => x.Id == r.MentorId && x.Role == Role.Mentor && !x.IsDeleted, token), "Mentor không hợp lệ.");
+            var mentorAccount = await uow.UserAccounts.Query()
+                .Include(x => x.MentorProfile)
+                .FirstOrDefaultAsync(x => x.Id == r.MentorId && x.Role == Role.Mentor && !x.IsDeleted, token);
+            Require(mentorAccount is not null, "Giáo viên không hợp lệ hoặc đã ngưng hoạt động.");
+            Rule(mentorAccount!.MentorProfile?.VerificationStatus == MentorVerificationStatus.Approved,
+                "MENTOR_NOT_VERIFIED",
+                "Chỉ được giao lớp cho Giáo viên đã được phê duyệt hồ sơ.", HttpStatusCode.Conflict);
+            if (uow.MentorTeachingQualifications is not null)
+            {
+                var hasQualification = await uow.MentorTeachingQualifications.Query()
+                    .AnyAsync(q => q.MentorUserId == r.MentorId && q.CertificateLevelId == p!.CertificateLevelId && q.IsActive, token);
+                Rule(hasQualification, "MENTOR_NOT_QUALIFIED_FOR_LEVEL",
+                    "Giáo viên chưa được cấp quyền giảng dạy cấp độ của gói học này. Hãy phân quyền JLPT trước khi mở lớp.",
+                    HttpStatusCode.Conflict);
+            }
             var c = id.HasValue ? await uow.StudyCohorts.Query().Include(x => x.Sessions).Include(x => x.Enrollments)
                 .SingleOrDefaultAsync(x => x.Id == id.Value, token) : new StudyCohort();
             Require(c is not null, "Lớp vừa thay đổi hoặc không tồn tại.");
             Rule(!id.HasValue || c!.Revision == r.Revision, "COHORT_SCHEDULE_REVISION_CONFLICT",
                 "Lớp vừa được cập nhật bởi thao tác khác. Vui lòng tải lại trước khi lưu.", HttpStatusCode.Conflict);
-            Require(!id.HasValue || c!.MentorId == r.MentorId, "Không đổi Mentor trực tiếp; gửi yêu cầu điều chỉnh lịch.");
-            Rule(!id.HasValue || !c!.Enrollments.Any(x => ReservesSeat(x, DateTime.UtcNow)), "COHORT_SCHEDULE_ALREADY_PUBLISHED",
-                "Lớp đang có học viên hoặc giữ chỗ. Xử lý qua yêu cầu điều chỉnh, không sửa trực tiếp.", HttpStatusCode.Conflict);
+            Require(!id.HasValue || c!.MentorId == r.MentorId, "Không đổi Giáo viên trực tiếp; hãy dùng luồng thay thế Giáo viên.");
+            Rule(!id.HasValue || !c!.Enrollments.Any(x => ReservesSeat(x, DateTime.UtcNow) || x.Status == "PaymentReview"),
+                "COHORT_SCHEDULE_ALREADY_PUBLISHED",
+                "Lớp đang có học viên, giữ chỗ hoặc đơn đang kiểm tra thanh toán. Xử lý qua yêu cầu điều chỉnh, không sửa trực tiếp.",
+                HttpStatusCode.Conflict);
             var slots = await uow.MentorAvailabilities.Query().Include(x => x.GroupPolicy).Where(x => r.AvailabilityIds.Contains(x.Id)
                 && x.MentorId == r.MentorId && !x.IsDeleted && x.IsApproved && x.RejectedAt == null
                 && x.StartTime > DateTime.UtcNow && x.ChangeRequestedAt == null).OrderBy(x => x.StartTime).ToListAsync(token);
@@ -214,6 +230,16 @@ public sealed partial class StudyCourseService
             }
             if (!id.HasValue) await uow.StudyCohorts.AddAsync(c, token); else c.Revision++;
             await uow.SaveChangesAsync(token); savedId = c.Id;
+            await uow.AdminAuditLogs.AddAsync(new AdminAuditLog
+            {
+                ActorUserId = Actor.Id,
+                EntityType = "StudyCohort",
+                EntityId = c.Id,
+                Action = id.HasValue ? "Updated" : "Created",
+                AfterJson = System.Text.Json.JsonSerializer.Serialize(new { c.Id, c.Name, c.PlanId, c.MentorId, c.Capacity, c.Status, c.Revision }),
+                CreatedAtUtc = DateTime.UtcNow,
+            }, token);
+            await uow.SaveChangesAsync(token);
         }, ct);
         return new { Id = savedId };
     });

@@ -78,12 +78,10 @@ namespace RikiPath.Application.Handlers
         {
             if (string.IsNullOrWhiteSpace(levelCode))
                 errors.Add("Thiếu cột Certificate Level Code.");
-            else if (levelCode is not ("N5" or "N4" or "N3" or "N2"))
-                errors.Add("Cấp độ phải từ N5 đến N2.");
             else if (ambiguousLevelCodes.Contains(levelCode))
                 errors.Add($"Certificate Level Code '{levelCode}' bị trùng ở nhiều loại chứng chỉ, không xác định được level.");
             else if (!levelsByCode.ContainsKey(levelCode))
-                errors.Add($"Certificate Level Code '{levelCode}' không tồn tại trong hệ thống.");
+                errors.Add($"Certificate Level Code '{levelCode}' không tồn tại hoặc chưa được kích hoạt.");
         }
 
         public static void CompareField(Dictionary<string, string> changed, string field, string? oldValue, string? newValue)
@@ -156,7 +154,7 @@ namespace RikiPath.Application.Handlers
             IReadOnlyList<MockTestSectionPayloadResponse> sections, IReadOnlyDictionary<int, string> skillNames)
         {
             var level = levelCode?.Trim().ToUpperInvariant();
-            if (level is not ("N5" or "N4" or "N3" or "N2")) return null;
+            if (level is not ("N5" or "N4" or "N3" or "N2" or "N1")) return null;
 
             var covered = sections.Where(section => section.Questions is { Count: > 0 })
                 .Select(section => JlptSkillAssessmentPolicy.Classify(skillNames.GetValueOrDefault(section.LanguageSkillId)))

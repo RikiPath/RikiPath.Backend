@@ -12,6 +12,15 @@ namespace RikiPath.Infrastructure.Configuration
             builder.Property(x => x.Name).IsRequired().HasMaxLength(150);
             builder.Property(x => x.Price).HasColumnType("decimal(18,0)");
             builder.Property(x => x.MeetingSessionCount).HasDefaultValue(0);
+            builder.Property(x => x.PlanCategory).IsRequired().HasMaxLength(32).HasDefaultValue("self_study");
+            builder.Property(x => x.Revision).HasDefaultValue(1).IsConcurrencyToken();
+            builder.ToTable(t =>
+            {
+                t.HasCheckConstraint("CK_SubscriptionPlans_Price", "\"Price\" >= 0");
+                t.HasCheckConstraint("CK_SubscriptionPlans_DurationDays", "\"DurationDays\" >= 0");
+                t.HasCheckConstraint("CK_SubscriptionPlans_AiGradingQuota", "\"AiGradingQuota\" >= 0");
+                t.HasCheckConstraint("CK_SubscriptionPlans_SortOrder", "\"SortOrder\" >= 0");
+            });
             builder.HasOne(x => x.CertificateLevel)
                 .WithMany()
                 .HasForeignKey(x => x.CertificateLevelId)
@@ -44,13 +53,13 @@ namespace RikiPath.Infrastructure.Configuration
                     });
 
             builder.HasData(
-                new SubscriptionPlan { Id = 1, Name = "Tự học tiếng Nhật - 1 tuần", Description = "Truy cập nội dung ôn luyện các chứng chỉ tiếng Nhật trong 1 tuần.", DurationDays = 7, Price = 1000m, AiGradingQuota = 1, MeetingSessionCount = 0, IsPopular = false, IsTrial = false, IsActive = true, SortOrder = 6, IsDeleted = false, CreatedDate = new DateTime(2026, 10, 1, 0, 0, 0, DateTimeKind.Utc) },
-                new SubscriptionPlan { Id = 2, Name = "Tự học tiếng Nhật - 2 tuần", Description = "Truy cập nội dung ôn luyện các chứng chỉ tiếng Nhật trong 2 tuần.", DurationDays = 14, Price = 1000m, AiGradingQuota = 2, MeetingSessionCount = 0, IsPopular = false, IsTrial = false, IsActive = true, SortOrder = 5, IsDeleted = false, CreatedDate = new DateTime(2026, 10, 1, 0, 0, 0, DateTimeKind.Utc) },
-                new SubscriptionPlan { Id = 3, Name = "Tự học tiếng Nhật - 3 tuần", Description = "Truy cập nội dung ôn luyện các chứng chỉ tiếng Nhật trong 3 tuần.", DurationDays = 21, Price = 2000m, AiGradingQuota = 3, MeetingSessionCount = 0, IsPopular = false, IsTrial = false, IsActive = true, SortOrder = 4, IsDeleted = false, CreatedDate = new DateTime(2026, 10, 1, 0, 0, 0, DateTimeKind.Utc) },
-                new SubscriptionPlan { Id = 4, Name = "Tự học tiếng Nhật - 1 tháng", Description = "Truy cập nội dung ôn luyện các chứng chỉ tiếng Nhật trong 1 tháng.", DurationDays = 30, Price = 2000m, AiGradingQuota = 5, MeetingSessionCount = 0, IsPopular = true, IsTrial = false, IsActive = true, SortOrder = 3, IsDeleted = false, CreatedDate = new DateTime(2026, 10, 1, 0, 0, 0, DateTimeKind.Utc) },
-                new SubscriptionPlan { Id = 5, Name = "Tự học tiếng Nhật - 2 tháng", Description = "Truy cập nội dung ôn luyện các chứng chỉ tiếng Nhật trong 2 tháng.", DurationDays = 60, Price = 3000m, AiGradingQuota = 10, MeetingSessionCount = 0, IsPopular = false, IsTrial = false, IsActive = true, SortOrder = 2, IsDeleted = false, CreatedDate = new DateTime(2026, 10, 1, 0, 0, 0, DateTimeKind.Utc) },
-                new SubscriptionPlan { Id = 6, Name = "Tự học tiếng Nhật - 3 tháng", Description = "Truy cập nội dung ôn luyện các chứng chỉ tiếng Nhật trong 3 tháng.", DurationDays = 90, Price = 3000m, AiGradingQuota = 15, MeetingSessionCount = 0, IsPopular = false, IsTrial = false, IsActive = true, SortOrder = 1, IsDeleted = false, CreatedDate = new DateTime(2026, 10, 1, 0, 0, 0, DateTimeKind.Utc) },
-                new SubscriptionPlan { Id = 7, Name = "Meeting 1-1 với Mentor - 12 buổi", Description = "Gói demo gồm 12 buổi ôn luyện 1-1 với Mentor, thời hạn 90 ngày. Dữ liệu thanh toán demo được seed để kiểm thử đặt lịch trên frontend.", DurationDays = 90, Price = 1000m, AiGradingQuota = 0, MeetingSessionCount = 12, IsPopular = false, IsTrial = false, IsActive = true, SortOrder = 7, IsDeleted = false, CreatedDate = new DateTime(2026, 10, 1, 0, 0, 0, DateTimeKind.Utc) });
+                new SubscriptionPlan { Id = 1, Name = "Tự học tiếng Nhật - 1 tuần", Description = "Truy cập nội dung ôn luyện các chứng chỉ tiếng Nhật trong 1 tuần.", DurationDays = 7, Price = 1000m, AiGradingQuota = 1, MeetingSessionCount = 0, PlanCategory = "self_study", IsPopular = false, IsTrial = false, IsActive = true, SortOrder = 6, Revision = 1, IsDeleted = false, CreatedDate = new DateTime(2026, 10, 1, 0, 0, 0, DateTimeKind.Utc) },
+                new SubscriptionPlan { Id = 2, Name = "Tự học tiếng Nhật - 2 tuần", Description = "Truy cập nội dung ôn luyện các chứng chỉ tiếng Nhật trong 2 tuần.", DurationDays = 14, Price = 1000m, AiGradingQuota = 2, MeetingSessionCount = 0, PlanCategory = "self_study", IsPopular = false, IsTrial = false, IsActive = true, SortOrder = 5, Revision = 1, IsDeleted = false, CreatedDate = new DateTime(2026, 10, 1, 0, 0, 0, DateTimeKind.Utc) },
+                new SubscriptionPlan { Id = 3, Name = "Tự học tiếng Nhật - 3 tuần", Description = "Truy cập nội dung ôn luyện các chứng chỉ tiếng Nhật trong 3 tuần.", DurationDays = 21, Price = 2000m, AiGradingQuota = 3, MeetingSessionCount = 0, PlanCategory = "self_study", IsPopular = false, IsTrial = false, IsActive = true, SortOrder = 4, Revision = 1, IsDeleted = false, CreatedDate = new DateTime(2026, 10, 1, 0, 0, 0, DateTimeKind.Utc) },
+                new SubscriptionPlan { Id = 4, Name = "Tự học tiếng Nhật - 1 tháng", Description = "Truy cập nội dung ôn luyện các chứng chỉ tiếng Nhật trong 1 tháng.", DurationDays = 30, Price = 2000m, AiGradingQuota = 5, MeetingSessionCount = 0, PlanCategory = "self_study", IsPopular = true, IsTrial = false, IsActive = true, SortOrder = 3, Revision = 1, IsDeleted = false, CreatedDate = new DateTime(2026, 10, 1, 0, 0, 0, DateTimeKind.Utc) },
+                new SubscriptionPlan { Id = 5, Name = "Tự học tiếng Nhật - 2 tháng", Description = "Truy cập nội dung ôn luyện các chứng chỉ tiếng Nhật trong 2 tháng.", DurationDays = 60, Price = 3000m, AiGradingQuota = 10, MeetingSessionCount = 0, PlanCategory = "self_study", IsPopular = false, IsTrial = false, IsActive = true, SortOrder = 2, Revision = 1, IsDeleted = false, CreatedDate = new DateTime(2026, 10, 1, 0, 0, 0, DateTimeKind.Utc) },
+                new SubscriptionPlan { Id = 6, Name = "Tự học tiếng Nhật - 3 tháng", Description = "Truy cập nội dung ôn luyện các chứng chỉ tiếng Nhật trong 3 tháng.", DurationDays = 90, Price = 3000m, AiGradingQuota = 15, MeetingSessionCount = 0, PlanCategory = "self_study", IsPopular = false, IsTrial = false, IsActive = true, SortOrder = 1, Revision = 1, IsDeleted = false, CreatedDate = new DateTime(2026, 10, 1, 0, 0, 0, DateTimeKind.Utc) },
+                new SubscriptionPlan { Id = 7, Name = "Meeting 1-1 với Mentor - 12 buổi", Description = "Gói demo gồm 12 buổi ôn luyện 1-1 với Mentor, thời hạn 90 ngày. Dữ liệu thanh toán demo được seed để kiểm thử đặt lịch trên frontend.", DurationDays = 90, Price = 1000m, AiGradingQuota = 0, MeetingSessionCount = 12, PlanCategory = "mentor_legacy", IsPopular = false, IsTrial = false, IsActive = true, SortOrder = 7, Revision = 1, IsDeleted = false, CreatedDate = new DateTime(2026, 10, 1, 0, 0, 0, DateTimeKind.Utc) });
         }
     }
 }
