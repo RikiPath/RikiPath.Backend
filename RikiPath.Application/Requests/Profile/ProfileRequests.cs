@@ -6,6 +6,15 @@ namespace RikiPath.Application.Requests.Profile
     {
         [Required(ErrorMessage = "Họ và tên không được để trống."), MaxLength(200)]
         public string FullName { get; set; } = string.Empty;
+
+        [MaxLength(20)]
+        public string? PhoneNumber { get; set; }
+
+        /// <summary>True when caller explicitly edits or clears PhoneNumber; prevents partial callers from wiping it.</summary>
+        public bool UpdatePhoneNumber { get; set; }
+
+        [MaxLength(50)]
+        public string? StudyTimePreference { get; set; }
     }
 
     public class SetJlptGoalRequest
@@ -48,5 +57,6 @@ namespace RikiPath.Application.Requests.Profile
     {
         public bool EmailNotificationsEnabled { get; set; }
         public bool SystemNotificationsEnabled { get; set; }
+        public Dictionary<string, bool>? NotificationCategories { get; set; }
     }
 }

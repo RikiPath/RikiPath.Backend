@@ -45,5 +45,15 @@ namespace RikiPath.Infrastructure.Repositories
                         && level.CertificateType.IsActive
                         && level.CertificateType.Name == "JLPT",
                     ct);
+
+        public async Task LockOrderScopeAsync(int certificateTypeId, CancellationToken ct = default)
+        {
+            if (_context.Database.IsNpgsql())
+            {
+                var scopeKey = $"catalog:certificate-levels:{certificateTypeId}";
+                await _context.Database.ExecuteSqlInterpolatedAsync(
+                    $"SELECT pg_advisory_xact_lock(hashtextextended({scopeKey}, 0))", ct);
+            }
+        }
     }
 }

@@ -9,6 +9,7 @@ using RikiPath.Application.Responses.ContentAuthoring;
 using RikiPath.Domain.Entities;
 using RikiPath.Domain.Enums;
 using System.Net;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -2028,7 +2029,7 @@ namespace RikiPath.Application.Services
             var options = question.Options;
             for (var i = options.Count - 1; i > 0; i--)
             {
-                var j = Random.Shared.Next(i + 1);
+                var j = RandomNumberGenerator.GetInt32(i + 1);
                 (options[i], options[j]) = (options[j], options[i]);
             }
         }

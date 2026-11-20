@@ -48,22 +48,43 @@ public sealed class MentorScheduleService(IUnitOfWork uow, IClaimService claims,
 
     public async Task<ApiResponse<bool>> ResolveChangeAsync(int slotId, ResolveMentorSlotRequest request, CancellationToken ct)
     {
-        if (!IsAdmin) return Fail("Chỉ admin được điều chỉnh lịch.");
-        if (string.IsNullOrWhiteSpace(request.Reason) || request.Reason.Length > 1000) return Fail("Nhập lý do xử lý (tối đa 1000 ký tự).");
-        if (request.CancelSlot) return ApiResponse<bool>.Fail(
-            "Không thể hủy và hoàn vé qua lịch tuần cũ. Hãy xử lý từng booking qua /api/mentor-bookings/{id}/cancel, sau đó duyệt hủy khung giờ tại /api/admin/mentor-availabilities/review-cancel.",
-            HttpStatusCode.Conflict);
+        if (!IsAdmin)
+            return ApiResponse<bool>.Fail("Chỉ Admin mới có quyền điều chỉnh lịch.", HttpStatusCode.Forbidden);
+        if (string.IsNullOrWhiteSpace(request.Reason) || request.Reason.Length > 1000)
+            return Fail("Nhập lý do xử lý (tối đa 1000 ký tự).");
+        if (request.CancelSlot)
+            return ApiResponse<bool>.Fail(
+                "Không thể hủy trực tiếp tại đây. Hãy duyệt yêu cầu hủy khung giờ tại màn hình Duyệt đổi/hủy lịch hoặc hủy lớp qua quy trình ngoại lệ.",
+                HttpStatusCode.Conflict);
         var slot = await uow.MentorAvailabilities.Query().Include(x => x.Mentor)
             .FirstOrDefaultAsync(x => x.Id == slotId && !x.IsDeleted, ct);
-        if (slot is null || slot.StartTime <= DateTime.UtcNow) return Fail("Không tìm thấy tiết tương lai.");
+        if (slot is null || slot.StartTime <= DateTime.UtcNow)
+            return ApiResponse<bool>.Fail("Không tìm thấy khung giờ tương lai.", HttpStatusCode.NotFound);
+        var now = DateTime.UtcNow;
+        var reason = request.Reason.Trim();
         await uow.ExecuteInTransactionAsync(async token => {
-            slot.ChangeResolution = request.Reason.Trim(); slot.ChangeRequestedAt = null;
-            await uow.Notifications.AddAsync(new Notification { UserId = slot.MentorId, Title = "Lịch tư vấn đã được xử lý",
-                Message = request.Reason.Trim(), Type = "MentorSchedule", LinkUrl = "/mentor-availability/" }, token);
+            slot.ChangeResolution = reason;
+            slot.ChangeRequestedAt = null;
+            slot.ModifiedDate = now;
+            await uow.Notifications.AddAsync(new Notification { UserId = slot.MentorId, Title = "Lịch dạy đã được xử lý",
+                Message = reason, Type = "MentorSchedule", LinkUrl = "/mentor-shift-schedule/" }, token);
+            await uow.AdminAuditLogs.AddAsync(new AdminAuditLog
+            {
+                ActorUserId = claims.GetUserClaim().Id,
+                EntityType = "MentorAvailability",
+                EntityId = slot.Id,
+                Action = "ChangeResolved",
+                AfterJson = System.Text.Json.JsonSerializer.Serialize(new { SlotId = slot.Id, slot.MentorId, ChangeResolution = reason }),
+                Reason = reason,
+                CreatedAtUtc = now,
+            }, token);
             await uow.SaveChangesAsync(token);
         }, ct);
-        try { await email.SendEmailAsync(slot.Mentor.Email!, "Điều chỉnh lịch tư vấn · RikiPath", "<h2>Điều chỉnh lịch tư vấn</h2><p>" + System.Net.WebUtility.HtmlEncode(request.Reason) + "</p>", ct); }
-        catch (Exception ex) { logger.LogWarning(ex, "Change resolution email failed for slot {SlotId}", slotId); }
+        if (slot.Mentor?.EmailNotificationsEnabled != false && !string.IsNullOrWhiteSpace(slot.Mentor?.Email))
+        {
+            try { await email.SendEmailAsync(slot.Mentor.Email, "Điều chỉnh lịch dạy · RikiPath", "<h2>Điều chỉnh lịch dạy</h2><p>" + System.Net.WebUtility.HtmlEncode(reason) + "</p>", ct); }
+            catch (Exception ex) { logger.LogWarning(ex, "Change resolution email failed for slot {SlotId}", slotId); }
+        }
         return ApiResponse<bool>.Success(true);
     }
 }

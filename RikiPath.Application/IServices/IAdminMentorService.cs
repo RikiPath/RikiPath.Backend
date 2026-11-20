@@ -12,7 +12,9 @@ namespace RikiPath.Application.IServices
         Task<ApiResponse<MentorResponse>> CreateMentorAsync(
             CreateMentorRequest request, CancellationToken cancellationToken);
 
-        Task<ApiResponse<List<MentorResponse>>> GetMentorsAsync(CancellationToken cancellationToken);
+        Task<ApiResponse<List<MentorResponse>>> GetMentorsAsync(
+            CancellationToken cancellationToken,
+            bool includeInactive = false);
 
         Task<ApiResponse<MentorResponse>> SetMentorActiveAsync(
             int mentorId, bool isActive, CancellationToken cancellationToken);
@@ -25,5 +27,14 @@ namespace RikiPath.Application.IServices
 
         Task<ApiResponse<AdminMentorProfileResponse>> ReviewVerificationAsync(
             int mentorId, ReviewMentorVerificationRequest request, CancellationToken cancellationToken);
+
+        Task<ApiResponse<MentorQualificationsWorkspaceResponse>> GetTeachingQualificationsAsync(
+            CancellationToken cancellationToken);
+
+        Task<ApiResponse<MentorQualificationBadgeResponse>> GrantTeachingQualificationAsync(
+            int mentorId, GrantMentorQualificationRequest request, CancellationToken cancellationToken);
+
+        Task<ApiResponse<bool>> RevokeTeachingQualificationAsync(
+            int mentorId, int certificateLevelId, RevokeMentorQualificationRequest request, CancellationToken cancellationToken);
     }
 }

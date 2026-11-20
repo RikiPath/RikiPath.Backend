@@ -315,7 +315,117 @@ namespace RikiPath.Application.Services
                     Note = request.Note,
                     CreatedDate = DateTime.UtcNow,
                 };
-                var reviewItem = await AddEntryWithReviewCardAsync(userId, note, cancellationToken);
+
+                ReviewCard? reviewItem = null;
+                if (request.EnrollSrs)
+                {
+                    reviewItem = await AddEntryWithReviewCardAsync(userId, note, cancellationToken);
+                }
+                else
+                {
+                    await unitOfWork.LearnerNoteEntries.AddAsync(note, cancellationToken);
+                    await unitOfWork.SaveChangesAsync(cancellationToken);
+                }
+
+                var response = MapEntry(note);
+                response.ReviewCardId = reviewItem?.Id;
+                return ApiResponse<NotebookEntryResponse>.Created(response);
+            }
+            catch (Exception)
+            {
+                return ApiResponse<NotebookEntryResponse>.Fail(
+                    "Không thể thêm ghi chú thủ công.", HttpStatusCode.InternalServerError);
+            }
+        }
+
+        public async Task<ApiResponse<NotebookEntryResponse>> UpdateEntryAsync(
+            int noteEntryId, UpdateNotebookEntryRequest request, CancellationToken cancellationToken)
+        {
+            try
+            {
+                var userId = claimService.GetUserClaim().Id;
+                var note = await unitOfWork.LearnerNoteEntries.GetByIdAsync(noteEntryId, cancellationToken);
+                if (note is null || note.IsDeleted)
+                    return ApiResponse<NotebookEntryResponse>.NotFound($"Không tìm thấy mục sổ tay Id = {noteEntryId}.");
+
+                var list = await unitOfWork.LearnerNotes.GetByIdAsync(note.LearnerNoteId, cancellationToken);
+                if (list is null || list.UserId != userId)
+                    return ApiResponse<NotebookEntryResponse>.Fail("Bạn không có quyền sửa mục này.", HttpStatusCode.Forbidden);
+
+                if (request.LearnerNoteId.HasValue && request.LearnerNoteId.Value != note.LearnerNoteId)
+                {
+                    var targetList = await unitOfWork.LearnerNotes.GetByIdAsync(request.LearnerNoteId.Value, cancellationToken);
+                    if (targetList is null)
+                        return ApiResponse<NotebookEntryResponse>.NotFound("Không tìm thấy danh sách đích.");
+                    if (targetList.UserId != userId)
+                        return ApiResponse<NotebookEntryResponse>.Fail("Danh sách đích không thuộc về bạn.", HttpStatusCode.Forbidden);
+
+                    note.LearnerNoteId = targetList.Id;
+                }
+
+                // Không bao giờ sửa dữ liệu từ điển chung (Vocabulary / Kanji) khi học viên chỉnh ghi chú cá nhân.
+                if (note.VocabularyId is null && note.KanjiId is null)
+                {
+                    if (!string.IsNullOrWhiteSpace(request.Word))
+                        note.ManualWord = request.Word.Trim();
+                    if (request.Reading is not null)
+                        note.ManualReading = string.IsNullOrWhiteSpace(request.Reading) ? null : request.Reading.Trim();
+                    if (!string.IsNullOrWhiteSpace(request.Meaning))
+                        note.ManualMeaning = request.Meaning.Trim();
+                }
+
+                if (request.Note is not null)
+                    note.Note = request.Note;
+
+                if (note.VocabularyId.HasValue && note.Vocabulary is null)
+                    note.Vocabulary = await unitOfWork.Vocabularies.GetPublicByIdAsync(note.VocabularyId.Value, cancellationToken);
+                if (note.KanjiId.HasValue && note.Kanji is null)
+                    note.Kanji = await unitOfWork.Kanjis.GetPublicByIdAsync(note.KanjiId.Value, cancellationToken);
+
+                unitOfWork.LearnerNoteEntries.Update(note);
+                await unitOfWork.SaveChangesAsync(cancellationToken);
+
+                var existingReviewCard = await unitOfWork.ReviewCards.GetByNoteEntryIdAsync(note.Id);
+                var response = MapEntry(note);
+                response.ReviewCardId = existingReviewCard is { IsDeleted: false } ? existingReviewCard.Id : null;
+                return ApiResponse<NotebookEntryResponse>.Success(response);
+            }
+            catch (Exception)
+            {
+                return ApiResponse<NotebookEntryResponse>.Fail(
+                    "Không thể cập nhật mục sổ tay.", HttpStatusCode.InternalServerError);
+            }
+        }
+
+        public async Task<ApiResponse<NotebookEntryResponse>> EnrollEntryToSrsAsync(
+            int noteEntryId, CancellationToken cancellationToken)
+        {
+            try
+            {
+                var userId = claimService.GetUserClaim().Id;
+                var note = await unitOfWork.LearnerNoteEntries.GetByIdAsync(noteEntryId, cancellationToken);
+                if (note is null || note.IsDeleted)
+                    return ApiResponse<NotebookEntryResponse>.NotFound($"Không tìm thấy mục sổ tay Id = {noteEntryId}.");
+
+                var list = await unitOfWork.LearnerNotes.GetByIdAsync(note.LearnerNoteId, cancellationToken);
+                if (list is null || list.UserId != userId)
+                    return ApiResponse<NotebookEntryResponse>.Fail("Bạn không có quyền thao tác mục này.", HttpStatusCode.Forbidden);
+
+                if (note.VocabularyId.HasValue && note.Vocabulary is null)
+                    note.Vocabulary = await unitOfWork.Vocabularies.GetPublicByIdAsync(note.VocabularyId.Value, cancellationToken);
+                if (note.KanjiId.HasValue && note.Kanji is null)
+                    note.Kanji = await unitOfWork.Kanjis.GetPublicByIdAsync(note.KanjiId.Value, cancellationToken);
+
+                var existingCard = await unitOfWork.ReviewCards.GetByNoteEntryIdAsync(note.Id);
+                if (existingCard is not null && !existingCard.IsDeleted)
+                {
+                    var existingResp = MapEntry(note);
+                    existingResp.ReviewCardId = existingCard.Id;
+                    return ApiResponse<NotebookEntryResponse>.Success(existingResp);
+                }
+
+                var reviewItem = await EnrollIntoReviewQueueAsync(userId, note, cancellationToken);
+                await unitOfWork.SaveChangesAsync(cancellationToken);
 
                 var response = MapEntry(note);
                 response.ReviewCardId = reviewItem.Id;
@@ -324,7 +434,7 @@ namespace RikiPath.Application.Services
             catch (Exception)
             {
                 return ApiResponse<NotebookEntryResponse>.Fail(
-                    "Không thể thêm ghi chú thủ công.", HttpStatusCode.InternalServerError);
+                    "Không thể thêm mục vào hàng chờ ôn tập SRS.", HttpStatusCode.InternalServerError);
             }
         }
 

@@ -7,13 +7,14 @@ internal static class PlacementAssessmentModePolicy
 
     public static string? ComparisonLevel(string? targetCode) => targetCode switch
     {
+        "N1" => "N2",
         "N2" => "N3",
         "N3" => "N4",
         "N4" => "N5",
         _ => null,
     };
 
-    private static bool SupportsDeclaration(string? targetCode) => targetCode is "N4" or "N3" or "N2";
+    private static bool SupportsDeclaration(string? targetCode) => targetCode is "N4" or "N3" or "N2" or "N1";
 
     public static bool IsValidDeclaration(string? targetCode, string? declaration)
     {

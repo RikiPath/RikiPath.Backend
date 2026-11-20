@@ -19,6 +19,8 @@ namespace RikiPath.Infrastructure.Configuration
             builder.Property(x => x.MeetingSessionsUsed).HasDefaultValue(0);
             builder.Property(x => x.MentorReviewPlan).HasMaxLength(6000);
             builder.Property(x => x.PendingMentorQuestion).HasMaxLength(2000);
+            builder.Property(x => x.PlanNameSnapshot).HasMaxLength(150);
+            builder.Property(x => x.PlanCategorySnapshot).HasMaxLength(32);
 
             builder.HasOne(x => x.UserAccount)
                 .WithMany(x => x.UserSubscriptions)

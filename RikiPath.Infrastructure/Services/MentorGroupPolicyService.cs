@@ -96,6 +96,37 @@ public sealed class MentorGroupPolicyService(AppDbContext context, AppSettings? 
                     CreatedAtUtc = DateTime.UtcNow
                 };
                 context.MentorGroupPolicies.Add(policy);
+                context.AdminAuditLogs.Add(new AdminAuditLog
+                {
+                    ActorUserId = adminId,
+                    EntityType = "MentorGroupPolicy",
+                    EntityId = policy.Version,
+                    Action = "PublishedVersion",
+                    BeforeJson = JsonSerializer.Serialize(new
+                    {
+                        latest.Version,
+                        latest.EffectiveFromUtc,
+                        latest.MaxLearners,
+                        latest.SessionMinutes,
+                        latest.RestMinutes,
+                        latest.CourseDurationWeeks,
+                        latest.DefaultSessionsPerWeek,
+                    }),
+                    AfterJson = JsonSerializer.Serialize(new
+                    {
+                        policy.Version,
+                        policy.EffectiveFromUtc,
+                        policy.MaxLearners,
+                        policy.SessionMinutes,
+                        policy.RestMinutes,
+                        policy.CourseDurationWeeks,
+                        policy.DefaultSessionsPerWeek,
+                        policy.AllowedSessionsPerWeekCsv,
+                        policy.CheckoutHoldMinutes,
+                        policy.MinLearnersToStart,
+                    }),
+                    CreatedAtUtc = policy.CreatedAtUtc,
+                });
                 await context.SaveChangesAsync(cancellationToken);
                 if (tx is not null) await tx.CommitAsync(cancellationToken);
                 return ApiResponse<MentorGroupPolicy>.Created(policy);

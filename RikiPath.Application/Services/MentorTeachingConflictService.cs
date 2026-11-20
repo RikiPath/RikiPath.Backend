@@ -139,9 +139,9 @@ public sealed class MentorTeachingConflictService(IUnitOfWork uow, IMentorGroupP
         var excludedIds = excluded.ToList();
         var excludeCohortId = o.ExcludeCohortId ?? 0;
 
-        // (a) Buổi của lớp nhóm đã công bố do Mentor này dạy.
+        // (a) Buổi của lớp nhóm đang mở hoặc nháp do Giáo viên này dạy (tránh trùng lịch từ khâu soạn nháp).
         var cohortRows = await uow.StudyCohorts.Query().AsNoTracking()
-            .Where(g => g.Status == "Published" && g.Id != excludeCohortId)
+            .Where(g => (g.Status == "Published" || g.Status == "Draft") && g.Id != excludeCohortId)
             .SelectMany(g => g.Sessions
                 .Where(s => s.Availability.MentorId == mentorId && !s.Availability.IsDeleted && s.Availability.RejectedAt == null
                     && s.Availability.StartTime < to && s.Availability.EndTime > from && !excludedIds.Contains(s.AvailabilityId))

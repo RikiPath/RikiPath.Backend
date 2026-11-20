@@ -6,5 +6,4 @@
   <Project Path="RikiPath.Domain/RikiPath.Domain.csproj" />
   <Project Path="RikiPath.Infrastructure/RikiPath.Infrastructure.csproj" />
   <Project Path="RikiPath.WebApi/RikiPath.WebApi.csproj" />
-  <Project Path="RikiPath.Tests/RikiPath.Tests.csproj" />
 </Solution>

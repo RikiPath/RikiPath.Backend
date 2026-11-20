@@ -23,7 +23,9 @@ public interface IStudyCourseService
     Task<ApiResponse<object>> AdminCatalogAsync(CancellationToken ct);
     Task<ApiResponse<object>> MentorsAsync(CancellationToken ct);
     Task<ApiResponse<object>> SaveCertificateAsync(int? id, SaveCourseCertificate request, CancellationToken ct);
+    Task<ApiResponse<object>> ReorderCertificateAsync(int id, ReorderCourseCatalogRequest request, CancellationToken ct);
     Task<ApiResponse<object>> SaveLevelAsync(int? id, SaveCourseLevel request, CancellationToken ct);
+    Task<ApiResponse<object>> ReorderLevelAsync(int id, ReorderCourseCatalogRequest request, CancellationToken ct);
     Task<ApiResponse<object>> PlansAsync(CancellationToken ct);
     Task<ApiResponse<object>> SavePlanAsync(int? id, SaveCoursePlan request, CancellationToken ct);
     Task<ApiResponse<object>> CoursesAsync(CancellationToken ct);

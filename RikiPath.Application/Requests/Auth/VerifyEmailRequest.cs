@@ -4,10 +4,12 @@ namespace RikiPath.Application.Requests.Auth
 {
     public class VerifyEmailRequest
     {
-        [Required]
-        public int UserId { get; set; }
+        public int? UserId { get; set; }
 
-        [Required]
+        [EmailAddress]
+        public string? Email { get; set; }
+
+        [Required, RegularExpression(@"^\d{6}$")]
         public string VerificationCode { get; set; } = string.Empty;
     }
 }

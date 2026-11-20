@@ -112,10 +112,25 @@ namespace RikiPath.Application.Services
 
                 if (request.Bio is not null) profile.Bio = request.Bio.Trim();
                 if (request.Expertise is not null) profile.Expertise = request.Expertise.Trim();
-                if (request.JlptLevel is not null) profile.JlptLevel = request.JlptLevel.Trim();
+                if (request.JlptLevel is not null)
+                {
+                    var normalizedLevel = request.JlptLevel.Trim().ToUpperInvariant();
+                    if (!string.IsNullOrEmpty(normalizedLevel) && JlptCurriculum.Rank(normalizedLevel) is < 1 or > 5)
+                        return ApiResponse<MentorProfileResponse>.Fail("Trình độ JLPT không hợp lệ (hỗ trợ N5–N1).", HttpStatusCode.BadRequest);
+                    profile.JlptLevel = normalizedLevel;
+                }
                 if (request.YearsOfExperience.HasValue) profile.YearsOfExperience = request.YearsOfExperience.Value;
                 if (request.Workplace is not null) profile.Workplace = request.Workplace.Trim();
-                if (request.IntroductionVideoUrl is not null) profile.IntroductionVideoUrl = request.IntroductionVideoUrl.Trim();
+                if (request.IntroductionVideoUrl is not null)
+                {
+                    var videoUrl = request.IntroductionVideoUrl.Trim();
+                    if (!string.IsNullOrEmpty(videoUrl) &&
+                        (!Uri.TryCreate(videoUrl, UriKind.Absolute, out var parsedUri) ||
+                         (parsedUri.Scheme != Uri.UriSchemeHttp && parsedUri.Scheme != Uri.UriSchemeHttps) ||
+                         videoUrl.Length > 500))
+                        return ApiResponse<MentorProfileResponse>.Fail("Liên kết video giới thiệu phải là URL http/https hợp lệ (tối đa 500 ký tự).", HttpStatusCode.BadRequest);
+                    profile.IntroductionVideoUrl = videoUrl;
+                }
 
                 profile.ModifiedDate = DateTime.UtcNow;
                 if (!isNew)

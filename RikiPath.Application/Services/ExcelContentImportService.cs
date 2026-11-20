@@ -253,9 +253,8 @@ namespace RikiPath.Application.Services
                             $"Dòng {row.SourceRowNumber}: {validationError}");
                 }
                 var info = ManualContentService.ReadListInfo(row.PayloadJson);
-                if (info?.CertificateLevelId is not int levelId || !levelCodes.TryGetValue(levelId, out var levelCode)
-                    || levelCode is not ("N5" or "N4" or "N3" or "N2"))
-                    return ApiResponse<ImportConfirmResponse>.Fail($"Dòng {row.SourceRowNumber}: hãy chọn cấp độ từ N5 đến N2.");
+                if (info?.CertificateLevelId is not int levelId || !levelCodes.TryGetValue(levelId, out _))
+                    return ApiResponse<ImportConfirmResponse>.Fail($"Dòng {row.SourceRowNumber}: hãy chọn cấp độ hợp lệ.");
                 if (!seen.Add((row.EntityType, row.RowKey, row.EntityType == ImportEntityType.PracticeExercise ? levelId : null))) continue;
                 if (row.Action == ImportRowAction.Modified)
                 {

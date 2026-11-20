@@ -1,0 +1,63 @@
+name: CI Quality & Security Gate
+
+on:
+  pull_request:
+    branches: [ "main" ]
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-quality-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-test-audit:
+    name: Build, Analyzers & NuGet Vulnerability Audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET SDK (per global.json)
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore dependencies (with NuGetAudit enabled)
+        run: dotnet restore RikiPath.Backend.slnx --locked-mode || dotnet restore RikiPath.Backend.slnx
+
+      - name: Build solution (Release)
+        run: dotnet build RikiPath.Backend.slnx --no-restore -c Release
+
+      - name: Check vulnerable NuGet packages
+        run: |
+          dotnet list RikiPath.Backend.slnx package --vulnerable --include-transitive
+
+      - name: Run analyzer verification (error severity gate)
+        run: dotnet format analyzers RikiPath.Backend.slnx --verify-no-changes --severity error --no-restore
+
+  secret-scanning:
+    name: Secret Scan (Gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout full git history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Gitleaks secret scanner
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=8.30.1
+          archive="gitleaks_${version}_linux_x64.tar.gz"
+          base="https://github.com/gitleaks/gitleaks/releases/download/v${version}"
+          curl --fail --location --silent --show-error "${base}/${archive}" -o "${RUNNER_TEMP}/${archive}"
+          curl --fail --location --silent --show-error "${base}/gitleaks_${version}_checksums.txt" -o "${RUNNER_TEMP}/checksums.txt"
+          (cd "${RUNNER_TEMP}" && grep "  ${archive}$" checksums.txt | sha256sum --check)
+          tar -xzf "${RUNNER_TEMP}/${archive}" -C "${RUNNER_TEMP}" gitleaks
+          "${RUNNER_TEMP}/gitleaks" git . --config .gitleaks.toml --redact --no-banner

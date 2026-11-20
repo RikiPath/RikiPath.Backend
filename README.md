@@ -11,7 +11,7 @@ Canonical operational rules for schema changes, EF Core migrations, QA verificat
 2. **Never store credentials in source code, scripts, logs, or reports.**
    - Supply connection strings via environment variables (`AppSettings__ConnectionStrings__DefaultConnection` / `ConnectionStrings__DefaultConnection`), User Secrets, or CI secret stores. Never print secrets in preflight or CI logs.
 3. **Every domain entity / Fluent configuration change requires a reviewed migration (zero drift).**
-   - CI & pre-merge must pass `MigrationGovernanceTests` (`HasPendingModelChanges() == false`, zero duplicate IDs, matching `.Designer.cs` files).
+   - CI & pre-merge must verify clean compilation (`dotnet build RikiPath.Backend.slnx`) and offline migration parity via `./tools/verify-migration-readiness.ps1 -SkipDatabaseCheck` (`HasPendingModelChanges() == false`, zero duplicate IDs, matching `.Designer.cs` files).
 4. **Never arbitrarily rewrite, delete, or squash previously deployed migrations, nor mix independent branches directly on shared DBs.**
    - Do not run `dotnet ef database update` from unmerged feature branches against Shared Supabase.
    - Every migration requires an explicit PR owner; cross-branch migrations must be integrated into the canonical branch before shared deployment.
@@ -27,9 +27,10 @@ Canonical operational rules for schema changes, EF Core migrations, QA verificat
 
 ## Automated Read-Only Tooling & Release Package
 
-- **Offline CI checks:**
+- **Offline CI build & migration checks:**
   ```powershell
-  dotnet test RikiPath.Tests/RikiPath.Tests.csproj --filter "FullyQualifiedName~MigrationGovernanceTests|FullyQualifiedName~AppDbContextDesignTimeFactoryTests"
+  dotnet build RikiPath.Backend.slnx -c Release
+  .\tools\verify-migration-readiness.ps1 -SkipDatabaseCheck -NoBuild
   ```
 - **Live target read-only preflight:**
   ```powershell
@@ -37,3 +38,5 @@ Canonical operational rules for schema changes, EF Core migrations, QA verificat
   ```
 - **Full Deployment, Post-Deployment & Rollback Runbook:**
   See [`Docs/MigrationReleaseReadiness.md`](Docs/MigrationReleaseReadiness.md).
+- **Security, Code Quality, CI/CD & Branch Protection Standards:**
+  See [`Docs/BACKEND_SECURITY_AND_ENGINEERING_STANDARDS.md`](Docs/BACKEND_SECURITY_AND_ENGINEERING_STANDARDS.md).

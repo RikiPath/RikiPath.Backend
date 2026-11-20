@@ -29,6 +29,12 @@ namespace RikiPath.Application.IServices
 
         Task<ApiResponse<NotebookEntryResponse>> AddManualEntryAsync(AddManualEntryRequest request, CancellationToken cancellationToken);
 
+        Task<ApiResponse<NotebookEntryResponse>> UpdateEntryAsync(
+            int noteEntryId, UpdateNotebookEntryRequest request, CancellationToken cancellationToken);
+
+        Task<ApiResponse<NotebookEntryResponse>> EnrollEntryToSrsAsync(
+            int noteEntryId, CancellationToken cancellationToken);
+
         Task<ApiResponse> RemoveEntryAsync(int noteEntryId, CancellationToken cancellationToken);
     }
 }

@@ -21,6 +21,8 @@ param(
     [string]$PsqlPath,
     [switch]$SkipDatabaseCheck,
     [switch]$NoBuild,
+    [ValidateSet('Debug', 'Release')]
+    [string]$BuildConfiguration = 'Release',
     [switch]$RequireSharedRemote,
     [string]$ExpectedHost,
     [string]$ExpectedDatabase,
@@ -82,6 +84,7 @@ Push-Location $BackendRoot
 try {
     $efArgs = @('ef', 'migrations', 'has-pending-model-changes', '--project', 'RikiPath.Infrastructure', '--startup-project', 'RikiPath.WebApi')
     if ($NoBuild) { $efArgs += '--no-build' }
+    $efArgs += @('--configuration', $BuildConfiguration)
     $efArgs += @('--', '--no-connect')
     & dotnet @efArgs
     if ($LASTEXITCODE -ne 0) {

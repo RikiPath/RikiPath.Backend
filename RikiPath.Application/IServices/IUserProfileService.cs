@@ -13,6 +13,8 @@ namespace RikiPath.Application.IServices
 
         Task<ApiResponse<UserProfileResponse>> UpdateAvatarAsync(IFormFile avatarFile, CancellationToken cancellationToken);
 
+        Task<ApiResponse<UserProfileResponse>> DeleteAvatarAsync(CancellationToken cancellationToken);
+
         Task<ApiResponse<UserProfileResponse>> SetJlptGoalAsync(SetJlptGoalRequest request, CancellationToken cancellationToken);
 
         Task<ApiResponse<UserProfileResponse>> SetStudyLevelAsync(SetStudyLevelRequest request, CancellationToken cancellationToken);

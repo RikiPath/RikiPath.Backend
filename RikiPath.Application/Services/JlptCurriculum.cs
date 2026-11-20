@@ -11,6 +11,7 @@ internal static class JlptCurriculum
         "N4" => 2,
         "N3" => 3,
         "N2" => 4,
+        "N1" => 5,
         _ => 0,
     };
 

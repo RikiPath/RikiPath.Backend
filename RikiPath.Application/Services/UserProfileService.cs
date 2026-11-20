@@ -18,6 +18,7 @@ namespace RikiPath.Application.Services
     public class UserProfileService(IUnitOfWork unitOfWork, IFileStorageService fileStorage, IClaimService claimService) : IUserProfileService
     {
         private static readonly string[] AllowedAvatarContentTypes = { "image/jpeg", "image/png", "image/webp" };
+        private static readonly string[] AllowedAvatarExtensions = { ".jpg", ".jpeg", ".png", ".webp" };
         private const long MaxAvatarSizeBytes = 5 * 1024 * 1024; // 5MB
 
         public Func<DateTime> UtcNowProvider { get; init; } = static () => DateTime.UtcNow;
@@ -28,7 +29,7 @@ namespace RikiPath.Application.Services
             {
                 var userId = claimService.GetUserClaim().Id;
                 var user = await unitOfWork.UserAccounts.GetWithLearningGoalAsync(userId, cancellationToken);
-                if (user is null)
+                if (user is null || user.IsDeleted)
                     return ApiResponse<UserProfileResponse>.NotFound("Không tìm thấy người dùng.");
 
                 return ApiResponse<UserProfileResponse>.Success(MapToResponse(user));
@@ -45,20 +46,56 @@ namespace RikiPath.Application.Services
             try
             {
                 var userId = claimService.GetUserClaim().Id;
-                var (firstName, lastName) = UserNameHelper.SplitFullName(request.FullName);
+                var normalizedName = string.Join(' ', (request.FullName ?? string.Empty).Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries));
+                if (normalizedName.Length > 200)
+                    return ApiResponse<UserProfileResponse>.Fail("Họ và tên tối đa 200 ký tự.");
+
+                var (firstName, lastName) = UserNameHelper.SplitFullName(normalizedName);
                 if (string.IsNullOrWhiteSpace(firstName))
                     return ApiResponse<UserProfileResponse>.Fail("Họ và tên không được để trống.");
 
-                var user = await unitOfWork.UserAccounts.GetByIdAsync(userId);
-                if (user is null)
-                    return ApiResponse<UserProfileResponse>.NotFound("Không tìm thấy người dùng.");
+                string? cleanedPhone = null;
+                if (request.UpdatePhoneNumber)
+                {
+                    var rawPhone = request.PhoneNumber?.Trim();
+                    if (!string.IsNullOrEmpty(rawPhone))
+                    {
+                        var compact = rawPhone.Replace(" ", string.Empty).Replace("-", string.Empty);
+                        if (!System.Text.RegularExpressions.Regex.IsMatch(compact, @"^(\+?[1-9]\d{7,14}|0\d{8,10})$"))
+                            return ApiResponse<UserProfileResponse>.Fail("Số điện thoại không đúng định dạng (ví dụ: 0912345678 hoặc +84912345678).");
+                        cleanedPhone = compact;
+                    }
+                }
 
-                user.FirstName = firstName;
-                user.LastName = lastName;
-                unitOfWork.UserAccounts.Update(user);
-                await unitOfWork.SaveChangesAsync();
+                UserProfileResponse? response = null;
+                ApiResponse<UserProfileResponse>? rejection = null;
+                await unitOfWork.ExecuteInTransactionAsync(async ct =>
+                {
+                    var user = await unitOfWork.UserAccounts.GetByIdForUpdateAsync(userId, ct);
+                    if (user is null || user.IsDeleted)
+                    {
+                        rejection = ApiResponse<UserProfileResponse>.NotFound("Không tìm thấy người dùng.");
+                        return;
+                    }
 
-                return ApiResponse<UserProfileResponse>.Success(MapToResponse(user));
+                    user.FirstName = firstName;
+                    user.LastName = lastName;
+                    if (request.UpdatePhoneNumber)
+                        user.PhoneNumber = cleanedPhone;
+                    if (request.StudyTimePreference is not null)
+                    {
+                        var pref = request.StudyTimePreference.Trim();
+                        user.StudyTimePreference = string.IsNullOrEmpty(pref) ? null : pref;
+                    }
+                    user.ModifiedDate = UtcNowProvider();
+                    unitOfWork.UserAccounts.Update(user);
+                    await unitOfWork.SaveChangesAsync(ct);
+
+                    var full = await unitOfWork.UserAccounts.GetWithLearningGoalAsync(userId, ct);
+                    response = MapToResponse(full ?? user);
+                }, cancellationToken);
+
+                return rejection ?? ApiResponse<UserProfileResponse>.Success(response!);
             }
             catch (Exception ex)
             {
@@ -69,6 +106,7 @@ namespace RikiPath.Application.Services
 
         public async Task<ApiResponse<UserProfileResponse>> UpdateAvatarAsync(IFormFile avatarFile, CancellationToken cancellationToken)
         {
+            UploadedFileResult? uploaded = null;
             try
             {
                 var userId = claimService.GetUserClaim().Id;
@@ -78,27 +116,81 @@ namespace RikiPath.Application.Services
                 if (avatarFile.Length > MaxAvatarSizeBytes)
                     return ApiResponse<UserProfileResponse>.Fail("Ảnh đại diện tối đa 5MB.");
 
-                if (!AllowedAvatarContentTypes.Contains(avatarFile.ContentType))
+                var contentType = avatarFile.ContentType?.Trim().ToLowerInvariant() ?? string.Empty;
+                if (!AllowedAvatarContentTypes.Contains(contentType))
                     return ApiResponse<UserProfileResponse>.Fail("Chỉ chấp nhận file JPEG, PNG hoặc WEBP.");
 
-                var user = await unitOfWork.UserAccounts.GetByIdAsync(userId);
-                if (user is null)
+                var ext = Path.GetExtension(avatarFile.FileName)?.ToLowerInvariant() ?? string.Empty;
+                if (!AllowedAvatarExtensions.Contains(ext))
+                    return ApiResponse<UserProfileResponse>.Fail("Phần mở rộng file không hợp lệ (chỉ chấp nhận .jpg, .jpeg, .png, .webp).");
+
+                await using var buffer = new MemoryStream();
+                await using (var incoming = avatarFile.OpenReadStream())
+                {
+                    var chunk = new byte[81920];
+                    int read;
+                    while ((read = await incoming.ReadAsync(chunk, cancellationToken)) > 0)
+                    {
+                        if (buffer.Length + read > MaxAvatarSizeBytes)
+                            return ApiResponse<UserProfileResponse>.Fail("Ảnh đại diện tối đa 5MB.");
+                        await buffer.WriteAsync(chunk.AsMemory(0, read), cancellationToken);
+                    }
+                }
+
+                if (!MatchesImageSignature(buffer.GetBuffer(), buffer.Length, contentType, ext))
+                    return ApiResponse<UserProfileResponse>.Fail("Nội dung file ảnh không khớp định dạng JPEG, PNG hoặc WEBP.");
+
+                var user = await unitOfWork.UserAccounts.GetWithLearningGoalAsync(userId, cancellationToken);
+                if (user is null || user.IsDeleted)
                     return ApiResponse<UserProfileResponse>.NotFound("Không tìm thấy người dùng.");
 
-                await using var stream = avatarFile.OpenReadStream();
-                var uploaded = await fileStorage.UploadAsync(
-                    stream, avatarFile.FileName, avatarFile.ContentType, "avatars", cancellationToken);
+                var previousAvatarUrl = user.AvatarUrl;
+                buffer.Position = 0;
+                var safeFileName = $"avatar-{userId}{NormalizeAvatarExt(contentType)}";
+                uploaded = await fileStorage.UploadAsync(buffer, safeFileName, contentType, "avatars", cancellationToken);
 
                 user.AvatarUrl = uploaded.Url;
+                user.ModifiedDate = UtcNowProvider();
                 unitOfWork.UserAccounts.Update(user);
-                await unitOfWork.SaveChangesAsync();
+                await unitOfWork.SaveChangesAsync(cancellationToken);
 
+                await TryDeleteAvatarObjectAsync(previousAvatarUrl, uploaded.Url, cancellationToken);
+                return ApiResponse<UserProfileResponse>.Success(MapToResponse(user));
+            }
+            catch (Exception ex)
+            {
+                if (uploaded is not null)
+                {
+                    try { await fileStorage.DeleteAsync(uploaded.StoredFileName, "avatars", cancellationToken); }
+                    catch { /* best-effort rollback */ }
+                }
+                return ApiResponse<UserProfileResponse>.Fail(
+                    "Không thể cập nhật ảnh đại diện.", HttpStatusCode.InternalServerError, errors: BuildDebugErrors(ex));
+            }
+        }
+
+        public async Task<ApiResponse<UserProfileResponse>> DeleteAvatarAsync(CancellationToken cancellationToken)
+        {
+            try
+            {
+                var userId = claimService.GetUserClaim().Id;
+                var user = await unitOfWork.UserAccounts.GetWithLearningGoalAsync(userId, cancellationToken);
+                if (user is null || user.IsDeleted)
+                    return ApiResponse<UserProfileResponse>.NotFound("Không tìm thấy người dùng.");
+
+                var previousAvatarUrl = user.AvatarUrl;
+                user.AvatarUrl = null;
+                user.ModifiedDate = UtcNowProvider();
+                unitOfWork.UserAccounts.Update(user);
+                await unitOfWork.SaveChangesAsync(cancellationToken);
+
+                await TryDeleteAvatarObjectAsync(previousAvatarUrl, null, cancellationToken);
                 return ApiResponse<UserProfileResponse>.Success(MapToResponse(user));
             }
             catch (Exception ex)
             {
                 return ApiResponse<UserProfileResponse>.Fail(
-                    "Không thể cập nhật ảnh đại diện.", HttpStatusCode.InternalServerError, errors: BuildDebugErrors(ex));
+                    "Không thể xóa ảnh đại diện.", HttpStatusCode.InternalServerError, errors: BuildDebugErrors(ex));
             }
         }
 
@@ -253,9 +345,9 @@ namespace RikiPath.Application.Services
                 if (current is null || !JlptCurriculum.IsSupportedStudyLevel(current.Code))
                     return ApiResponse<UserProfileResponse>.Fail("Cấp độ đang học không khả dụng; hiện hỗ trợ N5–N3.");
                 if (target is null || !IsSupportedGoalLevel(target.Code))
-                    return ApiResponse<UserProfileResponse>.Fail("Mục tiêu JLPT phải thuộc N5–N2.");
+                    return ApiResponse<UserProfileResponse>.Fail("Mục tiêu JLPT phải thuộc N5–N1.");
                 if (request.HasJlptCertificate && (certified is null || !IsSupportedGoalLevel(certified.Code)))
-                    return ApiResponse<UserProfileResponse>.Fail("Cấp chứng chỉ JLPT phải thuộc N5–N2.");
+                    return ApiResponse<UserProfileResponse>.Fail("Cấp chứng chỉ JLPT phải thuộc N5–N1.");
 
                 var userId = claimService.GetUserClaim().Id;
                 UserProfileResponse? result = null;
@@ -321,22 +413,27 @@ namespace RikiPath.Application.Services
             }
         }
 
-        private static bool IsSupportedGoalLevel(string? code) =>
-            code?.Trim().ToUpperInvariant() is "N5" or "N4" or "N3" or "N2";
+        private static bool IsSupportedGoalLevel(string? code) => JlptCurriculum.Rank(code) is >= 1 and <= 5;
 
         public async Task<ApiResponse<UserProfileResponse>> UpdateNotificationSettingsAsync(UpdateNotificationSettingsRequest request, CancellationToken cancellationToken)
         {
             try
             {
                 var userId = claimService.GetUserClaim().Id;
-                var user = await unitOfWork.UserAccounts.GetByIdAsync(userId);
-                if (user is null)
+                var user = await unitOfWork.UserAccounts.GetWithLearningGoalAsync(userId, cancellationToken);
+                if (user is null || user.IsDeleted)
                     return ApiResponse<UserProfileResponse>.NotFound("Không tìm thấy người dùng.");
 
                 user.EmailNotificationsEnabled = request.EmailNotificationsEnabled;
                 user.SystemNotificationsEnabled = request.SystemNotificationsEnabled;
+                if (request.NotificationCategories is not null)
+                {
+                    user.NotificationPreferencesJson = NotificationPreferenceHelper.SerializeMerged(
+                        user.Role, user.NotificationPreferencesJson, request.NotificationCategories);
+                }
+                user.ModifiedDate = UtcNowProvider();
                 unitOfWork.UserAccounts.Update(user);
-                await unitOfWork.SaveChangesAsync();
+                await unitOfWork.SaveChangesAsync(cancellationToken);
 
                 return ApiResponse<UserProfileResponse>.Success(MapToResponse(user));
             }
@@ -347,54 +444,116 @@ namespace RikiPath.Application.Services
             }
         }
 
-        private static UserProfileResponse MapToResponse(UserAccount user, CertificateLevel? level = null) => new()
+        private static UserProfileResponse MapToResponse(UserAccount user, CertificateLevel? level = null)
         {
-            UserId = user.Id,
-            Email = user.Email,
-            FullName = UserNameHelper.FormatFullName(user.FirstName, user.LastName),
-            AvatarUrl = user.AvatarUrl,
-            Role = user.Role.ToString(),
-            IsEmailVerified = user.IsEmailVerified,
-            TargetJlptLevelId = user.TargetCertificateLevelId,
-            TargetJlptLevelName = level?.Code ?? user.TargetCertificateLevel?.Code,
-            // Legacy profile: an old target remains a readable starting level until the learner confirms a new one.
-            StartingJlptLevelId = user.StartingCertificateLevelId ?? user.TargetCertificateLevelId,
-            StartingJlptLevelName = user.StartingCertificateLevel?.Code ?? level?.Code ?? user.TargetCertificateLevel?.Code,
-            CurrentStudyLevelId = user.StartingCertificateLevelId ?? user.TargetCertificateLevelId,
-            CurrentStudyLevelName = user.StartingCertificateLevel?.Code ?? level?.Code ?? user.TargetCertificateLevel?.Code,
-            LearningMode = user.LearningMode == LearningMode.AiPersonalized ? "AI_PERSONALIZED" : "STANDARD",
-            AssessedJlptLevelId = user.AssessedCertificateLevelId,
-            AssessedJlptLevelName = user.AssessedCertificateLevel?.Code,
-            PlacementDecision = user.PlacementDecision switch
+            var hasPassword = user.PasswordHash is { Length: 64 };
+            var googleLinked = !string.IsNullOrWhiteSpace(user.GoogleSubject);
+            var providers = new List<string>(2);
+            if (hasPassword) providers.Add("Password");
+            if (googleLinked) providers.Add("Google");
+
+            return new UserProfileResponse
             {
-                PlacementDecision.Skipped => "SKIPPED",
-                PlacementDecision.Completed => "COMPLETED",
-                _ => "NOT_TAKEN",
-            },
-            DeclaredJlptCertificateCode = user.DeclaredJlptCertificateCode,
-            DailyStudyMinutes = user.DailyStudyMinutes,
-            DailyStudyMinutesMin = user.DailyStudyMinutesMin ?? user.DailyStudyMinutes,
-            DailyStudyMinutesMax = user.DailyStudyMinutesMax ?? user.DailyStudyMinutes,
-            TargetCertificateTypeId = level?.CertificateTypeId ?? user.TargetCertificateLevel?.CertificateTypeId,
-            LearningGoalVersion = user.LearningGoalVersion,
-            HasJlptCertificate = user.SelfDeclaredCertificateLevelId.HasValue,
-            CertifiedJlptLevelId = user.SelfDeclaredCertificateLevelId,
-            CertifiedJlptLevelName = user.SelfDeclaredCertificateLevel?.Code,
-            TargetExamDate = user.TargetExamDate,
-            EmailNotificationsEnabled = user.EmailNotificationsEnabled,
-            SystemNotificationsEnabled = user.SystemNotificationsEnabled,
+                UserId = user.Id,
+                Email = user.Email ?? string.Empty,
+                PendingEmail = user.PendingEmail,
+                FullName = UserNameHelper.FormatFullName(user.FirstName, user.LastName),
+                PhoneNumber = user.PhoneNumber,
+                AvatarUrl = user.AvatarUrl,
+                Role = user.Role.ToString(),
+                IsEmailVerified = user.IsEmailVerified,
+                IsPhoneVerified = user.IsPhoneVerified,
+                HasPassword = hasPassword,
+                GoogleLinked = googleLinked,
+                AuthProviders = providers,
+                StudyTimePreference = user.StudyTimePreference,
+                CurrentStreak = user.CurrentStreak,
+                LongestStreak = user.LongestStreak,
+                TargetJlptLevelId = user.TargetCertificateLevelId,
+                TargetJlptLevelName = level?.Code ?? user.TargetCertificateLevel?.Code,
+                StartingJlptLevelId = user.StartingCertificateLevelId ?? user.TargetCertificateLevelId,
+                StartingJlptLevelName = user.StartingCertificateLevel?.Code ?? level?.Code ?? user.TargetCertificateLevel?.Code,
+                CurrentStudyLevelId = user.StartingCertificateLevelId ?? user.TargetCertificateLevelId,
+                CurrentStudyLevelName = user.StartingCertificateLevel?.Code ?? level?.Code ?? user.TargetCertificateLevel?.Code,
+                LearningMode = user.LearningMode == LearningMode.AiPersonalized ? "AI_PERSONALIZED" : "STANDARD",
+                AssessedJlptLevelId = user.AssessedCertificateLevelId,
+                AssessedJlptLevelName = user.AssessedCertificateLevel?.Code,
+                PlacementDecision = user.PlacementDecision switch
+                {
+                    PlacementDecision.Skipped => "SKIPPED",
+                    PlacementDecision.Completed => "COMPLETED",
+                    _ => "NOT_TAKEN",
+                },
+                DeclaredJlptCertificateCode = user.DeclaredJlptCertificateCode,
+                DailyStudyMinutes = user.DailyStudyMinutes,
+                DailyStudyMinutesMin = user.DailyStudyMinutesMin ?? user.DailyStudyMinutes,
+                DailyStudyMinutesMax = user.DailyStudyMinutesMax ?? user.DailyStudyMinutes,
+                TargetCertificateTypeId = level?.CertificateTypeId ?? user.TargetCertificateLevel?.CertificateTypeId,
+                LearningGoalVersion = user.LearningGoalVersion,
+                HasJlptCertificate = user.SelfDeclaredCertificateLevelId.HasValue,
+                CertifiedJlptLevelId = user.SelfDeclaredCertificateLevelId,
+                CertifiedJlptLevelName = user.SelfDeclaredCertificateLevel?.Code,
+                TargetExamDate = user.TargetExamDate,
+                EmailNotificationsEnabled = user.EmailNotificationsEnabled,
+                SystemNotificationsEnabled = user.SystemNotificationsEnabled,
+                NotificationCategories = NotificationPreferenceHelper.ParseForRole(user.Role, user.NotificationPreferencesJson),
+            };
+        }
+
+        private async Task TryDeleteAvatarObjectAsync(string? previousUrl, string? newUrl, CancellationToken cancellationToken)
+        {
+            if (string.IsNullOrWhiteSpace(previousUrl) || string.Equals(previousUrl, newUrl, StringComparison.Ordinal))
+                return;
+            if (!Uri.TryCreate(previousUrl, UriKind.Absolute, out var uri))
+                return;
+            const string marker = "/avatars/";
+            var idx = uri.AbsolutePath.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+            if (idx < 0)
+                return;
+            var fileName = Uri.UnescapeDataString(uri.AbsolutePath[(idx + marker.Length)..]);
+            if (string.IsNullOrWhiteSpace(fileName) || fileName.Contains('/') || fileName.Contains(".."))
+                return;
+            try
+            {
+                await fileStorage.DeleteAsync(fileName, "avatars", cancellationToken);
+            }
+            catch
+            {
+                // Keep profile update successful even if old storage cleanup fails.
+            }
+        }
+
+        private static string NormalizeAvatarExt(string contentType) => contentType switch
+        {
+            "image/png" => ".png",
+            "image/webp" => ".webp",
+            _ => ".jpg",
         };
 
-        private static List<string> BuildDebugErrors(Exception ex)
+        private static bool MatchesImageSignature(byte[] bytes, long length, string contentType, string ext) => (contentType, ext) switch
         {
+            ("image/jpeg", ".jpg" or ".jpeg") => length >= 3 && bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF,
+            ("image/png", ".png") => length >= 8 && bytes[0] == 0x89 && bytes[1] == 0x50 && bytes[2] == 0x4E && bytes[3] == 0x47
+                && bytes[4] == 0x0D && bytes[5] == 0x0A && bytes[6] == 0x1A && bytes[7] == 0x0A,
+            ("image/webp", ".webp") => length >= 12
+                && bytes[0] == 0x52 && bytes[1] == 0x49 && bytes[2] == 0x46 && bytes[3] == 0x46
+                && bytes[8] == 0x57 && bytes[9] == 0x45 && bytes[10] == 0x42 && bytes[11] == 0x50,
+            _ => false,
+        };
+
+        private static List<string>? BuildDebugErrors(Exception ex)
+        {
+#if DEBUG
             var errors = new List<string> { $"{ex.GetType().Name}: {ex.Message}" };
             if (ex.InnerException is not null)
                 errors.Add($"Inner: {ex.InnerException.Message}");
-#if DEBUG
             if (!string.IsNullOrEmpty(ex.StackTrace))
                 errors.Add(ex.StackTrace);
-#endif
             return errors;
+#else
+            _ = ex;
+            return null;
+#endif
         }
     }
 }

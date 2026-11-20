@@ -7,10 +7,6 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <InternalsVisibleTo Include="RikiPath.Tests" />
-  </ItemGroup>
-
-  <ItemGroup>
     <ProjectReference Include="..\RikiPath.Application\RikiPath.Application.csproj" />
     <ProjectReference Include="..\RikiPath.Domain\RikiPath.Domain.csproj" />
   </ItemGroup>

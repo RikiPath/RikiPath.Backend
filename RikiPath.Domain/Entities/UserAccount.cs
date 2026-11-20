@@ -10,6 +10,8 @@ namespace RikiPath.Domain.Entities
         public string? FirstName { get; set; }
         public string? LastName { get; set; }
         public string? Email { get; set; }
+        public string? PendingEmail { get; set; }
+        public DateTime? PendingEmailRequestedAtUtc { get; set; }
         public string? PhoneNumber { get; set; }
         public string? FirebaseUid { get; set; }
         public string? GoogleSubject { get; set; }
@@ -17,9 +19,11 @@ namespace RikiPath.Domain.Entities
         public bool IsEmailVerified { get; set; } = false;
         public Role Role { get; set; }
         public string? AvatarUrl { get; set; }
+        public int TokenVersion { get; set; } = 1;
 
         public bool SystemNotificationsEnabled { get; set; } = true;
         public bool EmailNotificationsEnabled { get; set; } = true;
+        public string? NotificationPreferencesJson { get; set; }
         public int? DailyStudyMinutesMin { get; set; }
         public int? DailyStudyMinutesMax { get; set; }
         public int DailyStudyMinutes { get; set; } = 30;

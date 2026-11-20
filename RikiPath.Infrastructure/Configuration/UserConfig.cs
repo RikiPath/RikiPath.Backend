@@ -23,8 +23,11 @@ namespace RikiPath.Infrastructure.Configuration
 
             builder.Property(x => x.FirstName).HasMaxLength(100);
             builder.Property(x => x.LastName).HasMaxLength(100);
+            builder.Property(x => x.PendingEmail).HasMaxLength(255);
             builder.Property(x => x.PhoneNumber).HasMaxLength(20);
             builder.Property(x => x.AvatarUrl).HasMaxLength(500);
+            builder.Property(x => x.NotificationPreferencesJson).HasMaxLength(2000);
+            builder.Property(x => x.TokenVersion).HasDefaultValue(1);
             builder.Property(x => x.StudyTimePreference).HasMaxLength(50);
             builder.Property(x => x.Role).HasConversion<string>().HasMaxLength(20);
 
@@ -147,6 +150,7 @@ namespace RikiPath.Infrastructure.Configuration
                 PasswordHash = hash,
                 IsEmailVerified = true,
                 IsDeleted = false,
+                TokenVersion = 1,
                 CreatedDate = new DateTime(2026, 9, 28, 0, 0, 0, DateTimeKind.Utc)
             };
         }
