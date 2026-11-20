@@ -2,6 +2,7 @@ namespace RikiPath.Domain.Entities
 {
     public class GrammarPattern : Base
     {
+        public string? ImageUrl { get; set; }
         public int Id { get; set; }
         public string Title { get; set; }
         public string Structure { get; set; }

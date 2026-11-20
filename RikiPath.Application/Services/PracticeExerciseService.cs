@@ -79,6 +79,7 @@ namespace RikiPath.Application.Services
                             Id = exercise.Id,
                             LessonId = exercise.LessonId,
                             Title = exercise.Title,
+                            ImageUrl = exercise.ImageUrl,
                             Description = exercise.Description,
                             LanguageSkillId = exercise.LanguageSkillId,
                             LanguageSkillName = skillNames.GetValueOrDefault(exercise.LanguageSkillId, string.Empty),
@@ -193,6 +194,7 @@ namespace RikiPath.Application.Services
                     AttemptId = attempt.Id,
                     PracticeExerciseId = exercise.Id,
                     Title = exercise.Title,
+                    ImageUrl = exercise.ImageUrl,
                     StartedAt = attempt.StartedAt,
                     Resumed = resumed,
                     Questions = questions
@@ -201,12 +203,14 @@ namespace RikiPath.Application.Services
                         {
                             Id = question.Id,
                             QuestionText = question.QuestionText,
+                            ImageUrl = question.ImageUrl,
                             SortOrder = question.SortOrder,
                             Options = optionsByQuestion.TryGetValue(question.Id, out var questionOptions)
                                 ? questionOptions.Select(option => new PracticeOptionResponse
                                 {
                                     Id = option.Id,
                                     OptionText = option.OptionText,
+                                    ImageUrl = option.ImageUrl,
                                     SortOrder = option.SortOrder,
                                 }).ToList()
                                 : new List<PracticeOptionResponse>(),

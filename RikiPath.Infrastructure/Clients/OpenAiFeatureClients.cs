@@ -50,6 +50,11 @@ public sealed class OpenAiEssayGradingClient(OpenAiClient client) : IAiEssayGrad
 {
     public async Task<string> GenerateGradingJsonAsync(int userId, string systemPrompt, string userPrompt, CancellationToken cancellationToken)
         => (await client.CompleteAsync(client.Settings.GradingModel, systemPrompt + "\nChỉ trả JSON object hợp lệ.", userPrompt, true, cancellationToken)).Text;
+
+    public async Task<string> GenerateGradingJsonAsync(int userId, string systemPrompt, string userPrompt,
+        CancellationToken cancellationToken, int maxOutputTokens)
+        => (await client.CompleteAsync(client.Settings.GradingModel, systemPrompt + "\nChỉ trả JSON object hợp lệ.", userPrompt, true,
+            cancellationToken, maxOutputTokens: maxOutputTokens)).Text;
 }
 
 public sealed class OpenAiContentReviewClient(OpenAiClient client) : IAiContentReviewClient

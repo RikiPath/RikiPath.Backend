@@ -8,13 +8,18 @@ using RikiPath.Application.Requests.Content;
 using RikiPath.Application.Responses;
 using RikiPath.Application.Responses.Content;
 using RikiPath.Domain.Enums;
+using RikiPath.Application.Services;
+using RikiPath.WebApi.Services;
 
 namespace RikiPath.Api.Controllers
 {
     [ApiController]
     [Route("api/content-import")]
     [Authorize(Roles = "ContentAuthor,Admin")]
-    public class ContentImportController(IExcelContentImportService importService, IFileStorageService fileStorage) : ControllerBase
+    public class ContentImportController(IExcelContentImportService importService, IFileStorageService fileStorage,
+        IContentAudioTranscriptionService? transcriptions = null,
+        ILogger<ContentImportController>? logger = null,
+        IAwsAudioFileStorageService? awsAudio = null) : ControllerBase
     {
         private const string ExcelContentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
         private static readonly JsonSerializerOptions WorkbookJson = new(JsonSerializerDefaults.Web);
@@ -31,8 +36,56 @@ namespace RikiPath.Api.Controllers
             if (!await HasMp3HeaderAsync(stream, cancellationToken))
                 return BadRequest(ApiResponse<UploadedFileResult>.Fail("File nghe không có định dạng MP3 hợp lệ."));
 
+            if (file.Length > ListeningAudioFilePolicy.MaxBytes)
+                return BadRequest(ApiResponse<UploadedFileResult>.Fail("File MP3 không được vượt quá 500 MB."));
+
             await using var audio = file.OpenReadStream();
+            if (transcriptions is not null)
+            {
+                try
+                {
+                    var result = await transcriptions.UploadAsync(audio, file.FileName, GetCurrentUserId() ?? 0, cancellationToken);
+                    return Ok(ApiResponse<ListeningAudioUploadResponse>.Success(result));
+                }
+                catch (ArgumentException ex)
+                {
+                    return BadRequest(ApiResponse<ListeningAudioUploadResponse>.Fail(ex.Message));
+                }
+                catch (System.Data.Common.DbException ex) when (ex.SqlState is "42P01" or "42703")
+                {
+                    return StatusCode(503, ApiResponse<ListeningAudioUploadResponse>.Fail(
+                        "Cần cập nhật database cho chức năng nhận dạng audio.", System.Net.HttpStatusCode.ServiceUnavailable,
+                        "AUDIO_TRANSCRIPTION_SCHEMA_REQUIRED"));
+                }
+                catch (InvalidOperationException)
+                {
+                    return StatusCode(503, ApiResponse<ListeningAudioUploadResponse>.Fail(
+                        "Dịch vụ lưu audio chưa được cấu hình đầy đủ.", System.Net.HttpStatusCode.ServiceUnavailable,
+                        "AUDIO_STORAGE_NOT_CONFIGURED"));
+                }
+                catch (Amazon.Runtime.AmazonServiceException ex)
+                {
+                    var failure = AwsAudioUploadErrors.Create<ListeningAudioUploadResponse>(ex, logger);
+                    return StatusCode(failure.StatusCode, failure);
+                }
+            }
             var uploaded = await fileStorage.UploadAsync(audio, file.FileName, "audio/mpeg", "jlpt-listening", cancellationToken);
+            return Ok(ApiResponse<UploadedFileResult>.Success(uploaded));
+        }
+
+        [HttpPost("content-image")]
+        [Consumes("multipart/form-data")]
+        public async Task<IActionResult> UploadContentImage(IFormFile? file, CancellationToken cancellationToken)
+        {
+            if (file is null || file.Length == 0)
+                return BadRequest(ApiResponse<UploadedFileResult>.Fail("Vui lòng chọn một hình ảnh."));
+            if (!file.ContentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+                return BadRequest(ApiResponse<UploadedFileResult>.Fail("Chỉ hỗ trợ file hình ảnh."));
+            if (file.Length > ImportImageFiles.MaxImageBytes)
+                return BadRequest(ApiResponse<UploadedFileResult>.Fail("Hình ảnh không được vượt quá 10 MB."));
+
+            await using var stream = file.OpenReadStream();
+            var uploaded = await fileStorage.UploadAsync(stream, file.FileName, file.ContentType, "jlpt-images", cancellationToken);
             return Ok(ApiResponse<UploadedFileResult>.Success(uploaded));
         }
 
@@ -41,15 +94,21 @@ namespace RikiPath.Api.Controllers
         /// </summary>
         /// <param name="file">File Excel (.xlsx, .xls)</param>
         /// <param name="entityType">Tùy chọn: Chọn loại nội dung cụ thể nếu chỉ muốn đọc 1 sheet duy nhất</param>
+        /// <param name="audioFiles">Các MP3 được chọn cùng Excel, tải lên AWS S3.</param>
+        /// <param name="imageFiles">Các ảnh được chọn cùng Excel, tải lên Supabase.</param>
         /// <param name="cancellationToken"></param>
         [HttpPost("preview")]
         [Consumes("multipart/form-data")]
         [ProducesResponseType(typeof(ApiResponse<ImportPreviewResponse>), StatusCodes.Status200OK)]
         [ProducesResponseType(typeof(ApiResponse<ImportPreviewResponse>), StatusCodes.Status400BadRequest)]
+        [RequestSizeLimit(270L * 1024 * 1024)]
+        [RequestFormLimits(MultipartBodyLengthLimit = 270L * 1024 * 1024)]
         public async Task<IActionResult> Preview(
             IFormFile file,
             [FromQuery] ImportEntityType? entityType,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            [FromForm] List<IFormFile>? audioFiles = null,
+            [FromForm] List<IFormFile>? imageFiles = null)
         {
             if (file == null || file.Length == 0)
             {
@@ -63,9 +122,24 @@ namespace RikiPath.Api.Controllers
             }
 
             await using var stream = file.OpenReadStream();
+            ImportAudioFiles resolver;
+            ImportImageFiles imageResolver;
+            try
+            {
+                if ((audioFiles ?? []).Sum(item => item.Length) + (imageFiles ?? []).Sum(item => item.Length) > 250L * 1024 * 1024)
+                    throw new InvalidDataException("Tổng dung lượng ảnh và MP3 trong mỗi lần import tối đa 250 MB.");
+                resolver = new ImportAudioFiles(audioFiles, awsAudio, transcriptions, GetCurrentUserId() ?? 0,
+                    (path, token) => UploadLocalMediaAsync(path, isAudio: true, token));
+                imageResolver = new ImportImageFiles(imageFiles, fileStorage,
+                    (path, token) => UploadLocalMediaAsync(path, isAudio: false, token));
+            }
+            catch (InvalidDataException ex)
+            {
+                return BadRequest(ApiResponse<ImportPreviewResponse>.Fail(ex.Message));
+            }
             var result = await importService.PreviewAsync(stream, file.FileName, entityType, cancellationToken,
-                (path, token) => UploadLocalMediaAsync(path, isAudio: true, token),
-                (path, token) => UploadLocalMediaAsync(path, isAudio: false, token));
+                (path, token) => ResolveImportAudioAsync(resolver, path, token),
+                imageResolver.ResolveAsync);
 
             if (!result.IsSuccess)
             {
@@ -112,44 +186,76 @@ namespace RikiPath.Api.Controllers
                 : StatusCode(result.StatusCode, result);
         }
 
+        private async Task<string> ResolveImportAudioAsync(ImportAudioFiles resolver, string source, CancellationToken ct)
+        {
+            try { return await resolver.ResolveAsync(source, ct); }
+            catch (Amazon.Runtime.AmazonServiceException ex)
+            {
+                var failure = AwsAudioUploadErrors.Create<object>(ex, logger);
+                throw new InvalidDataException(failure.ErrorMessage);
+            }
+            catch (ArgumentException ex) { throw new InvalidDataException(ex.Message); }
+            catch (InvalidOperationException)
+            {
+                throw new InvalidDataException("Dịch vụ lưu và nhận dạng audio chưa được cấu hình đầy đủ.");
+            }
+            catch (HttpRequestException)
+            {
+                throw new InvalidDataException("Không kết nối được kho audio. Vui lòng thử lại.");
+            }
+        }
+
         private async Task<string> UploadLocalMediaAsync(string path, bool isAudio, CancellationToken cancellationToken)
         {
             if (!User.IsInRole("ContentAuthor") && !User.IsInRole("Admin"))
                 throw new InvalidDataException("Chỉ Content Author hoặc Admin được nhập ảnh hoặc audio từ đường dẫn trên máy chủ.");
 
-            var audioRoot = Environment.GetEnvironmentVariable("RIKIPATH_IMPORT_AUDIO_ROOT");
+            var audioRoot = Environment.GetEnvironmentVariable(isAudio ? "RIKIPATH_IMPORT_AUDIO_ROOT" : "RIKIPATH_IMPORT_IMAGE_ROOT")
+                ?? (!isAudio ? Environment.GetEnvironmentVariable("RIKIPATH_IMPORT_AUDIO_ROOT") : null);
             if (string.IsNullOrWhiteSpace(audioRoot) || !Path.IsPathFullyQualified(audioRoot))
-                throw new InvalidDataException("Máy chủ chưa cấu hình thư mục audio RIKIPATH_IMPORT_AUDIO_ROOT.");
+                throw new InvalidDataException(isAudio
+                    ? "Không tìm thấy MP3. Hãy chọn thư mục hoặc các file MP3 trên web cùng với file Excel."
+                    : "Không tìm thấy ảnh. Hãy chọn thư mục hoặc các file ảnh trên web cùng với file Excel.");
 
             try
             {
-                var fullPath = Path.GetFullPath(path);
+                var fullPath = Path.GetFullPath(path, Path.GetFullPath(audioRoot));
                 var relative = Path.GetRelativePath(Path.GetFullPath(audioRoot), fullPath);
                 if (Path.IsPathRooted(relative) || relative == ".." ||
                     relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal) || relative.Contains(':'))
-                    throw new InvalidDataException("Đường dẫn file phải nằm trong thư mục audio được phép.");
+                    throw new InvalidDataException("Đường dẫn file phải nằm trong thư mục import được phép.");
                 var extension = Path.GetExtension(fullPath).ToLowerInvariant();
                 var contentType = isAudio
                     ? (extension == ".mp3" ? "audio/mpeg" : null)
-                    : extension switch { ".jpg" or ".jpeg" => "image/jpeg", ".png" => "image/png", ".webp" => "image/webp", _ => null };
+                    : extension switch { ".jpg" or ".jpeg" => "image/jpeg", ".png" => "image/png", ".webp" => "image/webp", ".gif" => "image/gif", _ => null };
                 if (contentType is null)
-                    throw new InvalidDataException(isAudio ? "Đường dẫn audio phải trỏ tới file .mp3." : "Ảnh phải là JPG, PNG hoặc WebP.");
+                    throw new InvalidDataException(isAudio ? "Đường dẫn audio phải trỏ tới file .mp3." : "Ảnh phải là JPG, PNG, WebP hoặc GIF.");
 
                 for (string? entry = fullPath; entry is not null; entry = Path.GetDirectoryName(entry))
                 {
                     if ((System.IO.File.GetAttributes(entry) & FileAttributes.ReparsePoint) != 0)
-                        throw new InvalidDataException("Đường dẫn audio không được đi qua thư mục hoặc file liên kết.");
+                        throw new InvalidDataException("Đường dẫn import không được đi qua thư mục hoặc file liên kết.");
                 }
 
                 await using var audio = System.IO.File.OpenRead(fullPath);
-                if (audio.Length > 25 * 1024 * 1024)
-                    throw new InvalidDataException("File tối đa 25 MB.");
+                if (audio.Length > (isAudio ? 25 * 1024 * 1024 : ImportImageFiles.MaxImageBytes))
+                    throw new InvalidDataException(isAudio ? "MP3 tối đa 25 MB." : "Ảnh tối đa 10 MB.");
                 if (isAudio && !await HasMp3HeaderAsync(audio, cancellationToken))
                     throw new InvalidDataException("File nghe không có định dạng MP3 hợp lệ.");
                 audio.Position = 0;
+                if (!isAudio)
+                {
+                    var header = new byte[12];
+                    var read = await audio.ReadAtLeastAsync(header, header.Length, false, cancellationToken);
+                    contentType = ImportImageFiles.DetectContentType(header, read, fullPath);
+                    audio.Position = 0;
+                }
 
                 try
                 {
+                    if (isAudio && transcriptions is not null)
+                        return (await transcriptions.UploadAsync(audio, Path.GetFileName(fullPath),
+                            GetCurrentUserId() ?? 0, cancellationToken)).Url;
                     var uploaded = await fileStorage.UploadAsync(audio, Path.GetFileName(fullPath), contentType, isAudio ? "jlpt-listening" : "jlpt-images", cancellationToken);
                     return uploaded.Url;
                 }

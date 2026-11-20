@@ -8,7 +8,8 @@ namespace RikiPath.Application.IServices
     public interface IExcelContentImportService
     {
         /// <summary>
-        /// Step 1 - Dry Run. Không ghi gì xuống DB. onlyType = null -> Bulk upload (đọc mọi sheet handler hỗ trợ
+        /// Step 1: đọc và so sánh nội dung; file media đính kèm được tải lên storage trước khi dựng bản nháp.
+        /// onlyType = null -> Bulk upload (đọc mọi sheet handler hỗ trợ
         /// mà file có); onlyType có giá trị -> Single upload (chỉ đọc đúng 1 sheet tương ứng, bỏ qua sheet khác dù file có).
         /// </summary>
         Task<ApiResponse<ImportPreviewResponse>> PreviewAsync(

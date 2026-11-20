@@ -2,6 +2,7 @@ namespace RikiPath.Application.Responses.Lessons
 {
     public class LessonDetailResponse
     {
+        public string? ImageUrl { get; set; }
         public int LessonId { get; set; }
         public int CourseId { get; set; }
         public int CertificateLevelId { get; set; }
@@ -27,6 +28,7 @@ namespace RikiPath.Application.Responses.Lessons
 
     public class LessonVocabularyResponse
     {
+        public string? ImageUrl { get; set; }
         public int VocabularyId { get; set; }
         public string Word { get; set; } = string.Empty;
         public string Reading { get; set; } = string.Empty;
@@ -38,6 +40,7 @@ namespace RikiPath.Application.Responses.Lessons
 
     public class LessonKanjiResponse
     {
+        public string? ImageUrl { get; set; }
         public int KanjiId { get; set; }
         public string Character { get; set; } = string.Empty;
         public string Meaning { get; set; } = string.Empty;
@@ -51,6 +54,7 @@ namespace RikiPath.Application.Responses.Lessons
 
     public class LessonGrammarResponse
     {
+        public string? ImageUrl { get; set; }
         public int GrammarPatternId { get; set; }
         public string Title { get; set; } = string.Empty;
         public string Structure { get; set; } = string.Empty;

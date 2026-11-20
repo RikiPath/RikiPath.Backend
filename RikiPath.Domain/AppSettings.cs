@@ -13,6 +13,7 @@ namespace RikiPath.Domain
         public PayOsPayoutSettings PayOsPayout { get; set; } = new();
         public MentorBankSecuritySettings MentorBankSecurity { get; set; } = new();
         public SupabaseSettings Supabase { get; set; }
+        public AwsAudioSettings AwsAudio { get; set; } = new();
         public AiSettings Ai { get; set; } = new();
         public GoogleAuthSettings GoogleAuth { get; set; } = new();
         public string FrontendBaseUrl { get; set; }
@@ -105,6 +106,20 @@ namespace RikiPath.Domain
         public string ServiceRoleKey { get; set; } = string.Empty;
         public string Bucket { get; set; } = string.Empty;
         public string VerificationBucket { get; set; } = string.Empty;
+    }
+
+    public sealed class AwsAudioSettings
+    {
+        public string AccessKeyId { get; set; } = string.Empty;
+        public string SecretAccessKey { get; set; } = string.Empty;
+        public string SessionToken { get; set; } = string.Empty;
+        public string Region { get; set; } = "us-east-1";
+        public string Bucket { get; set; } = string.Empty;
+        public string PublicBaseUrl { get; set; } = string.Empty;
+        public string ContentPrefix { get; set; } = "rikipath-audio/content";
+        public string RecordingPrefix { get; set; } = "rikipath-audio/recordings";
+        public string TemporaryPrefix { get; set; } = "rikipath-audio/processing";
+        public int JobTimeoutSeconds { get; set; } = 900;
     }
 
     public class AiSettings

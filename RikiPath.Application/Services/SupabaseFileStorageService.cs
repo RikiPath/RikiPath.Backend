@@ -50,7 +50,8 @@ namespace RikiPath.Application.Services
                 "application/pdf" => ".pdf",
                 "image/jpeg" => ".jpg",
                 "image/png" => ".png",
-                _ => throw new ArgumentException("Loại tài liệu không được hỗ trợ.", nameof(contentType))
+                _ => HomeworkAudioFormat.Extension(contentType)
+                    ?? throw new ArgumentException("Loại tài liệu không được hỗ trợ.", nameof(contentType))
             };
             var bucket = await RequirePrivateVerificationBucketAsync(cancellationToken);
             var objectPath = $"mentor/{ownerId}/{Guid.NewGuid():N}{extension}";
@@ -210,7 +211,7 @@ namespace RikiPath.Application.Services
             if (response.Content.Headers.ContentLength > maxBytes)
                 throw new InvalidOperationException("Chứng chỉ vượt quá giới hạn dung lượng.");
             var contentType = response.Content.Headers.ContentType?.MediaType;
-            if (contentType is not ("application/pdf" or "image/jpeg" or "image/png"))
+            if (contentType is not ("application/pdf" or "image/jpeg" or "image/png") && HomeworkAudioFormat.Extension(contentType) is null)
                 throw new InvalidOperationException("Loại chứng chỉ không hợp lệ.");
             var result = new MemoryStream();
             await using var source = await response.Content.ReadAsStreamAsync(cancellationToken);
@@ -226,7 +227,7 @@ namespace RikiPath.Application.Services
                 await result.WriteAsync(buffer.AsMemory(0, count), cancellationToken);
             }
             result.Position = 0;
-            return new PrivateVerificationReadResult(result, contentType);
+            return new PrivateVerificationReadResult(result, contentType!);
         }
     }
 }

@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using RikiPath.Application.Helpers;
 using RikiPath.Application.Responses.Content;
@@ -77,6 +77,11 @@ namespace RikiPath.Application.Handlers
                 },
             };
 
+            diff.Errors.AddRange(row.MediaImportErrors);
+            var imageUrl = ImportHandlerSupport.CheckUrl(row.Get("ImageUrl"), "ImageUrl", "", diff.Errors);
+            var strokeImage = ImportHandlerSupport.CheckUrl(row.Get("StrokeOrderImageUrl"), "StrokeOrderImageUrl", "", diff.Errors);
+            var audioUrl = ImportHandlerSupport.CheckUrl(row.Get("AudioUrl"), "AudioUrl", "", diff.Errors);
+
             // ---- Validate ----
             if (string.IsNullOrWhiteSpace(character))
                 diff.Errors.Add("Thiếu cột Character.");
@@ -108,6 +113,9 @@ namespace RikiPath.Application.Handlers
             // ---- Build payload ----
             var payload = new KanjiImportPayloadResponse
             {
+                ImageUrl = imageUrl,
+                StrokeOrderImageUrl = strokeImage,
+                AudioUrl = audioUrl,
                 Character = character!,
                 Meaning = meaning!,
                 SinoVietnamese = sinoVietnamese,
@@ -129,6 +137,10 @@ namespace RikiPath.Application.Handlers
 
             diff.TargetEntityId = existing.Id;
             var changed = new Dictionary<string, string>();
+            if (payload.StrokeOrderImageUrl is not null) ImportHandlerSupport.CompareField(changed, "strokeOrderImageUrl", existing.StrokeOrderImageUrl, payload.StrokeOrderImageUrl);
+            if (payload.AudioUrl is not null) ImportHandlerSupport.CompareField(changed, "audioUrl", existing.AudioUrl, payload.AudioUrl);
+            if (payload.ImageUrl is not null)
+                ImportHandlerSupport.CompareField(changed, "imageUrl", existing.ImageUrl, payload.ImageUrl);
 
             ImportHandlerSupport.CompareField(changed, "meaning", existing.Meaning, payload.Meaning);
             ImportHandlerSupport.CompareField(changed, "sinoVietnamese", existing.SinoVietnamese, payload.SinoVietnamese);

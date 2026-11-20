@@ -12,4 +12,5 @@ public sealed class AmazonTranscribeSettings
     public string AudioBucket { get; set; } = string.Empty;
     public string AudioPrefix { get; set; } = "rikipath-speech/";
     public int JobTimeoutSeconds { get; set; } = 120;
+    public int ContentJobTimeoutSeconds { get; set; } = 900;
 }

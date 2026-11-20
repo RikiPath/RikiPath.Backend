@@ -3,6 +3,7 @@ namespace RikiPath.Domain.Entities;
 /// <summary>A question in a practice exercise.</summary>
 public class PracticeQuestion : Base
 {
+    public string? ImageUrl { get; set; }
     public int Id { get; set; }
     public string QuestionText { get; set; } = string.Empty;
     public string? Explanation { get; set; }

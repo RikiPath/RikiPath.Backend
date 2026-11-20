@@ -151,8 +151,11 @@ public sealed class LearnerFeedbackService(
                         && x.IsCompleted && (type == "placement"
                             ? x.AttemptKind == AttemptKind.Placement || x.IsPlacementAssessment
                             : x.AttemptKind == AttemptKind.MockTest && !x.IsPlacementAssessment))
-                    .Select(x => new { Title = x.SectionResults!.OrderBy(r => r.Id)
-                        .Select(r => r.MockTestSection.MockTest.Title).FirstOrDefault() }).SingleOrDefaultAsync(ct);
+                    .Select(x => new
+                    {
+                        Title = x.SectionResults!.OrderBy(r => r.Id)
+                        .Select(r => r.MockTestSection.MockTest.Title).FirstOrDefault()
+                    }).SingleOrDefaultAsync(ct);
                 if (attempt is null) return null;
                 return type == "placement" ? $"Bài đánh giá năng lực · Lượt #{id}" : attempt.Title ?? $"Đề thi thử · Lượt #{id}";
             default: return null;

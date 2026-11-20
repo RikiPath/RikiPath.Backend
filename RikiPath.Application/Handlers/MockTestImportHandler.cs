@@ -4,14 +4,13 @@ using RikiPath.Application.Helpers;
 using RikiPath.Application.Responses.Content;
 using RikiPath.Domain.Enums;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace RikiPath.Application.Handlers
 {
     public sealed class MockTestImportHandler(IUnitOfWork unitOfWork) : ISheetImportHandler
     {
         private static readonly string[] OptionHeaders = ["Option1", "Option2", "Option3", "Option4"];
-        private static readonly HashSet<string> StructuredQuestionTypes = new(StringComparer.OrdinalIgnoreCase)
-            { "Ordering", "FillBlank", "Matching", "ShortAnswer" };
 
         public ImportEntityType EntityType => ImportEntityType.MockTest;
         public string SheetName => "Mock Test";
@@ -141,7 +140,8 @@ namespace RikiPath.Application.Handlers
                     ["rows"] = $"{group.Min(r => r.RowNumber)}–{group.Max(r => r.RowNumber)} ({group.Count} dòng)",
                     ["questionCount"] = group.Count(row => row.Has("QuestionText") || row.Has("ImageUrl")).ToString(),
                     ["questionTypes"] = string.Join(", ", group
-                        .Select(row => ImportHandlerSupport.Clean(row.Get("QuestionType")) ?? "SingleChoice")
+                        .Select(row => ImportHandlerSupport.Clean(row.Get("JlptItemType"))
+                            ?? ImportHandlerSupport.Clean(row.Get("QuestionType")) ?? "SingleChoice")
                         .GroupBy(type => type, StringComparer.OrdinalIgnoreCase)
                         .Select(types => $"{types.Key}: {types.Count()}")),
                     ["sections"] = string.Join(" | ", group.Select(r => ImportHandlerSupport.Clean(r.Get("SectionCode")))
@@ -211,24 +211,34 @@ namespace RikiPath.Application.Handlers
                 var text = ImportHandlerSupport.Clean(row.Get("QuestionText"));
                 if (text is null && string.IsNullOrWhiteSpace(row.Get("ImageUrl"))) errors.Add($"{rp}Thiếu cột QuestionText.");
 
-                var questionType = ImportHandlerSupport.Clean(row.Get("QuestionType")) ?? "SingleChoice";
-                var supportedQuestionTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-                    { "SingleChoice", "MultipleChoice", "Ordering", "FillBlank", "Matching", "ShortAnswer", "Listening", "Reading" };
-                if (!supportedQuestionTypes.Contains(questionType))
-                    errors.Add($"{rp}QuestionType '{questionType}' không hợp lệ. Dùng SingleChoice, MultipleChoice, Ordering, FillBlank, Matching hoặc ShortAnswer.");
-                else
-                    questionType = supportedQuestionTypes.First(type => type.Equals(questionType, StringComparison.OrdinalIgnoreCase));
-
                 JsonElement? interactionData = ParseJsonCell(row.Get("InteractionDataJson"), "InteractionDataJson", rp, errors);
                 JsonElement? answerKey = ParseJsonCell(row.Get("AnswerKeyJson"), "AnswerKeyJson", rp, errors);
+                interactionData = ReadFormatColumns(row, interactionData, ref answerKey, rp, errors);
+                var format = JlptMockQuestionFormats.Find(JlptMockQuestionFormats.ReadString(interactionData, "jlptItemType"));
+                var explicitType = ImportHandlerSupport.Clean(row.Get("QuestionType"));
+                var questionType = JlptMockQuestionFormats.NormalizeQuestionType(explicitType ?? (format?.Code switch
+                {
+                    JlptMockQuestionFormats.SentenceComposition => SentenceOrdering.QuestionType,
+                    _ when format?.Skill == "Listening" => "Listening",
+                    _ when format?.Skill == "Reading" => "Reading",
+                    _ => null,
+                }));
+                if (questionType is null)
+                {
+                    errors.Add($"{rp}QuestionType '{explicitType}' không được hỗ trợ.");
+                    continue;
+                }
 
                 var rawAudio = row.Get("AudioUrl");
                 var certificateSection = sectionCode is null ? null : certByCode.GetValueOrDefault(sectionCode);
-                var splitCombinedSection = certificateSection?.Code.Equals("N5_GRAMMAR_READING", StringComparison.OrdinalIgnoreCase) == true;
+                var supportedSectionSkills = GetCombinedSectionSkills(certificateSection?.Code);
                 var rowSkill = ImportHandlerSupport.Clean(row.Get("Language Skill Name"))?.ToUpperInvariant();
-                var combinedSkill = splitCombinedSection ? (rowSkill ?? (questionType == "Reading" ? "READING" : "GRAMMAR")) : null;
-                if (splitCombinedSection && combinedSkill is not ("GRAMMAR" or "READING"))
-                    errors.Add($"{rp}Phần '{sectionCode}' chỉ nhận kỹ năng Grammar hoặc Reading.");
+                var normalizedRowSkill = JlptSkillAssessmentPolicy.Classify(rowSkill)?.ToString().ToUpperInvariant();
+                var combinedSkill = supportedSectionSkills.Length > 1
+                    ? normalizedRowSkill ?? rowSkill ?? format?.Skill.ToUpperInvariant() ?? (questionType == "Reading" ? "READING" : "GRAMMAR")
+                    : null;
+                if (combinedSkill is not null && !supportedSectionSkills.Contains(combinedSkill))
+                    errors.Add($"{rp}Phần '{sectionCode}' chỉ nhận kỹ năng {string.Join(", ", supportedSectionSkills)}.");
                 var skillName = combinedSkill ?? (sectionCode is null ? null : explicitSkills.GetValueOrDefault(sectionCode)?.FirstOrDefault()
                     ?? InferSkillName(certificateSection?.Name ?? string.Empty) ?? InferSkillName(sectionCode));
                 var audioError = ImportHandlerSupport.ValidateMockListeningAudio(
@@ -237,9 +247,7 @@ namespace RikiPath.Application.Handlers
                 if (audioError is not null) errors.Add(rp + audioError);
                 var audio = audioError is null ? ImportHandlerSupport.CheckUrl(rawAudio, "AudioUrl", rp, errors) : null;
                 var image = ImportHandlerSupport.CheckUrl(row.Get("ImageUrl"), "ImageUrl", rp, errors);
-                var options = questionType.Equals("SingleChoice", StringComparison.OrdinalIgnoreCase)
-                    || questionType.Equals("Listening", StringComparison.OrdinalIgnoreCase)
-                    || questionType.Equals("Reading", StringComparison.OrdinalIgnoreCase)
+                var options = JlptMockQuestionFormats.IsSingleChoice(questionType)
                     ? ImportHandlerSupport.ParseOptions(row, OptionHeaders, "CorrectOptionNumber", rp, errors, includeImages: true)
                     : questionType.Equals("MultipleChoice", StringComparison.OrdinalIgnoreCase)
                         ? ParseMultipleChoiceOptions(row, rp, errors)
@@ -252,8 +260,8 @@ namespace RikiPath.Application.Handlers
                 var sectionKey = combinedSkill is null ? sectionCode : sectionCode + "|" + combinedSkill;
                 if (!sectionByCode.TryGetValue(sectionKey, out var section))
                 {
-                    var sectionTitle = combinedSkill is null ? SectionTitleOf(certSection)
-                        : combinedSkill == "READING" ? "Đọc hiểu" : "Ngữ pháp";
+                    var sectionTitle = JlptSkillAssessmentPolicy.Classify(combinedSkill) is { } bucket
+                        ? JlptSkillAssessmentPolicy.Label(bucket) : SectionTitleOf(certSection);
                     section = new SectionBuilder(certSection.Code, sectionTitle, sections.Count + 1, row.RowNumber, combinedSkill);
                     sectionByCode[sectionKey] = section;
                     sections.Add(section);
@@ -291,6 +299,13 @@ namespace RikiPath.Application.Handlers
 
             var coverageError = ImportHandlerSupport.ValidateMockTestCoverage(levelCode, sectionPayloads, ctx.SkillNameById);
             if (coverageError is not null) errors.Add(P(first) + coverageError);
+            foreach (var section in sectionPayloads)
+            foreach (var question in section.Questions)
+            {
+                var error = JlptMockQuestionFormats.Validate(question, levelCode, section.LanguageSkillName);
+                if (error is not null)
+                    errors.Add($"Dòng {seenSortOrders[question.SortOrder]}: {error}");
+            }
 
             if (errors.Count > 0)
             {
@@ -377,6 +392,74 @@ namespace RikiPath.Application.Handlers
 
         /// <summary>Tên hiển thị của phần thi, lấy từ CertificateSection do Admin tạo sẵn (đổi property nếu entity đặt tên khác).</summary>
         private static string SectionTitleOf(Domain.Entities.CertificateSection certSection) => certSection.Name;
+
+        private static string[] GetCombinedSectionSkills(string? sectionCode)
+        {
+            (string Match, string Skill)[] skills = [("VOCAB", "VOCABULARY"), ("GRAMMAR", "GRAMMAR"), ("READING", "READING")];
+            return skills.Where(item => sectionCode?.Contains(item.Match, StringComparison.OrdinalIgnoreCase) == true)
+                .Select(item => item.Skill).ToArray();
+        }
+
+        private static JsonElement? ReadFormatColumns(ExcelRow row, JsonElement? data, ref JsonElement? answerKey,
+            string rowPrefix, List<string> errors)
+        {
+            var itemType = ImportHandlerSupport.Clean(row.Get("JlptItemType"));
+            var passage = ImportHandlerSupport.Clean(row.Get("Passage"));
+            var secondPassage = ImportHandlerSupport.Clean(row.Get("SecondPassage"));
+            var star = ImportHandlerSupport.Clean(row.Get("StarPosition"));
+            var choicesInAudio = ImportHandlerSupport.Clean(row.Get("OptionsInAudio"));
+            var parts = ImportHandlerSupport.Clean(row.Get("OrderingParts"));
+            var audioStart = ImportHandlerSupport.Clean(row.Get("AudioStartSeconds"));
+            var audioEnd = ImportHandlerSupport.Clean(row.Get("AudioEndSeconds"));
+            if (itemType is null && passage is null && secondPassage is null && star is null && choicesInAudio is null && parts is null &&
+                audioStart is null && audioEnd is null)
+                return data;
+            if (data is not null && data.Value.ValueKind != JsonValueKind.Object)
+            {
+                errors.Add(rowPrefix + "InteractionDataJson phải là object khi dùng các cột định dạng JLPT.");
+                return data;
+            }
+
+            var fields = data is null ? new JsonObject() : JsonNode.Parse(data.Value.GetRawText())!.AsObject();
+            if (audioStart is not null || audioEnd is not null)
+            {
+                if (double.TryParse(audioStart, System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out var start) && double.IsFinite(start) && start >= 0 &&
+                    double.TryParse(audioEnd, System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out var end) && double.IsFinite(end) && end > start)
+                {
+                    fields["audioStartSeconds"] = start;
+                    fields["audioEndSeconds"] = end;
+                }
+                else errors.Add(rowPrefix + "Điền cả AudioStartSeconds và AudioEndSeconds: bắt đầu >= 0, kết thúc lớn hơn bắt đầu.");
+            }
+            if (itemType is not null) fields["jlptItemType"] = JlptMockQuestionFormats.Find(itemType)?.Code ?? itemType;
+            if (passage is not null) fields["passage"] = passage;
+            if (secondPassage is not null) fields["secondPassage"] = secondPassage;
+            if (star is not null)
+            {
+                if (int.TryParse(star, out var position)) fields["starPosition"] = position;
+                else errors.Add(rowPrefix + "StarPosition phải là số nguyên từ 1 đến 4.");
+            }
+            if (choicesInAudio is not null)
+            {
+                if (bool.TryParse(choicesInAudio, out var enabled)) fields["optionsInAudio"] = enabled;
+                else errors.Add(rowPrefix + "OptionsInAudio chỉ nhận true hoặc false.");
+            }
+            if (parts is not null)
+            {
+                var ordered = parts.Split('|', StringSplitOptions.TrimEntries);
+                var choices = ordered.Order(StringComparer.Ordinal).ToArray();
+                if (choices.SequenceEqual(ordered))
+                {
+                    var different = Array.FindLastIndex(choices, value => value != choices[0]);
+                    if (different > 0) (choices[0], choices[different]) = (choices[different], choices[0]);
+                }
+                fields["tokens"] = JsonSerializer.SerializeToNode(choices);
+                answerKey = JsonSerializer.SerializeToElement(ordered);
+            }
+            return JsonSerializer.SerializeToElement(fields);
+        }
 
         private static JsonElement? ParseJsonCell(string? raw, string header, string rowPrefix, List<string> errors)
         {

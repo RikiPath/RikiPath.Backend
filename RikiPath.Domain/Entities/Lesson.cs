@@ -4,6 +4,7 @@ namespace RikiPath.Domain.Entities
 {
     public class Lesson : Base
     {
+        public string? ImageUrl { get; set; }
         public int Id { get; set; }
         public string Title { get; set; }
         public string? Description { get; set; }

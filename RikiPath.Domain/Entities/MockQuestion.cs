@@ -12,6 +12,9 @@ public class MockQuestion : Base
     /// <summary>Structured answer definition for interactions that cannot be represented by one option ID.</summary>
     public string? AnswerKeyJson { get; set; }
     public string? AudioUrl { get; set; }
+    /// <summary>Japanese listening transcript used by server-side grading, never an exam prompt.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string? AudioTranscript { get; set; }
     public string? ImageUrl { get; set; }
     public string? Explanation { get; set; }
     public int SortOrder { get; set; }

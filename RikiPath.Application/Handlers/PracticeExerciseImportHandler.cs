@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using RikiPath.Application.Helpers;
 using RikiPath.Application.IServices;
 using RikiPath.Application.Responses.Content;
@@ -141,6 +141,8 @@ namespace RikiPath.Application.Handlers
         {
             var first = group[0];
             var errors = new List<string>();
+            errors.AddRange(group.SelectMany(row => row.MediaImportErrors.Select(error => $"Dòng {row.RowNumber}: {error}")));
+            var exerciseImage = ImportHandlerSupport.CheckUrl(ImportHandlerSupport.Consistent(group, "ExerciseImageUrl", errors), "ExerciseImageUrl", "", errors);
             static string P(ExcelRow r) => $"Dòng {r.RowNumber}: ";
 
             // ---- Thuộc tính cấp bài tập ----
@@ -227,16 +229,18 @@ namespace RikiPath.Application.Handlers
                     seenSortOrders[qSort] = row.RowNumber;
 
                 var text = ImportHandlerSupport.Clean(row.Get("Question Text"));
-                if (text is null) errors.Add($"{rp}Thiếu cột Question Text.");
+                var imageUrl = ImportHandlerSupport.CheckUrl(row.Get("ImageUrl"), "ImageUrl", rp, errors);
+                if (text is null && imageUrl is null) errors.Add($"{rp}Thiếu Question Text hoặc ImageUrl.");
 
-                var options = ImportHandlerSupport.ParseOptions(row, OptionHeaders, "Correct Option Number", rp, errors);
+                var options = ImportHandlerSupport.ParseOptions(row, OptionHeaders, "Correct Option Number", rp, errors, includeImages: true);
 
-                if (errors.Count > before || text is null || options is null) continue;
+                if (errors.Count > before || (text is null && imageUrl is null) || options is null) continue;
 
                 questions.Add(new PracticeQuestionPayloadResponse
                 {
                     SortOrder = qSort,
-                    QuestionText = text,
+                    QuestionText = text ?? string.Empty,
+                    ImageUrl = imageUrl,
                     Explanation = ImportHandlerSupport.Clean(row.Get("Explanation")),
                     Options = options,
                 });
@@ -265,6 +269,7 @@ namespace RikiPath.Application.Handlers
 
             var payload = new PracticeExerciseImportPayloadResponse
             {
+                ImageUrl = exerciseImage,
                 Title = title!,
                 Description = description,
                 // Không có cột Exercise Sort Order: giữ thứ tự cũ nếu bài đã có, bài mới lấy số dòng đầu của nhóm.
@@ -287,6 +292,7 @@ namespace RikiPath.Application.Handlers
 
             diff.TargetEntityId = existing.Id;
             var changed = new Dictionary<string, string>();
+            if (payload.ImageUrl is not null) ImportHandlerSupport.CompareField(changed, "imageUrl", existing.ImageUrl, payload.ImageUrl);
 
             ImportHandlerSupport.CompareField(changed, "exerciseDescription", existing.Description, payload.Description);
             if (existing.LanguageSkillId != skill.Id)
@@ -296,14 +302,14 @@ namespace RikiPath.Application.Handlers
             var oldQuestions = new Dictionary<int, string>();
             foreach (var q in (existing.Questions ?? []).Where(q => !q.IsDeleted))
             {
-                var opts = (q.Options ?? []).Where(o => !o.IsDeleted).OrderBy(o => o.SortOrder).Select(o => (o.OptionText, o.IsCorrect));
-                oldQuestions[q.SortOrder] = ImportHandlerSupport.QuestionSignature("", q.QuestionText, q.Explanation, null, null, opts);
+                var opts = (q.Options ?? []).Where(o => !o.IsDeleted).OrderBy(o => o.SortOrder).Select(o => (o.OptionText + "\u001e" + o.ImageUrl, o.IsCorrect));
+                oldQuestions[q.SortOrder] = ImportHandlerSupport.QuestionSignature("", q.QuestionText, q.Explanation, null, q.ImageUrl, opts);
             }
 
             var newQuestions = payload.Questions.ToDictionary(
                 q => q.SortOrder,
-                q => ImportHandlerSupport.QuestionSignature("", q.QuestionText, q.Explanation, null, null,
-                    q.Options.Select(o => (o.OptionText, o.IsCorrect))));
+                q => ImportHandlerSupport.QuestionSignature("", q.QuestionText, q.Explanation, null, q.ImageUrl,
+                    q.Options.Select(o => (o.OptionText + "\u001e" + o.ImageUrl, o.IsCorrect))));
 
             var questionSummary = ImportHandlerSupport.QuestionDiffSummary(oldQuestions, newQuestions);
             if (questionSummary is not null) changed["questions"] = questionSummary;

@@ -63,6 +63,7 @@ public class PracticeQuizService(
                         attempt.PracticeExerciseId == exercise.Id && attempt.ScorePercent >= MinimumPassingScorePercent),
                     LessonId = exercise.LessonId,
                     Title = exercise.Title,
+                    ImageUrl = exercise.ImageUrl,
                     Description = exercise.Description,
                     LanguageSkillName = exercise.LanguageSkill.Name,
                     QuestionCount = exercise.Questions!.Count(question => !question.IsDeleted),
@@ -186,11 +187,14 @@ public class PracticeQuizService(
                 AttemptId = attempt.Id,
                 PracticeExerciseId = exercise.Id,
                 ExerciseTitle = exercise.Title,
+                ImageUrl = exercise.ImageUrl,
+
                 LessonId = exercise.LessonId,
                 Questions = questions.Select(question => new PracticeExerciseQuestionResponse
                 {
                     QuestionId = question.Id,
                     QuestionText = question.QuestionText,
+                            ImageUrl = question.ImageUrl,
                     SortOrder = question.SortOrder,
                     Options = (question.Options ?? []).Where(option => !option.IsDeleted)
                         .OrderBy(option => option.SortOrder)
@@ -198,6 +202,7 @@ public class PracticeQuizService(
                         {
                             OptionId = option.Id,
                             OptionText = option.OptionText,
+                                    ImageUrl = option.ImageUrl,
                             SortOrder = option.SortOrder,
                         }).ToList(),
                 }).ToList(),

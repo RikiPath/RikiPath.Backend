@@ -7,6 +7,7 @@ namespace RikiPath.Domain.Entities
 {
     public class Vocabulary : Base
     {
+        public string? ImageUrl { get; set; }
         public int Id { get; set; }
         public string Word { get; set; }
         public string Reading { get; set; }

@@ -9,6 +9,7 @@ using RikiPath.Application.Responses.Lessons;
 using RikiPath.Domain.Entities;
 using RikiPath.Domain.Enums;
 using System.Net;
+using System.Text.Json;
 
 namespace RikiPath.Application.Services;
 
@@ -38,7 +39,8 @@ public sealed partial class HomeworkService(
                 c.LearnerId,
                 (c.Learner.FirstName + " " + c.Learner.LastName).Trim(),
                 c.CohortId!.Value,
-                c.StartsAt ?? c.Cohort!.StartsAt))
+                c.StartsAt ?? c.Cohort!.StartsAt,
+                null))
             .ToListAsync(ct);
         return (includeAllBookings ? enrollments : enrollments.DistinctBy(c => c.LearnerId))
             .OrderBy(c => c.LearnerName).ToList();
@@ -67,8 +69,12 @@ public sealed partial class HomeworkService(
         var lessonIds = items.Select(lesson => lesson.Id).ToArray();
         var exercises = await UsableExercises().Where(exercise => lessonIds.Contains(exercise.LessonId))
             .OrderBy(exercise => exercise.SortOrder).ThenBy(exercise => exercise.Id)
-            .Select(exercise => new { exercise.LessonId, Item = new HomeworkExercise(exercise.Id,
-                exercise.Title, exercise.Description, exercise.Questions!.Count(question => !question.IsDeleted), null) })
+            .Select(exercise => new
+            {
+                exercise.LessonId,
+                Item = new HomeworkExercise(exercise.Id,
+                exercise.Title, exercise.Description, exercise.Questions!.Count(question => !question.IsDeleted), null)
+            })
             .ToListAsync(ct);
         var byLesson = exercises.ToLookup(exercise => exercise.LessonId, exercise => exercise.Item);
         return items.Select(lesson => new HomeworkCatalogItem(lesson, byLesson[lesson.Id].ToList())).ToList();
@@ -220,9 +226,17 @@ public sealed partial class HomeworkService(
             .Select(group => new { Id = group.Key, Count = group.Count() })
             .ToDictionaryAsync(group => group.Id, group => group.Count, ct);
 
-        return rows.Select(item => new HomeworkItem(item.Id, item.LearnerId,
-            FullName(item.Learner), FullName(item.Mentor), item.Title, item.Instructions, item.CreatedDate, item.DueAt,
-            item.Status, item.HomeworkAssignmentLessons.OrderBy(link => link.Lesson.SortOrder).ThenBy(link => link.LessonId)
+        return rows.Select(item => WithAuthoredDefinition(new HomeworkItem(
+            item.Id,
+            item.LearnerId,
+            FullName(item.Learner),
+            FullName(item.Mentor),
+            item.Title,
+            item.Instructions,
+            item.CreatedDate,
+            item.DueAt,
+            item.Status,
+            item.HomeworkAssignmentLessons.OrderBy(link => link.Lesson.SortOrder).ThenBy(link => link.LessonId)
                 .Select(link => new HomeworkLesson(link.LessonId, link.Lesson.Title, link.Lesson.CertificateLevel.Code,
                     link.Lesson.LanguageSkill.Name)).ToList(),
             item.Exercises.OrderBy(link => link.PracticeExercise.SortOrder).ThenBy(link => link.PracticeExerciseId)
@@ -239,7 +253,7 @@ public sealed partial class HomeworkService(
             item.PublishedFeedbackAtUtc.HasValue
                 ? new HomeworkPublishedGradeView(item.Passed, item.MentorScore, item.MentorFeedback, item.PublishedFeedbackAtUtc.Value, item.PublishedByMentorId)
                 : null,
-            item.MentorBookingId)).ToList();
+            item.MentorBookingId), item, user.Role)).ToList();
     }
 
     public async Task<ApiResponse<LessonDetailResponse>> GetAssignedLessonAsync(int assignmentId, int lessonId, CancellationToken ct)
@@ -263,7 +277,7 @@ public sealed partial class HomeworkService(
             : SubmitScanAsync(assignmentId, scan, ct, textContent);
 
     private async Task<ApiResponse<HomeworkSubmissionDetail>> SubmitInternalAsync(int assignmentId, SubmitHomeworkRequest request,
-        IFormFile? scan, CancellationToken ct)
+        IFormFile? scan, CancellationToken ct, (IFormFile File, string ContentType)? audio = null)
     {
         var userId = claims.GetUserClaim().Id;
         var response = ApiResponse<HomeworkSubmissionDetail>.NotFound("Không tìm thấy bài tập được giao.");
@@ -296,6 +310,12 @@ public sealed partial class HomeworkService(
             if (assignment.Status is not ("Assigned" or "Submitted"))
             {
                 response = ApiResponse<HomeworkSubmissionDetail>.Fail("Bài tập đã đóng.", HttpStatusCode.Conflict, "HOMEWORK_CLOSED");
+                return;
+            }
+            var definition = ReadAuthoredDefinition(assignment.AuthoredDefinitionJson);
+            if (ValidateAuthoredSubmission(definition, request, scan is not null, audio is not null) is { } submissionError)
+            {
+                response = ApiResponse<HomeworkSubmissionDetail>.Fail(submissionError);
                 return;
             }
 

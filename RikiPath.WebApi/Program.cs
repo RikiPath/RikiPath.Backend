@@ -2,7 +2,6 @@ using RikiPath.Infrastructure.Options;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.HttpOverrides;
-using DocumentFormat.OpenXml.Office2016.Drawing.ChartDrawing;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
@@ -63,6 +62,7 @@ internal class Program
         appSettings.PayOs = payOsSection.Get<PayOsSettings>() ?? appSettings.PayOs ?? new PayOsSettings();
         appSettings.GoogleAuth = configuration.GetSection("GoogleAuth").Get<GoogleAuthSettings>()
                                 ?? appSettings.GoogleAuth;
+        configuration.GetSection("AwsAudio").Bind(appSettings.AwsAudio);
         builder.Services.AddSingleton(appSettings);
 
         builder.Services.Configure<PayOsSettings>(payOsSection);
@@ -84,21 +84,27 @@ internal class Program
                     context.Connection.RemoteIpAddress?.ToString() ?? "anonymous",
                     _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
                     {
-                        PermitLimit = 20, Window = TimeSpan.FromMinutes(1), QueueLimit = 0,
+                        PermitLimit = 20,
+                        Window = TimeSpan.FromMinutes(1),
+                        QueueLimit = 0,
                     }));
             options.AddPolicy("speech-session", context =>
                 System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
                     context.User.FindFirstValue(ClaimTypes.NameIdentifier) ?? context.Connection.RemoteIpAddress?.ToString() ?? "anonymous",
                     _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
                     {
-                        PermitLimit = 10, Window = TimeSpan.FromMinutes(1), QueueLimit = 0,
+                        PermitLimit = 10,
+                        Window = TimeSpan.FromMinutes(1),
+                        QueueLimit = 0,
                     }));
             options.AddPolicy("mentor-availability-submit", context =>
                 System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
                     context.User.FindFirstValue(ClaimTypes.NameIdentifier) ?? context.Connection.RemoteIpAddress?.ToString() ?? "anonymous",
                     _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
                     {
-                        PermitLimit = 20, Window = TimeSpan.FromMinutes(1), QueueLimit = 0,
+                        PermitLimit = 20,
+                        Window = TimeSpan.FromMinutes(1),
+                        QueueLimit = 0,
                     }));
         });
         builder.Services.AddOptions<MentorSlotGenerationOptions>()
@@ -146,6 +152,7 @@ internal class Program
         // 3. Infrastructure & Helpers
         builder.Services.AddHttpContextAccessor();
         builder.Services.AddHttpClient();
+        builder.Services.AddHttpClient<RikiPath.Application.Services.SupabaseFileStorageService>();
         var calendarProtection = builder.Services.AddDataProtection().SetApplicationName("RikiPath.MentorCalendar");
         var calendarKeysPath = builder.Configuration["GoogleCalendar:DataProtectionKeysPath"];
         if (!string.IsNullOrWhiteSpace(calendarKeysPath)) calendarProtection.PersistKeysToFileSystem(new DirectoryInfo(calendarKeysPath));
@@ -153,6 +160,7 @@ internal class Program
         builder.Services.AddScoped<IMentorCalendarService, MentorCalendarService>();
         builder.Services.AddHostedService<MentorCalendarWorker>();
         builder.Services.AddHttpClient<IJlptExamSource, RikiPath.Infrastructure.Services.JlptExamSource>(c => c.Timeout = TimeSpan.FromSeconds(15));
+        builder.Services.AddHostedService<ContentAudioTranscriptionWorker>();
         builder.Services.AddMemoryCache();
 
         // 3b. Firebase Admin SDK — dùng để verify idToken do React (Firebase Phone Auth) gửi lên.
@@ -274,7 +282,7 @@ internal class Program
             builder.Services.AddScoped(iface, impl);
         }
 
-        // Chỉ môi trường QA cô lập được thay private document storage; Production luôn dùng cấu hình Supabase.
+        // Chỉ môi trường QA cô lập được thay storage; môi trường thường dùng router AWS audio / Supabase tài liệu.
         if (configuration.GetValue<bool>("LocalQaVerificationStorage:Enabled"))
         {
             if (!builder.Environment.IsEnvironment("MentorQA"))
@@ -296,8 +304,10 @@ internal class Program
 
         builder.Services.AddOpenAiFeatures(configuration);
         builder.Services.AddScoped<RikiPath.Application.Services.SubscriptionAccessService>();
+        builder.Services.AddScoped<RikiPath.Application.Services.MockTestExplanationService>();
         builder.Services.AddScoped<RikiPath.Application.Services.ManualContentService>();
         builder.Services.AddScoped<RikiPath.Application.Services.HomeworkService>();
+
         builder.Services.AddScoped<LearnerFeedbackService>();
         if (builder.Environment.IsEnvironment("M4E2E"))
         {

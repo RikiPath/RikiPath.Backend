@@ -19,7 +19,8 @@ namespace RikiPath.Application.Services
     /// </summary>
     public sealed class ExcelContentImportService(
         IUnitOfWork unitOfWork,
-        IEnumerable<ISheetImportHandler> handlers) : IExcelContentImportService
+        IEnumerable<ISheetImportHandler> handlers,
+        IContentAudioTranscriptionService? audioTranscriptions = null) : IExcelContentImportService
     {
         public ApiResponse<WorkbookPreviewResponse> PreviewWorkbook(Stream fileStream, string fileName, CancellationToken cancellationToken)
         {
@@ -69,6 +70,7 @@ namespace RikiPath.Application.Services
                     : allHandlers.Where(h => h.EntityType == onlyType.Value)).ToList();
 
                 var response = new ImportPreviewResponse { PreviewId = Guid.NewGuid(), FileName = fileName };
+                var media = new WorkbookMediaPreparation(uploadLocalAudio, uploadLocalImage);
 
                 // Resolve Lesson rows first, even when only Practice Exercise was requested.
                 var lessonHandler = allHandlers.FirstOrDefault(handler => handler.EntityType == ImportEntityType.Lesson);
@@ -82,6 +84,7 @@ namespace RikiPath.Application.Services
                         var lessonRows = ToExcelRows(ExcelSheetReader.ReadRows(lessonSheet));
                         if (lessonRows.Count > 0)
                         {
+                            await media.PrepareAsync(lessonRows, cancellationToken);
                             lessonPreview = await lessonHandler.BuildDiffAsync(lessonRows, cancellationToken);
                             foreach (var lessonRow in lessonPreview.Rows.Where(row =>
                                 (row.Action is ImportRowAction.New or ImportRowAction.Modified)
@@ -112,33 +115,7 @@ namespace RikiPath.Application.Services
                     var rows = ToExcelRows(ExcelSheetReader.ReadRows(sheet));
                     if (rows.Count == 0) continue;
 
-                    if (handler.EntityType == ImportEntityType.MockTest && (uploadLocalAudio is not null || uploadLocalImage is not null))
-                    {
-                        var uploaded = new Dictionary<(bool IsAudio, string Path), string>();
-                        var mediaColumns = new[] { "AudioUrl", "ImageUrl", "Option1ImageUrl", "Option2ImageUrl", "Option3ImageUrl", "Option4ImageUrl" };
-                        foreach (var row in rows)
-                        foreach (var column in mediaColumns)
-                        {
-                            var isAudio = column == "AudioUrl";
-                            var upload = isAudio ? uploadLocalAudio : uploadLocalImage;
-                            var path = row.Get(column)?.Trim();
-                            if (upload is null || string.IsNullOrEmpty(path) || !Path.IsPathFullyQualified(path)) continue;
-                            try
-                            {
-                                var key = (isAudio, path);
-                                if (!uploaded.TryGetValue(key, out var url))
-                                {
-                                    url = await upload(path, cancellationToken);
-                                    uploaded.Add(key, url);
-                                }
-                                row.Fields[ExcelSheetReader.Normalize(column)] = url;
-                            }
-                            catch (InvalidDataException ex)
-                            {
-                                row.MediaImportErrors.Add($"{column}: {ex.Message}");
-                            }
-                        }
-                    }
+                    await media.PrepareAsync(rows, cancellationToken);
 
                     var sheetResult = handler is IWorkbookLessonAwareImportHandler lessonAwareHandler
                         ? await lessonAwareHandler.BuildDiffAsync(rows, workbookLessons, cancellationToken)
@@ -157,6 +134,7 @@ namespace RikiPath.Application.Services
 
                 return ApiResponse<ImportPreviewResponse>.Success(response);
             }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
             catch (Exception ex)
             {
                 return ApiResponse<ImportPreviewResponse>.Fail("Không đọc được file Excel: " + ex.Message);
@@ -286,6 +264,10 @@ namespace RikiPath.Application.Services
                     "Không có nội dung mới để lưu. Hãy kiểm tra các bản nháp hoặc nội dung đang chờ duyệt của bạn.");
 
             await unitOfWork.ContentApprovalRequests.AddRangeAsync(drafts, cancellationToken);
+            if (audioTranscriptions is not null)
+                foreach (var draft in drafts)
+                    await audioTranscriptions.QueuePayloadAsync(
+                        JsonSerializer.Deserialize<JsonElement>(draft.PayloadJson), actorUserId, cancellationToken);
             await unitOfWork.SaveChangesAsync(cancellationToken);
 
             return ApiResponse<ImportConfirmResponse>.Success(new ImportConfirmResponse
@@ -307,18 +289,19 @@ namespace RikiPath.Application.Services
             }
             catch (JsonException ex) { return $"Payload MockTest không hợp lệ: {ex.Message}"; }
             if (payload is null || payload.Sections.Count == 0) return "MockTest phải có ít nhất một section.";
+            if (!levelCodes.TryGetValue(payload.CertificateLevelId, out var levelCode))
+                return "Cấp độ của đề thi không tồn tại hoặc đã bị xóa.";
             foreach (var section in payload.Sections)
             foreach (var question in section.Questions)
             {
-                var type = string.IsNullOrWhiteSpace(question.QuestionType) ? "SingleChoice" : question.QuestionType;
+                var type = JlptMockQuestionFormats.NormalizeQuestionType(question.QuestionType);
+                if (type is null) return $"QuestionType '{question.QuestionType}' không được hỗ trợ.";
+                var skill = skillNames.GetValueOrDefault(section.LanguageSkillId) ?? section.LanguageSkillName;
                 var audioError = ImportHandlerSupport.ValidateMockListeningAudio(type, question.AudioUrl,
-                    skillNames.GetValueOrDefault(section.LanguageSkillId) ?? section.LanguageSkillName,
-                    section.Title, section.CertificateSectionCode);
+                    skill, section.Title, section.CertificateSectionCode);
                 if (audioError is not null)
                     return $"Phần '{section.Title}', câu số {question.SortOrder}: {audioError}";
-                if (type.Equals("SingleChoice", StringComparison.OrdinalIgnoreCase)
-                    || type.Equals("Listening", StringComparison.OrdinalIgnoreCase)
-                    || type.Equals("Reading", StringComparison.OrdinalIgnoreCase))
+                if (JlptMockQuestionFormats.IsSingleChoice(type))
                 {
                     if (question.Options.Count < 2 || question.Options.Count(option => option.IsCorrect) != 1)
                         return $"Câu '{question.QuestionText}' dạng {type} cần ít nhất 2 lựa chọn và đúng 1 đáp án đúng.";
@@ -337,9 +320,10 @@ namespace RikiPath.Application.Services
                         return $"Câu '{question.QuestionText}': {SentenceOrdering.InvalidContentMessage}";
                 }
                 else return $"QuestionType '{type}' không được hỗ trợ.";
+                var formatError = JlptMockQuestionFormats.Validate(question, levelCode, skill);
+                if (formatError is not null)
+                    return $"Phần '{section.Title}', câu số {question.SortOrder}: {formatError}";
             }
-            if (!levelCodes.TryGetValue(payload.CertificateLevelId, out var levelCode))
-                return "Cấp độ của đề thi không tồn tại hoặc đã bị xóa.";
             return ImportHandlerSupport.ValidateMockTestCoverage(levelCode, payload.Sections, skillNames);
         }
     }

@@ -10,17 +10,35 @@ using System.Net;
 
 namespace RikiPath.Application.Services
 {
-    public class SpeechToTextService(IAzureSpeechClient azureSpeechClient, AppSettings appSettings, ILogger<SpeechToTextService> logger, ITranscribeSpeechClient transcribeClient, ISpeechRecognitionClient? speechClient = null) : ISpeechToTextService
+    public class SpeechToTextService(IAzureSpeechClient azureSpeechClient, AppSettings appSettings, ILogger<SpeechToTextService> logger,
+        ITranscribeSpeechClient transcribeClient, ISpeechRecognitionClient? speechClient = null,
+        IFileStorageService? fileStorage = null, IClaimService? claims = null) : ISpeechToTextService
     {
         private const int TokenLifetimeSeconds = 600;
 
         public async Task<string> ConvertAudioToTextAsync(IFormFile audioFile, CancellationToken cancellationToken = default)
+            => (await ConvertAndSaveAudioAsync(audioFile, cancellationToken)).Transcript;
+
+        public async Task<RecordedSpeechResult> ConvertAndSaveAudioAsync(
+            IFormFile audioFile, CancellationToken cancellationToken = default)
         {
             if (audioFile.Length == 0 || audioFile.Length > 25 * 1024 * 1024)
                 throw new ArgumentException("File audio phải có dữ liệu và không vượt quá 25MB.");
+            if (fileStorage is null || claims is null || speechClient is null)
+                throw new InvalidOperationException("Dịch vụ lưu và nhận dạng audio AWS chưa được cấu hình.");
+            string? contentType;
+            await using (var input = audioFile.OpenReadStream())
+            {
+                var header = new byte[12];
+                var read = await input.ReadAtLeastAsync(header, header.Length, false, cancellationToken);
+                contentType = HomeworkAudioFormat.Detect(header.AsSpan(0, read));
+            }
+            if (contentType is null) throw new ArgumentException("Nội dung file ghi âm không hợp lệ.");
             await using var stream = audioFile.OpenReadStream();
-            return await (speechClient ?? throw new InvalidOperationException("OpenAI speech is not registered."))
-                .TranscribeAsync(stream, audioFile.FileName, cancellationToken);
+            var uploaded = await fileStorage.UploadPrivateVerificationAsync(
+                stream, contentType, claims.GetUserClaim().Id, cancellationToken);
+            var result = await speechClient.TranscribeFromUrlAsync(uploaded.Url, cancellationToken);
+            return new(result.TranscribedText, uploaded.Url);
         }
 
 

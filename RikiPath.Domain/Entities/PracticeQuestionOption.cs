@@ -3,6 +3,7 @@ namespace RikiPath.Domain.Entities;
 /// <summary>An answer choice for a practice question.</summary>
 public class PracticeQuestionOption : Base
 {
+    public string? ImageUrl { get; set; }
     public int Id { get; set; }
     public string OptionText { get; set; } = string.Empty;
     public bool IsCorrect { get; set; }

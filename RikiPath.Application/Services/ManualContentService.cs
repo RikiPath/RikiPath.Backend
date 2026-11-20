@@ -10,7 +10,8 @@ using RikiPath.Domain.Enums;
 
 namespace RikiPath.Application.Services;
 
-public sealed class ManualContentService(IUnitOfWork uow, IClaimService claims, IContentApprovalNotifierService? notifier = null)
+public sealed class ManualContentService(IUnitOfWork uow, IClaimService claims, IContentApprovalNotifierService? notifier = null,
+    IContentAudioTranscriptionService? audioTranscriptions = null)
 {
     private const string ManualSource = "Nhập tay";
     private static readonly JsonSerializerOptions Json = new() { PropertyNameCaseInsensitive = true };
@@ -80,12 +81,14 @@ public sealed class ManualContentService(IUnitOfWork uow, IClaimService claims, 
             .OrderBy(x => x.Id).Select(x => new
             {
                 x.AudioUrl,
+                x.ImageUrl,
                 TopicId = x.Topic != null && !x.Topic.IsDeleted ? x.TopicId : null,
                 TopicTitle = x.Topic != null && !x.Topic.IsDeleted ? x.Topic.Title : null,
             }).FirstOrDefaultAsync(ct);
         lesson.TopicId = published?.TopicId;
         lesson.TopicTitle = published?.TopicTitle;
         lesson.AudioUrl = published?.AudioUrl;
+        lesson.ImageUrl = published?.ImageUrl;
         return ApiResponse<JsonElement>.Success(JsonSerializer.SerializeToElement(lesson));
     }
 
@@ -164,6 +167,8 @@ public sealed class ManualContentService(IUnitOfWork uow, IClaimService claims, 
             item.ReviewedAt = null;
             item.ReviewedByName = null;
             item.ReviewNote = null;
+            if (audioTranscriptions is not null)
+                await audioTranscriptions.QueuePayloadAsync(JsonSerializer.SerializeToElement(payload), userId, ct);
             await uow.SaveChangesAsync(ct);
             return ApiResponse<int>.Success(item.Id);
         }
@@ -300,6 +305,7 @@ public sealed class ManualContentService(IUnitOfWork uow, IClaimService claims, 
         {
             case ImportEntityType.Lesson:
                 var lesson = Read<LessonImportPayloadResponse>(input);
+                if (lesson.ImageUrl is not null) lesson.ImageUrl = MediaUrl(lesson.ImageUrl, "URL ảnh") ?? string.Empty;
                 lesson.Title = Required(lesson.Title, "Tên bài học");
                 if (lesson.AudioUrl is not null)
                     lesson.AudioUrl = MediaUrl(lesson.AudioUrl, "URL âm thanh") ?? string.Empty;
@@ -313,6 +319,7 @@ public sealed class ManualContentService(IUnitOfWork uow, IClaimService claims, 
                 return (lesson, $"{lesson.Title} / {level.Code}");
             case ImportEntityType.Vocabulary:
                 var vocabulary = Read<VocabularyImportPayloadResponse>(input);
+                if (vocabulary.ImageUrl is not null) vocabulary.ImageUrl = MediaUrl(vocabulary.ImageUrl, "URL ảnh") ?? string.Empty;
                 vocabulary.Word = Required(vocabulary.Word, "Từ vựng");
                 vocabulary.Reading = Required(vocabulary.Reading, "Cách đọc");
                 vocabulary.Meaning = Required(vocabulary.Meaning, "Nghĩa");
@@ -321,6 +328,7 @@ public sealed class ManualContentService(IUnitOfWork uow, IClaimService claims, 
                 return (vocabulary, $"{vocabulary.Word} / {vocabulary.Reading}");
             case ImportEntityType.Kanji:
                 var kanji = Read<KanjiImportPayloadResponse>(input);
+                if (kanji.ImageUrl is not null) kanji.ImageUrl = MediaUrl(kanji.ImageUrl, "URL ảnh") ?? string.Empty;
                 kanji.Character = Required(kanji.Character, "Hán tự");
                 kanji.Meaning = Required(kanji.Meaning, "Nghĩa");
                 if (kanji.StrokeCount <= 0) throw new ArgumentException("Số nét phải lớn hơn 0.");
@@ -330,6 +338,7 @@ public sealed class ManualContentService(IUnitOfWork uow, IClaimService claims, 
                 return (kanji, kanji.Character);
             case ImportEntityType.Grammar:
                 var grammar = Read<GrammarImportPayloadResponse>(input);
+                if (grammar.ImageUrl is not null) grammar.ImageUrl = MediaUrl(grammar.ImageUrl, "URL ảnh") ?? string.Empty;
                 grammar.Title = Required(grammar.Title, "Tên mẫu ngữ pháp");
                 grammar.Structure = Required(grammar.Structure, "Cấu trúc");
                 grammar.CertificateLevelCode = level.Code;
@@ -394,6 +403,7 @@ public sealed class ManualContentService(IUnitOfWork uow, IClaimService claims, 
     private async Task ValidateExerciseAsync(PracticeExerciseImportPayloadResponse exercise, CancellationToken ct)
     {
         exercise.Title = Required(exercise.Title, "Tên bài luyện tập");
+        if (exercise.ImageUrl is not null) exercise.ImageUrl = MediaUrl(exercise.ImageUrl, "URL ảnh bài tập") ?? string.Empty;
         exercise.LanguageSkillName = await RequireSkillAsync(exercise.LanguageSkillId, ct);
         if (exercise.LessonId.HasValue)
         {
@@ -408,8 +418,9 @@ public sealed class ManualContentService(IUnitOfWork uow, IClaimService claims, 
         {
             var question = exercise.Questions[i] ?? throw new ArgumentException("Câu hỏi không hợp lệ.");
             question.SortOrder = i + 1;
-            question.QuestionText = Required(question.QuestionText, $"Nội dung câu {question.SortOrder}");
-            SetOptionOrder(question.Options, allowImage: false);
+            question.ImageUrl = MediaUrl(question.ImageUrl, $"URL ảnh câu {question.SortOrder}");
+            question.QuestionText = question.ImageUrl is null ? Required(question.QuestionText, $"Nội dung câu {question.SortOrder}") : question.QuestionText?.Trim() ?? string.Empty;
+            SetOptionOrder(question.Options, allowImage: true);
             if (question.Options.Count < 2 || question.Options.Count(x => x.IsCorrect) != 1)
                 throw new ArgumentException($"Câu {question.SortOrder} cần ít nhất 2 đáp án và đúng 1 đáp án đúng.");
         }

@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using RikiPath.Application.Helpers;
 using RikiPath.Application.Responses.Content;
@@ -82,6 +82,9 @@ namespace RikiPath.Application.Handlers
                 },
             };
 
+            diff.Errors.AddRange(row.MediaImportErrors);
+            var imageUrl = ImportHandlerSupport.CheckUrl(row.Get("ImageUrl"), "ImageUrl", "", diff.Errors);
+
             // ---- Validate ----
             if (string.IsNullOrWhiteSpace(title)) diff.Errors.Add("Thiếu cột LessonTitle.");
             var audioUrl = ImportHandlerSupport.CheckUrl(audio, "AudioUrl", "", diff.Errors);
@@ -132,6 +135,7 @@ namespace RikiPath.Application.Handlers
             // ---- Build payload (đã qua validate) ----
             var payload = new LessonImportPayloadResponse
             {
+                ImageUrl = imageUrl,
                 Title = title!,
                 Description = description,
                 AudioUrl = audioUrl,
@@ -152,6 +156,8 @@ namespace RikiPath.Application.Handlers
 
             diff.TargetEntityId = existing.Id;
             var changed = new Dictionary<string, string>();
+            if (payload.ImageUrl is not null)
+                ImportHandlerSupport.CompareField(changed, "imageUrl", existing.ImageUrl, payload.ImageUrl);
 
             ImportHandlerSupport.CompareField(changed, "description", existing.Description, payload.Description);
             if (audioUrl is not null)

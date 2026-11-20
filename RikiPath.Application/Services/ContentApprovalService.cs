@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using RikiPath.Application.Handlers;
@@ -19,7 +19,8 @@ namespace RikiPath.Application.Services
         IClaimService claimService,
         IEnumerable<ISheetImportHandler> sheetHandlers,
         IEnumerable<IApprovalDiffBuilder> diffBuilders,
-        IContentApprovalNotifierService notifier) : IContentApprovalService
+        IContentApprovalNotifierService notifier,
+        IContentAudioTranscriptionService? audioTranscriptions = null) : IContentApprovalService
     {
         private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
 
@@ -712,6 +713,7 @@ namespace RikiPath.Application.Services
                 vocab = new Vocabulary
                 {
                     Word = p.Word,
+                    ImageUrl = p.ImageUrl,
                     Reading = p.Reading,
                     Meaning = p.Meaning,
                     ExampleSentence = p.ExampleSentence,
@@ -726,6 +728,7 @@ namespace RikiPath.Application.Services
                     ?? throw new InvalidOperationException("Không tìm thấy từ vựng gốc.");
 
                 vocab.Word = p.Word;
+                if (p.ImageUrl is not null) vocab.ImageUrl = string.IsNullOrWhiteSpace(p.ImageUrl) ? null : p.ImageUrl;
                 vocab.Reading = p.Reading;
                 vocab.Meaning = p.Meaning;
                 vocab.ExampleSentence = p.ExampleSentence;
@@ -769,6 +772,7 @@ namespace RikiPath.Application.Services
                 kanji = new Kanji
                 {
                     Character = p.Character,
+                    ImageUrl = p.ImageUrl,
                     Meaning = p.Meaning,
                     SinoVietnamese = p.SinoVietnamese,
                     OnYomi = p.OnYomi,
@@ -785,6 +789,7 @@ namespace RikiPath.Application.Services
                     ?? throw new InvalidOperationException("Không tìm thấy Kanji gốc.");
 
                 kanji.Character = p.Character;
+                if (p.ImageUrl is not null) kanji.ImageUrl = string.IsNullOrWhiteSpace(p.ImageUrl) ? null : p.ImageUrl;
                 kanji.Meaning = p.Meaning;
                 kanji.SinoVietnamese = p.SinoVietnamese;
                 kanji.OnYomi = p.OnYomi;
@@ -857,6 +862,7 @@ namespace RikiPath.Application.Services
             }
             lesson.Title = p.Title;
             lesson.Description = p.Description;
+            if (p.ImageUrl is not null) lesson.ImageUrl = string.IsNullOrWhiteSpace(p.ImageUrl) ? null : p.ImageUrl;
             if (p.AudioUrl is not null)
                 lesson.AudioUrl = string.IsNullOrWhiteSpace(p.AudioUrl) ? null : p.AudioUrl;
             lesson.SortOrder = p.SortOrder;
@@ -903,11 +909,13 @@ namespace RikiPath.Application.Services
                 .OrderBy(q => q.SortOrder).Select(q => new PracticeQuestion
                 {
                     QuestionText = q.QuestionText,
+                    ImageUrl = q.ImageUrl,
                     Explanation = q.Explanation,
                     SortOrder = q.SortOrder,
                     Options = q.Options.OrderBy(o => o.SortOrder).Select(o => new PracticeQuestionOption
                     {
                         OptionText = o.OptionText,
+                        ImageUrl = o.ImageUrl,
                         IsCorrect = o.IsCorrect,
                         SortOrder = o.SortOrder
                     }).ToList()
@@ -919,6 +927,7 @@ namespace RikiPath.Application.Services
                 {
                     Title = p.Title,
                     Description = p.Description,
+                    ImageUrl = p.ImageUrl,
                     SortOrder = p.SortOrder,
                     LessonId = lesson.Id,
                     LanguageSkillId = p.LanguageSkillId,
@@ -931,6 +940,7 @@ namespace RikiPath.Application.Services
                 ?? throw new InvalidOperationException("Không tìm thấy Practice Exercise gốc.");
             exercise.Title = p.Title;
             exercise.Description = p.Description;
+            if (p.ImageUrl is not null) exercise.ImageUrl = string.IsNullOrWhiteSpace(p.ImageUrl) ? null : p.ImageUrl;
             exercise.SortOrder = p.SortOrder;
             exercise.LessonId = lesson.Id;
             exercise.LanguageSkillId = p.LanguageSkillId;
@@ -1090,6 +1100,7 @@ namespace RikiPath.Application.Services
                 {
                     Title = p.Title,
                     Structure = p.Structure,
+                    ImageUrl = p.ImageUrl,
                     UsageNotes = p.UsageNotes,
                     ExampleSentence = p.ExampleSentence,
                     ExampleSentenceMeaning = p.ExampleSentenceMeaning
@@ -1103,6 +1114,7 @@ namespace RikiPath.Application.Services
 
                 grammar.Title = p.Title;
                 grammar.Structure = p.Structure;
+                if (p.ImageUrl is not null) grammar.ImageUrl = string.IsNullOrWhiteSpace(p.ImageUrl) ? null : p.ImageUrl;
                 grammar.UsageNotes = p.UsageNotes;
                 grammar.ExampleSentence = p.ExampleSentence;
                 grammar.ExampleSentenceMeaning = p.ExampleSentenceMeaning;
@@ -1143,6 +1155,9 @@ namespace RikiPath.Application.Services
 
                 var skillNames = (await unitOfWork.LanguageSkills.GetAllAsync(cancellationToken))
                     .ToDictionary(skill => skill.Id, skill => skill.Name);
+                var level = await unitOfWork.CertificateLevels.GetByIdAsync(p.CertificateLevelId, cancellationToken);
+                if (level is null || level.IsDeleted)
+                    throw new InvalidOperationException("Cấp độ của đề thi không tồn tại hoặc đã bị xóa.");
                 foreach (var s in p.Sections)
                 {
                     if (req.Action == ImportRowAction.New)
@@ -1153,40 +1168,10 @@ namespace RikiPath.Application.Services
                             throw new InvalidOperationException($"Phần '{s.Title}' thiếu CertificateSectionCode.");
                     }
 
-                    foreach (var q in s.Questions)
-                    {
-                        var type = NormalizeMockQuestionType(q.QuestionType);
-                        var audioError = ImportHandlerSupport.ValidateMockListeningAudio(type, q.AudioUrl,
-                            skillNames.GetValueOrDefault(s.LanguageSkillId) ?? s.LanguageSkillName, s.Title, s.CertificateSectionCode);
-                        if (audioError is not null)
-                            throw new InvalidOperationException($"Phần '{s.Title}', câu số {q.SortOrder}: {audioError}");
-                        if (type is "SingleChoice" or "Listening" or "Reading")
-                        {
-                            if (q.Options.Count < 2)
-                                throw new InvalidOperationException($"Câu hỏi '{q.QuestionText}' phải có ít nhất 2 đáp án.");
-                            if (q.Options.Count(o => o.IsCorrect) != 1)
-                                throw new InvalidOperationException($"Câu hỏi '{q.QuestionText}' phải có đúng 1 đáp án đúng.");
-                        }
-                        else if (type == "MultipleChoice")
-                        {
-                            if (q.Options.Count < 2 || q.Options.All(o => !o.IsCorrect))
-                                throw new InvalidOperationException($"Câu hỏi nhiều lựa chọn '{q.QuestionText}' cần ít nhất 2 lựa chọn và có đáp án đúng.");
-                        }
-                        else
-                        {
-                            if (q.Options.Count != 0)
-                                throw new InvalidOperationException($"Câu hỏi {type} '{q.QuestionText}' không dùng Option1..Option4.");
-                            if (q.InteractionData is null || q.AnswerKey is null)
-                                throw new InvalidOperationException($"Câu hỏi {type} '{q.QuestionText}' cần InteractionDataJson và AnswerKeyJson.");
-                        }
-                    }
                 }
-                var level = await unitOfWork.CertificateLevels.GetByIdAsync(p.CertificateLevelId, cancellationToken);
-                if (level is null || level.IsDeleted)
-                    throw new InvalidOperationException("Cấp độ của đề thi không tồn tại hoặc đã bị xóa.");
-                var coverageError = ImportHandlerSupport.ValidateMockTestCoverage(level.Code, p.Sections, skillNames);
-                if (coverageError is not null)
-                    throw new InvalidOperationException(coverageError);
+                var validationError = ExcelContentImportService.ValidateMockTestPayload(req.PayloadJson!, skillNames,
+                    new Dictionary<int, string> { [level.Id] = level.Code });
+                if (validationError is not null) throw new InvalidOperationException(validationError);
             }
 
             if (req.Action == ImportRowAction.New)
@@ -1251,6 +1236,7 @@ namespace RikiPath.Application.Services
                     }).ToList()
                 };
 
+                await FillAudioTranscriptsAsync(test, cancellationToken);
                 await unitOfWork.MockTests.AddAsync(test, cancellationToken);
             }
             else
@@ -1314,21 +1300,27 @@ namespace RikiPath.Application.Services
                     (test.Sections ??= []).AddRange(replacementSections);
                 }
 
+                await FillAudioTranscriptsAsync(test, cancellationToken);
                 unitOfWork.MockTests.Update(test);
             }
         }
         #endregion
 
-        private static string NormalizeMockQuestionType(string? questionType)
+        private async Task FillAudioTranscriptsAsync(MockTest test, CancellationToken ct)
         {
-            var supported = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            if (audioTranscriptions is null) return;
+            foreach (var question in (test.Sections ?? []).Where(section => !section.IsDeleted)
+                .SelectMany(section => section.Questions ?? []).Where(question => !question.IsDeleted && !string.IsNullOrWhiteSpace(question.AudioUrl)))
             {
-                "SingleChoice", "MultipleChoice", "Ordering", "FillBlank", "Matching", "ShortAnswer", "Listening", "Reading"
-            };
-            if (string.IsNullOrWhiteSpace(questionType)) return "SingleChoice";
-            if (!supported.Contains(questionType.Trim()))
-                throw new InvalidOperationException($"Dạng câu MockTest không hỗ trợ: {questionType}.");
-            return supported.First(x => string.Equals(x, questionType.Trim(), StringComparison.OrdinalIgnoreCase));
+                var data = string.IsNullOrWhiteSpace(question.InteractionDataJson) ? (JsonElement?)null
+                    : JsonSerializer.Deserialize<JsonElement>(question.InteractionDataJson);
+                var audio = await audioTranscriptions.GetForGradingAsync(question.AudioUrl!, data, ct);
+                question.AudioTranscript = audio is { Status: "Completed" } ? audio.Transcript : null;
+            }
         }
+
+        private static string NormalizeMockQuestionType(string? questionType) =>
+            JlptMockQuestionFormats.NormalizeQuestionType(questionType)
+                ?? throw new InvalidOperationException($"Dạng câu MockTest không hỗ trợ: {questionType}.");
     }
 }

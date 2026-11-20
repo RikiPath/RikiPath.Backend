@@ -3,13 +3,17 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using RikiPath.Application.IServices;
 using RikiPath.Application.Responses;
+using RikiPath.Application.Responses.Content;
+using RikiPath.WebApi.Services;
 
 namespace RikiPath.WebApi.Controllers
 {
     [Route("api/[controller]")]
     [ApiController]
     [Authorize]
-    public class FileStorageController(IFileStorageService fileStorageService) : ControllerBase
+    public class FileStorageController(IFileStorageService fileStorageService,
+        IContentAudioTranscriptionService? transcriptions = null, IClaimService? claims = null,
+        ILogger<FileStorageController>? logger = null) : ControllerBase
     {
         private const long MaxUploadBytes = 25 * 1024 * 1024; // 25 MB
 
@@ -40,8 +44,46 @@ namespace RikiPath.WebApi.Controllers
                 return BadRequest(ApiResponse<object>.Fail("Đường dẫn thư mục không hợp lệ."));
 
             await using var stream = file.OpenReadStream();
-            var result = await fileStorageService.UploadAsync(stream, file.FileName, file.ContentType, folder.Trim(), cancellationToken);
-            return StatusCode(200, result);
+            if (transcriptions is not null && claims is not null &&
+                (User.IsInRole("ContentAuthor") || User.IsInRole("Admin")) &&
+                ext.Equals(".mp3", StringComparison.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    return Ok(await transcriptions.UploadAsync(stream, file.FileName, claims.GetUserClaim().Id, cancellationToken));
+                }
+                catch (ArgumentException ex)
+                {
+                    return BadRequest(ApiResponse<ListeningAudioUploadResponse>.Fail(ex.Message));
+                }
+                catch (InvalidOperationException)
+                {
+                    return StatusCode(503, ApiResponse<ListeningAudioUploadResponse>.Fail(
+                        "Dịch vụ lưu audio chưa được cấu hình đầy đủ.", System.Net.HttpStatusCode.ServiceUnavailable,
+                        "AUDIO_STORAGE_NOT_CONFIGURED"));
+                }
+                catch (Amazon.Runtime.AmazonServiceException ex)
+                {
+                    var failure = AwsAudioUploadErrors.Create<ListeningAudioUploadResponse>(ex, logger);
+                    return StatusCode(failure.StatusCode, failure);
+                }
+            }
+
+            try
+            {
+                var result = await fileStorageService.UploadAsync(stream, file.FileName, file.ContentType, folder.Trim(), cancellationToken);
+                return Ok(result);
+            }
+            catch (ArgumentException ex) { return BadRequest(new { message = ex.Message }); }
+            catch (InvalidOperationException)
+            {
+                return StatusCode(503, new { message = "Dịch vụ lưu file chưa được cấu hình đầy đủ." });
+            }
+            catch (Amazon.Runtime.AmazonServiceException ex)
+            {
+                var failure = AwsAudioUploadErrors.Create<UploadedFileResult>(ex, logger);
+                return StatusCode(failure.StatusCode, failure);
+            }
         }
 
         /// <summary>
@@ -54,8 +96,12 @@ namespace RikiPath.WebApi.Controllers
             if (!IsSafeSegment(storedFileName, allowEmpty: false) || !IsSafeSegment(folder, allowEmpty: true))
                 return BadRequest(ApiResponse<object>.Fail("Tên tệp hoặc thư mục không hợp lệ."));
 
-            await fileStorageService.DeleteAsync(storedFileName.Trim(), folder.Trim(), cancellationToken);
-            return NoContent();
+            try
+            {
+                await fileStorageService.DeleteAsync(storedFileName.Trim(), folder.Trim(), cancellationToken);
+                return NoContent();
+            }
+            catch (UnauthorizedAccessException) { return Forbid(); }
         }
 
         private static bool IsSafeSegment(string? value, bool allowEmpty)

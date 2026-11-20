@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using RikiPath.Application.IServices;
+using RikiPath.Application.Services;
 
 namespace RikiPath.WebApi.Services;
 
@@ -8,7 +9,7 @@ public sealed class LocalQaFileStorageService : IFileStorageService
 {
     private const int MaxDocumentBytes = 5 * 1024 * 1024;
     private static readonly Regex ReferencePattern = new(
-        @"^/(?<owner>[1-9][0-9]*)/(?<file>[a-f0-9]{32}\.(?:pdf|jpg|png))$",
+        @"^/(?<owner>[1-9][0-9]*)/(?<file>[a-f0-9]{32}\.(?:pdf|jpg|png|wav|mp3|m4a|webm))$",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private readonly string _root;
 
@@ -39,7 +40,8 @@ public sealed class LocalQaFileStorageService : IFileStorageService
             "application/pdf" => "pdf",
             "image/jpeg" => "jpg",
             "image/png" => "png",
-            _ => throw new ArgumentException("Loại chứng chỉ không được hỗ trợ.", nameof(contentType))
+            _ => HomeworkAudioFormat.Extension(contentType)?.TrimStart('.')
+                ?? throw new ArgumentException("Loại tệp không được hỗ trợ.", nameof(contentType))
         };
         await using var document = new MemoryStream();
         var buffer = new byte[81920];
@@ -84,6 +86,7 @@ public sealed class LocalQaFileStorageService : IFileStorageService
         var contentType = extension switch
         {
             ".pdf" => "application/pdf", ".jpg" => "image/jpeg", ".png" => "image/png",
+            ".wav" => "audio/wav", ".mp3" => "audio/mpeg", ".m4a" => "audio/mp4", ".webm" => "audio/webm",
             _ => throw new ArgumentException("Loại chứng chỉ không hợp lệ.", nameof(storedUrl))
         };
         var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read,
@@ -127,6 +130,6 @@ public sealed class LocalQaFileStorageService : IFileStorageService
         "image/jpeg" => bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF,
         "image/png" => length >= 8 && bytes[0] == 0x89 && bytes[1] == 0x50 && bytes[2] == 0x4E && bytes[3] == 0x47 &&
             bytes[4] == 0x0D && bytes[5] == 0x0A && bytes[6] == 0x1A && bytes[7] == 0x0A,
-        _ => false
+        _ => HomeworkAudioFormat.Detect(bytes.AsSpan(0, (int)length)) == contentType
     };
 }

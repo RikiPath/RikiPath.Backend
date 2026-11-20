@@ -308,9 +308,11 @@ public sealed class SubscriptionAccessService(
             "learning_path" => category == CategoryLearningPath,
             "speaking" => category is CategorySpeaking or CategoryAiGrading or CategorySelfStudy,
             "writing" => category is CategoryWriting or CategoryAiGrading or CategorySelfStudy,
+            MockTestExplanationService.CreditFeature => category is CategoryAiGrading or CategorySelfStudy,
             _ => false
         };
     }
+
 
     private static bool IsActive(UserSubscription order, DateTime now)
         => (order.StartDate is null || order.StartDate <= now) && (order.EndDate is null || order.EndDate > now);

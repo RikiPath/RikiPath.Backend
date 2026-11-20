@@ -8,6 +8,7 @@ using RikiPath.Application.Responses;
 using RikiPath.Application.Responses.MockTests;
 using RikiPath.Application.Responses.PlacementTests;
 using System.Net;
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
@@ -20,9 +21,7 @@ namespace RikiPath.Application.Services
         private static readonly JsonSerializerOptions MockSnapshotJson = new(JsonSerializerDefaults.Web);
 
         private static bool IsSingleChoiceQuestion(string type) =>
-            type.Equals("SingleChoice", StringComparison.OrdinalIgnoreCase) ||
-            type.Equals("Reading", StringComparison.OrdinalIgnoreCase) ||
-            type.Equals("Listening", StringComparison.OrdinalIgnoreCase);
+            JlptMockQuestionFormats.IsSingleChoice(type);
 
         private sealed class MockAttemptSnapshot
         {
@@ -80,16 +79,7 @@ namespace RikiPath.Application.Services
                 return submitted.Length == response.Value.GetArrayLength() &&
                     submitted.SequenceEqual(question.CorrectOptionIds.OrderBy(id => id));
             }
-            if (response is null || string.IsNullOrWhiteSpace(question.AnswerKeyJson)) return false;
-            try
-            {
-                return JsonNode.DeepEquals(JsonNode.Parse(question.AnswerKeyJson),
-                    JsonNode.Parse(response.Value.GetRawText()));
-            }
-            catch (JsonException)
-            {
-                return false;
-            }
+            return IsStructuredResponseCorrect(question.AnswerKeyJson, question.Prompt.InteractionData, response);
         }
 
         private static JsonElement? ParseJsonElement(string? json)
@@ -99,12 +89,27 @@ namespace RikiPath.Application.Services
             return document.RootElement.Clone();
         }
 
-        private static bool IsStructuredResponseCorrect(MockQuestion question, JsonElement? response)
+        private static string PublicOptionText(MockQuestionOption option, string? interactionData, int index) =>
+            JlptMockQuestionFormats.HasAudioOptions(ParseJsonElement(interactionData))
+                ? (index + 1).ToString(CultureInfo.InvariantCulture) : option.OptionText;
+
+        private static bool IsStructuredResponseCorrect(MockQuestion question, JsonElement? response) =>
+            IsStructuredResponseCorrect(question.AnswerKeyJson, ParseJsonElement(question.InteractionDataJson), response);
+
+        private static bool IsStructuredResponseCorrect(string? answerKey, JsonElement? data, JsonElement? response)
         {
-            if (response is null || string.IsNullOrWhiteSpace(question.AnswerKeyJson)) return false;
+            if (response is null || string.IsNullOrWhiteSpace(answerKey)) return false;
             try
             {
-                return JsonNode.DeepEquals(JsonNode.Parse(question.AnswerKeyJson), JsonNode.Parse(response.Value.GetRawText()));
+                if (JlptMockQuestionFormats.IsSentenceComposition(data))
+                {
+                    return JlptMockQuestionFormats.StarPosition(data) is >= 1 and <= 4 and var position &&
+                        JlptMockQuestionFormats.IsValidSentenceResponse(data, response) &&
+                        SentenceOrdering.TryReadSequence(response, out var submitted) && submitted.Length == 4 &&
+                        SentenceOrdering.TryReadSequence(ParseJsonElement(answerKey), out var correct) && correct.Length == 4 &&
+                        submitted[position - 1] == correct[position - 1];
+                }
+                return JsonNode.DeepEquals(JsonNode.Parse(answerKey), JsonNode.Parse(response.Value.GetRawText()));
             }
             catch (JsonException)
             {
@@ -183,10 +188,10 @@ namespace RikiPath.Application.Services
                                     Options = (question.Options ?? new List<MockQuestionOption>())
                                         .OrderBy(o => o.SortOrder)
                                         .ThenBy(o => o.Id)
-                                        .Select(option => new MockQuestionOptionResponse
+                                        .Select((option, index) => new MockQuestionOptionResponse
                                         {
                                             OptionId = option.Id,
-                                            OptionText = option.OptionText,
+                                            OptionText = PublicOptionText(option, question.InteractionDataJson, index),
                                             ImageUrl = option.ImageUrl,
                                             SortOrder = option.SortOrder,
                                         })
@@ -252,10 +257,10 @@ namespace RikiPath.Application.Services
                         Options = (item.Question.Options ?? [])
                             .Where(option => !option.IsDeleted)
                             .OrderBy(option => option.SortOrder).ThenBy(option => option.Id)
-                            .Select(option => new StartAttemptOptionResponse
+                            .Select((option, index) => new StartAttemptOptionResponse
                             {
                                 OptionId = option.Id,
-                                Content = option.OptionText,
+                                Content = PublicOptionText(option, item.Question.InteractionDataJson, index),
                                 ImageUrl = option.ImageUrl,
                                 Order = option.SortOrder,
                             }).ToList(),
@@ -560,6 +565,17 @@ namespace RikiPath.Application.Services
                                 $"Câu hỏi {submittedAnswer.QuestionId} yêu cầu câu trả lời theo dạng {questionType}.", HttpStatusCode.BadRequest);
                             return;
                         }
+                        else if (SentenceOrdering.IsType(questionType))
+                        {
+                            var data = frozenQuestion?.Prompt.InteractionData ?? ParseJsonElement(question.InteractionDataJson);
+                            if (JlptMockQuestionFormats.IsSentenceComposition(data) &&
+                                !JlptMockQuestionFormats.IsValidSentenceResponse(data, submittedAnswer.Response))
+                            {
+                                response = ApiResponse<AttemptResultResponse>.Fail(
+                                    $"Câu hỏi {submittedAnswer.QuestionId} chứa cụm từ không hợp lệ.", HttpStatusCode.BadRequest);
+                                return;
+                            }
+                        }
                         // Option phải thuộc đúng Question để client không thể ghép ID tùy ý khi chấm điểm.
                         if (submittedAnswer.SelectedOptionId is not null &&
                             !validOptionIds.Contains(submittedAnswer.SelectedOptionId.Value))
@@ -685,7 +701,7 @@ namespace RikiPath.Application.Services
                     var questionType = frozen?.Prompt.QuestionType ?? question.QuestionType;
                     var validOptionIds = frozen?.Prompt.Options.Select(option => option.OptionId).ToHashSet() ??
                         (question.Options ?? []).Where(option => !option.IsDeleted).Select(option => option.Id).ToHashSet();
-                    if (questionType.Equals("SingleChoice", StringComparison.OrdinalIgnoreCase))
+                    if (IsSingleChoiceQuestion(questionType))
                     {
                         if (answer.Response.HasValue || (answer.SelectedOptionId.HasValue &&
                             !validOptionIds.Contains(answer.SelectedOptionId.Value)))
@@ -708,6 +724,16 @@ namespace RikiPath.Application.Services
                     {
                         response = ApiResponse<bool>.Fail("Câu trả lời không đúng định dạng.", HttpStatusCode.BadRequest);
                         return;
+                    }
+                    else if (SentenceOrdering.IsType(questionType))
+                    {
+                        var data = frozen?.Prompt.InteractionData ?? ParseJsonElement(question.InteractionDataJson);
+                        if (JlptMockQuestionFormats.IsSentenceComposition(data) &&
+                            !JlptMockQuestionFormats.IsValidSentenceResponse(data, answer.Response))
+                        {
+                            response = ApiResponse<bool>.Fail("Câu trả lời chứa cụm từ không hợp lệ.", HttpStatusCode.BadRequest);
+                            return;
+                        }
                     }
 
                     snapshot.SelectedOptionId = answer.SelectedOptionId;
@@ -786,10 +812,10 @@ namespace RikiPath.Application.Services
                                 Options = (question.Options ?? [])
                                     .Where(option => !option.IsDeleted)
                                     .OrderBy(option => option.SortOrder).ThenBy(option => option.Id)
-                                    .Select(option => new StartAttemptOptionResponse
+                                    .Select((option, index) => new StartAttemptOptionResponse
                                     {
                                         OptionId = option.Id,
-                                        Content = option.OptionText,
+                                        Content = PublicOptionText(option, question.InteractionDataJson, index),
                                         ImageUrl = option.ImageUrl,
                                         Order = option.SortOrder,
                                     }).ToList(),
@@ -862,7 +888,7 @@ namespace RikiPath.Application.Services
                             ? foundQuestion : null;
                         answer.IsCorrect = frozenQuestion is not null
                             ? IsFrozenAnswerCorrect(frozenQuestion, answer.SelectedOptionId, structured)
-                            : question.QuestionType.Equals("SingleChoice", StringComparison.OrdinalIgnoreCase)
+                            : IsSingleChoiceQuestion(question.QuestionType)
                             ? selected?.IsCorrect == true
                             : question.QuestionType.Equals("MultipleChoice", StringComparison.OrdinalIgnoreCase)
                                 ? IsMultipleChoiceCorrect(question, structured)
@@ -1064,10 +1090,10 @@ namespace RikiPath.Application.Services
                                     SortOrder = question.SortOrder,
                                     Options = (question.Options ?? new List<MockQuestionOption>())
                                         .OrderBy(o => o.SortOrder)
-                                        .Select(option => new MockQuestionOptionResponse
+                                        .Select((option, index) => new MockQuestionOptionResponse
                                         {
                                             OptionId = option.Id,
-                                            OptionText = option.OptionText,
+                                            OptionText = PublicOptionText(option, question.InteractionDataJson, index),
                                             ImageUrl = option.ImageUrl,
                                             SortOrder = option.SortOrder,
                                         })
@@ -1109,35 +1135,37 @@ namespace RikiPath.Application.Services
                     attemptId, cancellationToken);
                 var frozenQuestionsById = ReadFrozenQuestions(attempt, answers);
 
-                var questions = answers.Select(a => new QuestionReviewCard
+                var questions = answers.Select(a =>
                 {
-                    QuestionId = a.MockQuestionId,
-                    QuestionText = frozenQuestionsById is not null &&
-                        frozenQuestionsById.TryGetValue(a.MockQuestionId, out var frozenText)
-                            ? frozenText.Prompt.Content : a.MockQuestion.QuestionText,
-                    QuestionType = frozenQuestionsById is not null &&
-                        frozenQuestionsById.TryGetValue(a.MockQuestionId, out var frozenType)
-                            ? frozenType.Prompt.QuestionType : a.MockQuestion.QuestionType,
-                    Response = ParseJsonElement(a.ResponseJson),
-                    AnswerKey = ParseJsonElement(frozenQuestionsById is not null &&
-                        frozenQuestionsById.TryGetValue(a.MockQuestionId, out var frozenKey)
-                            ? frozenKey.AnswerKeyJson : a.MockQuestion.AnswerKeyJson),
-                    Explanation = frozenQuestionsById is not null &&
-                        frozenQuestionsById.TryGetValue(a.MockQuestionId, out var frozenExplanation)
-                            ? frozenExplanation.Explanation : a.MockQuestion.Explanation,
-                    SelectedOptionId = a.SelectedOptionId,
-                    IsCorrect = a.IsCorrect,
-                    WasPreviouslyIncorrect = !a.IsCorrect,
-                    Options = frozenQuestionsById is not null &&
-                        frozenQuestionsById.TryGetValue(a.MockQuestionId, out var frozenOptions)
-                            ? frozenOptions.Prompt.Options.Select(option => new QuestionOptionReview
+                    var frozen = frozenQuestionsById?.GetValueOrDefault(a.MockQuestionId);
+                    var question = a.MockQuestion;
+                    return new QuestionReviewCard
+                    {
+                        QuestionId = a.MockQuestionId,
+                        QuestionText = frozen?.Prompt.Content ?? question.QuestionText,
+                        QuestionType = frozen?.Prompt.QuestionType ?? question.QuestionType,
+                        InteractionData = frozen is null ? ParseJsonElement(question.InteractionDataJson) : frozen.Prompt.InteractionData,
+                        ImageUrl = frozen is null ? question.ImageUrl : frozen.Prompt.ImageUrl,
+                        AudioUrl = frozen is null ? question.AudioUrl : frozen.Prompt.AudioUrl,
+                        AudioTranscript = frozen is null ||
+                            (string.Equals(frozen.Prompt.AudioUrl, question.AudioUrl, StringComparison.Ordinal) &&
+                             string.Equals(frozen.Prompt.InteractionData?.GetRawText(), question.InteractionDataJson, StringComparison.Ordinal))
+                            ? question.AudioTranscript : null,
+                        Response = ParseJsonElement(a.ResponseJson),
+                        AnswerKey = ParseJsonElement(frozen is null ? question.AnswerKeyJson : frozen.AnswerKeyJson),
+                        Explanation = frozen is null ? question.Explanation : frozen.Explanation,
+                        SelectedOptionId = a.SelectedOptionId,
+                        IsCorrect = a.IsCorrect,
+                        WasPreviouslyIncorrect = !a.IsCorrect,
+                        Options = frozen is not null
+                            ? frozen.Prompt.Options.Select(option => new QuestionOptionReview
                             {
                                 OptionId = option.OptionId,
                                 OptionText = option.Content,
                                 ImageUrl = option.ImageUrl,
-                                IsCorrect = frozenOptions.CorrectOptionIds.Contains(option.OptionId),
+                                IsCorrect = frozen.CorrectOptionIds.Contains(option.OptionId),
                             }).ToList()
-                            : (a.MockQuestion.Options ?? [])
+                            : (question.Options ?? [])
                                 .OrderBy(option => option.SortOrder).ThenBy(option => option.Id)
                                 .Select(option => new QuestionOptionReview
                                 {
@@ -1146,6 +1174,7 @@ namespace RikiPath.Application.Services
                                     ImageUrl = option.ImageUrl,
                                     IsCorrect = option.IsCorrect,
                                 }).ToList(),
+                    };
                 }).ToList();
 
                 return ApiResponse<DetailedAttemptResultResponse>.Success(new DetailedAttemptResultResponse
