@@ -2,7 +2,7 @@ name: Deploy .NET 8 Web API
 
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
   workflow_dispatch:
 
 concurrency:
@@ -18,88 +18,164 @@ jobs:
     environment: production
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      # 1. Checkout source code
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    - name: Setup .NET 8
-      uses: actions/setup-dotnet@v4
-      with:
-        dotnet-version: '8.0.x'
+      # 2. Setup .NET 8
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
 
-    - name: Restore & build solution before preflight
-      run: |
-        dotnet restore RikiPath.Backend.slnx
-        dotnet build RikiPath.Backend.slnx --no-restore -c Release
+      # 3. Restore & build
+      - name: Restore & build solution before preflight
+        run: |
+          dotnet restore RikiPath.Backend.slnx
+          dotnet build RikiPath.Backend.slnx --no-restore -c Release
 
-    - name: Verify security analyzers cleanly pass
-      run: dotnet format analyzers RikiPath.Backend.slnx --verify-no-changes --severity error --no-restore
+      # 4. Verify analyzers
+      - name: Verify security analyzers cleanly pass
+        run: |
+          dotnet format analyzers RikiPath.Backend.slnx \
+            --verify-no-changes \
+            --severity error \
+            --no-restore
 
-    - name: Install read-only migration preflight tools
-      run: |
-        dotnet tool install --global dotnet-ef --version 8.0.8
-        sudo apt-get update -qq
-        sudo apt-get install -y postgresql-client
+      # 5. Install migration preflight tools
+      - name: Install read-only migration preflight tools
+        run: |
+          dotnet tool install --global dotnet-ef --version 8.0.8
 
-    - name: Prepare private production settings for read-only preflight
-      env:
-        APPSETTINGS_PRODUCTION: ${{ secrets.APPSETTINGS_PRODUCTION }}
-      run: |
-        test -n "$APPSETTINGS_PRODUCTION"
-        printf '%s' "$APPSETTINGS_PRODUCTION" > RikiPath.WebApi/appsettings.Production.json
+          echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
 
-    - name: Block deployment when shared database schema diverges
-      shell: pwsh
-      env:
-        ASPNETCORE_ENVIRONMENT: Production
-        MIGRATION_GATE_HOST: ${{ secrets.MIGRATION_GATE_HOST }}
-        MIGRATION_GATE_DATABASE: ${{ secrets.MIGRATION_GATE_DATABASE }}
-        MIGRATION_GATE_USERNAME: ${{ secrets.MIGRATION_GATE_USERNAME }}
-      run: ./tools/verify-migration-readiness.ps1 -NoBuild -RequireSharedRemote -ExpectedHost $env:MIGRATION_GATE_HOST -ExpectedDatabase $env:MIGRATION_GATE_DATABASE -ExpectedUsername $env:MIGRATION_GATE_USERNAME
+          sudo apt-get update -qq
+          sudo apt-get install -y postgresql-client
 
-    - name: Publish Web API
-      run: dotnet publish RikiPath.WebApi/RikiPath.WebApi.csproj -c Release -o ./publish
+      # 6. Prepare production configuration for migration gate
+      - name: Prepare private production settings for read-only preflight
+        env:
+          APPSETTINGS_PRODUCTION: ${{ secrets.APPSETTINGS_PRODUCTION }}
+        run: |
+          test -n "$APPSETTINGS_PRODUCTION"
 
-    - name: Create appsettings.Production.json & artifact integrity checksum
-      run: |
-        cp RikiPath.WebApi/appsettings.Production.json ./publish/appsettings.Production.json
-        (cd ./publish && sha256sum RikiPath.WebApi.dll RikiPath.Application.dll RikiPath.Infrastructure.dll > publish.sha256)
+          printf '%s' "$APPSETTINGS_PRODUCTION" \
+            > RikiPath.WebApi/appsettings.Production.json
 
-    - name: Transfer files to VPS
-      uses: appleboy/scp-action@v0.1.7
-      with:
-        host: ${{ secrets.VPS_HOST }}
-        username: ${{ secrets.VPS_USERNAME }}
-        password: ${{ secrets.VPS_PASSWORD }}
-        source: "publish/*"
-        target: "/var/www/rikipath-api"
-        strip_components: 1
-        rm: false
+          jq empty RikiPath.WebApi/appsettings.Production.json
 
-    - name: Restart Systemd Service & Verify Checksum
-      uses: appleboy/ssh-action@v1.0.3
-      with:
-        host: ${{ secrets.VPS_HOST }}
-        username: ${{ secrets.VPS_USERNAME }}
-        password: ${{ secrets.VPS_PASSWORD }}
-        script: |
-          cd /var/www/rikipath-api
-          sha256sum -c publish.sha256
-          chmod 600 /var/www/rikipath-api/appsettings.Production.json
-          systemctl restart rikipath-api.service
+      # 7. Migration readiness gate
+      - name: Block deployment when shared database schema diverges
+        shell: pwsh
+        env:
+          ASPNETCORE_ENVIRONMENT: Production
+          MIGRATION_GATE_HOST: ${{ secrets.MIGRATION_GATE_HOST }}
+          MIGRATION_GATE_DATABASE: ${{ secrets.MIGRATION_GATE_DATABASE }}
+          MIGRATION_GATE_USERNAME: ${{ secrets.MIGRATION_GATE_USERNAME }}
+        run: |
+          ./tools/verify-migration-readiness.ps1 `
+            -NoBuild `
+            -RequireSharedRemote `
+            -ExpectedHost $env:MIGRATION_GATE_HOST `
+            -ExpectedDatabase $env:MIGRATION_GATE_DATABASE `
+            -ExpectedUsername $env:MIGRATION_GATE_USERNAME
 
-    - name: Verify live & database-readiness health checks
-      if: ${{ secrets.API_HEALTH_BASE_URL != '' }}
-      env:
-        API_HEALTH_BASE_URL: ${{ secrets.API_HEALTH_BASE_URL }}
-      run: |
-        for i in $(seq 1 12); do
-          code=$(curl -sS -o /tmp/ready.json -w "%{http_code}" "${API_HEALTH_BASE_URL%/}/health/ready" || true)
-          if [ "$code" = "200" ]; then
-            cat /tmp/ready.json
+      # 8. Publish Web API
+      - name: Publish Web API
+        run: |
+          dotnet publish RikiPath.WebApi/RikiPath.WebApi.csproj \
+            -c Release \
+            --no-restore \
+            -o ./publish
+
+      # 9. Prepare production config & checksum
+      - name: Create appsettings.Production.json & artifact integrity checksum
+        env:
+          APPSETTINGS_PRODUCTION: ${{ secrets.APPSETTINGS_PRODUCTION }}
+        run: |
+          test -n "$APPSETTINGS_PRODUCTION"
+
+          printf '%s' "$APPSETTINGS_PRODUCTION" \
+            > ./publish/appsettings.Production.json
+
+          jq empty ./publish/appsettings.Production.json
+
+          cd ./publish
+
+          find . -type f ! -name publish.sha256 -print0 \
+            | sort -z \
+            | xargs -0 sha256sum > publish.sha256
+
+      # 10. Transfer files to VPS
+      - name: Transfer files to VPS
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          password: ${{ secrets.VPS_PASSWORD }}
+          source: "publish/*"
+          target: "/var/www/rikipath-api"
+          strip_components: 1
+          rm: false
+
+      # 11. Verify & restart service
+      - name: Restart Systemd Service & Verify Checksum
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          password: ${{ secrets.VPS_PASSWORD }}
+          script: |
+            set -e
+
+            cd /var/www/rikipath-api
+
+            echo "Verifying deployment files..."
+            sha256sum -c publish.sha256
+
+            echo "Setting production configuration permissions..."
+            chmod 600 appsettings.Production.json
+
+            echo "Restarting API service..."
+            sudo systemctl restart rikipath-api.service
+
+            echo "Checking service status..."
+            sudo systemctl is-active --quiet rikipath-api.service
+
+            echo "Deployment restart successful."
+
+      # 12. Health check
+      - name: Verify live & database-readiness health checks
+        env:
+          API_HEALTH_BASE_URL: ${{ secrets.API_HEALTH_BASE_URL }}
+        run: |
+          if [ -z "$API_HEALTH_BASE_URL" ]; then
+            echo "API_HEALTH_BASE_URL is not configured."
+            echo "Skipping health check."
             exit 0
           fi
-          sleep 5
-        done
-        echo "Readiness probe failed with HTTP $code"
-        cat /tmp/ready.json || true
-        exit 1
+
+          echo "Checking API readiness..."
+
+          for i in $(seq 1 12); do
+            code=$(curl -sS \
+              -o /tmp/ready.json \
+              -w "%{http_code}" \
+              "${API_HEALTH_BASE_URL%/}/health/ready" || true)
+
+            if [ "$code" = "200" ]; then
+              echo "API readiness check passed."
+              cat /tmp/ready.json
+              exit 0
+            fi
+
+            echo "Attempt $i/12 failed with HTTP $code"
+
+            sleep 5
+          done
+
+          echo "Readiness probe failed with HTTP $code"
+
+          cat /tmp/ready.json || true
+
+          exit 1
