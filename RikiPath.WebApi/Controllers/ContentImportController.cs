@@ -37,7 +37,7 @@ namespace RikiPath.Api.Controllers
                 return BadRequest(ApiResponse<UploadedFileResult>.Fail("File nghe không có định dạng MP3 hợp lệ."));
 
             if (file.Length > ListeningAudioFilePolicy.MaxBytes)
-                return BadRequest(ApiResponse<UploadedFileResult>.Fail("File MP3 tối đa 25 MB."));
+                return BadRequest(ApiResponse<UploadedFileResult>.Fail("File MP3 không được vượt quá 500 MB."));
 
             await using var audio = file.OpenReadStream();
             if (transcriptions is not null)
@@ -70,6 +70,22 @@ namespace RikiPath.Api.Controllers
                 }
             }
             var uploaded = await fileStorage.UploadAsync(audio, file.FileName, "audio/mpeg", "jlpt-listening", cancellationToken);
+            return Ok(ApiResponse<UploadedFileResult>.Success(uploaded));
+        }
+
+        [HttpPost("content-image")]
+        [Consumes("multipart/form-data")]
+        public async Task<IActionResult> UploadContentImage(IFormFile? file, CancellationToken cancellationToken)
+        {
+            if (file is null || file.Length == 0)
+                return BadRequest(ApiResponse<UploadedFileResult>.Fail("Vui lòng chọn một hình ảnh."));
+            if (!file.ContentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+                return BadRequest(ApiResponse<UploadedFileResult>.Fail("Chỉ hỗ trợ file hình ảnh."));
+            if (file.Length > ImportImageFiles.MaxImageBytes)
+                return BadRequest(ApiResponse<UploadedFileResult>.Fail("Hình ảnh không được vượt quá 10 MB."));
+
+            await using var stream = file.OpenReadStream();
+            var uploaded = await fileStorage.UploadAsync(stream, file.FileName, file.ContentType, "jlpt-images", cancellationToken);
             return Ok(ApiResponse<UploadedFileResult>.Success(uploaded));
         }
 

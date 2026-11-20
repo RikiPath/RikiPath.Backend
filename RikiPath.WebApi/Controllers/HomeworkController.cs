@@ -9,45 +9,36 @@ using RikiPath.Application.Services;
 
 namespace RikiPath.WebApi.Controllers;
 
+// PR #70 integration: các route của teammate là canonical (scan, ai-draft, PUT grade, bookings/*).
+// Route Task 02/05 (cohorts, submit-scan, submission-scan, POST grade) giữ làm alias, gọi cùng một method canonical.
 [ApiController]
 [Route("api/homework")]
 [Authorize(Roles = "Learner,Mentor,Admin")]
 public sealed class HomeworkController(HomeworkService homework, IPracticeQuizService practice) : ControllerBase
 {
     [HttpGet]
-    public async Task<IActionResult> List([FromQuery] int? learnerId, [FromQuery] int? bookingId, CancellationToken ct)
+    public async Task<IActionResult> List([FromQuery] int? learnerId, [FromQuery] int? cohortId,
+        CancellationToken ct)
     {
-        if (User.IsInRole("Admin") && bookingId is not > 0 && learnerId is not > 0)
-            return BadRequest(ApiResponse<object>.Fail("Chọn lịch ôn luyện hoặc học viên để xem bài tập."));
-        return Ok(ApiResponse<object>.Success(await homework.GetAssignmentsAsync(learnerId, ct, bookingId)));
+        if (User.IsInRole("Admin") && learnerId is not > 0 && cohortId is not > 0)
+            return BadRequest(ApiResponse<object>.Fail("Chọn lớp học hoặc học viên để xem bài tập."));
+        return Ok(ApiResponse<object>.Success(await homework.GetAssignmentsAsync(learnerId, ct, cohortId)));
     }
-
-    [HttpGet("bookings")]
-    public async Task<IActionResult> Bookings(CancellationToken ct)
-        => Ok(ApiResponse<object>.Success(await homework.ListBookingsAsync(ct)));
-
-    [HttpPut("bookings/{bookingId:int}/evaluation"), Authorize(Roles = "Mentor")]
-    public async Task<IActionResult> Evaluate(int bookingId, EvaluateMentorBookingRequest request, CancellationToken ct)
-        => Send(await homework.EvaluateBookingAsync(bookingId, request, ct));
-
-    [HttpGet("bookings/{bookingId:int}/progress")]
-    public async Task<IActionResult> Progress(int bookingId, CancellationToken ct)
-        => Send(await homework.GetPracticeProgressAsync(bookingId, ct));
-
-    [HttpPost("bookings/{bookingId:int}/progress"), Authorize(Roles = "Learner")]
-    public async Task<IActionResult> Record(int bookingId, RecordMentorPracticeResultRequest request, CancellationToken ct)
-        => Send(await homework.RecordPracticeProgressAsync(bookingId, request, ct));
-
-    [HttpPut("bookings/{bookingId:int}/review-plan"), Authorize(Roles = "Mentor")]
-    public async Task<IActionResult> ReviewPlan(int bookingId, SaveMentorReviewPlanRequest request, CancellationToken ct)
-        => Send(await homework.SaveReviewPlanAsync(bookingId, request, ct));
 
     [HttpPost("{assignmentId:int}/scan"), Authorize(Roles = "Learner"), RequestSizeLimit(11000000)]
     [Consumes("multipart/form-data")]
-    public async Task<IActionResult> SubmitScan(int assignmentId, IFormFile? file, CancellationToken ct)
-        => Send(await homework.SubmitScanAsync(assignmentId, file, ct));
+    public async Task<IActionResult> SubmitScan(int assignmentId, IFormFile? file, [FromForm] string? textContent, CancellationToken ct)
+        => Send(await homework.SubmitScanAsync(assignmentId, file, ct, textContent));
+
+    // Alias Task 02: form "scan" + "textContent".
+    [HttpPost("{assignmentId:int}/submit-scan"), Authorize(Roles = "Learner"), RequestSizeLimit(11000000)]
+    [Consumes("multipart/form-data")]
+    public async Task<IActionResult> SubmitScanLegacy(int assignmentId, [FromForm] string? textContent, IFormFile? scan,
+        CancellationToken ct)
+        => Send(await homework.SubmitWithScanAsync(assignmentId, textContent, scan, ct));
 
     [HttpGet("{assignmentId:int}/scan")]
+    [HttpGet("{assignmentId:int}/submission-scan")]
     public async Task<IActionResult> Scan(int assignmentId, CancellationToken ct)
     {
         var file = await homework.ReadScanAsync(assignmentId, ct);
@@ -56,10 +47,10 @@ public sealed class HomeworkController(HomeworkService homework, IPracticeQuizSe
         return file is null ? NotFound() : File(file.Content, file.ContentType);
     }
 
-    [HttpPost("{assignmentId:int}/ai-draft"), Authorize(Roles = "Mentor")]
-    public async Task<IActionResult> Draft(int assignmentId,
-        [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] HomeworkAiDraftRequest? request, CancellationToken ct)
-        => Send(await homework.CreateDraftAsync(assignmentId, ct, request?.JlptLevel, request?.MentorPrompt));
+    //[HttpPost("{assignmentId:int}/ai-draft"), Authorize(Roles = "Mentor")]
+    //public async Task<IActionResult> Draft(int assignmentId,
+    //    [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] HomeworkAiDraftRequest? request, CancellationToken ct)
+    //    => Send(await homework.CreateDraftAsync(assignmentId, ct, request?.JlptLevel, request?.MentorPrompt));
 
     [HttpPost("ai-drafts"), Authorize(Roles = "Mentor")]
     public async Task<IActionResult> BatchDraft(HomeworkAiBatchDraftRequest request, CancellationToken ct)
@@ -83,6 +74,11 @@ public sealed class HomeworkController(HomeworkService homework, IPracticeQuizSe
     public async Task<IActionResult> Grade(int assignmentId, PublishHomeworkGradeRequest request, CancellationToken ct)
         => Send(await homework.PublishGradeAsync(assignmentId, request, ct));
 
+    // Alias Task 02: GradeHomeworkAssignmentRequest (Passed/Score/Feedback/PublishAiDraft) → PublishGradeAsync.
+    [HttpPost("{assignmentId:int}/grade"), Authorize(Roles = "Mentor")]
+    public async Task<IActionResult> GradeAndPublish(int assignmentId, GradeHomeworkAssignmentRequest request, CancellationToken ct)
+        => Send(await homework.GradeAndPublishAsync(assignmentId, request, ct));
+
     [HttpGet("learners")]
     [Authorize(Roles = "Mentor")]
     public async Task<IActionResult> Learners(CancellationToken ct, [FromQuery] bool includeAllBookings = false)
@@ -99,10 +95,17 @@ public sealed class HomeworkController(HomeworkService homework, IPracticeQuizSe
     public async Task<IActionResult> Create(CreateHomeworkRequest request, CancellationToken ct)
         => Send(await homework.CreateAsync(request, ct));
 
-    [HttpPost("group")]
-    [Authorize(Roles = "Mentor")]
-    public async Task<IActionResult> CreateGroup(CreateHomeworkGroupRequest request, CancellationToken ct)
-        => Send(await homework.CreateGroupAsync(request, ct));
+    //<<<<<<< HEAD
+    //    [HttpPost("group")]
+    //    [Authorize(Roles = "Mentor")]
+    //    public async Task<IActionResult> CreateGroup(CreateHomeworkGroupRequest request, CancellationToken ct)
+    //        => Send(await homework.CreateGroupAsync(request, ct));
+    //=======
+    //    [HttpPost("cohorts/{cohortId:int}")]
+    //    [Authorize(Roles = "Mentor")]
+    //    public async Task<IActionResult> CreateForCohort(int cohortId, CreateHomeworkRequest request, CancellationToken ct)
+    //        => Send(await homework.CreateCohortAssignmentsAsync(cohortId, request, ct));
+    //>>>>>>> 1100de53db4b59c055c72a80440c60150d9e694a
 
     [HttpGet("{assignmentId:int}/lessons/{lessonId:int}")]
     [Authorize(Roles = "Learner")]
@@ -121,6 +124,7 @@ public sealed class HomeworkController(HomeworkService homework, IPracticeQuizSe
         => Send(await practice.SubmitHomeworkAttemptAsync(assignmentId, attemptId, request, ct));
 
     [HttpPost("{assignmentId:int}/submit")]
+    [HttpPut("{assignmentId:int}/submit")]
     [Authorize(Roles = "Learner")]
     public async Task<IActionResult> Submit(int assignmentId, SubmitHomeworkRequest request, CancellationToken ct)
         => Send(await homework.SubmitAsync(assignmentId, request, ct));

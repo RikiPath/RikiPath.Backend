@@ -2,6 +2,7 @@ using System.Net;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using RikiPath.Application.Helpers;
 using RikiPath.Application.IServices;
 using RikiPath.Application.Requests.MentorProfile;
 using RikiPath.Application.Responses;
@@ -360,8 +361,7 @@ namespace RikiPath.Application.Services
         {
             MentorId = u.Id,
             Email = u.Email ?? string.Empty,
-            FirstName = u.FirstName,
-            LastName = u.LastName,
+            FullName = UserNameHelper.FormatFullName(u.FirstName, u.LastName),
             PhoneNumber = u.PhoneNumber,
             AvatarUrl = u.AvatarUrl,
             Bio = p.Bio,

@@ -1,103 +1,193 @@
-using System;
-using System.Linq;
+using System.Reflection;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Mvc.ApiExplorer;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.OpenApi.Extensions;
 using Microsoft.OpenApi.Models;
+using RikiPath.WebApi.Controllers;
 using RikiPath.WebApi.Swagger;
-using Xunit;
+using Swashbuckle.AspNetCore.Swagger;
 
 namespace RikiPath.Tests;
 
 /// <summary>
-/// Kiểm thử tự động chất lượng tài liệu Swagger và phân nhóm Canonical Tags.
-/// Đảm bảo không còn bất kỳ chuỗi mô tả boilerplate / placeholder chung chung nào.
+/// Kiểm tra tài liệu OpenAPI/Swagger sinh tự động từ Controller, XML comments và filters tối giản.
 /// </summary>
 public sealed class SwaggerDocumentationQualityTests
 {
-    private static readonly string[] ProhibitedBoilerplates =
+    private static readonly string[] ProhibitedPlaceholders =
     [
-        "kỳ bảng lương tháng của Cố vấn",
+        "API thực hiện thao tác theo cấu hình nghiệp vụ của hệ thống.",
         "Giá trị tham số này được sử dụng trong yêu cầu.",
-        "API áp dụng quyền truy cập và quy tắc nghiệp vụ đã cấu hình cho thao tác này.",
-        "Yêu cầu được xử lý thành công.",
-        "Thực hiện thao tác với dữ liệu liên quan.",
         "Dữ liệu đầu vào của yêu cầu.",
-        "Giá trị của trường"
+        "Dữ liệu thông tin đầu vào của yêu cầu.",
+        "Mô hình dữ liệu ",
+        "Giá trị của trường ",
+        "Thực hiện thao tác với dữ liệu liên quan."
     ];
 
-    [Fact]
-    public void CatalogContainsAllCanonicalOperationsWithNonEmptyMetadata()
+    private static (OpenApiDocument Document, IReadOnlyList<ApiDescription> ApiDescriptions) BuildOpenApiDocument()
     {
-        Assert.Equal(256, CanonicalApiOperationCatalog.Operations.Count);
-
-        foreach (var (operationId, meta) in CanonicalApiOperationCatalog.Operations)
+        var builder = WebApplication.CreateBuilder();
+        builder.Services.AddControllers()
+            .AddApplicationPart(typeof(AuthController).Assembly);
+        builder.Services.AddEndpointsApiExplorer();
+        builder.Services.AddSwaggerGen(c =>
         {
-            Assert.False(string.IsNullOrWhiteSpace(meta.Tag), $"Operation {operationId} has empty Tag.");
-            Assert.False(string.IsNullOrWhiteSpace(meta.Summary), $"Operation {operationId} has empty Summary.");
-            Assert.False(string.IsNullOrWhiteSpace(meta.Description), $"Operation {operationId} has empty Description.");
-
-            foreach (var prohibited in ProhibitedBoilerplates)
+            var webApiAsm = typeof(AuthController).Assembly;
+            var baseDir = Path.GetDirectoryName(webApiAsm.Location)!;
+            foreach (var file in new[] { $"{webApiAsm.GetName().Name}.xml", "RikiPath.Application.xml" })
             {
-                Assert.DoesNotContain(prohibited, meta.Summary, StringComparison.OrdinalIgnoreCase);
-                Assert.DoesNotContain(prohibited, meta.Description, StringComparison.OrdinalIgnoreCase);
+                var xmlPath = Path.Combine(baseDir, file);
+                if (File.Exists(xmlPath))
+                {
+                    c.IncludeXmlComments(xmlPath, includeControllerXmlComments: true);
+                }
+            }
+
+            c.SwaggerDoc("v1", new OpenApiInfo
+            {
+                Title = "RikiPath API",
+                Version = "v1",
+                Description = "API RikiPath sử dụng các đường dẫn nghiệp vụ chuẩn, không gắn phiên bản."
+            });
+            c.DocumentFilter<CanonicalApiDocumentFilter>();
+            c.OperationFilter<CanonicalApiOperationFilter>();
+
+            var securityScheme = new OpenApiSecurityScheme
+            {
+                Name = "Authorization",
+                Description = "Nhập JWT Bearer theo định dạng: Bearer {token}.",
+                In = ParameterLocation.Header,
+                Type = SecuritySchemeType.Http,
+                Scheme = "bearer",
+                BearerFormat = "JWT",
+                Reference = new OpenApiReference { Type = ReferenceType.SecurityScheme, Id = "Bearer" }
+            };
+            c.AddSecurityDefinition("Bearer", securityScheme);
+            c.AddSecurityRequirement(new OpenApiSecurityRequirement { { securityScheme, Array.Empty<string>() } });
+        });
+
+        using var app = builder.Build();
+        app.MapControllers();
+
+        var doc = app.Services.GetRequiredService<ISwaggerProvider>().GetSwagger("v1");
+        var apiDescriptions = app.Services.GetRequiredService<IApiDescriptionGroupCollectionProvider>()
+            .ApiDescriptionGroups.Items
+            .SelectMany(g => g.Items)
+            .ToList();
+
+        return (doc, apiDescriptions);
+    }
+
+    [Fact]
+    public void GeneratedOpenApiDocument_CoversAllActions_WithUniqueOperationIdsAndCleanMetadata()
+    {
+        var (doc, apiDescriptions) = BuildOpenApiDocument();
+
+        Assert.NotEmpty(doc.Paths);
+        var operations = doc.Paths
+            .SelectMany(p => p.Value.Operations.Select(o => (Path: p.Key, Method: o.Key, Op: o.Value)))
+            .ToList();
+
+        Assert.Equal(apiDescriptions.Count, operations.Count);
+
+        var operationIds = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var (path, method, op) in operations)
+        {
+            Assert.False(string.IsNullOrWhiteSpace(op.OperationId), $"{method} {path} missing operationId.");
+            Assert.True(operationIds.Add(op.OperationId!), $"Duplicate operationId {op.OperationId}.");
+            Assert.False(string.IsNullOrWhiteSpace(op.Summary), $"{method} {path} missing summary.");
+            Assert.NotEmpty(op.Tags);
+
+            foreach (var prohibited in ProhibitedPlaceholders)
+            {
+                Assert.DoesNotContain(prohibited, op.Summary, StringComparison.OrdinalIgnoreCase);
+                if (!string.IsNullOrWhiteSpace(op.Description))
+                {
+                    Assert.DoesNotContain(prohibited, op.Description, StringComparison.OrdinalIgnoreCase);
+                }
+            }
+        }
+
+        // Mọi schema không bị gắn câu mô tả boilerplate nhân tạo.
+        Assert.NotEmpty(doc.Components.Schemas);
+        foreach (var (schemaName, schema) in doc.Components.Schemas)
+        {
+            if (!string.IsNullOrWhiteSpace(schema.Description))
+            {
+                Assert.DoesNotContain("Mô hình dữ liệu ", schema.Description, StringComparison.OrdinalIgnoreCase);
+            }
+            foreach (var (_, prop) in schema.Properties)
+            {
+                if (!string.IsNullOrWhiteSpace(prop.Description))
+                {
+                    Assert.DoesNotContain("Mô hình dữ liệu ", prop.Description, StringComparison.OrdinalIgnoreCase);
+                    Assert.DoesNotContain("Giá trị của trường ", prop.Description, StringComparison.OrdinalIgnoreCase);
+                }
             }
         }
     }
 
     [Fact]
-    public void AllOperationsBelongToApprovedCanonicalTags()
+    public void DocumentTags_HaveNoOrphans_AndAllUsedTagsHaveDescriptions()
     {
-        var approvedTags = CanonicalApiOperationCatalog.TagDescriptions.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var (doc, _) = BuildOpenApiDocument();
+        var usedTags = doc.Paths.Values
+            .SelectMany(p => p.Operations.Values)
+            .SelectMany(o => o.Tags)
+            .Select(t => t.Name)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var (operationId, meta) in CanonicalApiOperationCatalog.Operations)
+        Assert.NotNull(doc.Tags);
+        Assert.Equal(usedTags.Count, doc.Tags!.Count);
+        foreach (var tag in doc.Tags)
         {
-            Assert.Contains(meta.Tag, approvedTags);
+            Assert.Contains(tag.Name, usedTags);
+            Assert.False(string.IsNullOrWhiteSpace(tag.Description), $"Tag {tag.Name} missing description.");
         }
     }
 
     [Fact]
-    public void ListAndDetailOperationsHaveDistinctSummaries()
+    public void XmlControllerDocumentation_FlowsThroughWithoutManualCatalogOverride()
     {
-        // Kiểm tra phân biệt giữa List payrolls và Detail payrolls của Mentor
-        var mentorList = CanonicalApiOperationCatalog.Operations["MentorCompensation_GET_api_mentor_compensation_payrolls"];
-        var mentorDetail = CanonicalApiOperationCatalog.Operations["MentorCompensation_GET_api_mentor_compensation_payrolls_by_payrollPeriodId"];
-        Assert.NotEqual(mentorList.Summary, mentorDetail.Summary);
+        var (doc, _) = BuildOpenApiDocument();
 
-        // Kiểm tra phân biệt giữa List payouts và Detail payout của Mentor
-        var payoutList = CanonicalApiOperationCatalog.Operations["MentorCompensation_GET_api_mentor_compensation_payouts"];
-        var payoutDetail = CanonicalApiOperationCatalog.Operations["MentorCompensation_GET_api_mentor_compensation_payouts_by_obligationId"];
-        Assert.NotEqual(payoutList.Summary, payoutDetail.Summary);
+        var loginOp = doc.Paths["/api/Auth/login"].Operations[OperationType.Post];
+        Assert.Equal("Auth_POST_api_Auth_login", loginOp.OperationId);
+        Assert.Contains("JWT token", loginOp.Summary);
+        Assert.Contains("LoginRequest", loginOp.RequestBody.Description);
 
-        // Kiểm tra phân biệt giữa Admin List payrolls và Admin Detail payroll
-        var adminList = CanonicalApiOperationCatalog.Operations["AdminMentorCompensation_GET_api_admin_mentor_compensation_payrolls"];
-        var adminDetail = CanonicalApiOperationCatalog.Operations["AdminMentorCompensation_GET_api_admin_mentor_compensation_payrolls_by_payrollPeriodId"];
-        Assert.NotEqual(adminList.Summary, adminDetail.Summary);
+        // Endpoint không có XML comment (StudyCourses / MentorKpi) vẫn nhận summary/tag tự động.
+        var kpiOp = doc.Paths["/api/mentor/kpi/summary"].Operations[OperationType.Get];
+        Assert.Equal("MentorKpi_GET_api_mentor_kpi_summary", kpiOp.OperationId);
+        Assert.False(string.IsNullOrWhiteSpace(kpiOp.Summary));
+
+        // JSON serialize hợp lệ OpenAPI 3.0.
+        var json = doc.SerializeAsJson(Microsoft.OpenApi.OpenApiSpecVersion.OpenApi3_0);
+        Assert.False(string.IsNullOrWhiteSpace(json));
     }
 
     [Fact]
-    public void ParameterDescriptionsDoNotContainBoilerplate()
+    public void AllowAnonymousEndpoints_ClearBearerSecurityRequirement()
     {
-        Assert.NotEmpty(CanonicalApiOperationCatalog.ParameterDescriptions);
+        var (doc, apiDescriptions) = BuildOpenApiDocument();
 
-        foreach (var (paramName, desc) in CanonicalApiOperationCatalog.ParameterDescriptions)
+        foreach (var api in apiDescriptions)
         {
-            Assert.False(string.IsNullOrWhiteSpace(desc), $"Param {paramName} has empty description.");
-            Assert.DoesNotContain("Giá trị tham số này được sử dụng trong yêu cầu.", desc);
+            var isAnon = api.ActionDescriptor.EndpointMetadata?.OfType<IAllowAnonymous>().Any() == true;
+            if (!isAnon) continue;
+
+            var pathKey = "/" + api.RelativePath!.TrimStart('/');
+            if (!doc.Paths.TryGetValue(pathKey, out var pathItem)) continue;
+
+            var opType = Enum.Parse<OperationType>(api.HttpMethod!, ignoreCase: true);
+            if (pathItem.Operations.TryGetValue(opType, out var op))
+            {
+                Assert.NotNull(op.Security);
+                Assert.Empty(op.Security);
+            }
         }
-    }
-
-    [Fact]
-    public void ResponseDescriptionGeneratesMeaningfulResponses()
-    {
-        var desc200 = CanonicalApiOperationCatalog.GetResponseDescription("200", "Xem danh sách các kỳ đối soát thù lao của Cố vấn.");
-        Assert.Contains("Xem danh sách các kỳ đối soát thù lao của Cố vấn", desc200);
-        Assert.DoesNotContain("Yêu cầu được xử lý thành công.", desc200);
-
-        var desc400 = CanonicalApiOperationCatalog.GetResponseDescription("400");
-        Assert.Contains("không hợp lệ", desc400);
-
-        var desc403 = CanonicalApiOperationCatalog.GetResponseDescription("403");
-        Assert.Contains("không có quyền", desc403);
-
-        var desc404 = CanonicalApiOperationCatalog.GetResponseDescription("404");
-        Assert.Contains("Không tìm thấy", desc404);
     }
 }

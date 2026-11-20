@@ -40,16 +40,19 @@ public sealed class MentorAvailabilityApprovalTests
         await Seed(db);
         var uow = new UnitOfWork(db);
         var registrationUow = new Mock<IUnitOfWork>();
+        var studyCourses = new Mock<IStudyCourseRepository>();
+        studyCourses.Setup(x => x.LockScheduleAsync(It.IsAny<int>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        registrationUow.SetupGet(x => x.StudyCourses).Returns(studyCourses.Object);
         registrationUow.SetupGet(x => x.MentorAvailabilities).Returns(uow.MentorAvailabilities);
         registrationUow.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>())).Returns((CancellationToken ct) => db.SaveChangesAsync(ct));
         registrationUow.Setup(x => x.ExecuteInTransactionAsync(It.IsAny<Func<CancellationToken, Task>>(), It.IsAny<CancellationToken>()))
             .Returns((Func<CancellationToken, Task> fn, CancellationToken ct) => fn(ct));
-        var meeting = new MentorMeetingService(registrationUow.Object, Mock.Of<IPaymentGatewayClient>(), Claims(Role.Mentor, 501),
-            new AppSettings(), NullLogger<MentorMeetingService>.Instance, Mock.Of<IMentorCreditLedgerService>());
-        var start = DateTime.UtcNow.AddDays(1);
+        var meeting = new MentorAvailabilityReviewService(registrationUow.Object, Claims(Role.Mentor, 501));
+        var start = DateTime.UtcNow.AddDays(2).Date.AddHours(2);
         var registration = await meeting.CreateAvailabilityAsync(new CreateMentorAvailabilityRequest
         { StartTime = start, EndTime = start.AddHours(1) }, default);
-        Assert.True(registration.IsSuccess);
+        Assert.True(registration.IsSuccess, registration.ErrorMessage);
         var created = RikiPath.Application.Responses.ApiResponse<RikiPath.Application.Responses.MentorMeetings.MentorAvailabilityResponse>.Success(registration.Result!.Single());
         Assert.True(created.IsSuccess);
         Assert.False(created.Result!.IsApproved);

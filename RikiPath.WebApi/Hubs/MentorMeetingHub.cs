@@ -47,8 +47,12 @@ public sealed class MentorMeetingHub(
         bool isNewConnection;
         lock (RoomLock)
         {
-            var learnerCount = JoinedRooms.Count(x => x.Value.RoomId == roomId && !x.Value.IsMentor && x.Key != Context.ConnectionId);
-            if (!isMentor && learnerCount >= meeting.Capacity)
+            var activeLearners = JoinedRooms
+                .Where(x => x.Value.RoomId == roomId && !x.Value.IsMentor && x.Key != Context.ConnectionId)
+                .Select(x => x.Value.UserId)
+                .ToHashSet();
+            // Một học viên kết nối lại trên thiết bị khác vẫn chỉ chiếm một chỗ của lớp.
+            if (!isMentor && !activeLearners.Contains(userId) && activeLearners.Count >= meeting.Capacity)
                 throw new HubException($"Phòng đã đủ {meeting.Capacity} học viên.");
             isNewConnection = !JoinedRooms.ContainsKey(Context.ConnectionId);
             JoinedRooms[Context.ConnectionId] = me;

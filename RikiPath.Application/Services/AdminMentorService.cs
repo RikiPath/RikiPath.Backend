@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.EntityFrameworkCore;
+using RikiPath.Application.Helpers;
 using RikiPath.Application.IServices;
 using RikiPath.Application.Requests.AdminMentor;
 using RikiPath.Application.Requests.MentorProfile;
@@ -38,14 +39,15 @@ namespace RikiPath.Application.Services
                     return ApiResponse<MentorResponse>.Fail("Email này đã được sử dụng.", HttpStatusCode.BadRequest);
 
                 CreatePasswordHash(request.Password, out var hash, out var salt);
+                var (firstName, lastName) = UserNameHelper.SplitFullName(request.FullName);
 
                 var mentor = new UserAccount
                 {
                     Email = normalizedEmail,
                     PasswordHash = hash,
                     PasswordSalt = salt,
-                    FirstName = request.FirstName,
-                    LastName = request.LastName,
+                    FirstName = firstName,
+                    LastName = lastName,
                     PhoneNumber = request.PhoneNumber,
                     Role = Role.Mentor,
                     IsEmailVerified = true,
@@ -329,8 +331,7 @@ namespace RikiPath.Application.Services
         {
             Id = u.Id,
             Email = u.Email,
-            FirstName = u.FirstName,
-            LastName = u.LastName,
+            FullName = UserNameHelper.FormatFullName(u.FirstName, u.LastName),
             PhoneNumber = u.PhoneNumber,
             IsEmailVerified = u.IsEmailVerified,
             CreatedDate = u.CreatedDate
@@ -340,8 +341,7 @@ namespace RikiPath.Application.Services
         {
             MentorId = u.Id,
             Email = u.Email ?? string.Empty,
-            FirstName = u.FirstName,
-            LastName = u.LastName,
+            FullName = UserNameHelper.FormatFullName(u.FirstName, u.LastName),
             PhoneNumber = u.PhoneNumber,
             AvatarUrl = u.AvatarUrl,
             IsActive = !u.IsDeleted,

@@ -3,6 +3,7 @@ using System.Text;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using RikiPath.Application;
+using RikiPath.Application.Helpers;
 using RikiPath.Domain.Entities;
 using RikiPath.Domain.Enums;
 
@@ -51,13 +52,14 @@ public class AdminOperationsController(IUnitOfWork uow) : ControllerBase
         if (await uow.UserAccounts.AnyAsync(x => x.Email != null && x.Email.ToLower() == email, ct))
             return Conflict(new { error = "Email đã được sử dụng." });
         using var hmac = new HMACSHA512();
+        var (firstName, lastName) = UserNameHelper.SplitFullName(r.FullName);
         var user = new UserAccount
         {
             Email = email,
             PasswordSalt = hmac.Key,
             PasswordHash = hmac.ComputeHash(Encoding.UTF8.GetBytes(r.Password)),
-            FirstName = r.FirstName,
-            LastName = r.LastName,
+            FirstName = firstName,
+            LastName = lastName,
             PhoneNumber = r.PhoneNumber,
             Role = r.Role,
             IsEmailVerified = r.IsEmailVerified,
@@ -78,7 +80,8 @@ public class AdminOperationsController(IUnitOfWork uow) : ControllerBase
         if (!Enum.IsDefined(r.Role)) return BadRequest(new { error = "Role không hợp lệ." });
         if (user.Role == Role.Admin && (r.Role != Role.Admin || !r.IsActive)) return BadRequest(new { error = "Không thể hạ quyền Admin duy nhất." });
         if (user.Role != Role.Admin && r.Role == Role.Admin) return BadRequest(new { error = "Không thể cấp thêm role Admin." });
-        user.FirstName = r.FirstName; user.LastName = r.LastName; user.PhoneNumber = r.PhoneNumber;
+        var (firstName, lastName) = UserNameHelper.SplitFullName(r.FullName);
+        user.FirstName = firstName; user.LastName = lastName; user.PhoneNumber = r.PhoneNumber;
         if (user.Role != Role.Admin) user.Role = r.Role;
         user.IsDeleted = !r.IsActive; user.ModifiedDate = DateTime.UtcNow;
         uow.UserAccounts.Update(user); await uow.SaveChangesAsync(ct);
@@ -99,7 +102,7 @@ public class AdminOperationsController(IUnitOfWork uow) : ControllerBase
         uow.UserAccounts.Update(user); await uow.SaveChangesAsync(ct); return NoContent();
     }
 
-    private static object UserDto(UserAccount u) => new { u.Id, u.Email, u.FirstName, u.LastName, u.PhoneNumber, Role = u.Role.ToString(), u.IsEmailVerified, u.IsPhoneVerified, IsActive = !u.IsDeleted, u.CreatedDate };
+    private static object UserDto(UserAccount u) => new { u.Id, u.Email, FullName = UserNameHelper.FormatFullName(u.FirstName, u.LastName), u.PhoneNumber, Role = u.Role.ToString(), u.IsEmailVerified, u.IsPhoneVerified, IsActive = !u.IsDeleted, u.CreatedDate };
 }
 
 public sealed class AdminCreateUserRequest
@@ -107,8 +110,8 @@ public sealed class AdminCreateUserRequest
     [System.ComponentModel.DataAnnotations.Required, System.ComponentModel.DataAnnotations.EmailAddress]
     public string Email { get; set; } = string.Empty;
     public string Password { get; set; } = string.Empty;
-    public string? FirstName { get; set; }
-    public string? LastName { get; set; }
+    [System.ComponentModel.DataAnnotations.MaxLength(200)]
+    public string? FullName { get; set; }
     public string? PhoneNumber { get; set; }
     public Role Role { get; set; } = Role.Learner;
     public bool IsEmailVerified { get; set; }
@@ -116,8 +119,8 @@ public sealed class AdminCreateUserRequest
 
 public sealed class AdminUpdateUserRequest
 {
-    public string? FirstName { get; set; }
-    public string? LastName { get; set; }
+    [System.ComponentModel.DataAnnotations.MaxLength(200)]
+    public string? FullName { get; set; }
     public string? PhoneNumber { get; set; }
     public Role Role { get; set; }
     public bool IsActive { get; set; }

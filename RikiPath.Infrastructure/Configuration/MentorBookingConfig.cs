@@ -39,6 +39,8 @@ namespace RikiPath.Infrastructure.Configuration
 
             builder.HasIndex(x => new { x.MentorAvailabilityId, x.UserSubscriptionId }).IsUnique()
                 .HasFilter("NOT \"IsDeleted\" AND \"Status\" <> 'Cancelled'");
+            builder.HasIndex(x => new { x.MentorAvailabilityId, x.LearnerId }).IsUnique()
+                .HasFilter("\"MentorAvailabilityId\" IS NOT NULL AND \"LearnerId\" IS NOT NULL AND NOT \"IsDeleted\" AND \"Status\" <> 'Cancelled'");
 
             builder.HasData(
                new MentorBooking

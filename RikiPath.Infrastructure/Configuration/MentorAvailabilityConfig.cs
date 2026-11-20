@@ -24,6 +24,8 @@ namespace RikiPath.Infrastructure.Configuration
             // MentorAvailability là nguồn khung giờ có thể đặt; khóa sinh lịch chỉ áp dụng cho bản ghi mới.
             builder.HasOne(x => x.ScheduleRule).WithMany().HasForeignKey(x => x.MentorScheduleRuleId)
                    .OnDelete(DeleteBehavior.Restrict);
+            builder.HasOne(x => x.GroupPolicy).WithMany().HasForeignKey(x => x.GroupPolicyId)
+                   .OnDelete(DeleteBehavior.Restrict);
             builder.Property(x => x.GenerationKey).HasMaxLength(160);
             builder.Property(x => x.LocalBusinessDate).HasColumnType("date");
             builder.HasIndex(x => x.GenerationKey).IsUnique().HasFilter("\"GenerationKey\" IS NOT NULL");
@@ -41,11 +43,12 @@ namespace RikiPath.Infrastructure.Configuration
             {
                 t.HasCheckConstraint("CK_MentorAvailability_BookedCount",
                     "\"BookedCount\" >= 0 AND \"BookedCount\" <= \"MaxLearners\"");
-                // Khung giờ lịch sử không có metadata sinh lịch; khung giờ mới phải đủ dữ liệu và dài 90 phút.
+                // Giữ nguyên dữ liệu lịch sử; buổi mới phải khớp snapshot thời lượng và sức chứa.
                 t.HasCheckConstraint("CK_MentorAvailability_GeneratedSlot",
-                    "(\"GenerationKey\" IS NULL AND \"PolicyVersion\" IS NULL AND \"MentorScheduleRuleId\" IS NULL AND \"LocalBusinessDate\" IS NULL) OR " +
+                    "(\"GenerationKey\" IS NULL AND \"PolicyVersion\" IS NULL AND \"MentorScheduleRuleId\" IS NULL AND \"LocalBusinessDate\" IS NULL AND \"GroupPolicyId\" IS NULL AND \"SessionMinutesSnapshot\" IS NULL AND \"RestMinutesSnapshot\" IS NULL) OR " +
                     "(\"GenerationKey\" IS NOT NULL AND \"PolicyVersion\" IS NOT NULL AND \"PolicyVersion\" > 0 AND \"MentorScheduleRuleId\" IS NOT NULL AND " +
-                    "\"LocalBusinessDate\" IS NOT NULL AND \"MaxLearners\" = 1 AND \"EndTime\" = \"StartTime\" + INTERVAL '90 minutes')");
+                    "\"LocalBusinessDate\" IS NOT NULL AND ((\"GroupPolicyId\" IS NULL AND \"SessionMinutesSnapshot\" IS NULL AND \"RestMinutesSnapshot\" IS NULL AND \"MaxLearners\" = 1 AND \"EndTime\" = \"StartTime\" + INTERVAL '90 minutes') OR " +
+                    "(\"GroupPolicyId\" IS NOT NULL AND \"SessionMinutesSnapshot\" > 0 AND \"RestMinutesSnapshot\" >= 0 AND \"MaxLearners\" BETWEEN 1 AND 4 AND \"EndTime\" = \"StartTime\" + \"SessionMinutesSnapshot\" * INTERVAL '1 minute')))");
             });
 
             builder.HasMany(x => x.MentorBookings)

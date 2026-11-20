@@ -2,7 +2,9 @@ namespace RikiPath.Application.Services;
 
 public static class ListeningAudioFilePolicy
 {
-    public const int MaxBytes = 25 * 1024 * 1024;
+    // Listening recordings can be long (for example a 50-minute JLPT audio).
+    // Keep the limit high enough for the upload flow; each request still accepts one file.
+    public const int MaxBytes = 500 * 1024 * 1024;
 
     public static async Task<bool> HasMp3HeaderAsync(Stream audio, CancellationToken ct)
     {

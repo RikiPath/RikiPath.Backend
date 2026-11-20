@@ -16,6 +16,17 @@ namespace RikiPath.Application.IClients
             string returnUrl,
             string cancelUrl,
             CancellationToken cancellationToken);
+        // Tạo link có hạn dùng (PayOS: trường tùy chọn "expiredAt", Unix giây; không thuộc chữ ký).
+        // Mặc định bỏ qua hạn dùng để các cổng/giả lập cũ vẫn hoạt động.
+        Task<PaymentLinkResult> CreatePaymentLinkAsync(
+            long orderCode,
+            int amount,
+            string description,
+            string returnUrl,
+            string cancelUrl,
+            DateTime? expiresAtUtc,
+            CancellationToken cancellationToken)
+            => CreatePaymentLinkAsync(orderCode, amount, description, returnUrl, cancelUrl, cancellationToken);
         PaymentCallbackResult VerifyWebhook(PayOsWebhookRequest webhook);
         Task<PaymentLinkInformation> GetPaymentInformationAsync(long orderCode, CancellationToken cancellationToken);
     }

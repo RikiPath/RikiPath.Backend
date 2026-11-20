@@ -225,7 +225,7 @@ public sealed class EmailRelaySecurityTests
                 Email = "new@example.com",
                 Password = "safe-secret",
                 ConfirmPassword = "safe-secret",
-                FirstName = "New",
+                FullName = "New",
             },
             CancellationToken.None);
 

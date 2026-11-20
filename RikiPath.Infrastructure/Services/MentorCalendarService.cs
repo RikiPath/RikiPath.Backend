@@ -90,8 +90,10 @@ public sealed class MentorCalendarService(AppDbContext db, IHttpClientFactory cl
         var auth = new HttpClientWrapper(client, token.GetProperty("access_token").GetString()!);
         var now = DateTime.UtcNow;
         var slots = await db.MentorAvailabilities.AsNoTracking().Where(s => s.MentorId == mentorId && !s.IsDeleted && s.IsApproved && s.RejectedAt == null && s.EndTime > now
-            && s.MentorBookings.Any(b => !b.IsDeleted && b.UserSubscription.PaymentStatus == RikiPath.Domain.Enums.PaymentStatus.Paid
-                && (b.Status == RikiPath.Domain.Enums.MentorStatus.Assigned || b.Status == RikiPath.Domain.Enums.MentorStatus.Accepted)))
+            && (s.MentorBookings.Any(b => !b.IsDeleted && b.UserSubscription.PaymentStatus == RikiPath.Domain.Enums.PaymentStatus.Paid
+                && (b.Status == RikiPath.Domain.Enums.MentorStatus.Assigned || b.Status == RikiPath.Domain.Enums.MentorStatus.Accepted))
+                || db.StudyCohorts.Any(c => c.Status == "Published" && c.Sessions.Any(t => t.AvailabilityId == s.Id))
+                || db.StudyCourses.Any(c => c.PaymentStatus == "Paid" && c.Status == "Active" && c.Sessions.Any(t => t.AvailabilityId == s.Id && t.Status == "Scheduled"))))
             .ToListAsync(ct);
         var previous = JsonSerializer.Deserialize<Dictionary<string, SyncedEvent>>(row.SyncedEventsJson) ?? [];
         var next = new Dictionary<string, SyncedEvent>();

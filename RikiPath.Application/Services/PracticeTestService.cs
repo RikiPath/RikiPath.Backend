@@ -60,7 +60,10 @@ namespace RikiPath.Application.Services
             => targetExamDate.HasValue && GetDaysUntilExam(targetExamDate.Value, utcNow) >= 1;
     }
 
-    public class PracticeTestService(IUnitOfWork unitOfWork, IClaimService claimService) : IPracticeTestService
+    public class PracticeTestService(
+        IUnitOfWork unitOfWork,
+        IClaimService claimService,
+        IMentorGroupPolicyService? groupPolicies = null) : IPracticeTestService
     {
         public const string AttemptTypePlacement = "placement";
         // Published option IDs are positive. This choice is only emitted for Placement.
@@ -1835,8 +1838,12 @@ namespace RikiPath.Application.Services
                     pendingSubmissionId = attempt.Id;
             }
 
-            return new PlacementAttemptAllowance(TargetAttemptLimit, started,
-                Math.Max(0, TargetAttemptLimit - started), pendingSubmissionId);
+            var policyLimit = groupPolicies is null
+                ? null
+                : (await groupPolicies.GetEffectiveAsync(now, cancellationToken))?.PlacementAttemptLimit;
+            var limit = policyLimit is > 0 ? policyLimit.Value : TargetAttemptLimit;
+            return new PlacementAttemptAllowance(limit, started,
+                Math.Max(0, limit - started), pendingSubmissionId);
         }
 
         private static ApiResponse<PlacementAttemptSnapshotResponse>? CheckStartAllowance(
@@ -1847,7 +1854,7 @@ namespace RikiPath.Application.Services
                     "Hãy nộp lượt đã hết giờ để xem kết quả.", HttpStatusCode.Conflict, "PLACEMENT_PENDING_SUBMISSION");
             if (allowance.Remaining == 0)
                 return ApiResponse<PlacementAttemptSnapshotResponse>.Fail(
-                    $"Bạn đã dùng hết {TargetAttemptLimit} lượt đánh giá ở cấp mục tiêu này.",
+                    $"Bạn đã dùng hết {allowance.Limit} lượt đánh giá ở cấp mục tiêu này.",
                     HttpStatusCode.Conflict, "PLACEMENT_ATTEMPT_LIMIT_REACHED");
             if (retake != (latest is not null))
                 return ApiResponse<PlacementAttemptSnapshotResponse>.Fail(

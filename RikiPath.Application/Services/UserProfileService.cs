@@ -1,5 +1,6 @@
 using RikiPath.Domain.Entities;
 using Microsoft.AspNetCore.Http;
+using RikiPath.Application.Helpers;
 using RikiPath.Application.IServices;
 using RikiPath.Application.Requests.Profile;
 using RikiPath.Application.Responses;
@@ -44,15 +45,16 @@ namespace RikiPath.Application.Services
             try
             {
                 var userId = claimService.GetUserClaim().Id;
-                if (string.IsNullOrWhiteSpace(request.FirstName) || string.IsNullOrWhiteSpace(request.LastName))
+                var (firstName, lastName) = UserNameHelper.SplitFullName(request.FullName);
+                if (string.IsNullOrWhiteSpace(firstName))
                     return ApiResponse<UserProfileResponse>.Fail("Họ và tên không được để trống.");
 
                 var user = await unitOfWork.UserAccounts.GetByIdAsync(userId);
                 if (user is null)
                     return ApiResponse<UserProfileResponse>.NotFound("Không tìm thấy người dùng.");
 
-                user.FirstName = request.FirstName.Trim();
-                user.LastName = request.LastName.Trim();
+                user.FirstName = firstName;
+                user.LastName = lastName;
                 unitOfWork.UserAccounts.Update(user);
                 await unitOfWork.SaveChangesAsync();
 
@@ -200,7 +202,7 @@ namespace RikiPath.Application.Services
                 var userId = claimService.GetUserClaim().Id;
                 var level = await unitOfWork.CertificateLevels.GetActiveJlptLevelByIdAsync(
                     request.CurrentStudyLevelId, cancellationToken);
-                if (level is null || JlptCurriculum.Rank(level.Code) == 0)
+                if (level is null || !JlptCurriculum.IsSupportedStudyLevel(level.Code))
                     return ApiResponse<UserProfileResponse>.Fail(
                         "Cấp độ học không khả dụng; lộ trình tiêu chuẩn hiện hỗ trợ N5–N3.",
                         HttpStatusCode.BadRequest, errorCode: "STUDY_LEVEL_UNSUPPORTED");
@@ -248,7 +250,7 @@ namespace RikiPath.Application.Services
                 if (request.CertifiedJlptLevelId.HasValue)
                     certified = await unitOfWork.CertificateLevels.GetActiveJlptLevelByIdAsync(request.CertifiedJlptLevelId.Value, cancellationToken);
 
-                if (current is null || JlptCurriculum.Rank(current.Code) == 0)
+                if (current is null || !JlptCurriculum.IsSupportedStudyLevel(current.Code))
                     return ApiResponse<UserProfileResponse>.Fail("Cấp độ đang học không khả dụng; hiện hỗ trợ N5–N3.");
                 if (target is null || !IsSupportedGoalLevel(target.Code))
                     return ApiResponse<UserProfileResponse>.Fail("Mục tiêu JLPT phải thuộc N5–N2.");
@@ -349,8 +351,7 @@ namespace RikiPath.Application.Services
         {
             UserId = user.Id,
             Email = user.Email,
-            FirstName = user.FirstName,
-            LastName = user.LastName,
+            FullName = UserNameHelper.FormatFullName(user.FirstName, user.LastName),
             AvatarUrl = user.AvatarUrl,
             Role = user.Role.ToString(),
             IsEmailVerified = user.IsEmailVerified,

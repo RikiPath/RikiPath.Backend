@@ -3,6 +3,7 @@ using RikiPath.Application.IRepositories;
 using RikiPath.Infrastructure.Repositories;
 using System.Net;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -10,18 +11,53 @@ using RikiPath.Application.IClients;
 using RikiPath.Application.IServices;
 using RikiPath.Application.Options;
 using RikiPath.Application.Requests.MentorScheduling;
+using RikiPath.Application.Responses;
+using RikiPath.Application.Responses.MentorScheduling;
 using RikiPath.Application.Services;
 using RikiPath.Domain;
 using RikiPath.Domain.Entities;
 using RikiPath.Domain.Enums;
 using RikiPath.Domain.MentorScheduling;
 using RikiPath.Infrastructure;
+using RikiPath.Infrastructure.Services;
+using RikiPath.WebApi.Controllers;
 using Xunit;
 
 namespace RikiPath.Tests
 {
     public sealed class MentorScheduleManagementTests
     {
+        [Fact]
+        public async Task Publish_endpoint_submits_generated_slots_to_admin_review_service()
+        {
+            var service = new Mock<IMentorScheduleManagementService>();
+            var request = new PublishSlotsRequest { StartDate = new DateOnly(2026, 12, 1), EndDate = new DateOnly(2026, 12, 2) };
+            service.Setup(x => x.PublishSlotsAsync(request, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(ApiResponse<PublishSlotsResponse>.Success(new PublishSlotsResponse { CreatedCount = 2 }));
+            var policies = new Mock<IMentorGroupPolicyService>();
+            policies.Setup(x => x.GetEffectiveAsync(It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new MentorGroupPolicy { Version = 1, MaxLearners = 4 });
+            var controller = new MentorScheduleManagementController(service.Object, policies.Object);
+
+            var result = Assert.IsType<ObjectResult>(await controller.PublishSlots(request, default));
+
+            Assert.Equal(200, result.StatusCode);
+            service.Verify(x => x.PublishSlotsAsync(request, It.IsAny<CancellationToken>()), Times.Once);
+        }
+
+        [Fact]
+        public async Task Publish_endpoint_requires_admin_policy_before_generating_group_slots()
+        {
+            var service = new Mock<IMentorScheduleManagementService>();
+            var controller = new MentorScheduleManagementController(service.Object, Mock.Of<IMentorGroupPolicyService>());
+            var request = new PublishSlotsRequest { StartDate = new DateOnly(2026, 12, 1), EndDate = new DateOnly(2026, 12, 2) };
+
+            var result = Assert.IsType<ConflictObjectResult>(await controller.PublishSlots(request, default));
+
+            Assert.Equal(409, result.StatusCode);
+            service.Verify(x => x.PublishSlotsAsync(It.IsAny<PublishSlotsRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+        }
+
         private static AppDbContext CreateInMemoryDb()
         {
             var options = new DbContextOptionsBuilder<AppDbContext>()
@@ -347,6 +383,63 @@ namespace RikiPath.Tests
         }
 
         [Fact]
+        public async Task Generated_group_session_snapshots_policy_and_waits_for_admin_approval()
+        {
+            await using var db = CreateInMemoryDb();
+            const int mentorId = 920206;
+            db.Users.Add(new UserAccount { Id = mentorId, Role = Role.Mentor, PasswordHash = [], PasswordSalt = [] });
+            db.MentorProfiles.Add(new MentorProfile { MentorId = mentorId, VerificationStatus = MentorVerificationStatus.Approved });
+            db.MentorGroupPolicies.Add(new MentorGroupPolicy
+            {
+                Id = 1, Version = 1, EffectiveFromUtc = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+                MaxLearners = 4, SessionMinutes = 90, RestMinutes = 15, DailySessionCap = 4,
+                PublicationHorizonDays = 30, CancellationLeadHours = 24, ReschedulingLeadHours = 24,
+                HomeworkDeadlineDays = 7, PlacementAttemptLimit = 2,
+                RemediationCompletionThresholdPercent = 90, KpiReportingPeriodDays = 30,
+                RecurringWeekdayPatternsJson = "[[1,3,5],[2,4,6]]", CreatedAtUtc = DateTime.UtcNow
+            });
+            var today = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(7));
+            var nextMonday = today.AddDays(1);
+            while (nextMonday.DayOfWeek != DayOfWeek.Monday) nextMonday = nextMonday.AddDays(1);
+            db.MentorSchedules.Add(new MentorSchedule
+            {
+                MentorId = mentorId, PolicyVersion = 3, TimeZoneId = "Asia/Ho_Chi_Minh",
+                AutoPublish = false, EffectiveFrom = today,
+                Rules = [new MentorScheduleRule
+                {
+                    Weekday = 1, DaypartCode = "Morning", LocalStart = new TimeOnly(7, 0),
+                    LocalEnd = new TimeOnly(11, 0), EffectiveFrom = today
+                }]
+            });
+            await db.SaveChangesAsync();
+
+            var uow = new UnitOfWork(db);
+            var claims = MockClaims(Role.Mentor, mentorId);
+            var profileService = new MentorProfileService(uow, claims, NullLogger<MentorProfileService>.Instance);
+            var service = new MentorScheduleManagementService(uow, claims, profileService, CreateSlotGenerator(),
+                NullLogger<MentorScheduleManagementService>.Instance, new MentorGroupPolicyService(db));
+
+            var result = await service.PublishSlotsAsync(new PublishSlotsRequest
+            {
+                StartDate = nextMonday, EndDate = nextMonday
+            });
+
+            Assert.True(result.IsSuccess, result.ErrorMessage);
+            Assert.All(result.Result!.PublishedSlots, item => Assert.True(item.AvailabilityId > 0));
+            var slots = await db.MentorAvailabilities.Where(x => x.MentorId == mentorId).ToListAsync();
+            Assert.NotEmpty(slots);
+            Assert.All(slots, slot =>
+            {
+                Assert.Equal(4, slot.MaxLearners);
+                Assert.Equal(1, slot.GroupPolicyId);
+                Assert.Equal(90, slot.SessionMinutesSnapshot);
+                Assert.Equal(15, slot.RestMinutesSnapshot);
+                Assert.False(slot.IsApproved);
+                Assert.Null(slot.PublishedAt);
+            });
+        }
+
+        [Fact]
         public async Task Slot_generation_produces_deterministic_90min_slots_with_15min_rest()
         {
             await using var db = CreateInMemoryDb();
@@ -490,6 +583,20 @@ namespace RikiPath.Tests
             // DB vẫn giữ nguyên 1 slot, tuyệt đối không nhân đôi
             var finalCountInDb = await db.MentorAvailabilities.CountAsync(x => x.MentorId == 207 && !x.IsDeleted);
             Assert.Equal(1, finalCountInDb);
+
+            // Retry sau khi Admin hủy không được âm thầm mở lại lịch đã hủy.
+            var cancelled = await db.MentorAvailabilities.SingleAsync(x => x.MentorId == 207);
+            cancelled.IsDeleted = true;
+            await db.SaveChangesAsync();
+            var afterCancellation = await service.PublishSlotsAsync(new PublishSlotsRequest
+            {
+                StartDate = nextWednesday,
+                EndDate = nextWednesday
+            });
+            Assert.True(afterCancellation.IsSuccess, afterCancellation.ErrorMessage);
+            Assert.Equal(0, afterCancellation.Result!.CreatedCount);
+            Assert.Equal(1, afterCancellation.Result.SkippedExistingCount);
+            Assert.True(cancelled.IsDeleted);
         }
 
         [Fact]
@@ -847,6 +954,89 @@ namespace RikiPath.Tests
             Assert.False(result.IsSuccess);
             Assert.Equal(409, result.StatusCode);
             Assert.Contains("xung đột khi công bố khung giờ làm việc", result.ErrorMessage);
+        }
+
+        [Theory]
+        [InlineData(1, 3, 5)]
+        [InlineData(2, 4, 6)]
+        public async Task Recurring_MonWedFri_and_TueThuSat_rules_generate_policy_slots_for_canonical_admin_approval(int d1, int d2, int d3)
+        {
+            await using var db = CreateInMemoryDb();
+            var mentor = new UserAccount { Id = 220, Role = Role.Mentor, FirstName = "Hana", LastName = "Sato", PasswordHash = [], PasswordSalt = [] };
+            var admin = new UserAccount { Id = 1, Role = Role.Admin, FirstName = "Admin", LastName = "QA", PasswordHash = [], PasswordSalt = [] };
+            db.Users.AddRange(mentor, admin);
+            db.MentorProfiles.Add(new MentorProfile { MentorId = mentor.Id, VerificationStatus = MentorVerificationStatus.Approved });
+            db.MentorGroupPolicies.Add(new MentorGroupPolicy
+            {
+                Version = 1,
+                EffectiveFromUtc = DateTime.UtcNow.AddDays(-5),
+                MaxLearners = 4,
+                EnrollmentCutoffMinutesBeforeFirstSession = 60,
+                SessionMinutes = 90,
+                RestMinutes = 15,
+                DailySessionCap = 4,
+                PublicationHorizonDays = 30,
+                CancellationLeadHours = 24,
+                ReschedulingLeadHours = 24,
+                HomeworkDeadlineDays = 7,
+                PlacementAttemptLimit = 2,
+                RemediationCompletionThresholdPercent = 90m,
+                KpiReportingPeriodDays = 30,
+                RecurringWeekdayPatternsJson = "[[1,3,5],[2,4,6]]",
+                CreatedAtUtc = DateTime.UtcNow.AddDays(-5)
+            });
+            await db.SaveChangesAsync();
+
+            var today = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(7));
+            var nextMonday = today.AddDays(((int)DayOfWeek.Monday - (int)today.DayOfWeek + 7) % 7 is 0 ? 7 : ((int)DayOfWeek.Monday - (int)today.DayOfWeek + 7) % 7);
+            var uow = new UnitOfWork(db);
+            var mentorClaims = MockClaims(Role.Mentor, mentor.Id);
+            var profileService = new MentorProfileService(uow, mentorClaims, NullLogger<MentorProfileService>.Instance);
+            var scheduleService = new MentorScheduleManagementService(
+                uow,
+                mentorClaims,
+                profileService,
+                CreateSlotGenerator(),
+                NullLogger<MentorScheduleManagementService>.Instance,
+                new MentorGroupPolicyService(db));
+
+            var updateRes = await scheduleService.UpdateMyScheduleAsync(new UpdateMentorScheduleRequest
+            {
+                TimeZoneId = "Asia/Ho_Chi_Minh",
+                AutoPublish = false,
+                EffectiveFrom = nextMonday,
+                Rules = new[] { d1, d2, d3 }.Select(weekday => new MentorScheduleRuleRequest
+                {
+                    Weekday = weekday,
+                    DaypartCode = "Evening",
+                    LocalStart = new TimeOnly(18, 0),
+                    LocalEnd = new TimeOnly(22, 0),
+                    EffectiveFrom = nextMonday
+                }).ToList()
+            });
+            Assert.True(updateRes.IsSuccess, updateRes.ErrorMessage);
+
+            var publishRes = await scheduleService.PublishSlotsAsync(new PublishSlotsRequest
+            {
+                StartDate = nextMonday,
+                EndDate = nextMonday.AddDays(6)
+            });
+            Assert.True(publishRes.IsSuccess, publishRes.ErrorMessage);
+            var generated = await db.MentorAvailabilities.OrderBy(x => x.StartTime).ToListAsync();
+            Assert.Equal(6, generated.Count);
+            Assert.Equal(new[] { d1, d2, d3 }, generated.Select(x => (int)x.LocalBusinessDate!.Value.DayOfWeek).Distinct().OrderBy(x => x).ToArray());
+            Assert.All(generated, slot =>
+            {
+                Assert.False(slot.IsApproved);
+                Assert.Equal(4, slot.MaxLearners);
+                Assert.Equal(90, slot.SessionMinutesSnapshot);
+                Assert.Equal(15, slot.RestMinutesSnapshot);
+            });
+
+            var adminReview = new MentorAvailabilityReviewService(uow, MockClaims(Role.Admin, admin.Id));
+            var approved = await adminReview.ReviewAsync(generated[0].Id, true, null, default);
+            Assert.True(approved.IsSuccess, approved.ErrorMessage);
+            Assert.True((await db.MentorAvailabilities.AsNoTracking().SingleAsync(x => x.Id == generated[0].Id)).IsApproved);
         }
     }
 }

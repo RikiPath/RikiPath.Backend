@@ -12,6 +12,16 @@ public interface IMentorSlotGenerator
         DateTimeOffset nowUtc,
         int policyVersion = 3);
 
+    IReadOnlyList<MentorGeneratedSlot> GenerateDailySlots(
+        int mentorId,
+        DateOnly localDate,
+        IReadOnlyCollection<MentorDaypart> enabledDayparts,
+        DateTimeOffset nowUtc,
+        int policyVersion,
+        int sessionMinutes,
+        int restMinutes,
+        int publicationHorizonDays);
+
     MentorSlotValidationResult ValidateBooking(
         MentorBookingCandidate candidate,
         IReadOnlyCollection<ExistingMentorAppointment> existingAppointments,

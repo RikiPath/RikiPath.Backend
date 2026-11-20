@@ -18,7 +18,7 @@ public sealed partial class HomeworkService
 {
     private static readonly JsonSerializerOptions HomeworkJson = new(JsonSerializerDefaults.Web);
     private static readonly JsonSerializerOptions HomeworkAiJson = new(JsonSerializerDefaults.Web)
-        { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+    { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
     private const int ScanLimit = 10 * 1024 * 1024;
     private const int CorrectionLimit = 20;
     private const int QuizCorrectionLimit = 12;
@@ -85,21 +85,27 @@ public sealed partial class HomeworkService
         return new(grade.OverallScore, feedback, BusinessDateHelper.EnsureUtc(grade.GradedAt), corrections ?? []);
     }
 
-    public async Task<ApiResponse<HomeworkSubmissionDetail>> SubmitScanAsync(int id, IFormFile? file, CancellationToken ct)
+    // Integration: teammate chỉ nhận JPG/PNG; Task 02 đã hỗ trợ PDF (bài viết dạng tài liệu) nên PDF được giữ, kiểm tra chữ ký "%PDF".
+    public async Task<ApiResponse<HomeworkSubmissionDetail>> SubmitScanAsync(int id, IFormFile? file, CancellationToken ct,
+        string? textContent = null)
     {
         if (storage is null)
             return ApiResponse<HomeworkSubmissionDetail>.Fail("Kho ảnh bài tập chưa sẵn sàng.", HttpStatusCode.ServiceUnavailable);
-        if (file is not { Length: >= 8 and <= ScanLimit } || file.ContentType is not ("image/jpeg" or "image/png"))
-            return ApiResponse<HomeworkSubmissionDetail>.Fail("Chọn ảnh JPG hoặc PNG tối đa 10 MB.");
+        if (file is not { Length: >= 8 and <= ScanLimit } || file.ContentType is not ("image/jpeg" or "image/png" or "application/pdf"))
+            return ApiResponse<HomeworkSubmissionDetail>.Fail("Chọn ảnh JPG/PNG hoặc tệp PDF tối đa 10 MB.");
         await using (var stream = file.OpenReadStream())
         {
             var signature = new byte[8];
             await stream.ReadExactlyAsync(signature, ct);
-            var valid = file.ContentType == "image/jpeg" ? signature.AsSpan(0, 3).SequenceEqual(new byte[] { 255, 216, 255 })
-                : signature.AsSpan().SequenceEqual(new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 });
-            if (!valid) return ApiResponse<HomeworkSubmissionDetail>.Fail("Tệp tải lên không đúng định dạng ảnh.");
+            var valid = file.ContentType switch
+            {
+                "image/jpeg" => signature.AsSpan(0, 3).SequenceEqual(new byte[] { 255, 216, 255 }),
+                "image/png" => signature.AsSpan().SequenceEqual(new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 }),
+                _ => signature.AsSpan(0, 4).SequenceEqual(new byte[] { 37, 80, 68, 70 }),
+            };
+            if (!valid) return ApiResponse<HomeworkSubmissionDetail>.Fail("Tệp tải lên không đúng định dạng đã chọn.");
         }
-        try { return await SubmitInternalAsync(id, new(null, null), file, ct); }
+        try { return await SubmitInternalAsync(id, new(textContent, null), file, ct); }
         catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException)
         {
             return ApiResponse<HomeworkSubmissionDetail>.Fail("Chưa lưu được ảnh bài nộp. Hãy thử lại.", HttpStatusCode.BadGateway);
@@ -110,7 +116,7 @@ public sealed partial class HomeworkService
     {
         var reference = await AssignmentsFor(claims.GetUserClaim(), null).AsNoTracking()
             .Where(a => a.Id == id && a.Submission != null && !a.Submission.IsDeleted)
-            .Select(a => a.Submission!.PrivateScanReference).SingleOrDefaultAsync(ct);
+            .Select(a => a.Submission!.PrivateScanReference ?? a.Submission.ScanStorageUrl).SingleOrDefaultAsync(ct);
         return reference is null || storage is null ? null : await storage.OpenPrivateVerificationAsync(reference, ct);
     }
 
@@ -150,55 +156,28 @@ public sealed partial class HomeworkService
         var actor = claims.GetUserClaim();
         if (actor.Role != Role.Mentor)
             return ApiResponse<HomeworkAiGradeDraft>.Fail("Chỉ mentor được tạo gợi ý chấm bài.", HttpStatusCode.Forbidden);
-        var selectedLevel = string.IsNullOrWhiteSpace(jlptLevel) ? null : jlptLevel.Trim().ToUpperInvariant();
-        if (selectedLevel is not null && !HomeworkRubrics.ContainsKey(selectedLevel))
-            return ApiResponse<HomeworkAiGradeDraft>.Fail("Chỉ hỗ trợ chấm theo cấp JLPT N5, N4, N3 hoặc N2.");
-        var prompt = mentorPrompt?.Trim();
-        if (prompt?.Length > MaxMentorPromptLength)
-            return ApiResponse<HomeworkAiGradeDraft>.Fail("Yêu cầu chấm tối đa 1.200 ký tự.");
-
-        var assignment = await AssignmentsFor(actor, null).AsNoTracking()
-            .Select(a => new
-            {
-                a.Id, a.Title, a.Instructions, a.LearnerId, a.Submission, a.AuthoredDefinitionJson,
-                BookingLevel = a.MentorBooking!.UserSubscription.CertificateLevel!.Code,
-                Lessons = a.HomeworkAssignmentLessons.Select(link => new
-                {
-                    link.Lesson.Title, Level = link.Lesson.CertificateLevel.Code, Skill = link.Lesson.LanguageSkill.Name
-                }).ToList()
-            })
+        var assignment = await AssignmentsFor(actor, null).AsTracking().Include(a => a.Submission)
             .SingleOrDefaultAsync(a => a.Id == id, ct);
         if (assignment?.Submission is not { IsDeleted: false } submission)
             return ApiResponse<HomeworkAiGradeDraft>.NotFound("Chưa tìm thấy bài nộp của học viên.");
         if (grader is null)
-            return ApiResponse<HomeworkAiGradeDraft>.Fail("AI chấm bài chưa sẵn sàng.", HttpStatusCode.ServiceUnavailable);
+            return await DraftUnavailableAsync(assignment, "AI chấm bài chưa sẵn sàng. Mentor có thể chấm trực tiếp.", HttpStatusCode.ServiceUnavailable, ct);
 
         try
         {
             var definition = ReadAuthoredDefinition(assignment.AuthoredDefinitionJson);
             var text = submission.TextContent;
             string? transcription = null;
-            if (submission.PrivateAudioReference is { } audioReference)
-            {
-                if (speech is null || storage is null)
-                    return ApiResponse<HomeworkAiGradeDraft>.Fail("AI chép lời bản thu chưa sẵn sàng.", HttpStatusCode.ServiceUnavailable);
-                if (audioReference.StartsWith("s3://", StringComparison.Ordinal))
-                    transcription = (await speech.TranscribeFromUrlAsync(audioReference, ct)).TranscribedText;
-                else
-                {
-                    var audio = await storage.OpenPrivateVerificationAsync(audioReference, ct);
-                    await using var stream = audio.Content;
-                    var extension = HomeworkAudioFormat.Extension(audio.ContentType)
-                        ?? throw new InvalidOperationException("Định dạng bản thu không được hỗ trợ.");
-                    transcription = await speech.TranscribeAsync(stream, "homework" + extension, ct);
-                }
-                text = transcription;
-            }
-            if (submission.PrivateScanReference is { } reference)
+            if (ScanReference(submission) is { } reference && string.IsNullOrWhiteSpace(text))
             {
                 if (ocr is null || storage is null)
-                    return ApiResponse<HomeworkAiGradeDraft>.Fail("AI đọc ảnh chưa sẵn sàng. Mentor có thể chấm trực tiếp.", HttpStatusCode.ServiceUnavailable);
+                    return await DraftUnavailableAsync(assignment, "AI đọc ảnh chưa sẵn sàng. Mentor có thể chấm trực tiếp.", HttpStatusCode.ServiceUnavailable, ct);
                 var image = await storage.OpenPrivateVerificationAsync(reference, ct);
+                if (image.ContentType == "application/pdf")
+                {
+                    await image.Content.DisposeAsync();
+                    return await DraftUnavailableAsync(assignment, "AI chưa đọc được tệp PDF. Mentor có thể xem bài nộp và chấm trực tiếp.", HttpStatusCode.BadRequest, ct);
+                }
                 await using var stream = image.Content;
                 using var buffer = new MemoryStream();
                 await stream.CopyToAsync(buffer, ct);
@@ -211,138 +190,81 @@ public sealed partial class HomeworkService
                     && value.ValueKind == JsonValueKind.String) transcription = value.GetString();
                 text = transcription;
             }
-            var attempts = unit.PracticeExerciseAttempts.Query().AsNoTracking().Where(a =>
-                a.HomeworkAssignmentId == id && a.UserId == assignment.LearnerId && !a.IsDeleted &&
-                a.IsCompleted && a.SubmittedAt <= submission.SubmittedAt);
-            var scoredQuizzes = await attempts.Where(a => a.ScorePercent.HasValue)
-                .Select(a => new QuizScore(a.ScorePercent!.Value, a.PracticeExercise.Lesson.CertificateLevel.Code))
-                .ToListAsync(ct);
-            var authoredErrors = new List<QuizError>();
-            if (definition?.Type == MultipleChoiceHomework)
+            if (string.IsNullOrWhiteSpace(text) || text.Length > 20000)
+                return await DraftUnavailableAsync(assignment, "Chưa có phần chữ để AI chấm. Mentor có thể xem bài nộp và chấm trực tiếp.", HttpStatusCode.BadRequest, ct);
+
+            var levels = new List<string>();
+            if (!string.IsNullOrWhiteSpace(jlptLevel)) levels.Add(jlptLevel.Trim().ToUpperInvariant());
+            else if (definition is not null) levels.Add(definition.Level);
+            else levels.Add("N5");
+
+            var payload = new
             {
-                var selected = ReadSelectedOptions(submission.SelectedOptionsJson);
-                if (!HasValidSelections(definition, selected))
-                    return ApiResponse<HomeworkAiGradeDraft>.Fail("Bài nộp thiếu đáp án trắc nghiệm hợp lệ.");
-                for (var index = 0; index < definition.Questions.Length; index++)
-                {
-                    var question = definition.Questions[index];
-                    if (selected![index] == question.CorrectOptionIndex) continue;
-                    authoredErrors.Add(new QuizError(-(index + 1), assignment.Title, definition.Level, question.Question,
-                        question.Options[selected[index]], [question.Options[question.CorrectOptionIndex!.Value]], question.Explanation));
-                }
-                scoredQuizzes.Add(new QuizScore(100d * (definition.Questions.Length - authoredErrors.Count) / definition.Questions.Length,
-                    definition.Level));
-            }
-            var hasText = !string.IsNullOrWhiteSpace(text);
-            if (text?.Length > 20000 || (!hasText && scoredQuizzes.Count == 0))
-                return ApiResponse<HomeworkAiGradeDraft>.Fail("Chưa có nội dung phù hợp để AI chấm. Mentor có thể xem bài nộp và chấm trực tiếp.");
+                assignment.Title,
+                assignment.Instructions,
+                Text = text,
+                WritingLevels = levels,
+                Rubrics = levels.Where(HomeworkRubrics.ContainsKey).Distinct().ToDictionary(l => l, l => HomeworkRubrics[l]),
+                MentorPrompt = mentorPrompt?.Trim()
+            };
 
-            var quizLevels = SupportedLevels.Where(level => scoredQuizzes.Any(quiz => quiz.Level == level)).ToArray();
-            var lessonLevels = SupportedLevels.Where(level => assignment.Lessons.Any(lesson => lesson.Level == level)).ToArray();
-            var writingLevel = selectedLevel ?? definition?.Level;
-            var writingLevels = writingLevel is not null ? [writingLevel] : lessonLevels;
-            if (writingLevels.Length == 0)
-                writingLevels = quizLevels;
-            if (writingLevels.Length == 0 && assignment.BookingLevel is { } bookingLevel && HomeworkRubrics.ContainsKey(bookingLevel))
-                writingLevels = [bookingLevel];
+            var raw = await grader.GenerateGradingJsonAsync(actor.Id,
+                HomeworkGradingPrompt,
+                JsonSerializer.Serialize(payload, HomeworkAiJson), ct);
+            var result = string.IsNullOrWhiteSpace(raw) ? null : JsonSerializer.Deserialize<HomeworkAiDraft>(raw, HomeworkJson);
+            if (result is not { Score: >= 0 and <= 100 } || result.Feedback?.Trim().Length is not (> 0 and <= 2000))
+                return await DraftUnavailableAsync(assignment, "AI chưa trả nhận xét hợp lệ. Mentor có thể chấm trực tiếp.", HttpStatusCode.BadGateway, ct);
 
-            var gradingLevels = SupportedLevels.Where(level => quizLevels.Contains(level) ||
-                ((hasText || quizLevels.Length == 0) && writingLevels.Contains(level))).ToArray();
-            if (gradingLevels.Length == 0)
-                return ApiResponse<HomeworkAiGradeDraft>.Fail("Chọn cấp JLPT N5–N2 trước khi AI chấm bài.",
-                    HttpStatusCode.BadRequest, "HOMEWORK_GRADING_LEVEL_REQUIRED");
+            var score = Math.Round(result.Score.Value, 2);
+            var corrections = (result.Corrections ?? [])
+                .Where(c => !string.IsNullOrWhiteSpace(c.Category) && !string.IsNullOrWhiteSpace(c.Original)
+                    && !string.IsNullOrWhiteSpace(c.Reason) && !string.IsNullOrWhiteSpace(c.Correction))
+                .Take(CorrectionLimit)
+                .Select(c => new HomeworkCorrection(
+                    c.Category.Trim(),
+                    c.Original.Trim(),
+                    c.Reason.Trim(),
+                    c.Correction.Trim(),
+                    string.IsNullOrWhiteSpace(c.Location) ? null : c.Location.Trim()))
+                .ToList();
 
-            var wrongAnswers = unit.LearnerPracticeAnswers.Query().AsNoTracking()
-                .Where(a => !a.IsDeleted && a.IsCorrect == false && attempts.Any(t => t.Id == a.PracticeExerciseAttemptId));
-            var wrongCount = authoredErrors.Count + await wrongAnswers.CountAsync(ct);
-            var quizErrors = await wrongAnswers
-                .Where(a => !a.PracticeQuestion.IsDeleted && a.PracticeQuestion.Options!.Any(o => !o.IsDeleted && o.IsCorrect))
-                .OrderBy(a => a.PracticeExerciseAttemptId).ThenBy(a => a.PracticeQuestion.SortOrder).ThenBy(a => a.PracticeQuestionId)
-                .Take(Math.Max(0, QuizCorrectionLimit - authoredErrors.Count))
-                .Select(a => new QuizError(a.PracticeQuestionId, a.PracticeExerciseAttempt.PracticeExercise.Title,
-                    a.PracticeExerciseAttempt.PracticeExercise.Lesson.CertificateLevel.Code,
-                    a.PracticeQuestion.QuestionText, a.SelectedOption != null ? a.SelectedOption.OptionText : a.TextAnswer,
-                    a.PracticeQuestion.Options!.Where(o => !o.IsDeleted && o.IsCorrect).OrderBy(o => o.SortOrder)
-                        .Select(o => o.OptionText).ToList(), a.PracticeQuestion.Explanation))
-                .ToListAsync(ct);
-            quizErrors.InsertRange(0, authoredErrors.Take(QuizCorrectionLimit));
-            var aiInput = JsonSerializer.Serialize(new { assignment.Title, assignment.Instructions, assignment.Lessons,
-                AssignmentType = definition?.Type,
-                MentorPrompt = prompt,
-                WritingLevels = hasText ? writingLevels : [],
-                Rubrics = gradingLevels.Select(level => new { Level = level, Criteria = HomeworkRubrics[level] }),
-                Text = text, QuizScores = scoredQuizzes, QuizErrors = quizErrors }, HomeworkAiJson);
-            // Reserve room for the provider's message framing and JSON instruction.
-            if (Encoding.UTF8.GetByteCount(HomeworkGradingPrompt) + Encoding.UTF8.GetByteCount(aiInput) + 256 > MaxGradingInputBytes)
-                return ApiResponse<HomeworkAiGradeDraft>.Fail("Đề, yêu cầu chấm hoặc bài nộp vượt ngân sách đầu vào AI. Hãy rút ngắn yêu cầu chấm hoặc chấm trực tiếp.",
-                    HttpStatusCode.BadRequest, "HOMEWORK_AI_INPUT_TOO_LONG");
-            var raw = await grader.GenerateGradingJsonAsync(actor.Id, HomeworkGradingPrompt, aiInput, ct, MaxGradingOutputTokens);
-            var result = JsonSerializer.Deserialize<HomeworkAiDraft>(ContentAuthoringService.StripCodeFence(raw), HomeworkJson);
-            if (result is not { Score: >= 0 and <= 100, Corrections.Length: <= CorrectionLimit } ||
-                result.Feedback?.Trim().Length is not (> 0 and <= 2000) ||
-                !TryBuildDraftCorrections(result.Corrections, quizErrors, hasText, out var corrections))
-                return ApiResponse<HomeworkAiGradeDraft>.Fail("AI chưa trả nhận xét hợp lệ. Mentor có thể thử lại hoặc chấm trực tiếp.", HttpStatusCode.BadGateway);
+            // Lưu nháp AI riêng cho Mentor (Task 02); học viên không thấy cho đến khi Mentor công bố.
+            assignment.AiDraftFeedback = result.Feedback.Trim();
+            assignment.AiDraftScore = (double)score;
+            assignment.AiDraftGeneratedAtUtc = DateTime.UtcNow;
+            assignment.AiDraftUnavailableReason = null;
+            await unit.SaveChangesAsync(ct);
 
-            var score = hasText ? result.Score.Value : (decimal)scoredQuizzes.Average(quiz => quiz.Score);
-            return ApiResponse<HomeworkAiGradeDraft>.Success(new HomeworkAiGradeDraft(submission.Id, Math.Round(score, 2),
-                result.Feedback.Trim(), transcription, corrections, wrongCount > quizErrors.Count, gradingLevels));
+            return ApiResponse<HomeworkAiGradeDraft>.Success(new HomeworkAiGradeDraft(
+                submission.Id,
+                score,
+                assignment.AiDraftFeedback,
+                transcription,
+                corrections,
+                false,
+                levels));
         }
-        catch (Exception ex) when (ex is AiServiceException or AiQuotaExceededException or JsonException or HttpRequestException
-            or InvalidOperationException or ArgumentException or IOException)
+        catch (Exception ex) when (!ct.IsCancellationRequested && (ex is AiServiceException or AiQuotaExceededException or JsonException
+            or HttpRequestException or InvalidOperationException or TaskCanceledException or FileNotFoundException))
         {
-            return ApiResponse<HomeworkAiGradeDraft>.Fail("Chưa tạo được gợi ý chấm bằng AI. Hãy thử lại hoặc chấm trực tiếp.", HttpStatusCode.BadGateway);
+            return await DraftUnavailableAsync(assignment, "Chưa tạo được gợi ý chấm bằng AI. Hãy thử lại hoặc chấm trực tiếp.", HttpStatusCode.BadGateway, ct);
         }
     }
 
-    private static bool TryBuildDraftCorrections(HomeworkAiCorrection[] drafts, List<QuizError> quizErrors, bool hasText,
-        out List<HomeworkCorrection> corrections)
+    // Lỗi AI/OCR chỉ ghi lý do vào bài tập; bài nộp của học viên không bị thay đổi.
+    private async Task<ApiResponse<HomeworkAiGradeDraft>> DraftUnavailableAsync(HomeworkAssignment assignment, string reason, HttpStatusCode status,
+        CancellationToken ct)
     {
-        corrections = [];
-        var quizErrorsById = quizErrors.ToDictionary(error => error.QuestionId);
-        var items = new List<HomeworkCorrection>(drafts.Length);
-        foreach (var draft in drafts)
-        {
-            if (draft is null) return false;
-            if (draft.QuestionId is { } questionId)
-            {
-                if (!quizErrorsById.Remove(questionId, out var quiz)) return false;
-                items.Add(new HomeworkCorrection(draft.Category,
-                    LimitText(quiz.Original ?? "Bỏ trống", 800), draft.Reason,
-                    LimitText(string.Join(" / ", quiz.CorrectOptions), 800), LimitText($"{quiz.Exercise} · {quiz.Question}", 300)));
-            }
-            else
-            {
-                if (!hasText) return false;
-                items.Add(new HomeworkCorrection(draft.Category, draft.Original, draft.Reason, draft.Correction, draft.Location));
-            }
-        }
-        return quizErrorsById.Count == 0 && TryNormalizeCorrections(items, out corrections);
+        assignment.AiDraftUnavailableReason = reason.Length > 500 ? reason[..500] : reason;
+        await unit.SaveChangesAsync(ct);
+        return ApiResponse<HomeworkAiGradeDraft>.Fail(reason, status, "HOMEWORK_AI_DRAFT_UNAVAILABLE", retryable: true);
     }
 
-    private static string LimitText(string value, int limit) =>
-        value.Length > limit ? value[..(limit - 1)] + "…" : value;
+    public Task<ApiResponse<HomeworkGrade>> PublishGradeAsync(int id, PublishHomeworkGradeRequest request, CancellationToken ct)
+        => PublishGradeCoreAsync(id, request, null, ct);
 
-    private static bool TryNormalizeCorrections(IReadOnlyList<HomeworkCorrection>? input, out List<HomeworkCorrection> corrections)
-    {
-        corrections = [];
-        if (input is null) return true;
-        if (input.Count > CorrectionLimit) return false;
-        foreach (var item in input)
-        {
-            if (item?.Category?.Trim() is not { Length: > 0 and <= 80 } category ||
-                item.Original?.Trim() is not { Length: > 0 and <= 800 } original ||
-                item.Reason?.Trim() is not { Length: > 0 and <= 1200 } reason ||
-                item.Correction?.Trim() is not { Length: > 0 and <= 800 } correction ||
-                item.Location?.Trim().Length > 300)
-                return false;
-
-            var location = item.Location?.Trim();
-            corrections.Add(new HomeworkCorrection(category, original, reason, correction, string.IsNullOrEmpty(location) ? null : location));
-        }
-        return true;
-    }
-
-    public async Task<ApiResponse<HomeworkGrade>> PublishGradeAsync(int id, PublishHomeworkGradeRequest request, CancellationToken ct)
+    private async Task<ApiResponse<HomeworkGrade>> PublishGradeCoreAsync(int id, PublishHomeworkGradeRequest request, bool? passed,
+        CancellationToken ct)
     {
         var actor = claims.GetUserClaim();
         if (actor.Role != Role.Mentor) return ApiResponse<HomeworkGrade>.Fail("Chỉ mentor được gửi bài chấm.", HttpStatusCode.Forbidden);
@@ -360,12 +282,17 @@ public sealed partial class HomeworkService
         {
             await unit.UserAccounts.GetByIdForUpdateAsync(learnerId.Value, token);
             var assignment = await query.AsTracking().Include(a => a.Submission).ThenInclude(s => s!.GradingResult).SingleOrDefaultAsync(token);
-            if (assignment?.Submission is not { IsDeleted: false } submission || submission.Id != request.SubmissionId) return;
+            if (assignment?.Submission is not { IsDeleted: false } submission) return;
+            if (submission.Id != request.SubmissionId)
+            {
+                response = ApiResponse<HomeworkGrade>.Fail("Bài nộp đã thay đổi. Hãy tải lại trước khi chấm.", HttpStatusCode.Conflict,
+                    "HOMEWORK_SUBMISSION_CHANGED");
+                return;
+            }
             var score = (double)Math.Round(request.Score, 2);
             var previous = PublishedGrade(submission.GradingResult);
-            var finalCorrections = request.Corrections is null ? previous?.Corrections ?? [] : corrections;
-            if (previous is not null && previous.Score == score && previous.Feedback == feedback &&
-                (previous.Corrections ?? []).SequenceEqual(finalCorrections))
+            if (previous is not null && previous.Score == score && previous.Feedback == feedback
+                && (!passed.HasValue || assignment.Passed == passed))
             {
                 response = ApiResponse<HomeworkGrade>.Success(previous);
                 return;
@@ -378,21 +305,69 @@ public sealed partial class HomeworkService
                 await unit.GradingResults.AddAsync(grade, token);
             }
             grade.OverallScore = score;
-            grade.FeedbackJson = JsonSerializer.Serialize(new HomeworkFeedback(feedback, finalCorrections), HomeworkJson);
-            grade.GradedAt = DateTime.UtcNow;
+            grade.FeedbackJson = JsonSerializer.Serialize(new HomeworkFeedback(feedback, corrections), HomeworkJson);
+            // PostgreSQL lưu tới micro giây; cắt trước để phản hồi lần đầu và lần gửi lại (idempotent) trùng nhau.
+            var nowUtc = DateTime.UtcNow;
+            grade.GradedAt = nowUtc.AddTicks(-(nowUtc.Ticks % 10));
             grade.IsDeleted = false;
             assignment.Status = "Graded";
-            await NotifyAsync(assignment.LearnerId, "Mentor đã chấm bài tập", assignment.Title, assignment.MentorBookingId, token);
+            // Bản sao trên HomeworkAssignment để báo cáo/tiến độ Cohort (Task 02/05) đọc cùng một kết quả đã công bố.
+            assignment.MentorScore = score;
+            assignment.MentorFeedback = feedback;
+            assignment.Passed = passed ?? assignment.Passed;
+            assignment.PublishedFeedbackAtUtc = grade.GradedAt;
+            assignment.PublishedByMentorId = actor.Id;
+            await NotifyAsync(assignment.LearnerId, "Mentor đã chấm bài tập", assignment.Title, assignment.CohortId, token);
             await unit.SaveChangesAsync(token);
             response = ApiResponse<HomeworkGrade>.Success(PublishedGrade(grade)!);
         }, ct);
         return response;
     }
 
-    private Task NotifyAsync(int learnerId, string title, string message, int? bookingId, CancellationToken ct)
+    private static bool TryNormalizeCorrections(IReadOnlyList<HomeworkCorrection>? input, out IReadOnlyList<HomeworkCorrection> normalized)
+    {
+        if (input is null or { Count: 0 })
+        {
+            normalized = [];
+            return true;
+        }
+        if (input.Count > CorrectionLimit)
+        {
+            normalized = [];
+            return false;
+        }
+        var list = new List<HomeworkCorrection>(input.Count);
+        foreach (var item in input)
+        {
+            if (item is null
+                || item.Category?.Trim() is not { Length: > 0 and <= 80 } category
+                || item.Original?.Trim() is not { Length: > 0 and <= 800 } original
+                || item.Reason?.Trim() is not { Length: > 0 and <= 1200 } reason
+                || item.Correction?.Trim() is not { Length: > 0 and <= 800 } correction
+                || item.Location?.Trim().Length > 300)
+            {
+                normalized = [];
+                return false;
+            }
+            list.Add(new HomeworkCorrection(
+                category,
+                original,
+                reason,
+                correction,
+                string.IsNullOrWhiteSpace(item.Location) ? null : item.Location.Trim()));
+        }
+        normalized = list;
+        return true;
+    }
+
+    private Task NotifyAsync(int learnerId, string title, string message, int? cohortId, CancellationToken ct)
         => unit.Notifications.AddAsync(new Notification
         {
-            UserId = learnerId, Title = title, Message = message, Type = "Homework", IsRead = false,
-            LinkUrl = bookingId.HasValue ? $"/homework/?bookingId={bookingId}" : "/homework/",
+            UserId = learnerId,
+            Title = title,
+            Message = message,
+            Type = "Homework",
+            IsRead = false,
+            LinkUrl = cohortId.HasValue ? $"/homework/?cohortId={cohortId}" : "/homework/",
         }, ct);
 }

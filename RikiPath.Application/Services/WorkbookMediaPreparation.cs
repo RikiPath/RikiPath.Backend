@@ -15,6 +15,8 @@ public sealed class WorkbookMediaPreparation(
     public async Task PrepareAsync(IReadOnlyList<ExcelRow> rows, CancellationToken ct)
     {
         foreach (var row in rows)
+        {
+            ValidateHostedMediaUrls(row);
         foreach (var column in Columns)
         {
             ct.ThrowIfCancellationRequested();
@@ -53,6 +55,28 @@ public sealed class WorkbookMediaPreparation(
                 failed[key] = ex.Message;
                 row.MediaImportErrors.Add(column + ": " + ex.Message);
             }
+        }
+        }
+    }
+
+    private static void ValidateHostedMediaUrls(ExcelRow row)
+    {
+        foreach (var field in row.Fields)
+        {
+            var key = field.Key.ToLowerInvariant();
+            if (!key.EndsWith("imageurl", StringComparison.Ordinal) && !key.EndsWith("videourl", StringComparison.Ordinal)) continue;
+            var value = field.Value?.Trim();
+            if (string.IsNullOrWhiteSpace(value)) continue;
+            if (!Uri.TryCreate(value, UriKind.Absolute, out var uri) ||
+                uri.Scheme is not ("http" or "https"))
+            {
+                row.MediaImportErrors.Add(field.Key + " phải là URL http/https.");
+                continue;
+            }
+            var host = uri.Host.TrimEnd('.').ToLowerInvariant();
+            if (host != "supabase.co" && !host.EndsWith(".supabase.co", StringComparison.Ordinal) &&
+                host != "amazonaws.com" && !host.EndsWith(".amazonaws.com", StringComparison.Ordinal))
+                row.MediaImportErrors.Add(field.Key + " phải là URL file trên Supabase Storage hoặc Amazon S3.");
         }
     }
 }

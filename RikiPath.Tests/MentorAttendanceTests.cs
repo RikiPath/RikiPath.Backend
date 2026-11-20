@@ -111,6 +111,31 @@ public sealed class MentorAttendanceTests
         };
         db.MentorBookings.Add(booking);
 
+        var course = new StudyCourse
+        {
+            Id = 1500 + learnerId,
+            LearnerId = learnerId,
+            MentorId = mentorId,
+            PlanId = 1,
+            Name = "Cohort Session",
+            CertificateLevelId = 1,
+            PurchaseKey = Guid.NewGuid(),
+            PaymentStatus = paymentStatus == PaymentStatus.Paid ? "Paid" : "Pending",
+            Status = bookingStatus == MentorStatus.Cancelled ? "Cancelled" : "Active",
+            Sessions =
+            [
+                new StudyCourseSession
+                {
+                    Id = 2500 + learnerId,
+                    Number = 1,
+                    AvailabilityId = slot.Id,
+                    ScheduledAt = slot.StartTime,
+                    Status = bookingStatus == MentorStatus.Cancelled ? "Cancelled" : "Scheduled"
+                }
+            ]
+        };
+        db.StudyCourses.Add(course);
+
         await db.SaveChangesAsync();
         return (mentor, learner, slot, booking);
     }
@@ -168,6 +193,102 @@ public sealed class MentorAttendanceTests
 
         var canAccess = await service.CanAccessRoomAsync(slot.RoomId, strangerLearnerId);
         Assert.False(canAccess);
+    }
+
+    [Fact]
+    public async Task Four_paid_learners_share_one_room_and_stranger_is_denied()
+    {
+        await using var db = CreateInMemoryDb();
+        var (mentor, firstLearner, slot, _) = await SeedBookingAndSlotAsync(db, startMinutesOffset: 0, durationMinutes: 90);
+        slot.MaxLearners = 4;
+        slot.BookedCount = 4;
+        var learnerIds = new[] { firstLearner.Id, 102, 103, 104 };
+        foreach (var learnerId in learnerIds.Skip(1))
+        {
+            db.Users.Add(new UserAccount
+            {
+                Id = learnerId, FirstName = "Học viên", LastName = learnerId.ToString(),
+                Email = $"learner{learnerId}@rikipath.edu.vn", Role = Role.Learner,
+                PasswordHash = [], PasswordSalt = []
+            });
+            db.UserSubscriptions.Add(new UserSubscription
+            {
+                Id = 500 + learnerId, UserId = learnerId, PaymentStatus = PaymentStatus.Paid,
+                MeetingSessionsIncluded = 1, MeetingSessionsUsed = 1,
+                PurchasedAt = DateTime.UtcNow.AddDays(-1), StartDate = DateTime.UtcNow.AddDays(-1),
+                EndDate = DateTime.UtcNow.AddDays(30)
+            });
+            db.MentorBookings.Add(new MentorBooking
+            {
+                Id = 900 + learnerId, UserSubscriptionId = 500 + learnerId,
+                MentorAvailabilityId = slot.Id, LearnerId = learnerId, Status = MentorStatus.Accepted
+            });
+            db.StudyCourses.Add(new StudyCourse
+            {
+                Id = 1500 + learnerId, LearnerId = learnerId, MentorId = mentor.Id, PlanId = 1, Name = "Cohort Session",
+                CertificateLevelId = 1, PurchaseKey = Guid.NewGuid(), PaymentStatus = "Paid", Status = "Active",
+                Sessions = [new StudyCourseSession { Id = 2500 + learnerId, Number = 1, AvailabilityId = slot.Id, ScheduledAt = slot.StartTime, Status = "Scheduled" }]
+            });
+        }
+        await db.SaveChangesAsync();
+
+        var service = new MentorAttendanceService(db, MockClaims(Role.Mentor, mentor.Id),
+            NullLogger<MentorAttendanceService>.Instance);
+        foreach (var learnerId in learnerIds)
+        {
+            Assert.True(await service.CanAccessRoomAsync(slot.RoomId, learnerId));
+            Assert.True((await service.RecordJoinAsync(slot.RoomId, learnerId, $"learner-{learnerId}")).IsSuccess);
+        }
+        Assert.False(await service.CanAccessRoomAsync(slot.RoomId, 999));
+        Assert.False((await service.RecordJoinAsync(slot.RoomId, 999, "stranger")).IsSuccess);
+        Assert.True((await service.RecordJoinAsync(slot.RoomId, mentor.Id, "mentor")).IsSuccess);
+        Assert.Equal(5, await db.MentorAttendanceRecords.CountAsync(r => r.RoomId == slot.RoomId));
+        Assert.Single(db.MentorAttendanceRecords.Where(r => r.RoomId == slot.RoomId && r.UserId == mentor.Id));
+    }
+
+    [Fact]
+    public async Task SignalR_group_room_rejects_user_not_in_paid_roster()
+    {
+        var roomId = Guid.NewGuid();
+        var access = new Mock<IMentorMeetingAccessService>();
+        access.Setup(x => x.GetMeetingAsync(roomId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new MeetingAccessInfoResponse
+            {
+                Capacity = 4,
+                Mentor = new MeetingParticipantResponse { UserId = 201, Name = "Cố vấn", IsMentor = true },
+                Learners = [new MeetingParticipantResponse { UserId = 101, Name = "Học viên", IsMentor = false }]
+            });
+        var hub = new MentorMeetingHub(access.Object, new Mock<IMeetingNoteService>().Object);
+        var context = new Mock<HubCallerContext>();
+        context.Setup(x => x.ConnectionAborted).Returns(CancellationToken.None);
+        context.Setup(x => x.User).Returns(new System.Security.Claims.ClaimsPrincipal(
+            new System.Security.Claims.ClaimsIdentity([
+                new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.NameIdentifier, "999")
+            ])));
+        hub.Context = context.Object;
+
+        await Assert.ThrowsAsync<HubException>(() => hub.JoinRoom(roomId, "Người ngoài", "Learner"));
+    }
+
+    [Fact]
+    public async Task Unpaid_learner_cannot_record_attendance_even_with_assigned_booking()
+    {
+        await using var db = CreateInMemoryDb();
+        var (_, learner, slot, _) = await SeedBookingAndSlotAsync(db, paymentStatus: PaymentStatus.Pending);
+        var service = new MentorAttendanceService(db, MockClaims(Role.Learner, learner.Id),
+            NullLogger<MentorAttendanceService>.Instance);
+        Assert.False((await service.RecordJoinAsync(slot.RoomId, learner.Id, "unpaid")).IsSuccess);
+    }
+
+    [Fact]
+    public async Task Paid_learner_cannot_record_attendance_before_room_opens()
+    {
+        await using var db = CreateInMemoryDb();
+        var (_, learner, slot, _) = await SeedBookingAndSlotAsync(db, startMinutesOffset: 30);
+        var service = new MentorAttendanceService(db, MockClaims(Role.Learner, learner.Id),
+            NullLogger<MentorAttendanceService>.Instance);
+        Assert.False((await service.RecordJoinAsync(slot.RoomId, learner.Id, "early")).IsSuccess);
+        Assert.Empty(db.MentorAttendanceRecords);
     }
 
     [Fact]
@@ -248,7 +369,7 @@ public sealed class MentorAttendanceTests
 
         var savedRecord = await db.MentorAttendanceRecords.FirstOrDefaultAsync(r => r.RoomId == slot.RoomId && r.UserId == learner.Id);
         Assert.NotNull(savedRecord);
-        Assert.Equal(booking.Id, savedRecord.MentorBookingId);
+        Assert.Equal(2500 + learner.Id, savedRecord.CourseSessionId);
         Assert.Equal(MentorAttendanceStatus.Joined, savedRecord.Status);
     }
 
@@ -273,8 +394,8 @@ public sealed class MentorAttendanceTests
         Assert.Equal(MentorAttendanceStatus.Joined, reconnectResult.Result.Status);
         Assert.True(reconnectResult.Result.IsOnline);
 
-        // Đảm bảo không tạo thêm bản ghi mới trong DB (duy trì 1 bản ghi duy nhất cho cặp booking + user)
-        var totalRecords = await db.MentorAttendanceRecords.CountAsync(r => r.MentorBookingId == booking.Id && r.UserId == learner.Id);
+        // Đảm bảo không tạo thêm bản ghi mới trong DB (duy trì 1 bản ghi duy nhất cho cặp room + user)
+        var totalRecords = await db.MentorAttendanceRecords.CountAsync(r => r.RoomId == slot.RoomId && r.UserId == learner.Id);
         Assert.Equal(1, totalRecords);
     }
 
@@ -394,6 +515,9 @@ public sealed class MentorAttendanceTests
         var setupClaims = MockClaims(Role.Admin, 99);
         var setupService = new MentorAttendanceService(db, setupClaims, NullLogger<MentorAttendanceService>.Instance);
         await setupService.RecordJoinAsync(slot.RoomId, learner.Id, "conn-l-book");
+        var rec = await db.MentorAttendanceRecords.SingleAsync(r => r.RoomId == slot.RoomId && r.UserId == learner.Id);
+        rec.MentorBookingId = booking.Id;
+        await db.SaveChangesAsync();
 
         // Learner chính chủ
         var learnerClaims = MockClaims(Role.Learner, learner.Id);

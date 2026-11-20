@@ -8,7 +8,7 @@ namespace RikiPath.WebApi.Controllers;
 [ApiController]
 [Route("api/admin/mentor-availabilities")]
 [Authorize(Roles = "Admin")]
-public sealed class AdminMentorAvailabilityController(IMentorMeetingService service, IMentorAvailabilityReviewService reviewService) : ControllerBase
+public sealed class AdminMentorAvailabilityController(IMentorAvailabilityReviewService reviewService) : ControllerBase
 {
     [HttpPost("{id:int}/split")]
     public async Task<IActionResult> Split(int id, SplitMentorAvailabilityRequest request, CancellationToken ct)
@@ -18,7 +18,7 @@ public sealed class AdminMentorAvailabilityController(IMentorMeetingService serv
     }
     [HttpGet("pending")]
     public async Task<IActionResult> GetPendingAvailabilities(CancellationToken cancellationToken)
-        => ToActionResult(await service.GetPendingAvailabilitiesAsync(cancellationToken));
+        => ToActionResult(await reviewService.GetPendingAvailabilitiesAsync(cancellationToken));
     [HttpGet("mentor/{mentorId:int}/schedule")]
     public async Task<IActionResult> GetSchedule(int mentorId, [FromQuery] DateTime from, [FromQuery] DateTime to, CancellationToken ct)
     {
@@ -38,7 +38,7 @@ public sealed class AdminMentorAvailabilityController(IMentorMeetingService serv
         [FromQuery] bool approve,
         [FromQuery] string? rejectionReason,
         CancellationToken cancellationToken)
-        => ToActionResult(await service.ReviewAvailabilitiesAsync(ids, approve, rejectionReason, cancellationToken));
+        => ToActionResult(await reviewService.ReviewAvailabilitiesAsync(ids, approve, rejectionReason, cancellationToken));
 
     [HttpPost("review-cancel")]
     public async Task<IActionResult> ReviewCancelAvailabilities(
@@ -46,7 +46,7 @@ public sealed class AdminMentorAvailabilityController(IMentorMeetingService serv
         [FromQuery] bool approve,
         [FromQuery] string? rejectionReason,
         CancellationToken cancellationToken)
-        => ToActionResult(await service.ReviewCancelAvailabilitiesAsync(ids, approve, rejectionReason, cancellationToken));
+        => ToActionResult(await reviewService.ReviewCancelAvailabilitiesAsync(ids, approve, rejectionReason, cancellationToken));
 
     [HttpPost("{id:int}/review")]
     public async Task<IActionResult> Review(int id, ReviewMentorAvailabilityRequest request, CancellationToken ct)

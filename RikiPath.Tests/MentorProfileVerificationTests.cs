@@ -393,11 +393,9 @@ namespace RikiPath.Tests
             Assert.True(await profileService.IsMentorEligibleForSchedulingAsync(106));
 
             // Kiểm tra danh sách bookable mentors của học viên có chứa mentor 106
-            var meetingService = new MentorMeetingService(uow, Mock.Of<IPaymentGatewayClient>(),
-                MockClaims(Role.Learner, 999), new AppSettings(), NullLogger<MentorMeetingService>.Instance,
-                Mock.Of<IMentorCreditLedgerService>());
-            var bookableList = await meetingService.GetMentorsAsync(default);
-            Assert.Contains(bookableList.Result!, x => x.Id == 106);
+            var discoveryService = new MentorDiscoveryService(uow, NullLogger<MentorDiscoveryService>.Instance);
+            var bookableList = await discoveryService.SearchMentorsAsync(new RikiPath.Application.Requests.MentorDiscovery.MentorDiscoveryFilterRequest());
+            Assert.Contains(bookableList.Result!.Items, x => x.MentorId == 106);
         }
 
         [Fact]
@@ -438,11 +436,9 @@ namespace RikiPath.Tests
             Assert.Equal("Chứng chỉ JLPT đã hết hạn hoặc không rõ nét.", validRejectResult.Result.RejectionReason);
 
             // Mentor không bookable trong danh sách học viên
-            var meetingService = new MentorMeetingService(uow, Mock.Of<IPaymentGatewayClient>(),
-                MockClaims(Role.Learner, 999), new AppSettings(), NullLogger<MentorMeetingService>.Instance,
-                Mock.Of<IMentorCreditLedgerService>());
-            var bookableList = await meetingService.GetMentorsAsync(default);
-            Assert.DoesNotContain(bookableList.Result!, x => x.Id == 107);
+            var discoveryService = new MentorDiscoveryService(uow, NullLogger<MentorDiscoveryService>.Instance);
+            var bookableList = await discoveryService.SearchMentorsAsync(new RikiPath.Application.Requests.MentorDiscovery.MentorDiscoveryFilterRequest());
+            Assert.DoesNotContain(bookableList.Result!.Items, x => x.MentorId == 107);
         }
 
         [Fact]

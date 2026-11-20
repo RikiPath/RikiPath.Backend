@@ -10,6 +10,17 @@ namespace RikiPath.Infrastructure
     public class UnitOfWork : IUnitOfWork
     {
         private readonly AppDbContext _context;
+        public IStudyCourseRepository StudyCourses { get; }
+        public IGenericRepository<StudyCoursePlan> StudyCoursePlans { get; }
+        public IGenericRepository<StudyCohort> StudyCohorts { get; }
+        public IGenericRepository<CohortEnrollmentEntitlement> CohortEnrollmentEntitlements { get; }
+        public IGenericRepository<CourseScheduleRequest> CourseScheduleRequests { get; }
+        public IGenericRepository<CohortTransferRequest> CohortTransferRequests { get; }
+        public IGenericRepository<StudyCohortMentorAssignment> StudyCohortMentorAssignments { get; }
+        public IGenericRepository<CohortScheduleRequest> CohortScheduleRequests { get; }
+        public IGenericRepository<CohortMentorReview> CohortMentorReviews { get; }
+        public IGenericRepository<CohortComplaint> CohortComplaints { get; }
+        public IGenericRepository<JlptExamSchedule> JlptExamSchedules { get; }
 
         // 1. Users & Core Auth
         public IUserAccountRepository UserAccounts { get; }
@@ -92,6 +103,17 @@ namespace RikiPath.Infrastructure
         public UnitOfWork(AppDbContext context)
         {
             _context = context ?? throw new ArgumentNullException(nameof(context));
+            StudyCourses = new StudyCourseRepository(_context);
+            StudyCoursePlans = new GenericRepository<StudyCoursePlan>(_context);
+            StudyCohorts = new GenericRepository<StudyCohort>(_context);
+            CohortEnrollmentEntitlements = new GenericRepository<CohortEnrollmentEntitlement>(_context);
+            CourseScheduleRequests = new GenericRepository<CourseScheduleRequest>(_context);
+            CohortTransferRequests = new GenericRepository<CohortTransferRequest>(_context);
+            StudyCohortMentorAssignments = new GenericRepository<StudyCohortMentorAssignment>(_context);
+            CohortScheduleRequests = new GenericRepository<CohortScheduleRequest>(_context);
+            CohortMentorReviews = new GenericRepository<CohortMentorReview>(_context);
+            CohortComplaints = new GenericRepository<CohortComplaint>(_context);
+            JlptExamSchedules = new GenericRepository<JlptExamSchedule>(_context);
 
             // Initializing Repositories
             UserAccounts = new UserAccountRepository(_context);

@@ -3,6 +3,7 @@ using System.Text;
 using Google.Apis.Auth;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using RikiPath.Application.Helpers;
 using RikiPath.Application.Requests.Auth;
 using RikiPath.Application.Responses;
 using RikiPath.Application.Responses.Auth;
@@ -105,12 +106,17 @@ public partial class AuthService
                     return ApiResponse<LoginResponse>.Fail(
                         "Hãy đăng ký bằng email và xác thực email trước khi liên kết tài khoản Google này.");
 
+                var googleFullName = !string.IsNullOrWhiteSpace(identity.Name)
+                    ? identity.Name
+                    : UserNameHelper.FormatFullName(identity.GivenName, identity.FamilyName);
+                var (firstName, lastName) = UserNameHelper.SplitFullName(googleFullName);
+
                 account = new UserAccount
                 {
                     GoogleSubject = identity.Subject,
                     Email = email,
-                    FirstName = FitGoogleName(identity.GivenName ?? (string.IsNullOrWhiteSpace(identity.FamilyName) ? identity.Name : null)),
-                    LastName = FitGoogleName(identity.FamilyName),
+                    FirstName = firstName,
+                    LastName = lastName,
                     IsEmailVerified = true,
                     Role = Role.Learner,
                     PasswordHash = [],
@@ -162,17 +168,9 @@ public partial class AuthService
             AccessToken = CreateToken(account),
             UserId = account.Id,
             Email = account.Email ?? string.Empty,
-            FullName = $"{account.FirstName} {account.LastName}".Trim(),
+            FullName = UserNameHelper.FormatFullName(account.FirstName, account.LastName),
             PhoneNumber = account.PhoneNumber,
             Role = account.Role.ToString(),
         }, created ? HttpStatusCode.Created : HttpStatusCode.OK);
-    }
-
-    private static string? FitGoogleName(string? name)
-    {
-        var trimmed = name?.Trim();
-        return trimmed is { Length: > 100 }
-            ? string.Concat(trimmed.EnumerateRunes().Take(100).Select(rune => rune.ToString()))
-            : trimmed;
     }
 }

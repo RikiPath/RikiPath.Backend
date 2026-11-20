@@ -1,8 +1,13 @@
-using Microsoft.OpenApi.Models;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Routing;
-using RikiPath.WebApi.Swagger;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.OpenApi.Models;
 using RikiPath.WebApi.Controllers;
+using RikiPath.WebApi.Swagger;
 
 namespace RikiPath.Tests;
 
@@ -18,21 +23,6 @@ public sealed class CanonicalApiDocumentFilterTests
             .ToArray();
 
         Assert.Equal(["api/admin/mentor-availabilities"], routes);
-    }
-
-    [Fact]
-    public void MentorMeetingControllerDoesNotDeclareSubscriptionBookingAlias()
-    {
-        var routeTemplates = typeof(MentorMeetingController)
-            .GetMethods()
-            .SelectMany(method => method.GetCustomAttributes(typeof(HttpMethodAttribute), inherit: true)
-                .Cast<HttpMethodAttribute>())
-            .Select(attribute => attribute.Template)
-            .Where(template => template is not null)
-            .ToArray();
-
-        Assert.DoesNotContain(routeTemplates, template => template!.Contains("subscriptions/", StringComparison.OrdinalIgnoreCase)
-            && template.Contains("/bookings", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -164,5 +154,82 @@ public sealed class CanonicalApiDocumentFilterTests
         Assert.Equal(
             "Lấy thông tin hồ sơ Cố vấn.",
             CanonicalApiOperationFilter.BuildFallbackSummary("GET", "api/admin/mentors"));
+    }
+
+    [Fact]
+    public async Task RuntimeSwaggerDocument_ExcludesLegacyApis_AndRetainsGroupLearningApis()
+    {
+        var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+        {
+            ApplicationName = typeof(AdminMentorGroupPolicyController).Assembly.GetName().Name
+        });
+        builder.WebHost.UseUrls("http://127.0.0.1:0");
+        builder.Services.AddEndpointsApiExplorer();
+        builder.Services
+            .AddControllers()
+            .AddApplicationPart(typeof(AdminMentorGroupPolicyController).Assembly)
+            .AddJsonOptions(options =>
+            {
+                options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
+            });
+        builder.Services.AddSwaggerGen(c =>
+        {
+            c.SwaggerDoc("v1", new OpenApiInfo { Title = "RikiPath API", Version = "v1" });
+            c.DocumentFilter<CanonicalApiDocumentFilter>();
+            c.OperationFilter<CanonicalApiOperationFilter>();
+        });
+
+        await using var app = builder.Build();
+        app.UseSwagger();
+        app.MapControllers();
+        await app.StartAsync();
+
+        try
+        {
+            using var http = new HttpClient { BaseAddress = new Uri(app.Urls.First()) };
+            using var response = await http.GetAsync("/swagger/v1/swagger.json");
+            response.EnsureSuccessStatusCode();
+
+            using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            var paths = json.RootElement.GetProperty("paths")
+                .EnumerateObject()
+                .Select(p => p.Name)
+                .ToArray();
+
+            Assert.NotEmpty(paths);
+
+            var forbiddenFragments = new[]
+            {
+                "mentor-booking",
+                "mentor-plan",
+                "mentor-chat",
+                "payroll",
+                "payout",
+                "bank-account",
+                "compensation",
+                "credit-ledger",
+                "dispute",
+                "api/v1"
+            };
+
+            foreach (var fragment in forbiddenFragments)
+            {
+                Assert.DoesNotContain(
+                    paths,
+                    path => path.Contains(fragment, StringComparison.OrdinalIgnoreCase));
+            }
+
+            // Canonical Group Learning, Checkout, Homework PR #70, Attendance, and KPI endpoints remain present
+            Assert.Contains(paths, p => p.StartsWith("/api/study-courses", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(paths, p => p.StartsWith("/api/homework", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(paths, p => p.StartsWith("/api/admin/mentor-group-policies", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(paths, p => p.Contains("kpi", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(paths, p => p.Contains("attendance", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(paths, p => p.Contains("payment", StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            await app.StopAsync();
+        }
     }
 }

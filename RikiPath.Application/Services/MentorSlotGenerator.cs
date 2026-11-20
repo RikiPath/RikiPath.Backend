@@ -19,6 +19,19 @@ public sealed class MentorSlotGenerator : IMentorSlotGenerator
         IReadOnlyCollection<MentorDaypart> enabledDayparts,
         DateTimeOffset nowUtc,
         int policyVersion = 3)
+        => GenerateDailySlots(mentorId, localDate, enabledDayparts, nowUtc, policyVersion,
+            MentorSlotPolicy.AppointmentDurationMinutes, MentorSlotPolicy.MinimumRestMinutes,
+            MentorSlotPolicy.MaximumScheduleHorizonDays);
+
+    public IReadOnlyList<MentorGeneratedSlot> GenerateDailySlots(
+        int mentorId,
+        DateOnly localDate,
+        IReadOnlyCollection<MentorDaypart> enabledDayparts,
+        DateTimeOffset nowUtc,
+        int policyVersion,
+        int sessionMinutes,
+        int restMinutes,
+        int publicationHorizonDays)
     {
         if (mentorId <= 0)
             throw new ArgumentOutOfRangeException(nameof(mentorId), "Cố vấn được chọn không hợp lệ.");
@@ -26,7 +39,9 @@ public sealed class MentorSlotGenerator : IMentorSlotGenerator
             throw new ArgumentNullException(nameof(enabledDayparts), "Danh sách ca làm việc không được để trống.");
         if (policyVersion <= 0)
             throw new ArgumentOutOfRangeException(nameof(policyVersion), "Phiên bản chính sách phải lớn hơn 0.");
-        ValidateScheduleDate(localDate, nowUtc);
+        if (sessionMinutes <= 0 || restMinutes < 0 || publicationHorizonDays <= 0)
+            throw new ArgumentOutOfRangeException(nameof(sessionMinutes), "Thông số thời lượng và phạm vi công bố phải hợp lệ.");
+        ValidateScheduleDate(localDate, nowUtc, publicationHorizonDays);
 
         if (enabledDayparts.Count == 0)
             throw new ArgumentException("Vui lòng chọn ít nhất một ca làm việc.", nameof(enabledDayparts));
@@ -43,8 +58,8 @@ public sealed class MentorSlotGenerator : IMentorSlotGenerator
 
         var slots = new List<MentorGeneratedSlot>();
         DateTimeOffset? previousSlotEndUtc = null;
-        var duration = TimeSpan.FromMinutes(MentorSlotPolicy.AppointmentDurationMinutes);
-        var rest = TimeSpan.FromMinutes(MentorSlotPolicy.MinimumRestMinutes);
+        var duration = TimeSpan.FromMinutes(sessionMinutes);
+        var rest = TimeSpan.FromMinutes(restMinutes);
 
         foreach (var window in selected.OrderBy(x => x.StartLocal))
         {
@@ -139,10 +154,10 @@ public sealed class MentorSlotGenerator : IMentorSlotGenerator
         return MentorSlotValidationResult.Valid();
     }
 
-    private void ValidateScheduleDate(DateOnly localDate, DateTimeOffset nowUtc)
+    private void ValidateScheduleDate(DateOnly localDate, DateTimeOffset nowUtc, int publicationHorizonDays)
     {
         var todayLocal = _policy.GetBusinessDate(nowUtc);
-        if (localDate < todayLocal || localDate > todayLocal.AddDays(MentorSlotPolicy.MaximumScheduleHorizonDays))
-            throw new ArgumentOutOfRangeException(nameof(localDate), "Chỉ có thể tạo lịch cho 30 ngày tới theo giờ Việt Nam.");
+        if (localDate < todayLocal || localDate > todayLocal.AddDays(publicationHorizonDays))
+            throw new ArgumentOutOfRangeException(nameof(localDate), $"Chỉ có thể tạo lịch cho {publicationHorizonDays} ngày tới theo giờ Việt Nam.");
     }
 }

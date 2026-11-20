@@ -42,8 +42,6 @@ public sealed class MentorAttendanceService : IMentorAttendanceService
 
         var slot = await _context.MentorAvailabilities
             .Include(a => a.Mentor)
-            .Include(a => a.MentorBookings)
-                .ThenInclude(b => b.UserSubscription)
             .FirstOrDefaultAsync(a => a.RoomId == roomId && !a.IsDeleted && a.IsApproved && a.RejectedAt == null, cancellationToken);
 
         if (slot is null) return false;
@@ -53,20 +51,14 @@ public sealed class MentorAttendanceService : IMentorAttendanceService
             return false;
 
         // Nếu là Mentor phụ trách
-        if (slot.MentorId == userId)
+        if (slot.MentorId == userId && slot.Mentor?.Role == Role.Mentor)
         {
             RoomMentors[roomId] = userId;
             return true;
         }
 
-        // Nếu là Learner có booking hợp lệ đã thanh toán và chưa bị hủy
-        var hasValidBooking = slot.MentorBookings != null && slot.MentorBookings.Any(b =>
-            !b.IsDeleted
-            && b.UserSubscription.UserId == userId
-            && b.UserSubscription.PaymentStatus == PaymentStatus.Paid
-            && (b.Status == MentorStatus.Assigned || b.Status == MentorStatus.Accepted));
-
-        if (hasValidBooking) return true;
+        if (await _context.StudyCourses.AnyAsync(c => c.LearnerId == userId && c.PaymentStatus == "Paid" && c.Status == "Active"
+            && c.Sessions.Any(s => s.AvailabilityId == slot.Id && s.Status == "Scheduled"), cancellationToken)) return true;
 
         // Quản trị viên (Admin) luôn có quyền giám sát
         var claim = _claimService.GetUserClaim();
@@ -86,16 +78,16 @@ public sealed class MentorAttendanceService : IMentorAttendanceService
             // Tìm khung giờ và thông tin người dùng
             var slot = await _context.MentorAvailabilities
                 .Include(a => a.Mentor)
-                .Include(a => a.MentorBookings)
-                    .ThenInclude(b => b.UserSubscription)
-                        .ThenInclude(s => s.UserAccount)
                 .FirstOrDefaultAsync(a => a.RoomId == roomId && !a.IsDeleted && a.IsApproved && a.RejectedAt == null, cancellationToken);
 
             if (slot is null)
                 return ApiResponse<MentorAttendanceResponse>.Fail("Không tìm thấy phòng họp hợp lệ.", HttpStatusCode.NotFound);
 
-            var isMentor = slot.MentorId == userId;
-            MentorBooking? booking = null;
+            // Chỉ ghi nhận điểm danh trong cửa sổ tham gia phòng thực tế.
+            if (nowUtc < slot.StartTime.AddMinutes(-10) || nowUtc >= slot.EndTime)
+                return ApiResponse<MentorAttendanceResponse>.Fail("Buổi học chưa mở hoặc đã kết thúc.", HttpStatusCode.Conflict);
+
+            var isMentor = slot.MentorId == userId && slot.Mentor?.Role == Role.Mentor;
             string participantName = string.Empty;
             string role = isMentor ? "Mentor" : "Learner";
 
@@ -103,26 +95,22 @@ public sealed class MentorAttendanceService : IMentorAttendanceService
             {
                 participantName = slot.Mentor != null ? $"{slot.Mentor.FirstName} {slot.Mentor.LastName}".Trim() : "Mentor";
                 RoomMentors[roomId] = userId;
-                booking = slot.MentorBookings.FirstOrDefault(b => !b.IsDeleted
-                    && b.UserSubscription.PaymentStatus == PaymentStatus.Paid
-                    && b.Status is MentorStatus.Assigned or MentorStatus.Accepted);
             }
             else
             {
-                booking = slot.MentorBookings.FirstOrDefault(b =>
-                    !b.IsDeleted
-                    && b.UserSubscription.UserId == userId
-                    && b.UserSubscription.PaymentStatus == PaymentStatus.Paid
-                    && b.Status is MentorStatus.Assigned or MentorStatus.Accepted);
-
-                if (booking is null)
+                if (!await _context.StudyCourses.AnyAsync(c => c.LearnerId == userId && c.PaymentStatus == "Paid" && c.Status == "Active" && c.Sessions.Any(s => s.AvailabilityId == slot.Id && s.Status == "Scheduled"), cancellationToken))
                     return ApiResponse<MentorAttendanceResponse>.Fail("Bạn không có lịch hẹn hợp lệ cho phòng họp này.", HttpStatusCode.Forbidden);
 
-                var learnerAccount = booking.UserSubscription.UserAccount;
+                var learnerAccount = await _context.Users.FindAsync([userId], cancellationToken);
                 participantName = learnerAccount != null ? $"{learnerAccount.FirstName} {learnerAccount.LastName}".Trim() : $"User #{userId}";
             }
 
-            if (booking is null)
+            var courseSessionId = await _context.StudyCourses.Where(c => c.PaymentStatus == "Paid" && c.Status == "Active"
+                && (isMentor || c.LearnerId == userId)).SelectMany(c => c.Sessions)
+                .Where(s => s.AvailabilityId == slot.Id && s.Status == "Scheduled").Select(s => (int?)s.Id).FirstOrDefaultAsync(cancellationToken);
+            var isCohortSession = courseSessionId.HasValue
+                || (isMentor && await _context.Set<StudyCohortSession>().AnyAsync(s => s.AvailabilityId == slot.Id, cancellationToken));
+            if (!courseSessionId.HasValue && !isCohortSession)
                 return ApiResponse<MentorAttendanceResponse>.Fail("Chưa có buổi học hợp lệ cho phòng này.", HttpStatusCode.Conflict);
 
             // 1. Quản lý trạng thái hiện diện đa thiết bị trong bộ nhớ
@@ -140,7 +128,8 @@ public sealed class MentorAttendanceService : IMentorAttendanceService
             {
                 record = new MentorAttendanceRecord
                 {
-                    MentorBookingId = booking.Id,
+                    MentorBookingId = null,
+                    CourseSessionId = courseSessionId,
                     RoomId = roomId,
                     UserId = userId,
                     Role = role,
@@ -493,6 +482,7 @@ public sealed class MentorAttendanceService : IMentorAttendanceService
         {
             Id = r.Id,
             MentorBookingId = r.MentorBookingId,
+            CourseSessionId = r.CourseSessionId,
             RoomId = r.RoomId,
             UserId = r.UserId,
             ParticipantName = name,

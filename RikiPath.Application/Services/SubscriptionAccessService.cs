@@ -19,7 +19,6 @@ public sealed class SubscriptionAccessService(
     public const int WritingPlan = 8102;
     public const int GradingCredit = 8103;
     public const int LearningPathCredit = 8104;
-    public const int MentorPlan = 8105;
     public const int OrderPrefix = 900_000_000;
 
     private static bool IsStudy(int planId) => planId is >= 1 and <= 6;
@@ -29,13 +28,13 @@ public sealed class SubscriptionAccessService(
     {
         var plans = await unitOfWork.SubscriptionPlans.Query().AsNoTracking()
             .Where(p => p.IsActive && !p.IsDeleted && (p.Id >= 1 && p.Id <= 6 ||
-                p.Id >= SpeakingPlan && p.Id <= MentorPlan))
+                p.Id >= SpeakingPlan && p.Id <= LearningPathCredit))
             .OrderBy(p => p.SortOrder).ThenBy(p => p.Id).ToListAsync(ct);
         return plans.Select(p => new StudyPlanOffer(p.Id, p.Name, p.Description, p.Price, p.DurationDays,
             p.AiGradingQuota, p.IsPopular, p.Id switch
             {
                 SpeakingPlan => "speaking", WritingPlan => "writing", GradingCredit => "ai_grading",
-                LearningPathCredit => "learning_path", MentorPlan => "mentor", _ => "self_study"
+                LearningPathCredit => "learning_path", _ => "self_study"
             })).ToList();
     }
 
@@ -61,7 +60,7 @@ public sealed class SubscriptionAccessService(
             active.Where(s => s.SubscriptionPlanId == SpeakingPlan).Sum(RemainingAi),
             active.Where(s => s.SubscriptionPlanId == WritingPlan).Sum(RemainingAi),
             active.Where(s => s.SubscriptionPlanId == LearningPathCredit).Sum(RemainingAi),
-            active.Sum(s => Math.Max(0, s.MeetingSessionsIncluded - s.MeetingSessionsUsed)),
+            0,
             purchases.Select(s => new PurchasedStudyPlan(s.Id, s.SubscriptionPlanId, s.SubscriptionPlan.Name,
                 s.AmountPaid, s.StartDate, s.EndDate, IsActive(s, now), RemainingAi(s))).ToList(),
             studyExpiresAt, studyDaysRemaining);

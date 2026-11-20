@@ -133,6 +133,11 @@ namespace RikiPath.Application.Handlers
                 errors.Add($"{rowPrefix}{label} phải là đường dẫn http/https hợp lệ.");
                 return null;
             }
+            if (IsHostedMediaField(label) && !IsApprovedMediaUrl(v))
+            {
+                errors.Add($"{rowPrefix}{label} phải là URL file đã lưu trên Supabase Storage hoặc Amazon S3.");
+                return null;
+            }
             return v;
         }
 
@@ -169,6 +174,18 @@ namespace RikiPath.Application.Handlers
         private static bool IsHttpUrl(string value) =>
             Uri.TryCreate(value, UriKind.Absolute, out var uri) &&
             (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
+
+        private static bool IsHostedMediaField(string label) =>
+            label.Contains("ImageUrl", StringComparison.OrdinalIgnoreCase) ||
+            label.Contains("VideoUrl", StringComparison.OrdinalIgnoreCase);
+
+        private static bool IsApprovedMediaUrl(string value)
+        {
+            if (!Uri.TryCreate(value, UriKind.Absolute, out var uri)) return false;
+            var host = uri.Host.TrimEnd('.').ToLowerInvariant();
+            return host == "supabase.co" || host.EndsWith(".supabase.co", StringComparison.Ordinal) ||
+                   host == "amazonaws.com" || host.EndsWith(".amazonaws.com", StringComparison.Ordinal);
+        }
 
         /// <summary>
         /// Đọc Option1..4 + số thứ tự đáp án đúng. Cần >= 2 đáp án, không được bỏ trống giữa chừng

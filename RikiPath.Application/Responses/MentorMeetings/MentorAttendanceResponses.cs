@@ -6,6 +6,7 @@ public sealed class MentorAttendanceResponse
 {
     public int Id { get; set; }
     public int? MentorBookingId { get; set; }
+    public int? CourseSessionId { get; set; }
     public Guid RoomId { get; set; }
     public int UserId { get; set; }
     public string ParticipantName { get; set; } = string.Empty;

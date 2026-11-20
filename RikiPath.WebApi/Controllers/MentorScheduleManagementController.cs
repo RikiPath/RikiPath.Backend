@@ -3,6 +3,9 @@ using Microsoft.AspNetCore.Mvc;
 using RikiPath.Application.IServices;
 using RikiPath.Application.Requests.MentorScheduling;
 using RikiPath.Application.Responses;
+using RikiPath.Application.Responses.MentorScheduling;
+using RikiPath.Domain.MentorScheduling;
+using System.Net;
 
 namespace RikiPath.WebApi.Controllers
 {
@@ -10,7 +13,8 @@ namespace RikiPath.WebApi.Controllers
     [ApiController]
     [Route("api/mentors/me/schedule")]
     public sealed class MentorScheduleManagementController(
-        IMentorScheduleManagementService scheduleService) : ControllerBase
+        IMentorScheduleManagementService scheduleService,
+        IMentorGroupPolicyService groupPolicies) : ControllerBase
     {
         // // Lấy thông tin mẫu lịch làm việc và danh sách quy tắc ca lặp của Chuyên gia đang đăng nhập.
         [HttpGet]
@@ -49,15 +53,34 @@ namespace RikiPath.WebApi.Controllers
             CancellationToken cancellationToken)
             => ToActionResult(await scheduleService.PreviewSlotsAsync(request, cancellationToken));
 
-        // // Sinh và công bố chính thức các khung giờ làm việc khả dụng vào hệ thống đặt lịch.
-        // Đảm bảo tính bất biến (idempotent), không trùng GenerationKey và không ghi đè buổi đã có học viên đặt.
-        // Yêu cầu tài khoản Chuyên gia phải có hồ sơ ĐÃ ĐƯỢC PHÊ DUYỆT (Approved).
+        // Sinh khung giờ theo chính sách và gửi Admin duyệt; Mentor không tự công bố.
         [HttpPost("publish-slots")]
         [Authorize(Roles = "Mentor")]
-        public IActionResult PublishSlots(
+        public async Task<IActionResult> PublishSlots(
             [FromBody] PublishSlotsRequest request,
             CancellationToken cancellationToken)
-            => Conflict(new { ErrorMessage = "Luồng tự công bố đã được thay bằng đăng ký ngày/giờ rảnh và Admin duyệt tại /api/mentor/availability." });
+        {
+            if (request.StartDate.Year < 2020)
+                return BadRequest(ApiResponse<PublishSlotsResponse>.Fail("Ngày bắt đầu không hợp lệ."));
+            var localMidnightUtc = TimeZoneInfo.ConvertTimeToUtc(
+                request.StartDate.ToDateTime(TimeOnly.MinValue),
+                TimeZoneInfo.FindSystemTimeZoneById(MentorSlotPolicy.BusinessTimeZoneId));
+            if (await groupPolicies.GetEffectiveAsync(localMidnightUtc, cancellationToken) is null)
+                return Conflict(ApiResponse<PublishSlotsResponse>.Fail(
+                    "Chưa có chính sách Admin áp dụng cho lịch này; chưa tạo buổi học.", HttpStatusCode.Conflict));
+            return ToActionResult(await scheduleService.PublishSlotsAsync(request, cancellationToken));
+        }
+
+        /// <summary>
+        /// Mentor xem trước xung đột lịch dạy của chính mình (trùng giờ, thời gian nghỉ, giới hạn buổi/ngày và buổi/tuần)
+        /// cho các khung giờ dự kiến. Chỉ mang tính tham khảo; hệ thống vẫn kiểm tra lại khi ghi lịch.
+        /// </summary>
+        [HttpPost("conflict-preview")]
+        [Authorize(Roles = "Mentor")]
+        public async Task<IActionResult> PreviewTeachingConflicts(
+            [FromBody] TeachingConflictPreviewRequest request,
+            CancellationToken cancellationToken)
+            => ToActionResult(await scheduleService.PreviewTeachingConflictsAsync(request, cancellationToken));
 
         // // Hủy hoặc đóng một khung giờ làm việc tương lai chưa có học viên đặt lịch.
         [HttpDelete("slots/{slotId:int}")]

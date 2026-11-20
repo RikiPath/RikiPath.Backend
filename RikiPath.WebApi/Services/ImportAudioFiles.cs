@@ -17,10 +17,10 @@ public sealed class ImportAudioFiles
         Func<string, CancellationToken, Task<string>> readServerFile)
     {
         selected = (files ?? []).Where(file => file.FileName.EndsWith(".mp3", StringComparison.OrdinalIgnoreCase)).ToList();
-        if (selected.Count > 100 || selected.Sum(file => file.Length) > 250L * 1024 * 1024)
-            throw new InvalidDataException("Mỗi lần import tối đa 100 MP3, tổng dung lượng tối đa 250 MB.");
+        if (selected.Count > 1)
+            throw new InvalidDataException("Mỗi lần chỉ được tải lên một file MP3.");
         if (selected.Any(file => file.Length < 4 || file.Length > ListeningAudioFilePolicy.MaxBytes))
-            throw new InvalidDataException("Mỗi file MP3 phải có dữ liệu và tối đa 25 MB.");
+            throw new InvalidDataException("File MP3 phải có dữ liệu và không vượt quá 500 MB.");
         this.aws = aws;
         this.transcripts = transcripts;
         this.authorId = authorId;
