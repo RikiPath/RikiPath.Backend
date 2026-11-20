@@ -522,15 +522,12 @@ internal class Program
             app.UseExceptionHandler();
             app.UseHsts();
         }
-        if (!app.Environment.IsProduction() || configuration.GetValue<bool>("Swagger:Enabled"))
+        app.UseSwagger();
+        app.UseSwaggerUI(c =>
         {
-            app.UseSwagger();
-            app.UseSwaggerUI(c =>
-            {
-                c.DocumentTitle = "RikiPath API Swagger";
-                c.SwaggerEndpoint("/swagger/v1/swagger.json", "RikiPath API v1");
-            });
-        }
+            c.DocumentTitle = "RikiPath API Swagger";
+            c.SwaggerEndpoint("/swagger/v1/swagger.json", "RikiPath API v1");
+        });
 
         app.UseHttpsRedirection();
         app.UseCors("DefaultCorsPolicy");
