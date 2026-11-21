@@ -22,6 +22,20 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Enforce permanent Backend repository policy
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f AGENTS.md
+          test -f .githooks/pre-push
+          test -f tools/pre-push.ps1
+          prohibited=$(git ls-files | grep -Ei '(^|/)(tests?|[^/]+\.tests?)(/|$)|(^|/)[^/]+Tests\.cs$|\.Tests?\.csproj$' || true)
+          if [ -n "$prohibited" ]; then
+            echo "Backend test files/projects are permanently prohibited:"
+            echo "$prohibited"
+            exit 1
+          fi
+
       - name: Setup .NET SDK (per global.json)
         uses: actions/setup-dotnet@v4
         with:
