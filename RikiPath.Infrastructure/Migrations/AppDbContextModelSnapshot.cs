@@ -2001,9 +2001,6 @@ namespace RikiPath.Infrastructure.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
-                    b.Property<string>("AuthoredDefinitionJson")
-                        .HasColumnType("text");
-
                     b.Property<string>("AiDraftFeedback")
                         .HasMaxLength(4000)
                         .HasColumnType("character varying(4000)");
@@ -2024,6 +2021,9 @@ namespace RikiPath.Infrastructure.Migrations
                         .HasMaxLength(30)
                         .HasColumnType("character varying(30)")
                         .HasDefaultValue("Booking1on1");
+
+                    b.Property<string>("AuthoredDefinitionJson")
+                        .HasColumnType("text");
 
                     b.Property<Guid?>("CohortAssignmentGroupKey")
                         .HasColumnType("uuid");
@@ -2181,15 +2181,15 @@ namespace RikiPath.Infrastructure.Migrations
                         .HasMaxLength(2000)
                         .HasColumnType("character varying(2000)");
 
-                    b.Property<string>("SelectedOptionsJson")
-                        .HasColumnType("text");
-
                     b.Property<int>("RevisionCount")
                         .HasColumnType("integer");
 
                     b.Property<string>("ScanStorageUrl")
                         .HasMaxLength(1000)
                         .HasColumnType("character varying(1000)");
+
+                    b.Property<string>("SelectedOptionsJson")
+                        .HasColumnType("text");
 
                     b.Property<DateTime>("SubmittedAt")
                         .HasColumnType("timestamp without time zone");
