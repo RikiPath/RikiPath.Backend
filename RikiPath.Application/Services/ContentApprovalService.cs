@@ -32,6 +32,9 @@ namespace RikiPath.Application.Services
         // về CÙNG 1 instance Kanji/Vocabulary/Grammar cho cả 2 - nếu không chặn ở đây, lần add LessonKanji/...
         // thứ 2 sẽ bị EF từ chối ngay vì trùng khóa, trước khi kịp SaveChanges.
         private readonly HashSet<(object Lesson, object Entity)> _stagedLessonLinks = new();
+        private Dictionary<int, string>? _languageSkillNames;
+        private Dictionary<int, (string Code, bool IsDeleted)>? _certificateLevels;
+        private Dictionary<string, List<int>>? _certificateSectionIdsByCode;
 
         public async Task<ApiResponse<List<SheetImportResponse>>> PreviewImportAsync(
             IFormFile file, CancellationToken cancellationToken)
@@ -519,66 +522,110 @@ namespace RikiPath.Application.Services
             var seen = new HashSet<int>();
             var reviewed = new List<ContentApprovalRequest>();
 
-            await unitOfWork.ExecuteInTransactionAsync(async token =>
+            try
             {
-                foreach (var item in request.Items)
+                await unitOfWork.ExecuteInTransactionAsync(async token =>
                 {
-                    if (!seen.Add(item.RequestId)) continue;
+                    var requestIds = request.Items
+                        .Select(item => item.RequestId)
+                        .Distinct()
+                        .ToArray();
+                    var requestsById = await unitOfWork.ContentApprovalRequests.Query()
+                        .Where(approval => requestIds.Contains(approval.Id) && !approval.IsDeleted)
+                        .ToDictionaryAsync(approval => approval.Id, token);
 
-                    if (!item.Approve && string.IsNullOrWhiteSpace(item.ReviewNote))
+                    foreach (var item in request.Items)
                     {
-                        result.Failures.Add(new BulkReviewItemResult
-                        {
-                            RequestId = item.RequestId,
-                            Reason = "Vui lòng nhập lý do từ chối."
-                        });
-                        continue;
-                    }
+                        if (!seen.Add(item.RequestId)) continue;
 
-                    try
-                    {
-                        var req = await unitOfWork.ContentApprovalRequests.GetByIdAsync(item.RequestId, token);
-                        if (req is null || req.IsDeleted || !IsReviewable(req.Status))
+                        if (!item.Approve && string.IsNullOrWhiteSpace(item.ReviewNote))
                         {
                             result.Failures.Add(new BulkReviewItemResult
                             {
                                 RequestId = item.RequestId,
-                                Reason = "Yêu cầu không tồn tại hoặc đã được xử lý."
+                                Reason = "Vui lòng nhập lý do từ chối."
                             });
                             continue;
                         }
 
-                        req.ReviewedByName = reviewerName;
-                        await ApplyReviewAsync(req, item.Approve, item.ReviewNote, token);
-                        unitOfWork.ContentApprovalRequests.Update(req);
-                        reviewed.Add(req);
-                        result.SuccessCount++;
-                    }
-                    catch (InvalidOperationException ex)
-                    {
-                        result.Failures.Add(new BulkReviewItemResult { RequestId = item.RequestId, Reason = ex.Message });
-                    }
-                    catch (Exception)
-                    {
-                        result.Failures.Add(new BulkReviewItemResult { RequestId = item.RequestId, Reason = "Dữ liệu mục này không hợp lệ hoặc bị xung đột." });
-                    }
-                }
+                        try
+                        {
+                            if (!requestsById.TryGetValue(item.RequestId, out var req) || !IsReviewable(req.Status))
+                            {
+                                result.Failures.Add(new BulkReviewItemResult
+                                {
+                                    RequestId = item.RequestId,
+                                    Reason = "Yêu cầu không tồn tại hoặc đã được xử lý."
+                                });
+                                continue;
+                            }
 
-                if (reviewed.Count > 0 && unitOfWork.AdminAuditLogs is not null)
-                {
-                    await unitOfWork.AdminAuditLogs.AddAsync(new AdminAuditLog
-                    {
-                        ActorUserId = actor.Id,
-                        EntityType = "ContentApprovalBatch",
-                        EntityId = reviewed[0].Id,
-                        Action = "BatchReviewed",
-                        AfterJson = JsonSerializer.Serialize(new { Succeeded = result.SuccessCount, Failed = result.Failures.Count }),
-                        CreatedAtUtc = DateTime.UtcNow,
-                    }, token);
-                }
+                            req.ReviewedByName = reviewerName;
+                            await ApplyReviewAsync(req, item.Approve, item.ReviewNote, token);
+                            unitOfWork.ContentApprovalRequests.Update(req);
+                            reviewed.Add(req);
+                            result.SuccessCount++;
+                        }
+                        catch (OperationCanceledException) when (token.IsCancellationRequested)
+                        {
+                            // Do not turn a cancelled HTTP request into a per-row
+                            // validation failure and continue using the cancelled
+                            // transaction. Let the transaction wrapper roll back
+                            // and preserve the cancellation as the root cause.
+                            throw;
+                        }
+                        catch (InvalidOperationException ex)
+                        {
+                            result.Failures.Add(new BulkReviewItemResult { RequestId = item.RequestId, Reason = ex.Message });
+                        }
+                        catch (Exception)
+                        {
+                            result.Failures.Add(new BulkReviewItemResult { RequestId = item.RequestId, Reason = "Dữ liệu mục này không hợp lệ hoặc bị xung đột." });
+                        }
+                    }
 
-                await unitOfWork.SaveChangesAsync(token);
-            }, cancellationToken);
+                    if (reviewed.Count > 0 && unitOfWork.AdminAuditLogs is not null)
+                    {
+                        await unitOfWork.AdminAuditLogs.AddAsync(new AdminAuditLog
+                        {
+                            ActorUserId = actor.Id,
+                            EntityType = "ContentApprovalBatch",
+                            EntityId = reviewed[0].Id,
+                            Action = "BatchReviewed",
+                            AfterJson = JsonSerializer.Serialize(new { Succeeded = result.SuccessCount, Failed = result.Failures.Count }),
+                            CreatedAtUtc = DateTime.UtcNow,
+                        }, token);
+                    }
+
+                    await unitOfWork.SaveChangesAsync(token);
+                }, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                return ApiResponse<BulkReviewResponse>.Fail(
+                    "Một hoặc nhiều yêu cầu vừa được xử lý bởi thao tác khác. Vui lòng tải lại danh sách.",
+                    System.Net.HttpStatusCode.Conflict);
+            }
+            catch (DbUpdateException)
+            {
+                return ApiResponse<BulkReviewResponse>.Fail(
+                    "Không thể ghi kết quả duyệt do dữ liệu vừa thay đổi hoặc chưa đủ cấu hình. Vui lòng tải lại và thử lại.",
+                    System.Net.HttpStatusCode.Conflict);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return ApiResponse<BulkReviewResponse>.Fail(ex.Message, System.Net.HttpStatusCode.BadRequest);
+            }
+            catch (Exception)
+            {
+                return ApiResponse<BulkReviewResponse>.Fail(
+                    "Không thể duyệt các yêu cầu lúc này. Vui lòng thử lại sau.",
+                    System.Net.HttpStatusCode.InternalServerError);
+            }
 
             await NotifyAuthorsAsync(reviewed, cancellationToken);
 
@@ -826,6 +873,47 @@ namespace RikiPath.Application.Services
         private static LessonImportPayloadResponse ReadLessonPayload(ContentApprovalRequest request) =>
             JsonSerializer.Deserialize<LessonImportPayloadResponse>(request.PayloadJson, JsonOptions)
                 ?? throw new InvalidOperationException("Payload Lesson rỗng.");
+
+        private async Task<Dictionary<int, string>> GetLanguageSkillNamesAsync(CancellationToken ct)
+        {
+            if (_languageSkillNames is not null) return _languageSkillNames;
+
+            _languageSkillNames = (await unitOfWork.LanguageSkills.Query()
+                    .AsNoTracking()
+                    .Where(skill => !skill.IsDeleted)
+                    .Select(skill => new { skill.Id, skill.Name })
+                    .ToListAsync(ct))
+                .ToDictionary(skill => skill.Id, skill => skill.Name);
+            return _languageSkillNames;
+        }
+
+        private async Task<Dictionary<int, (string Code, bool IsDeleted)>> GetCertificateLevelsAsync(CancellationToken ct)
+        {
+            if (_certificateLevels is not null) return _certificateLevels;
+
+            _certificateLevels = (await unitOfWork.CertificateLevels.Query()
+                    .AsNoTracking()
+                    .Select(level => new { level.Id, level.Code, level.IsDeleted })
+                    .ToListAsync(ct))
+                .ToDictionary(level => level.Id, level => (level.Code, level.IsDeleted));
+            return _certificateLevels;
+        }
+
+        private async Task<Dictionary<string, List<int>>> GetCertificateSectionIdsByCodeAsync(CancellationToken ct)
+        {
+            if (_certificateSectionIdsByCode is not null) return _certificateSectionIdsByCode;
+
+            var sections = await unitOfWork.CertificateSections.Query()
+                .AsNoTracking()
+                .Where(section => !section.IsDeleted)
+                .Select(section => new { section.Id, section.Code })
+                .ToListAsync(ct);
+            _certificateSectionIdsByCode = sections
+                .GroupBy(section => section.Code, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(group => group.Key, group => group.Select(section => section.Id).ToList(),
+                    StringComparer.OrdinalIgnoreCase);
+            return _certificateSectionIdsByCode;
+        }
 
         private async Task ApplyLessonTopicApprovalAsync(ContentApprovalRequest request, string? reviewNote, CancellationToken ct)
         {
@@ -1153,10 +1241,9 @@ namespace RikiPath.Application.Services
                 if (p.Sections is not { Count: > 0 })
                     throw new InvalidOperationException("Đề thi chưa có phần (section) nào.");
 
-                var skillNames = (await unitOfWork.LanguageSkills.GetAllAsync(cancellationToken))
-                    .ToDictionary(skill => skill.Id, skill => skill.Name);
-                var level = await unitOfWork.CertificateLevels.GetByIdAsync(p.CertificateLevelId, cancellationToken);
-                if (level is null || level.IsDeleted)
+                var skillNames = await GetLanguageSkillNamesAsync(cancellationToken);
+                var levels = await GetCertificateLevelsAsync(cancellationToken);
+                if (!levels.TryGetValue(p.CertificateLevelId, out var level) || level.IsDeleted)
                     throw new InvalidOperationException("Cấp độ của đề thi không tồn tại hoặc đã bị xóa.");
                 foreach (var s in p.Sections)
                 {
@@ -1170,7 +1257,7 @@ namespace RikiPath.Application.Services
 
                 }
                 var validationError = ExcelContentImportService.ValidateMockTestPayload(req.PayloadJson!, skillNames,
-                    new Dictionary<int, string> { [level.Id] = level.Code });
+                    new Dictionary<int, string> { [p.CertificateLevelId] = level.Code });
                 if (validationError is not null) throw new InvalidOperationException(validationError);
             }
 
@@ -1183,25 +1270,25 @@ namespace RikiPath.Application.Services
                     .Distinct(StringComparer.OrdinalIgnoreCase)
                     .ToList();
 
-                var certSections = await unitOfWork.CertificateSections.Query()
-                    .Where(c => !c.IsDeleted && codes.Contains(c.Code))
-                    .ToListAsync(cancellationToken);
-
-                var duplicated = certSections
-                    .GroupBy(c => c.Code, StringComparer.OrdinalIgnoreCase)
-                    .Where(g => g.Count() > 1)
-                    .Select(g => g.Key)
+                var sectionIdsByCode = await GetCertificateSectionIdsByCodeAsync(cancellationToken);
+                var duplicated = codes
+                    .Where(code => sectionIdsByCode.TryGetValue(code, out var ids) && ids.Count > 1)
                     .ToList();
                 if (duplicated.Count > 0)
                     throw new InvalidOperationException(
                         $"Code CertificateSection bị trùng trong DB: {string.Join(", ", duplicated)}.");
 
-                var sectionIdByCode = certSections.ToDictionary(c => c.Code, c => c.Id, StringComparer.OrdinalIgnoreCase);
-
-                var missing = codes.Where(c => !sectionIdByCode.ContainsKey(c)).ToList();
+                var missing = codes
+                    .Where(code => !sectionIdsByCode.ContainsKey(code))
+                    .ToList();
                 if (missing.Count > 0)
                     throw new InvalidOperationException(
                         $"Không tìm thấy CertificateSection có Code: {string.Join(", ", missing)}. Admin cần tạo sẵn trước khi duyệt.");
+
+                var sectionIdByCode = codes.ToDictionary(
+                    code => code,
+                    code => sectionIdsByCode[code][0],
+                    StringComparer.OrdinalIgnoreCase);
 
                 var test = new MockTest
                 {
@@ -1236,7 +1323,9 @@ namespace RikiPath.Application.Services
                     }).ToList()
                 };
 
-                await FillAudioTranscriptsAsync(test, cancellationToken);
+                // Transcription is asynchronous. Do not enqueue/read audio inside
+                // the admin approval transaction; the transcription worker will
+                // synchronize completed transcripts after this content commit.
                 await unitOfWork.MockTests.AddAsync(test, cancellationToken);
             }
             else
@@ -1300,7 +1389,6 @@ namespace RikiPath.Application.Services
                     (test.Sections ??= []).AddRange(replacementSections);
                 }
 
-                await FillAudioTranscriptsAsync(test, cancellationToken);
                 unitOfWork.MockTests.Update(test);
             }
         }

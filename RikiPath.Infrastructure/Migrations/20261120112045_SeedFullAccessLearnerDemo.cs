@@ -20,6 +20,26 @@ namespace RikiPath.Infrastructure.Migrations
                 columns: new[] { "DurationDaysSnapshot", "EndDate", "MeetingSessionsUsed", "PlanCategorySnapshot", "PlanNameSnapshot", "PlanRevisionSnapshot", "PurchasedAt" },
                 values: new object[] { 90, new DateTime(2099, 12, 31, 23, 59, 59, 0, DateTimeKind.Unspecified), 0, "mentor_legacy", "Meeting 1-1 với Mentor - 12 buổi", 1, new DateTime(2026, 10, 1, 0, 0, 0, 0, DateTimeKind.Unspecified) });
 
+            // The demo learning-path subscription uses plan 8104.  This plan is
+            // intentionally created here because older databases already contain
+            // the self-study plans (1-6) but do not have the learning-path credit
+            // plan yet.  ON CONFLICT keeps the migration safe when an admin has
+            // already created the plan manually.
+            migrationBuilder.Sql(
+                """
+                INSERT INTO "SubscriptionPlans"
+                    ("Id", "Name", "Description", "DurationDays", "Price", "AiGradingQuota",
+                     "MeetingSessionCount", "CertificateLevelId", "PlanCategory", "IsPopular",
+                     "IsTrial", "IsActive", "SortOrder", "Revision", "CreatedDate", "ModifiedDate",
+                     "CreatedBy", "ModifiedBy", "IsDeleted")
+                VALUES
+                    (8104, 'Mua 1 lượt AI đề xuất lộ trình',
+                     'Gói credit cho một lượt AI đề xuất lộ trình tự học.', 0, 1000, 1,
+                     0, NULL, 'learning_path', FALSE, FALSE, TRUE, 8, 1,
+                     TIMESTAMP '2026-10-01 00:00:00', NULL, NULL, NULL, FALSE)
+                ON CONFLICT ("Id") DO NOTHING;
+                """);
+
             migrationBuilder.InsertData(
                 table: "UserSubscriptions",
                 columns: new[] { "Id", "AiGradingQuota", "AiGradingUsedCount", "AmountPaid", "CertificateLevelId", "CreatedBy", "CreatedDate", "DurationDaysSnapshot", "EndDate", "IsDeleted", "MentorId", "MentorPracticeOutcomeJson", "MentorReviewCompletedAt", "MentorReviewPlan", "MentorReviewSessionAt", "ModifiedBy", "ModifiedDate", "PaymentExpiresAt", "PaymentStatus", "PaymentTransactionId", "PendingMentorAvailabilityId", "PendingMentorQuestion", "PlanCategorySnapshot", "PlanNameSnapshot", "PlanRevisionSnapshot", "PurchasedAt", "StartDate", "SubscriptionPlanId", "UserId" },

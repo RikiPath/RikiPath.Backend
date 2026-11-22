@@ -591,6 +591,110 @@ namespace RikiPath.Infrastructure.Migrations
                             Name = "Nghe hiểu",
                             PassingScore = 0,
                             SortOrder = 0
+                        },
+                        new
+                        {
+                            Id = 8,
+                            CertificateLevelId = 3,
+                            Code = "N3_VOCAB",
+                            CreatedDate = new DateTime(2026, 10, 31, 11, 13, 24, 991, DateTimeKind.Utc).AddTicks(5300),
+                            Description = "Phần thi kiểm tra chữ Hán, cách đọc và từ vựng cấp độ N3",
+                            IsDeleted = false,
+                            MaxScore = 0,
+                            Name = "Kiến thức ngôn ngữ (Từ vựng)",
+                            PassingScore = 0,
+                            SortOrder = 0
+                        },
+                        new
+                        {
+                            Id = 9,
+                            CertificateLevelId = 3,
+                            Code = "N3_GRAMMAR",
+                            CreatedDate = new DateTime(2026, 10, 31, 11, 13, 24, 991, DateTimeKind.Utc).AddTicks(5301),
+                            Description = "Phần thi kiểm tra cấu trúc ngữ pháp và sắp xếp câu cấp độ N3",
+                            IsDeleted = false,
+                            MaxScore = 0,
+                            Name = "Kiến thức ngôn ngữ (Ngữ pháp)",
+                            PassingScore = 0,
+                            SortOrder = 0
+                        },
+                        new
+                        {
+                            Id = 10,
+                            CertificateLevelId = 3,
+                            Code = "N3_READING",
+                            CreatedDate = new DateTime(2026, 10, 31, 11, 13, 24, 991, DateTimeKind.Utc).AddTicks(5302),
+                            Description = "Phần thi đọc hiểu văn bản, thông báo và biểu mẫu cấp độ N3",
+                            IsDeleted = false,
+                            MaxScore = 0,
+                            Name = "Đọc hiểu",
+                            PassingScore = 0,
+                            SortOrder = 0
+                        },
+                        new
+                        {
+                            Id = 11,
+                            CertificateLevelId = 3,
+                            Code = "N3_LISTENING",
+                            CreatedDate = new DateTime(2026, 10, 31, 11, 13, 24, 991, DateTimeKind.Utc).AddTicks(5303),
+                            Description = "Phần thi nghe hiểu hội thoại và tình huống thực tế cấp độ N3",
+                            IsDeleted = false,
+                            MaxScore = 0,
+                            Name = "Nghe hiểu",
+                            PassingScore = 0,
+                            SortOrder = 0
+                        },
+                        new
+                        {
+                            Id = 12,
+                            CertificateLevelId = 4,
+                            Code = "N2_VOCAB",
+                            CreatedDate = new DateTime(2026, 10, 31, 11, 13, 24, 991, DateTimeKind.Utc).AddTicks(5304),
+                            Description = "Phần thi kiểm tra chữ Hán, cách đọc và từ vựng cấp độ N2",
+                            IsDeleted = false,
+                            MaxScore = 0,
+                            Name = "Kiến thức ngôn ngữ (Từ vựng)",
+                            PassingScore = 0,
+                            SortOrder = 0
+                        },
+                        new
+                        {
+                            Id = 13,
+                            CertificateLevelId = 4,
+                            Code = "N2_GRAMMAR",
+                            CreatedDate = new DateTime(2026, 10, 31, 11, 13, 24, 991, DateTimeKind.Utc).AddTicks(5305),
+                            Description = "Phần thi kiểm tra cấu trúc ngữ pháp và sắp xếp câu cấp độ N2",
+                            IsDeleted = false,
+                            MaxScore = 0,
+                            Name = "Kiến thức ngôn ngữ (Ngữ pháp)",
+                            PassingScore = 0,
+                            SortOrder = 0
+                        },
+                        new
+                        {
+                            Id = 14,
+                            CertificateLevelId = 4,
+                            Code = "N2_READING",
+                            CreatedDate = new DateTime(2026, 10, 31, 11, 13, 24, 991, DateTimeKind.Utc).AddTicks(5306),
+                            Description = "Phần thi đọc hiểu văn bản, thông báo và biểu mẫu cấp độ N2",
+                            IsDeleted = false,
+                            MaxScore = 0,
+                            Name = "Đọc hiểu",
+                            PassingScore = 0,
+                            SortOrder = 0
+                        },
+                        new
+                        {
+                            Id = 15,
+                            CertificateLevelId = 4,
+                            Code = "N2_LISTENING",
+                            CreatedDate = new DateTime(2026, 10, 31, 11, 13, 24, 991, DateTimeKind.Utc).AddTicks(5307),
+                            Description = "Phần thi nghe hiểu hội thoại và tình huống thực tế cấp độ N2",
+                            IsDeleted = false,
+                            MaxScore = 0,
+                            Name = "Nghe hiểu",
+                            PassingScore = 0,
+                            SortOrder = 0
                         });
                 });
 
@@ -2001,9 +2105,6 @@ namespace RikiPath.Infrastructure.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
-                    b.Property<string>("AuthoredDefinitionJson")
-                        .HasColumnType("text");
-
                     b.Property<string>("AiDraftFeedback")
                         .HasMaxLength(4000)
                         .HasColumnType("character varying(4000)");
@@ -2024,6 +2125,9 @@ namespace RikiPath.Infrastructure.Migrations
                         .HasMaxLength(30)
                         .HasColumnType("character varying(30)")
                         .HasDefaultValue("Booking1on1");
+
+                    b.Property<string>("AuthoredDefinitionJson")
+                        .HasColumnType("text");
 
                     b.Property<Guid?>("CohortAssignmentGroupKey")
                         .HasColumnType("uuid");
@@ -2181,15 +2285,15 @@ namespace RikiPath.Infrastructure.Migrations
                         .HasMaxLength(2000)
                         .HasColumnType("character varying(2000)");
 
-                    b.Property<string>("SelectedOptionsJson")
-                        .HasColumnType("text");
-
                     b.Property<int>("RevisionCount")
                         .HasColumnType("integer");
 
                     b.Property<string>("ScanStorageUrl")
                         .HasMaxLength(1000)
                         .HasColumnType("character varying(1000)");
+
+                    b.Property<string>("SelectedOptionsJson")
+                        .HasColumnType("text");
 
                     b.Property<DateTime>("SubmittedAt")
                         .HasColumnType("timestamp without time zone");

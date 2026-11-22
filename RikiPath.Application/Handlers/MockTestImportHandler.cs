@@ -45,7 +45,7 @@ namespace RikiPath.Application.Handlers
             var ctx = new DiffContext(existingByKey, ambiguousKeys, levelsByCode, ambiguousLevelCodes,
                 skillsByName, ambiguousSkillNames, skills.ToDictionary(s => s.Id, s => s.Name),
                 certSectionsByCode, ambiguousSectionCodes, certSections.ToDictionary(s => s.Id, s => s.Code),
-                openRowKeys);
+                certSections, openRowKeys);
 
             // Gộp dòng theo MockTestTitle (giữ thứ tự xuất hiện). Dòng thiếu tên đề -> 1 nhóm riêng để báo lỗi.
             var groups = new List<List<ExcelRow>>();
@@ -83,6 +83,7 @@ namespace RikiPath.Application.Handlers
             Dictionary<string, Domain.Entities.CertificateSection> CertSectionsByCode,
             HashSet<string> AmbiguousSectionCodes,
             Dictionary<int, string> SectionCodeById,
+            IReadOnlyList<Domain.Entities.CertificateSection> CertificateSections,
             HashSet<string> OpenRowKeys);
 
         private sealed class SectionBuilder(string code, string title, int sortOrder, int firstRow, string? explicitSkill)
@@ -116,6 +117,10 @@ namespace RikiPath.Application.Handlers
             var levelErrors = new List<string>();
             ImportHandlerSupport.CheckLevel(levelCode, ctx.LevelsByCode, ctx.AmbiguousLevelCodes, levelErrors);
             errors.AddRange(levelErrors.Select(e => P(first) + e));
+            var levelIdForSectionAlias = levelCode is not null &&
+                ctx.LevelsByCode.TryGetValue(levelCode, out var resolvedLevelId)
+                ? resolvedLevelId
+                : (int?)null;
 
             var timeLimit = 0;
             if (timeRaw is null) errors.Add($"{P(first)}Thiếu cột TimeLimitMinutes.");
@@ -167,8 +172,17 @@ namespace RikiPath.Application.Handlers
                     }
                     else if (!ctx.CertSectionsByCode.TryGetValue(code, out var cs))
                     {
-                        errors.Add($"{rp0}SectionCode '{code}' không tồn tại trong hệ thống (Admin cần tạo sẵn CertificateSection).");
-                        certByCode[code] = null;
+                        // Một số file cũ dùng mã RPK_N5_GRAMMAR/RPK_N5_READING,
+                        // trong khi master data chuẩn đã gộp hai phần này thành
+                        // N5_GRAMMAR_READING. Chỉ nhận alias khi tìm được đúng một
+                        // section cùng level để không gắn nhầm dữ liệu sang level khác.
+                        if (TryResolveSectionAlias(code, levelIdForSectionAlias, ctx.CertificateSections, out var alias))
+                            certByCode[code] = alias;
+                        else
+                        {
+                            errors.Add($"{rp0}SectionCode '{code}' không tồn tại trong hệ thống (Admin cần tạo sẵn CertificateSection).");
+                            certByCode[code] = null;
+                        }
                     }
                     else certByCode[code] = cs;
                 }
@@ -398,6 +412,55 @@ namespace RikiPath.Application.Handlers
             (string Match, string Skill)[] skills = [("VOCAB", "VOCABULARY"), ("GRAMMAR", "GRAMMAR"), ("READING", "READING")];
             return skills.Where(item => sectionCode?.Contains(item.Match, StringComparison.OrdinalIgnoreCase) == true)
                 .Select(item => item.Skill).ToArray();
+        }
+
+        private static bool TryResolveSectionAlias(
+            string code,
+            int? certificateLevelId,
+            IReadOnlyList<Domain.Entities.CertificateSection> sections,
+            out Domain.Entities.CertificateSection section)
+        {
+            section = null!;
+            if (certificateLevelId is null) return false;
+
+            var normalized = code.Trim().ToUpperInvariant();
+            var withoutRikiPrefix = normalized.StartsWith("RPK_", StringComparison.Ordinal)
+                ? normalized[4..]
+                : normalized;
+            var candidates = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                withoutRikiPrefix,
+            };
+
+            if (withoutRikiPrefix.EndsWith("_GRAMMAR", StringComparison.Ordinal) ||
+                withoutRikiPrefix.EndsWith("_READING", StringComparison.Ordinal))
+            {
+                var levelPrefix = withoutRikiPrefix[..withoutRikiPrefix.LastIndexOf('_')];
+                candidates.Add(levelPrefix + "_GRAMMAR_READING");
+            }
+
+            if (withoutRikiPrefix.EndsWith("_VOCABULARY", StringComparison.Ordinal))
+            {
+                candidates.Add(withoutRikiPrefix[..^"_VOCABULARY".Length] + "_VOCAB");
+            }
+
+            var matches = sections
+                .Where(candidate => !candidate.IsDeleted &&
+                    candidate.CertificateLevelId == certificateLevelId.Value &&
+                    candidates.Contains(candidate.Code))
+                .ToList();
+            // Nếu tồn tại mã sau khi bỏ tiền tố RPK_ thì ưu tiên mã đó; chỉ dùng
+            // mã gộp GRAMMAR_READING/VOCAB làm fallback. Trường hợp có nhiều bản
+            // ghi trùng mã vẫn bị từ chối như lookup chính.
+            var exactMatches = matches
+                .Where(candidate => string.Equals(candidate.Code, withoutRikiPrefix, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            if (exactMatches.Count > 0)
+                matches = exactMatches;
+            if (matches.Count != 1) return false;
+
+            section = matches[0];
+            return true;
         }
 
         private static JsonElement? ReadFormatColumns(ExcelRow row, JsonElement? data, ref JsonElement? answerKey,

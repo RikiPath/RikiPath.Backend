@@ -219,7 +219,21 @@ namespace RikiPath.Infrastructure
                 }
                 catch
                 {
-                    await transaction.RollbackAsync(cancellationToken);
+                    // Rollback is cleanup, not part of the cancelled request. If the
+                    // browser/proxy aborts a long author request, reusing the already
+                    // cancelled token here causes EF to log a second transaction
+                    // failure and can hide the original cancellation.
+                    try
+                    {
+                        await transaction.RollbackAsync(CancellationToken.None);
+                    }
+                    catch
+                    {
+                        // Preserve the original operation exception. The connection is
+                        // disposed immediately after this block, so a failed rollback
+                        // must not replace the useful root cause.
+                    }
+
                     throw;
                 }
             });
