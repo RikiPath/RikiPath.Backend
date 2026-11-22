@@ -217,7 +217,7 @@ public sealed class ManualContentService(IUnitOfWork uow, IClaimService claims, 
         var batchName = string.Empty;
         await uow.ExecuteContentAuthorWriteAsync(userId, async token =>
         {
-            var items = await uow.ContentApprovalRequests.Query()
+            var items = await uow.ContentApprovalRequests.Query().AsNoTracking()
                 .Where(item => !item.IsDeleted && item.SubmittedByUserId == userId &&
                     (id.HasValue ? item.Id == id : item.BatchId == batchId))
                 .OrderBy(item => item.SourceRowNumber).ThenBy(item => item.Id).ToListAsync(token);
@@ -256,6 +256,20 @@ public sealed class ManualContentService(IUnitOfWork uow, IClaimService claims, 
         {
             try
             {
+                // Newly created Excel rows have already passed the import
+                // validator before they are persisted as Drafts. Re-running the
+                // full validator here performs several database queries per row
+                // and makes a large batch hold the author transaction until the
+                // browser times out (499). Keep a cheap payload check for new
+                // rows; modified rows still use the full path below so the
+                // target-identity/stale-update check is preserved. The admin
+                // approval path validates every payload again before publishing.
+                if (IsExcelImportDraft(item) && item.Action == ImportRowAction.New)
+                {
+                    ValidateStoredImportPayload(item);
+                    continue;
+                }
+
                 var input = JsonSerializer.Deserialize<JsonElement>(item.PayloadJson);
                 var (payload, _) = await ValidateAsync(item.EntityType, input, ct);
                 if (item.SourceRowNumber > 0)
@@ -277,14 +291,67 @@ public sealed class ManualContentService(IUnitOfWork uow, IClaimService claims, 
             }
         }
 
+        // The batch can contain thousands of Excel rows. A tracked SaveChanges
+        // would issue one UPDATE per row and commonly exceed the browser/proxy
+        // timeout. Keep the operation atomic, but update all draft statuses with
+        // one parameterized SQL statement.
         var now = DateTime.UtcNow;
-        foreach (var item in drafts)
+        var draftIds = drafts.Select(item => item.Id).ToArray();
+        var updatedCount = await uow.ContentApprovalRequests.Query()
+            .Where(item => draftIds.Contains(item.Id) && !item.IsDeleted &&
+                item.Status == ContentApprovalStatus.Draft)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(item => item.Status, ContentApprovalStatus.PendingReview)
+                .SetProperty(item => item.SubmittedAt, now), ct);
+
+        return updatedCount == drafts.Count
+            ? ApiResponse<int>.Success(updatedCount)
+            : ApiResponse<int>.Fail("Một số bản nháp vừa được thao tác bởi yêu cầu khác. Vui lòng tải lại lô import.",
+                HttpStatusCode.Conflict);
+    }
+
+    private static bool IsExcelImportDraft(ContentApprovalRequest item) =>
+        item.SourceRowNumber > 0 &&
+        (item.SourceFileName.EndsWith(".xlsx", StringComparison.OrdinalIgnoreCase) ||
+         item.SourceFileName.EndsWith(".xls", StringComparison.OrdinalIgnoreCase));
+
+    private static void ValidateStoredImportPayload(ContentApprovalRequest item)
+    {
+        if (string.IsNullOrWhiteSpace(item.PayloadJson))
+            throw new ArgumentException("Payload bản nháp bị rỗng.");
+
+        try
         {
-            item.Status = ContentApprovalStatus.PendingReview;
-            item.SubmittedAt = now;
+            using var document = JsonDocument.Parse(item.PayloadJson);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+                throw new ArgumentException("Payload bản nháp không hợp lệ.");
+
+            var info = ReadListInfo(item.PayloadJson);
+            if (info?.CertificateLevelId is not > 0)
+                throw new ArgumentException("Payload bản nháp thiếu cấp độ JLPT.");
+
+            if (item.EntityType == ImportEntityType.MockTest)
+            {
+                var hasSections = false;
+                var sections = default(JsonElement);
+                foreach (var property in document.RootElement.EnumerateObject())
+                {
+                    if (!string.Equals(property.Name, "sections", StringComparison.OrdinalIgnoreCase))
+                        continue;
+
+                    sections = property.Value;
+                    hasSections = true;
+                    break;
+                }
+
+                if (!hasSections || sections.ValueKind != JsonValueKind.Array || sections.GetArrayLength() == 0)
+                    throw new ArgumentException("Đề thi phải có ít nhất một phần thi.");
+            }
         }
-        await uow.SaveChangesAsync(ct);
-        return ApiResponse<int>.Success(drafts.Count);
+        catch (JsonException ex)
+        {
+            throw new ArgumentException("Payload bản nháp không hợp lệ.", ex);
+        }
     }
 
     private Task<ContentApprovalRequest?> FindMineAsync(int id, CancellationToken ct)
