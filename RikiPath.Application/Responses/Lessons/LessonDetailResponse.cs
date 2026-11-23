@@ -20,6 +20,11 @@ namespace RikiPath.Application.Responses.Lessons
         public int ResumePositionSeconds { get; set; }
         public bool IsCompleted { get; set; }
         public DateTime? CompletedAt { get; set; }
+        public DateTime? FirstViewedAt { get; set; }
+        public DateTime? LastInteractedAt { get; set; }
+        public int InteractionCount { get; set; }
+        public int AutoEnrolledSrsCount { get; set; }
+        public List<RikiPath.Application.Responses.Reviews.SrsSuggestedCardResponse> SuggestedSrsCards { get; set; } = new();
 
         public List<LessonVocabularyResponse> Vocabularies { get; set; } = new();
         public List<LessonKanjiResponse> Kanjis { get; set; } = new();

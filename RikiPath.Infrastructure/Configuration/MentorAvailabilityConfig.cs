@@ -26,6 +26,11 @@ namespace RikiPath.Infrastructure.Configuration
                    .OnDelete(DeleteBehavior.Restrict);
             builder.HasOne(x => x.GroupPolicy).WithMany().HasForeignKey(x => x.GroupPolicyId)
                    .OnDelete(DeleteBehavior.Restrict);
+            builder.HasOne(x => x.TeachingProposal).WithMany(p => p.GeneratedAvailabilities)
+                   .HasForeignKey(x => x.TeachingProposalId)
+                   .OnDelete(DeleteBehavior.Restrict);
+            builder.HasIndex(x => x.TeachingProposalId)
+                   .HasFilter("\"TeachingProposalId\" IS NOT NULL");
             builder.Property(x => x.GenerationKey).HasMaxLength(160);
             builder.Property(x => x.LocalBusinessDate).HasColumnType("date");
             builder.HasIndex(x => x.GenerationKey).IsUnique().HasFilter("\"GenerationKey\" IS NOT NULL");
@@ -43,10 +48,10 @@ namespace RikiPath.Infrastructure.Configuration
             {
                 t.HasCheckConstraint("CK_MentorAvailability_BookedCount",
                     "\"BookedCount\" >= 0 AND \"BookedCount\" <= \"MaxLearners\"");
-                // Giữ nguyên dữ liệu lịch sử; buổi mới phải khớp snapshot thời lượng và sức chứa.
+                // Giữ nguyên dữ liệu lịch sử; buổi sinh từ mẫu lịch hoặc từ đề xuất mở lớp đã duyệt phải khớp snapshot thời lượng và sức chứa.
                 t.HasCheckConstraint("CK_MentorAvailability_GeneratedSlot",
                     "(\"GenerationKey\" IS NULL AND \"PolicyVersion\" IS NULL AND \"MentorScheduleRuleId\" IS NULL AND \"LocalBusinessDate\" IS NULL AND \"GroupPolicyId\" IS NULL AND \"SessionMinutesSnapshot\" IS NULL AND \"RestMinutesSnapshot\" IS NULL) OR " +
-                    "(\"GenerationKey\" IS NOT NULL AND \"PolicyVersion\" IS NOT NULL AND \"PolicyVersion\" > 0 AND \"MentorScheduleRuleId\" IS NOT NULL AND " +
+                    "(\"GenerationKey\" IS NOT NULL AND \"PolicyVersion\" IS NOT NULL AND \"PolicyVersion\" > 0 AND (\"MentorScheduleRuleId\" IS NOT NULL OR \"TeachingProposalId\" IS NOT NULL) AND " +
                     "\"LocalBusinessDate\" IS NOT NULL AND ((\"GroupPolicyId\" IS NULL AND \"SessionMinutesSnapshot\" IS NULL AND \"RestMinutesSnapshot\" IS NULL AND \"MaxLearners\" = 1 AND \"EndTime\" = \"StartTime\" + INTERVAL '90 minutes') OR " +
                     "(\"GroupPolicyId\" IS NOT NULL AND \"SessionMinutesSnapshot\" > 0 AND \"RestMinutesSnapshot\" >= 0 AND \"MaxLearners\" BETWEEN 1 AND 4 AND \"EndTime\" = \"StartTime\" + \"SessionMinutesSnapshot\" * INTERVAL '1 minute')))");
             });

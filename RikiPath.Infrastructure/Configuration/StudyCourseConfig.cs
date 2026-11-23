@@ -136,6 +136,8 @@ public sealed class StudyCohortConfig : IEntityTypeConfiguration<StudyCohort>
         b.HasOne(x => x.Plan).WithMany().HasForeignKey(x => x.PlanId).OnDelete(DeleteBehavior.Restrict);
         b.HasOne(x => x.Mentor).WithMany().HasForeignKey(x => x.MentorId).OnDelete(DeleteBehavior.Restrict);
         b.HasOne(x => x.GroupPolicy).WithMany().HasForeignKey(x => x.GroupPolicyId).OnDelete(DeleteBehavior.Restrict);
+        b.HasOne(x => x.SourceProposal).WithMany().HasForeignKey(x => x.SourceProposalId).OnDelete(DeleteBehavior.Restrict);
+        b.HasIndex(x => x.SourceProposalId).HasFilter("\"SourceProposalId\" IS NOT NULL");
         b.HasMany(x => x.Sessions).WithOne(x => x.Cohort).HasForeignKey(x => x.CohortId);
     }
 }

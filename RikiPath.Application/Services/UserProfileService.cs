@@ -296,7 +296,7 @@ namespace RikiPath.Application.Services
                     request.CurrentStudyLevelId, cancellationToken);
                 if (level is null || !JlptCurriculum.IsSupportedStudyLevel(level.Code))
                     return ApiResponse<UserProfileResponse>.Fail(
-                        "Cấp độ học không khả dụng; lộ trình tiêu chuẩn hiện hỗ trợ N5–N3.",
+                        "Cấp độ học không khả dụng; lộ trình tiêu chuẩn hiện hỗ trợ N5–N2.",
                         HttpStatusCode.BadRequest, errorCode: "STUDY_LEVEL_UNSUPPORTED");
 
                 var user = await unitOfWork.UserAccounts.GetWithLearningGoalAsync(userId, cancellationToken);
@@ -315,6 +315,46 @@ namespace RikiPath.Application.Services
             {
                 return ApiResponse<UserProfileResponse>.Fail(
                     "Không thể cập nhật cấp độ học.", HttpStatusCode.InternalServerError,
+                    errors: BuildDebugErrors(ex));
+            }
+        }
+
+        public async Task<ApiResponse<UserProfileResponse>> SetRoadmapModeAsync(
+            SetRoadmapModeRequest request, CancellationToken cancellationToken)
+        {
+            var normalized = (request.Mode ?? string.Empty).Trim().ToUpperInvariant();
+            LearningMode? targetMode = normalized switch
+            {
+                "STANDARD" => LearningMode.Standard,
+                "AI" or "AI_PERSONALIZED" or "AIPERSONALIZED" => LearningMode.AiPersonalized,
+                _ => null,
+            };
+            if (!targetMode.HasValue)
+                return ApiResponse<UserProfileResponse>.Fail(
+                    "Chế độ lộ trình không hợp lệ. Chỉ hỗ trợ STANDARD hoặc AI_PERSONALIZED.",
+                    HttpStatusCode.BadRequest, errorCode: "ROADMAP_MODE_INVALID");
+
+            try
+            {
+                var userId = claimService.GetUserClaim().Id;
+                var user = await unitOfWork.UserAccounts.GetWithLearningGoalAsync(userId, cancellationToken);
+                if (user is null)
+                    return ApiResponse<UserProfileResponse>.NotFound("Không tìm thấy người dùng.");
+
+                if (user.LearningMode != targetMode.Value)
+                {
+                    user.LearningMode = targetMode.Value;
+                    user.LearningGoalVersion++;
+                    unitOfWork.UserAccounts.Update(user);
+                    await unitOfWork.SaveChangesAsync(cancellationToken);
+                }
+
+                return ApiResponse<UserProfileResponse>.Success(MapToResponse(user));
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                return ApiResponse<UserProfileResponse>.Fail(
+                    "Không thể chuyển chế độ lộ trình.", HttpStatusCode.InternalServerError,
                     errors: BuildDebugErrors(ex));
             }
         }
@@ -343,7 +383,7 @@ namespace RikiPath.Application.Services
                     certified = await unitOfWork.CertificateLevels.GetActiveJlptLevelByIdAsync(request.CertifiedJlptLevelId.Value, cancellationToken);
 
                 if (current is null || !JlptCurriculum.IsSupportedStudyLevel(current.Code))
-                    return ApiResponse<UserProfileResponse>.Fail("Cấp độ đang học không khả dụng; hiện hỗ trợ N5–N3.");
+                    return ApiResponse<UserProfileResponse>.Fail("Cấp độ đang học không khả dụng; hiện hỗ trợ N5–N2.");
                 if (target is null || !IsSupportedGoalLevel(target.Code))
                     return ApiResponse<UserProfileResponse>.Fail("Mục tiêu JLPT phải thuộc N5–N1.");
                 if (request.HasJlptCertificate && (certified is null || !IsSupportedGoalLevel(certified.Code)))

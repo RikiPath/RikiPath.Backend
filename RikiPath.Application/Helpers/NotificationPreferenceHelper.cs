@@ -72,6 +72,25 @@ public static class NotificationPreferenceHelper
         if (!user.SystemNotificationsEnabled)
             return false;
 
+        return IsCategoryEnabled(user, notificationType);
+    }
+
+    public static bool ShouldDeliverEmail(UserAccount user, string? notificationType)
+    {
+        if (string.IsNullOrWhiteSpace(user.Email) || user.IsDeleted)
+            return false;
+
+        if (IsMandatorySecurityType(notificationType))
+            return true;
+
+        if (!user.EmailNotificationsEnabled)
+            return false;
+
+        return IsCategoryEnabled(user, notificationType);
+    }
+
+    private static bool IsCategoryEnabled(UserAccount user, string? notificationType)
+    {
         var category = MapTypeToCategory(user.Role, notificationType);
         if (category is null)
             return true;

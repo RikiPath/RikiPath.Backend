@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using RikiPath.Application.IServices;
 using RikiPath.Application.Requests.KanjiWriting;
+using RikiPath.Domain.Enums;
 
 namespace RikiPath.WebApi.Controllers
 {
@@ -20,6 +21,8 @@ namespace RikiPath.WebApi.Controllers
         ///   true, nên phát animation stroke-order mẫu (HanziWriter.animateCharacter()) trước khi cho
         ///   learner tự vẽ (quiz()), thay vì bắt vẽ ngay.
         /// </remarks>
+        // Feature control: kanji writing belongs to the Japanese library feature; submitting a drawn answer stays open.
+        [RequireFeature(FeatureCodes.JapaneseLibrary)]
         [HttpGet("due")]
         public async Task<IActionResult> GetDue([FromQuery] int count = 10, CancellationToken cancellationToken = default)
         {
@@ -27,6 +30,7 @@ namespace RikiPath.WebApi.Controllers
             return Ok(result);
         }
 
+        [RequireFeature(FeatureCodes.JapaneseLibrary)]
         [HttpGet("all")]
         public async Task<IActionResult> GetAll(CancellationToken cancellationToken = default)
         {

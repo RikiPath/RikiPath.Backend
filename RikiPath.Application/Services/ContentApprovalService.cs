@@ -75,63 +75,12 @@ namespace RikiPath.Application.Services
             }
         }
 
-        public async Task<ApiResponse<int>> SubmitImportRequestsAsync(
+        public Task<ApiResponse<int>> SubmitImportRequestsAsync(
             List<SheetImportResponse> sheetDiffs, CancellationToken cancellationToken)
         {
-            try
-            {
-                var authorId = claimService.GetUserClaim().Id;
-                var createdCount = 0;
-                var mockTestRows = sheetDiffs.Where(sheet => sheet.EntityType == ImportEntityType.MockTest)
-                    .SelectMany(sheet => sheet.Rows)
-                    .Where(row => row.Action is ImportRowAction.New or ImportRowAction.Modified)
-                    .ToList();
-                if (mockTestRows.Count > 0)
-                {
-                    var skillNames = (await unitOfWork.LanguageSkills.GetAllAsync(cancellationToken))
-                        .ToDictionary(skill => skill.Id, skill => skill.Name);
-                    var levelCodes = (await unitOfWork.CertificateLevels.GetAllAsync(cancellationToken))
-                        .Where(level => !level.IsDeleted).ToDictionary(level => level.Id, level => level.Code);
-                    foreach (var row in mockTestRows)
-                    {
-                        var error = ExcelContentImportService.ValidateMockTestPayload(row.PayloadJson ?? "{}", skillNames, levelCodes);
-                        if (error is not null)
-                            return ApiResponse<int>.Fail($"Dòng {row.SourceRowNumber}: {error}");
-                    }
-                }
-
-                foreach (var sheet in sheetDiffs)
-                {
-                    foreach (var row in sheet.Rows)
-                    {
-                        if (row.Action is ImportRowAction.Error or ImportRowAction.Unchanged)
-                            continue;
-
-                        var approvalRequest = new ContentApprovalRequest
-                        {
-                            EntityType = sheet.EntityType,
-                            Action = row.Action,
-                            RowKey = row.RowKey,
-                            TargetEntityId = row.TargetEntityId,
-                            PayloadJson = row.PayloadJson ?? "{}",
-                            DiffSummaryJson = JsonSerializer.Serialize(row.ChangedFields),
-                            Status = ContentApprovalStatus.PendingReview,
-                            SubmittedByUserId = authorId,
-                            SubmittedAt = DateTime.UtcNow
-                        };
-
-                        await unitOfWork.ContentApprovalRequests.AddAsync(approvalRequest, cancellationToken);
-                        createdCount++;
-                    }
-                }
-
-                await unitOfWork.SaveChangesAsync(cancellationToken);
-                return ApiResponse<int>.Success(createdCount);
-            }
-            catch (Exception ex)
-            {
-                return ApiResponse<int>.Fail($"Lỗi khi gửi yêu cầu phê duyệt: {ex.Message}");
-            }
+            return Task.FromResult(ApiResponse<int>.Fail(
+                "Luồng gửi diff trực tiếp đã đóng. Hãy lưu bản nháp bằng /api/content-import/confirm rồi gửi duyệt từ bản nháp.",
+                System.Net.HttpStatusCode.Gone));
         }
 
         public async Task<ApiResponse<List<PendingApprovalItemResponse>>> GetPendingApprovalsAsync(
@@ -358,10 +307,9 @@ namespace RikiPath.Application.Services
 
                 await unitOfWork.ExecuteInTransactionAsync(async token =>
                 {
-                    var req = await unitOfWork.ContentApprovalRequests.Query()
-                        .FirstOrDefaultAsync(r => r.Id == requestId && !r.IsDeleted, token);
+                    var req = await unitOfWork.ContentApprovalRequests.GetByIdForUpdateAsync(requestId, token);
 
-                    if (req is null)
+                    if (req is null || req.IsDeleted)
                     {
                         conflictOrFail = ApiResponse<bool>.NotFound("Không tìm thấy yêu cầu duyệt nội dung.");
                         return;
@@ -398,6 +346,10 @@ namespace RikiPath.Application.Services
 
                 return ApiResponse<bool>.Success(true);
             }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
             catch (InvalidOperationException ex)
             {
                 return ApiResponse<bool>.Fail(ex.Message, System.Net.HttpStatusCode.BadRequest);
@@ -427,9 +379,8 @@ namespace RikiPath.Application.Services
 
                 await unitOfWork.ExecuteInTransactionAsync(async token =>
                 {
-                    var lessonRequest = await unitOfWork.ContentApprovalRequests.Query()
-                        .FirstOrDefaultAsync(r => r.Id == lessonRequestId && !r.IsDeleted, token);
-                    if (lessonRequest is null || lessonRequest.EntityType != ImportEntityType.Lesson)
+                    var lessonRequest = await unitOfWork.ContentApprovalRequests.GetByIdForUpdateAsync(lessonRequestId, token);
+                    if (lessonRequest is null || lessonRequest.IsDeleted || lessonRequest.EntityType != ImportEntityType.Lesson)
                     {
                         fail = ApiResponse<BulkReviewResponse>.NotFound("Không tìm thấy yêu cầu Lesson.");
                         return;
@@ -444,7 +395,8 @@ namespace RikiPath.Application.Services
                         ?? throw new InvalidOperationException("Payload Lesson rỗng.");
                     var requests = await unitOfWork.ContentApprovalRequests.Query()
                         .Where(r => !r.IsDeleted && r.Status == ContentApprovalStatus.PendingReview &&
-                            r.SubmittedByUserId == lessonRequest.SubmittedByUserId)
+                            r.SubmittedByUserId == lessonRequest.SubmittedByUserId &&
+                            lessonRequest.BatchId != Guid.Empty && r.BatchId == lessonRequest.BatchId)
                         .ToListAsync(token);
 
                     var group = new List<ContentApprovalRequest> { lessonRequest };
@@ -460,6 +412,15 @@ namespace RikiPath.Application.Services
                                 group.Add(candidate);
                         }
                         catch (JsonException) { }
+                    }
+
+                    foreach (var related in group.Skip(1).OrderBy(item => item.Id))
+                    {
+                        var expectedPayload = related.PayloadJson;
+                        var locked = await unitOfWork.ContentApprovalRequests.GetByIdForUpdateAsync(related.Id, token);
+                        if (locked is null || locked.IsDeleted || !IsReviewable(locked.Status) ||
+                            locked.PayloadJson != expectedPayload)
+                            throw new InvalidOperationException("Một nội dung trong lô vừa được xử lý. Vui lòng tải lại.");
                     }
 
                     if (request.Approve)
@@ -491,14 +452,22 @@ namespace RikiPath.Application.Services
                         }, token);
                     }
 
+                    var completedStatus = request.Approve
+                        ? ContentApprovalStatus.Approved : ContentApprovalStatus.Rejected;
+                    if (group.Any(item => item.Status != completedStatus))
+                        throw new InvalidOperationException("Một số nội dung trong lô chưa được xử lý. Vui lòng tải lại.");
                     result.SuccessCount = group.Count;
                     await unitOfWork.SaveChangesAsync(token);
-                    notifyTargets = request.Approve ? [lessonRequest] : group;
+                    notifyTargets = group;
                 }, cancellationToken);
 
                 if (fail is not null) return fail;
                 if (notifyTargets.Count > 0) await NotifyAuthorsAsync(notifyTargets, cancellationToken);
                 return ApiResponse<BulkReviewResponse>.Success(result);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
             }
             catch (InvalidOperationException ex)
             {
@@ -521,113 +490,148 @@ namespace RikiPath.Application.Services
             var result = new BulkReviewResponse();
             var seen = new HashSet<int>();
             var reviewed = new List<ContentApprovalRequest>();
+            var approvedWithLesson = new Dictionary<int, ContentApprovalRequest>();
+            var requestedIds = request.Items.Select(item => item.RequestId).Where(id => id > 0).Distinct().ToArray();
+            var requestTypes = requestedIds.Length == 0
+                ? new Dictionary<int, ImportEntityType>()
+                : await unitOfWork.ContentApprovalRequests.Query()
+                    .AsNoTracking()
+                    .Where(r => requestedIds.Contains(r.Id))
+                    .ToDictionaryAsync(r => r.Id, r => r.EntityType, cancellationToken);
+            var orderedItems = request.Items
+                .OrderBy(i => requestTypes.GetValueOrDefault(i.RequestId) == ImportEntityType.Lesson ? 0 : 1)
+                .ThenBy(i => i.RequestId)
+                .ToList();
 
-            try
+            foreach (var item in orderedItems)
             {
-                await unitOfWork.ExecuteInTransactionAsync(async token =>
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!seen.Add(item.RequestId))
                 {
-                    var requestIds = request.Items
-                        .Select(item => item.RequestId)
-                        .Distinct()
-                        .ToArray();
-                    var requestsById = await unitOfWork.ContentApprovalRequests.Query()
-                        .Where(approval => requestIds.Contains(approval.Id) && !approval.IsDeleted)
-                        .ToDictionaryAsync(approval => approval.Id, token);
-
-                    foreach (var item in request.Items)
+                    result.Failures.Add(new BulkReviewItemResult
                     {
-                        if (!seen.Add(item.RequestId)) continue;
+                        RequestId = item.RequestId,
+                        Reason = "Yêu cầu bị lặp trong danh sách duyệt."
+                    });
+                    continue;
+                }
 
-                        if (!item.Approve && string.IsNullOrWhiteSpace(item.ReviewNote))
+                // Approving a Lesson can approve its related rows in the same import batch.
+                if (approvedWithLesson.TryGetValue(item.RequestId, out var previouslyApproved))
+                {
+                    if (item.Approve)
+                    {
+                        reviewed.Add(previouslyApproved);
+                        result.SuccessCount++;
+                    }
+                    else
+                    {
+                        result.Failures.Add(new BulkReviewItemResult
                         {
-                            result.Failures.Add(new BulkReviewItemResult
-                            {
-                                RequestId = item.RequestId,
-                                Reason = "Vui lòng nhập lý do từ chối."
-                            });
-                            continue;
+                            RequestId = item.RequestId,
+                            Reason = "Nội dung đã được duyệt cùng bài học trong lô này."
+                        });
+                    }
+                    continue;
+                }
+
+                if (!item.Approve && string.IsNullOrWhiteSpace(item.ReviewNote))
+                {
+                    result.Failures.Add(new BulkReviewItemResult
+                    {
+                        RequestId = item.RequestId,
+                        Reason = "Vui lòng nhập lý do từ chối."
+                    });
+                    continue;
+                }
+
+                try
+                {
+                    _stagedLessonLinks.Clear();
+                    ContentApprovalRequest? processed = null;
+                    List<ContentApprovalRequest> cascaded = [];
+                    await unitOfWork.ExecuteInTransactionAsync(async token =>
+                    {
+                        var approval = await unitOfWork.ContentApprovalRequests
+                            .GetByIdForUpdateAsync(item.RequestId, token);
+                        if (approval is null || approval.IsDeleted || !IsReviewable(approval.Status))
+                            throw new InvalidOperationException("Yêu cầu không tồn tại hoặc đã được xử lý.");
+
+                        List<ContentApprovalRequest> relatedCandidates = [];
+                        if (item.Approve && approval.EntityType == ImportEntityType.Lesson &&
+                            approval.BatchId != Guid.Empty)
+                        {
+                            relatedCandidates = await unitOfWork.ContentApprovalRequests.Query()
+                                .Where(row => requestedIds.Contains(row.Id) && row.Id != approval.Id &&
+                                    row.BatchId == approval.BatchId &&
+                                    row.SubmittedByUserId == approval.SubmittedByUserId &&
+                                    !row.IsDeleted && row.Status == ContentApprovalStatus.PendingReview)
+                                .ToListAsync(token);
                         }
 
-                        try
+                        approval.ReviewedByName = reviewerName;
+                        await ApplyReviewAsync(approval, item.Approve, item.ReviewNote, token);
+                        cascaded = relatedCandidates
+                            .Where(row => row.Status == ContentApprovalStatus.Approved)
+                            .ToList();
+
+                        if (unitOfWork.AdminAuditLogs is not null)
                         {
-                            if (!requestsById.TryGetValue(item.RequestId, out var req) || !IsReviewable(req.Status))
+                            foreach (var changed in cascaded.Prepend(approval))
                             {
-                                result.Failures.Add(new BulkReviewItemResult
+                                await unitOfWork.AdminAuditLogs.AddAsync(new AdminAuditLog
                                 {
-                                    RequestId = item.RequestId,
-                                    Reason = "Yêu cầu không tồn tại hoặc đã được xử lý."
-                                });
-                                continue;
+                                    ActorUserId = actor.Id,
+                                    EntityType = "ContentApprovalRequest",
+                                    EntityId = changed.Id,
+                                    Action = "BatchReviewed",
+                                    AfterJson = JsonSerializer.Serialize(new
+                                    {
+                                        changed.Id,
+                                        Status = changed.Status.ToString()
+                                    }),
+                                    CreatedAtUtc = DateTime.UtcNow,
+                                }, token);
                             }
+                        }
 
-                            req.ReviewedByName = reviewerName;
-                            await ApplyReviewAsync(req, item.Approve, item.ReviewNote, token);
-                            unitOfWork.ContentApprovalRequests.Update(req);
-                            reviewed.Add(req);
-                            result.SuccessCount++;
-                        }
-                        catch (OperationCanceledException) when (token.IsCancellationRequested)
-                        {
-                            // Do not turn a cancelled HTTP request into a per-row
-                            // validation failure and continue using the cancelled
-                            // transaction. Let the transaction wrapper roll back
-                            // and preserve the cancellation as the root cause.
-                            throw;
-                        }
-                        catch (InvalidOperationException ex)
-                        {
-                            result.Failures.Add(new BulkReviewItemResult { RequestId = item.RequestId, Reason = ex.Message });
-                        }
-                        catch (Exception)
-                        {
-                            result.Failures.Add(new BulkReviewItemResult { RequestId = item.RequestId, Reason = "Dữ liệu mục này không hợp lệ hoặc bị xung đột." });
-                        }
-                    }
+                        await unitOfWork.SaveChangesAsync(token);
+                        processed = approval;
+                    }, cancellationToken);
 
-                    if (reviewed.Count > 0 && unitOfWork.AdminAuditLogs is not null)
+                    reviewed.Add(processed!);
+                    result.SuccessCount++;
+                    foreach (var related in cascaded)
+                        approvedWithLesson.TryAdd(related.Id, related);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (InvalidOperationException ex)
+                {
+                    result.Failures.Add(new BulkReviewItemResult { RequestId = item.RequestId, Reason = ex.Message });
+                }
+                catch (DbUpdateException)
+                {
+                    result.Failures.Add(new BulkReviewItemResult
                     {
-                        await unitOfWork.AdminAuditLogs.AddAsync(new AdminAuditLog
-                        {
-                            ActorUserId = actor.Id,
-                            EntityType = "ContentApprovalBatch",
-                            EntityId = reviewed[0].Id,
-                            Action = "BatchReviewed",
-                            AfterJson = JsonSerializer.Serialize(new { Succeeded = result.SuccessCount, Failed = result.Failures.Count }),
-                            CreatedAtUtc = DateTime.UtcNow,
-                        }, token);
-                    }
-
-                    await unitOfWork.SaveChangesAsync(token);
-                }, cancellationToken);
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                throw;
-            }
-            catch (DbUpdateConcurrencyException)
-            {
-                return ApiResponse<BulkReviewResponse>.Fail(
-                    "Một hoặc nhiều yêu cầu vừa được xử lý bởi thao tác khác. Vui lòng tải lại danh sách.",
-                    System.Net.HttpStatusCode.Conflict);
-            }
-            catch (DbUpdateException)
-            {
-                return ApiResponse<BulkReviewResponse>.Fail(
-                    "Không thể ghi kết quả duyệt do dữ liệu vừa thay đổi hoặc chưa đủ cấu hình. Vui lòng tải lại và thử lại.",
-                    System.Net.HttpStatusCode.Conflict);
-            }
-            catch (InvalidOperationException ex)
-            {
-                return ApiResponse<BulkReviewResponse>.Fail(ex.Message, System.Net.HttpStatusCode.BadRequest);
-            }
-            catch (Exception)
-            {
-                return ApiResponse<BulkReviewResponse>.Fail(
-                    "Không thể duyệt các yêu cầu lúc này. Vui lòng thử lại sau.",
-                    System.Net.HttpStatusCode.InternalServerError);
+                        RequestId = item.RequestId,
+                        Reason = "Dữ liệu mục này vừa thay đổi hoặc bị xung đột. Vui lòng tải lại."
+                    });
+                }
+                catch (Exception)
+                {
+                    result.Failures.Add(new BulkReviewItemResult
+                    {
+                        RequestId = item.RequestId,
+                        Reason = "Không thể xử lý nội dung này. Vui lòng thử lại."
+                    });
+                }
             }
 
-            await NotifyAuthorsAsync(reviewed, cancellationToken);
+            if (reviewed.Count > 0)
+                await NotifyAuthorsAsync(reviewed, cancellationToken);
 
             if (result.SuccessCount == 0 && result.Failures.Count > 0)
                 return ApiResponse<BulkReviewResponse>.Fail(
@@ -954,6 +958,19 @@ namespace RikiPath.Application.Services
             if (p.AudioUrl is not null)
                 lesson.AudioUrl = string.IsNullOrWhiteSpace(p.AudioUrl) ? null : p.AudioUrl;
             lesson.SortOrder = p.SortOrder;
+            lesson.EstimatedMinutes = p.EstimatedMinutes > 0 ? p.EstimatedMinutes : 15;
+            if (p.LearningObjectives is not null) lesson.LearningObjectives = p.LearningObjectives;
+            if (p.SourceProvenance is not null) lesson.SourceProvenance = p.SourceProvenance;
+            if (!string.IsNullOrWhiteSpace(p.PrerequisiteLessonTitle))
+            {
+                var prereqTitle = p.PrerequisiteLessonTitle.Trim();
+                var prereq = await FindLessonAsync(prereqTitle, p.CertificateLevelId, cancellationToken)
+                    ?? await unitOfWork.Lessons.FirstOrDefaultAsync(
+                        l => !l.IsDeleted && l.Title == prereqTitle,
+                        cancellationToken);
+                if (prereq is not null && prereq.Id != lesson.Id)
+                    lesson.PrerequisiteLessonId = prereq.Id;
+            }
             lesson.CertificateLevelId = p.CertificateLevelId;
             lesson.LanguageSkillId = p.LanguageSkillId;
             if (isNew) await unitOfWork.Lessons.AddAsync(lesson, cancellationToken);
@@ -979,19 +996,75 @@ namespace RikiPath.Application.Services
             var title = ManualContentService.NormalizeTopicTitle(payload.TopicTitle);
             if (string.IsNullOrEmpty(title)) return null;
 
-            var names = await topics.OrderBy(x => x.Id).Select(x => new { x.Id, x.Title }).ToListAsync(ct);
-            var match = names.Find(x => string.Equals(x.Title.Trim().Normalize(), title, StringComparison.OrdinalIgnoreCase));
-            return match is not null
-                ? await topics.SingleAsync(x => x.Id == match.Id, ct)
-                : await unitOfWork.Topics.AddAsync(new Topic { Title = title }, ct);
+            var candidates = await topics
+                .Where(x => x.CertificateLevelId == payload.CertificateLevelId || x.CertificateLevelId == null)
+                .OrderByDescending(x => x.CertificateLevelId == payload.CertificateLevelId)
+                .ThenBy(x => x.Id)
+                .ToListAsync(ct);
+
+            var match = candidates.Find(x => string.Equals(x.Title.Trim().Normalize(), title, StringComparison.OrdinalIgnoreCase));
+            if (match is not null)
+            {
+                if (!match.CertificateLevelId.HasValue) match.CertificateLevelId = payload.CertificateLevelId;
+                if (!string.IsNullOrWhiteSpace(payload.StageCode)) match.StageCode = payload.StageCode;
+                if (!string.IsNullOrWhiteSpace(payload.StageObjectives)) match.LearningObjectives = payload.StageObjectives;
+                if (payload.StageSortOrder.HasValue) match.SortOrder = payload.StageSortOrder.Value;
+                unitOfWork.Topics.Update(match);
+                return match;
+            }
+
+            var nextSort = payload.StageSortOrder
+                ?? ((candidates.Where(x => x.CertificateLevelId == payload.CertificateLevelId).Select(x => x.SortOrder).DefaultIfEmpty(0).Max()) + 1);
+            return await unitOfWork.Topics.AddAsync(new Topic
+            {
+                Title = title,
+                CertificateLevelId = payload.CertificateLevelId,
+                StageCode = payload.StageCode,
+                LearningObjectives = payload.StageObjectives,
+                SortOrder = nextSort,
+            }, ct);
         }
 
         private async Task ApplyPracticeExerciseApprovalAsync(ContentApprovalRequest req, CancellationToken cancellationToken)
         {
             var p = JsonSerializer.Deserialize<PracticeExerciseImportPayloadResponse>(req.PayloadJson, JsonOptions)
                 ?? throw new InvalidOperationException("Payload Practice Exercise rỗng.");
-            var lesson = await FindLessonAsync(p.LessonTitle, p.CertificateLevelId, cancellationToken)
-                ?? throw new InvalidOperationException($"Không tìm thấy Lesson '{p.LessonTitle}' ({p.CertificateLevelId}) để lưu Practice Exercise.");
+            var scope = PracticeExerciseScopes.Normalize(p.Scope);
+            var passingScore = p.PassingScorePercent > 0 ? p.PassingScorePercent : 70;
+
+            Lesson? lesson = null;
+            int? resolvedTopicId = p.TopicId;
+            int resolvedLevelId = p.CertificateLevelId;
+
+            if (scope == PracticeExerciseScopes.LessonQuickCheck)
+            {
+                lesson = await FindLessonAsync(p.LessonTitle, p.CertificateLevelId, cancellationToken)
+                    ?? throw new InvalidOperationException($"Không tìm thấy Lesson '{p.LessonTitle}' ({p.CertificateLevelId}) để lưu Practice Exercise.");
+                resolvedTopicId = lesson.TopicId;
+                resolvedLevelId = lesson.CertificateLevelId;
+            }
+            else if (scope == PracticeExerciseScopes.GroupQuiz)
+            {
+                if (!resolvedTopicId.HasValue && !string.IsNullOrWhiteSpace(p.TopicTitle))
+                {
+                    var normalizedTopic = ManualContentService.NormalizeTopicTitle(p.TopicTitle);
+                    var topicRow = await unitOfWork.Topics.Query()
+                        .Where(t => !t.IsDeleted && (t.CertificateLevelId == resolvedLevelId || resolvedLevelId == 0 || t.CertificateLevelId == null))
+                        .OrderByDescending(t => t.CertificateLevelId == resolvedLevelId)
+                        .ToListAsync(cancellationToken);
+                    var matchedTopic = topicRow.FirstOrDefault(t => string.Equals(t.Title.Trim().Normalize(), normalizedTopic, StringComparison.OrdinalIgnoreCase));
+                    if (matchedTopic is null)
+                        throw new InvalidOperationException($"Không tìm thấy Topic/Chặng '{p.TopicTitle}' để lưu GroupQuiz.");
+                    resolvedTopicId = matchedTopic.Id;
+                    resolvedLevelId = matchedTopic.CertificateLevelId ?? resolvedLevelId;
+                }
+                if (!resolvedTopicId.HasValue)
+                    throw new InvalidOperationException("GroupQuiz yêu cầu TopicId hoặc TopicTitle.");
+            }
+            else if (resolvedLevelId <= 0)
+            {
+                throw new InvalidOperationException("StageAssessment yêu cầu CertificateLevelId.");
+            }
 
             static List<PracticeQuestion> MapQuestions(IEnumerable<PracticeQuestionPayloadResponse> questions) => questions
                 .OrderBy(q => q.SortOrder).Select(q => new PracticeQuestion
@@ -1017,7 +1090,11 @@ namespace RikiPath.Application.Services
                     Description = p.Description,
                     ImageUrl = p.ImageUrl,
                     SortOrder = p.SortOrder,
-                    LessonId = lesson.Id,
+                    Scope = scope,
+                    PassingScorePercent = passingScore,
+                    LessonId = lesson?.Id,
+                    TopicId = resolvedTopicId,
+                    CertificateLevelId = resolvedLevelId > 0 ? resolvedLevelId : null,
                     LanguageSkillId = p.LanguageSkillId,
                     Questions = MapQuestions(p.Questions)
                 }, cancellationToken);
@@ -1030,7 +1107,11 @@ namespace RikiPath.Application.Services
             exercise.Description = p.Description;
             if (p.ImageUrl is not null) exercise.ImageUrl = string.IsNullOrWhiteSpace(p.ImageUrl) ? null : p.ImageUrl;
             exercise.SortOrder = p.SortOrder;
-            exercise.LessonId = lesson.Id;
+            exercise.Scope = scope;
+            exercise.PassingScorePercent = passingScore;
+            exercise.LessonId = lesson?.Id;
+            exercise.TopicId = resolvedTopicId;
+            exercise.CertificateLevelId = resolvedLevelId > 0 ? resolvedLevelId : null;
             exercise.LanguageSkillId = p.LanguageSkillId;
             foreach (var question in (exercise.Questions ?? []).Where(q => !q.IsDeleted))
             {
@@ -1045,6 +1126,7 @@ namespace RikiPath.Application.Services
         {
             var pending = await unitOfWork.ContentApprovalRequests.Query()
                 .Where(r => !r.IsDeleted
+                    && lessonRequest.BatchId != Guid.Empty && r.BatchId == lessonRequest.BatchId
                     && (r.Status == ContentApprovalStatus.Approved ||
                         (r.Status == ContentApprovalStatus.PendingReview && r.SubmittedByUserId == lessonRequest.SubmittedByUserId))
                     && r.Id != lessonRequest.Id
@@ -1063,6 +1145,16 @@ namespace RikiPath.Application.Services
                     matching.Add(related);
                 }
                 catch (JsonException) { throw new InvalidOperationException($"Không đọc được nội dung liên quan #{related.Id}."); }
+            }
+
+            foreach (var related in matching.Where(item => item.Status == ContentApprovalStatus.PendingReview)
+                .OrderBy(item => item.Id))
+            {
+                var expectedPayload = related.PayloadJson;
+                var locked = await unitOfWork.ContentApprovalRequests.GetByIdForUpdateAsync(related.Id, cancellationToken);
+                if (locked is null || locked.IsDeleted || !IsReviewable(locked.Status) ||
+                    locked.PayloadJson != expectedPayload)
+                    throw new InvalidOperationException("Nội dung liên quan vừa thay đổi. Vui lòng tải lại lô duyệt.");
             }
 
             // First create/update content so generated entity IDs exist, then persist links to the lesson.
@@ -1231,6 +1323,7 @@ namespace RikiPath.Application.Services
 
         private async Task ApplyMockTestApprovalAsync(ContentApprovalRequest req, CancellationToken cancellationToken)
         {
+            _ = audioTranscriptions;
             var p = JsonSerializer.Deserialize<MockTestImportPayloadResponse>(req.PayloadJson, JsonOptions)
                 ?? throw new InvalidOperationException("Payload MockTest rỗng.");
 
@@ -1296,6 +1389,8 @@ namespace RikiPath.Application.Services
                     Description = p.Description,
                     TimeLimitMinutes = p.TimeLimitMinutes,
                     CertificateLevelId = p.CertificateLevelId,
+                    PublishStatus = ContentStatus.Published,
+                    PublishedAt = DateTime.UtcNow,
                     Sections = p.Sections!.Select(s => new MockTestSection
                     {
                         Title = s.Title,
@@ -1327,6 +1422,8 @@ namespace RikiPath.Application.Services
                 // the admin approval transaction; the transcription worker will
                 // synchronize completed transcripts after this content commit.
                 await unitOfWork.MockTests.AddAsync(test, cancellationToken);
+                await unitOfWork.SaveChangesAsync(cancellationToken);
+                req.TargetEntityId = test.Id;
             }
             else
             {
@@ -1337,18 +1434,21 @@ namespace RikiPath.Application.Services
                 test.Description = p.Description;
                 test.TimeLimitMinutes = p.TimeLimitMinutes;
                 test.CertificateLevelId = p.CertificateLevelId;
+                test.PublishStatus = ContentStatus.Published;
+                test.PublishedAt ??= DateTime.UtcNow;
 
                 if (p.Sections is { Count: > 0 })
                 {
                     var sectionCodes = p.Sections.Select(s => s.CertificateSectionCode?.Trim())
                         .Where(code => !string.IsNullOrWhiteSpace(code)).Select(code => code!).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-                    var certSections = await unitOfWork.CertificateSections.Query()
-                        .Where(section => !section.IsDeleted && sectionCodes.Contains(section.Code))
-                        .ToListAsync(cancellationToken);
-                    var sectionIdByCode = certSections.ToDictionary(section => section.Code, section => section.Id, StringComparer.OrdinalIgnoreCase);
-                    var missingCodes = sectionCodes.Where(code => !sectionIdByCode.ContainsKey(code)).ToList();
+                    var sectionIdsByCode = await GetCertificateSectionIdsByCodeAsync(cancellationToken);
+                    var missingCodes = sectionCodes.Where(code => !sectionIdsByCode.ContainsKey(code)).ToList();
                     if (missingCodes.Count > 0)
                         throw new InvalidOperationException($"Không tìm thấy CertificateSection: {string.Join(", ", missingCodes)}.");
+                    var sectionIdByCode = sectionCodes.ToDictionary(
+                        code => code,
+                        code => sectionIdsByCode[code][0],
+                        StringComparer.OrdinalIgnoreCase);
 
                     // Giữ lại câu cũ vì attempt lịch sử tham chiếu đến chúng; ẩn cấu trúc cũ và tạo phiên bản mới.
                     foreach (var oldSection in test.Sections ?? [])
@@ -1389,23 +1489,11 @@ namespace RikiPath.Application.Services
                     (test.Sections ??= []).AddRange(replacementSections);
                 }
 
+                // Transcription is asynchronous; do not enqueue/write ContentAudioTranscriptions inside approval tx.
                 unitOfWork.MockTests.Update(test);
             }
         }
         #endregion
-
-        private async Task FillAudioTranscriptsAsync(MockTest test, CancellationToken ct)
-        {
-            if (audioTranscriptions is null) return;
-            foreach (var question in (test.Sections ?? []).Where(section => !section.IsDeleted)
-                .SelectMany(section => section.Questions ?? []).Where(question => !question.IsDeleted && !string.IsNullOrWhiteSpace(question.AudioUrl)))
-            {
-                var data = string.IsNullOrWhiteSpace(question.InteractionDataJson) ? (JsonElement?)null
-                    : JsonSerializer.Deserialize<JsonElement>(question.InteractionDataJson);
-                var audio = await audioTranscriptions.GetForGradingAsync(question.AudioUrl!, data, ct);
-                question.AudioTranscript = audio is { Status: "Completed" } ? audio.Transcript : null;
-            }
-        }
 
         private static string NormalizeMockQuestionType(string? questionType) =>
             JlptMockQuestionFormats.NormalizeQuestionType(questionType)

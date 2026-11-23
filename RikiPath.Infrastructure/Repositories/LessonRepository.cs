@@ -1,5 +1,6 @@
 using RikiPath.Application.IRepositories;
 using RikiPath.Domain.Entities;
+using RikiPath.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 using System.Collections.Generic;
 using System.Linq;
@@ -44,7 +45,8 @@ namespace RikiPath.Infrastructure.Repositories
         {
             return await LearnerVisibleLessons()
                 .Where(lesson => lesson.CertificateLevelId == certificateLevelId)
-                .OrderBy(lesson => lesson.SortOrder)
+                .OrderBy(lesson => lesson.Topic != null ? lesson.Topic.SortOrder : int.MaxValue)
+                .ThenBy(lesson => lesson.SortOrder)
                 .ThenBy(lesson => lesson.Id)
                 .Select(lesson => new AssessmentRoadmapLesson(
                     lesson.Id,
@@ -56,9 +58,20 @@ namespace RikiPath.Infrastructure.Repositories
                         .OrderByDescending(progress => progress.IsCompleted)
                         .ThenByDescending(progress => progress.ProgressPercent)
                         .FirstOrDefault(),
-                    lesson.LessonKanjis!.Count(link => !link.Kanji.IsDeleted),
-                    lesson.LessonVocabularies!.Count(link => !link.Vocabulary.IsDeleted),
-                    lesson.LessonGrammars!.Count(link => !link.GrammarPattern.IsDeleted)))
+                    lesson.LessonKanjis!.Count(link => !link.Kanji.IsDeleted && link.Kanji.Status == ContentStatus.Published),
+                    lesson.LessonVocabularies!.Count(link => !link.Vocabulary.IsDeleted && link.Vocabulary.Status == ContentStatus.Published),
+                    lesson.LessonGrammars!.Count(link => !link.GrammarPattern.IsDeleted && link.GrammarPattern.Status == ContentStatus.Published),
+                    lesson.Description,
+                    lesson.SortOrder,
+                    lesson.EstimatedMinutes,
+                    lesson.TopicId,
+                    lesson.Topic != null && !lesson.Topic.IsDeleted ? lesson.Topic.Title : null,
+                    lesson.Topic != null && !lesson.Topic.IsDeleted ? lesson.Topic.SortOrder : null,
+                    lesson.Topic != null && !lesson.Topic.IsDeleted ? lesson.Topic.StageCode : null,
+                    lesson.Topic != null && !lesson.Topic.IsDeleted ? lesson.Topic.LearningObjectives : null,
+                    lesson.PrerequisiteLessonId,
+                    lesson.LearningObjectives,
+                    lesson.LanguageSkill.Code))
                 .ToListAsync(cancellationToken);
         }
 
@@ -71,13 +84,13 @@ namespace RikiPath.Infrastructure.Repositories
                     .ThenInclude(level => level.CertificateType)
                 .Include(lesson => lesson.LanguageSkill)
                 .Include(lesson => lesson.LessonVocabularies!
-                    .Where(link => !link.Vocabulary.IsDeleted))
+                    .Where(link => !link.Vocabulary.IsDeleted && link.Vocabulary.Status == ContentStatus.Published))
                     .ThenInclude(link => link.Vocabulary)
                 .Include(lesson => lesson.LessonKanjis!
-                    .Where(link => !link.Kanji.IsDeleted))
+                    .Where(link => !link.Kanji.IsDeleted && link.Kanji.Status == ContentStatus.Published))
                     .ThenInclude(link => link.Kanji)
                 .Include(lesson => lesson.LessonGrammars!
-                    .Where(link => !link.GrammarPattern.IsDeleted))
+                    .Where(link => !link.GrammarPattern.IsDeleted && link.GrammarPattern.Status == ContentStatus.Published))
                     .ThenInclude(link => link.GrammarPattern)
                 .AsSplitQuery()
                 .FirstOrDefaultAsync(lesson => lesson.Id == lessonId, cancellationToken);
@@ -86,6 +99,7 @@ namespace RikiPath.Infrastructure.Repositories
         private IQueryable<Lesson> LearnerVisibleLessons() =>
             _context.Lessons.AsNoTracking().Where(lesson =>
                 !lesson.IsDeleted
+                && lesson.Status == ContentStatus.Published
                 && !lesson.CertificateLevel.IsDeleted
                 && !lesson.CertificateLevel.CertificateType.IsDeleted
                 && lesson.CertificateLevel.CertificateType.IsActive
@@ -107,17 +121,21 @@ namespace RikiPath.Infrastructure.Repositories
                  .Where(lesson =>
                      lesson.CertificateLevelId == certificateLevelId
                      && !lesson.IsDeleted
+                     && lesson.Status == ContentStatus.Published
                      && !lesson.CertificateLevel.IsDeleted
                      && !lesson.CertificateLevel.CertificateType.IsDeleted
                      && lesson.CertificateLevel.CertificateType.IsActive
                      && lesson.CertificateLevel.CertificateType.Name == "JLPT"
                      && !lesson.LanguageSkill.IsDeleted)
                  .Include(x => x.Topic)
-                 .Include(x => x.LessonKanjis!.Where(link => !link.Kanji.IsDeleted))
+                 .Include(x => x.LessonKanjis!.Where(link =>
+                     !link.Kanji.IsDeleted && link.Kanji.Status == ContentStatus.Published))
                      .ThenInclude(link => link.Kanji)
-                 .Include(x => x.LessonVocabularies!.Where(link => !link.Vocabulary.IsDeleted))
+                 .Include(x => x.LessonVocabularies!.Where(link =>
+                     !link.Vocabulary.IsDeleted && link.Vocabulary.Status == ContentStatus.Published))
                      .ThenInclude(link => link.Vocabulary)
-                 .Include(x => x.LessonGrammars!.Where(link => !link.GrammarPattern.IsDeleted))
+                 .Include(x => x.LessonGrammars!.Where(link =>
+                     !link.GrammarPattern.IsDeleted && link.GrammarPattern.Status == ContentStatus.Published))
                      .ThenInclude(link => link.GrammarPattern)
                  .AsSplitQuery()
                  .OrderBy(x => x.SortOrder)

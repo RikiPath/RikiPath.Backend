@@ -5,6 +5,7 @@ using RikiPath.Application.Requests.PracticeExercises;
 using RikiPath.Application.Responses;
 using RikiPath.Application.Responses.PracticeExercises;
 using RikiPath.Domain.Entities;
+using RikiPath.Domain.Enums;
 using System.Net;
 
 namespace RikiPath.Application.Services;
@@ -24,6 +25,138 @@ public class PracticeQuizService(
     public Task<ApiResponse<IReadOnlyList<PracticeExerciseSummaryResponse>>> GetAssessmentRoadmapExercisesAsync(
         int lessonId, CancellationToken cancellationToken)
         => LoadLessonExercisesAsync(lessonId, cancellationToken, fromAssessmentRoadmap: true);
+
+    public async Task<ApiResponse<IReadOnlyList<PracticeExerciseSummaryResponse>>> GetCheckpointsAsync(
+        int? topicId, int? certificateLevelId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var userId = claimService.GetUserClaim().Id;
+            var query = LessonPracticeProgress.ReadyExercises(unitOfWork)
+                .Where(e => e.Scope == PracticeExerciseScopes.GroupQuiz || e.Scope == PracticeExerciseScopes.StageAssessment);
+
+            if (topicId.HasValue)
+                query = query.Where(e => e.TopicId == topicId.Value);
+            if (certificateLevelId.HasValue)
+                query = query.Where(e => e.CertificateLevelId == certificateLevelId.Value);
+
+            var list = await query
+                .OrderBy(e => e.SortOrder).ThenBy(e => e.Id)
+                .Select(e => new PracticeExerciseSummaryResponse
+                {
+                    Id = e.Id,
+                    MinimumPassingScorePercent = e.PassingScorePercent > 0 ? e.PassingScorePercent : MinimumPassingScorePercent,
+                    Passed = unitOfWork.PracticeExerciseAttempts.Query().Any(a =>
+                        !a.IsDeleted && a.UserId == userId && a.HomeworkAssignmentId == null &&
+                        a.IsCompleted && a.PracticeExerciseId == e.Id &&
+                        a.ScorePercent >= (e.PassingScorePercent > 0 ? e.PassingScorePercent : MinimumPassingScorePercent)),
+                    LessonId = e.LessonId ?? 0,
+                    TopicId = e.TopicId,
+                    CertificateLevelId = e.CertificateLevelId,
+                    Scope = e.Scope,
+                    Title = e.Title,
+                    ImageUrl = e.ImageUrl,
+                    Description = e.Description,
+                    LanguageSkillId = e.LanguageSkillId,
+                    LanguageSkillName = e.LanguageSkill.Name,
+                    QuestionCount = e.Questions!.Count(q => !q.IsDeleted),
+                })
+                .ToListAsync(cancellationToken);
+
+            return ApiResponse<IReadOnlyList<PracticeExerciseSummaryResponse>>.Success(list);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch
+        {
+            return ApiResponse<IReadOnlyList<PracticeExerciseSummaryResponse>>.Fail(
+                "Không thể tải danh sách bài kiểm tra chặng.", HttpStatusCode.InternalServerError);
+        }
+    }
+
+    public async Task<ApiResponse<PracticeExerciseAttemptResponse>> StartCheckpointAttemptAsync(
+        int practiceExerciseId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var userId = claimService.GetUserClaim().Id;
+            var exercise = await unitOfWork.PracticeExercises.GetWithQuestionsAndOptionsAsync(
+                practiceExerciseId, cancellationToken);
+            if (exercise is null || exercise.IsDeleted ||
+                (exercise.Scope != PracticeExerciseScopes.GroupQuiz && exercise.Scope != PracticeExerciseScopes.StageAssessment))
+                return ApiResponse<PracticeExerciseAttemptResponse>.NotFound("Không tìm thấy bài kiểm tra chặng.");
+
+            // Check unlock status against standard adaptive roadmap so learner must study preceding lessons first
+            var roadmapSvc = standardRoadmapService ?? new StandardRoadmapService(unitOfWork, claimService);
+            var roadmapRes = await roadmapSvc.GetAssessmentRoadmapAsync(cancellationToken);
+            if (roadmapRes.IsSuccess && roadmapRes.Result is { } roadmap)
+            {
+                var checkpoint = roadmap.Stages
+                    .SelectMany(s => new[] { s.GroupQuiz, s.StageAssessment })
+                    .FirstOrDefault(cp => cp is not null && cp.ExerciseId == practiceExerciseId);
+                if (checkpoint is { IsUnlocked: false })
+                {
+                    return ApiResponse<PracticeExerciseAttemptResponse>.Fail(
+                        checkpoint.LockReason ?? "Hãy học xong các bài trong chặng trước khi làm bài kiểm tra.",
+                        HttpStatusCode.Conflict, "CHECKPOINT_LOCKED");
+                }
+            }
+
+            var questions = GetVisibleQuestions(exercise);
+            if (!CanTakeExercise(questions, requireSingleCorrectOption: true))
+                return ApiResponse<PracticeExerciseAttemptResponse>.Fail(
+                    "Bài kiểm tra chặng chưa có đủ câu hỏi và lựa chọn hợp lệ.", HttpStatusCode.Conflict);
+
+            var attempt = new PracticeExerciseAttempt
+            {
+                UserId = userId,
+                PracticeExerciseId = exercise.Id,
+                HomeworkAssignmentId = null,
+                StartedAt = DateTime.UtcNow,
+            };
+            await unitOfWork.PracticeExerciseAttempts.AddAsync(attempt, cancellationToken);
+            await unitOfWork.SaveChangesAsync(cancellationToken);
+
+            var passingScore = exercise.PassingScorePercent > 0 ? exercise.PassingScorePercent : MinimumPassingScorePercent;
+            return ApiResponse<PracticeExerciseAttemptResponse>.Success(new PracticeExerciseAttemptResponse
+            {
+                AttemptId = attempt.Id,
+                PracticeExerciseId = exercise.Id,
+                ExerciseTitle = exercise.Title,
+                Scope = exercise.Scope,
+                ImageUrl = exercise.ImageUrl,
+                LessonId = exercise.LessonId ?? 0,
+                TopicId = exercise.TopicId,
+                CertificateLevelId = exercise.CertificateLevelId,
+                PassingScorePercent = passingScore,
+                Questions = questions.Select(question => new PracticeExerciseQuestionResponse
+                {
+                    QuestionId = question.Id,
+                    QuestionText = question.QuestionText,
+                    ImageUrl = question.ImageUrl,
+                    SortOrder = question.SortOrder,
+                    Options = (question.Options ?? []).Where(option => !option.IsDeleted)
+                        .OrderBy(option => option.SortOrder)
+                        .Select(option => new PracticeExerciseOptionResponse
+                        {
+                            OptionId = option.Id,
+                            OptionText = option.OptionText,
+                            ImageUrl = option.ImageUrl,
+                            SortOrder = option.SortOrder,
+                        }).ToList(),
+                }).ToList(),
+            });
+        }
+        catch (OperationCanceledException) { throw; }
+        catch
+        {
+            return ApiResponse<PracticeExerciseAttemptResponse>.Fail(
+                "Không thể bắt đầu bài kiểm tra chặng.", HttpStatusCode.InternalServerError);
+        }
+    }
+
+    public Task<ApiResponse<PracticeExerciseAttemptResultResponse>> SubmitCheckpointAttemptAsync(
+        int attemptId, SubmitPracticeExerciseAttemptRequest request, CancellationToken cancellationToken)
+        => SubmitAsync(attemptId, null, request, cancellationToken, fromAssessmentRoadmap: false, isCheckpoint: true);
 
     private async Task<ApiResponse<IReadOnlyList<PracticeExerciseSummaryResponse>>> LoadLessonExercisesAsync(
         int lessonId, CancellationToken cancellationToken, bool fromAssessmentRoadmap = false)
@@ -50,21 +183,26 @@ public class PracticeQuizService(
                 ? LessonPracticeProgress.ReadyExercises(unitOfWork)
                 : unitOfWork.PracticeExercises.Query();
             var exercises = await source
-                .Where(exercise => !exercise.IsDeleted && exercise.LessonId == lessonId)
+                .Where(exercise => !exercise.IsDeleted && exercise.LessonId == lessonId && exercise.Scope == PracticeExerciseScopes.LessonQuickCheck)
                 .OrderBy(exercise => exercise.SortOrder)
                 .ThenBy(exercise => exercise.Id)
                 .Select(exercise => new PracticeExerciseSummaryResponse
                 {
                     Id = exercise.Id,
-                    MinimumPassingScorePercent = MinimumPassingScorePercent,
+                    MinimumPassingScorePercent = exercise.PassingScorePercent > 0 ? exercise.PassingScorePercent : MinimumPassingScorePercent,
                     Passed = unitOfWork.PracticeExerciseAttempts.Query().Any(attempt =>
                         !attempt.IsDeleted && attempt.UserId == userId && attempt.HomeworkAssignmentId == null &&
                         attempt.IsCompleted &&
-                        attempt.PracticeExerciseId == exercise.Id && attempt.ScorePercent >= MinimumPassingScorePercent),
-                    LessonId = exercise.LessonId,
+                        attempt.PracticeExerciseId == exercise.Id &&
+                        attempt.ScorePercent >= (exercise.PassingScorePercent > 0 ? exercise.PassingScorePercent : MinimumPassingScorePercent)),
+                    LessonId = exercise.LessonId ?? 0,
+                    TopicId = exercise.TopicId,
+                    CertificateLevelId = exercise.CertificateLevelId,
+                    Scope = exercise.Scope,
                     Title = exercise.Title,
                     ImageUrl = exercise.ImageUrl,
                     Description = exercise.Description,
+                    LanguageSkillId = exercise.LanguageSkillId,
                     LanguageSkillName = exercise.LanguageSkill.Name,
                     QuestionCount = exercise.Questions!.Count(question => !question.IsDeleted),
                 })
@@ -107,25 +245,29 @@ public class PracticeQuizService(
 
             var exercise = await unitOfWork.PracticeExercises.GetWithQuestionsAndOptionsAsync(
                 practiceExerciseId, cancellationToken);
-            var lesson = exercise is null || exercise.IsDeleted ? null :
-                await unitOfWork.Lessons.GetLearnerVisibleByIdAsync(exercise.LessonId, cancellationToken);
-            if (exercise is null || lesson is null)
+            if (exercise is null || exercise.IsDeleted)
                 return ApiResponse<PracticeExerciseAttemptResponse>.NotFound("Không tìm thấy bài Practice Exercise.");
 
-            if (!assignmentId.HasValue &&
+            var lesson = exercise.LessonId is int exLessonId
+                ? await unitOfWork.Lessons.GetLearnerVisibleByIdAsync(exLessonId, cancellationToken)
+                : null;
+            if (exercise.LessonId.HasValue && lesson is null)
+                return ApiResponse<PracticeExerciseAttemptResponse>.NotFound("Không tìm thấy bài Practice Exercise.");
+
+            if (!assignmentId.HasValue && lesson is not null &&
                 !await LessonPracticeProgress.HasStudiedAsync(unitOfWork, userId, lesson.Id, cancellationToken))
                 return ApiResponse<PracticeExerciseAttemptResponse>.Fail(
                     "Hãy đánh dấu đã học xong bài trước khi làm bài luyện tập.",
                     HttpStatusCode.Conflict, "LESSON_STUDY_REQUIRED");
 
-            if (fromAssessmentRoadmap)
+            if (fromAssessmentRoadmap && lesson is not null)
             {
                 var access = await CheckAssessmentRoadmapLessonAsync(lesson.Id, cancellationToken);
                 if (!access.IsSuccess)
                     return ApiResponse<PracticeExerciseAttemptResponse>.Fail(
                         access.ErrorMessage!, (HttpStatusCode)access.StatusCode, access.ErrorCode);
             }
-            else if (!assignmentId.HasValue && fromCatalog)
+            else if (!assignmentId.HasValue && fromCatalog && lesson is not null)
             {
                 if (skill is not null && (skill is not ("Reading" or "Listening") || lesson.LanguageSkill.Name != skill))
                     return ApiResponse<PracticeExerciseAttemptResponse>.Fail("Kỹ năng ôn luyện không hợp lệ.");
@@ -138,7 +280,7 @@ public class PracticeQuizService(
                         "Hãy hoàn thành bài học trước để mở bài luyện tập này.",
                         HttpStatusCode.Conflict, "CATALOG_LESSON_LOCKED");
             }
-            else if (!assignmentId.HasValue)
+            else if (!assignmentId.HasValue && lesson is not null)
             {
                 var path = await learningPathService.GetLatestLearningPathAsync(cancellationToken);
                 var schedules = path.Result?.DailySchedules.OrderBy(day => day.Day).ToList();
@@ -182,19 +324,23 @@ public class PracticeQuizService(
                 await unitOfWork.SaveChangesAsync(cancellationToken);
             }
 
+            var passingScore = exercise.PassingScorePercent > 0 ? exercise.PassingScorePercent : MinimumPassingScorePercent;
             return ApiResponse<PracticeExerciseAttemptResponse>.Success(new PracticeExerciseAttemptResponse
             {
                 AttemptId = attempt.Id,
                 PracticeExerciseId = exercise.Id,
                 ExerciseTitle = exercise.Title,
+                Scope = exercise.Scope,
                 ImageUrl = exercise.ImageUrl,
-
-                LessonId = exercise.LessonId,
+                LessonId = exercise.LessonId ?? 0,
+                TopicId = exercise.TopicId,
+                CertificateLevelId = exercise.CertificateLevelId,
+                PassingScorePercent = passingScore,
                 Questions = questions.Select(question => new PracticeExerciseQuestionResponse
                 {
                     QuestionId = question.Id,
                     QuestionText = question.QuestionText,
-                            ImageUrl = question.ImageUrl,
+                    ImageUrl = question.ImageUrl,
                     SortOrder = question.SortOrder,
                     Options = (question.Options ?? []).Where(option => !option.IsDeleted)
                         .OrderBy(option => option.SortOrder)
@@ -202,7 +348,7 @@ public class PracticeQuizService(
                         {
                             OptionId = option.Id,
                             OptionText = option.OptionText,
-                                    ImageUrl = option.ImageUrl,
+                            ImageUrl = option.ImageUrl,
                             SortOrder = option.SortOrder,
                         }).ToList(),
                 }).ToList(),
@@ -230,7 +376,7 @@ public class PracticeQuizService(
 
     private async Task<ApiResponse<PracticeExerciseAttemptResultResponse>> SubmitAsync(
         int attemptId, int? assignmentId, SubmitPracticeExerciseAttemptRequest request, CancellationToken cancellationToken,
-        bool fromAssessmentRoadmap = false)
+        bool fromAssessmentRoadmap = false, bool isCheckpoint = false)
     {
         try
         {
@@ -253,9 +399,9 @@ public class PracticeQuizService(
             if (exercise is null || exercise.IsDeleted)
                 return ApiResponse<PracticeExerciseAttemptResultResponse>.NotFound("Không tìm thấy bài Practice Exercise.");
 
-            if (fromAssessmentRoadmap)
+            if (fromAssessmentRoadmap && exercise.LessonId is int roadmapLessonId)
             {
-                var access = await CheckAssessmentRoadmapLessonAsync(exercise.LessonId, cancellationToken);
+                var access = await CheckAssessmentRoadmapLessonAsync(roadmapLessonId, cancellationToken);
                 if (!access.IsSuccess)
                     return ApiResponse<PracticeExerciseAttemptResultResponse>.Fail(
                         access.ErrorMessage!, (HttpStatusCode)access.StatusCode, access.ErrorCode);
@@ -264,14 +410,14 @@ public class PracticeQuizService(
             var questions = GetVisibleQuestions(exercise);
             if (questions.Count == 0)
                 return ApiResponse<PracticeExerciseAttemptResultResponse>.Fail("Bài tập không có câu hỏi.");
-            if (fromAssessmentRoadmap && !CanTakeExercise(questions, requireSingleCorrectOption: true))
+            if ((fromAssessmentRoadmap || isCheckpoint) && !CanTakeExercise(questions, requireSingleCorrectOption: true))
                 return ApiResponse<PracticeExerciseAttemptResultResponse>.Fail(
                     "Bài luyện tập chưa có bộ câu hỏi hợp lệ.", HttpStatusCode.Conflict);
 
             var suppliedAnswers = request.Answers ?? [];
             if (suppliedAnswers.GroupBy(answer => answer.QuestionId).Any(group => group.Count() > 1))
                 return ApiResponse<PracticeExerciseAttemptResultResponse>.Fail("Không được gửi đáp án trùng câu hỏi.");
-            if ((assignmentId.HasValue || fromAssessmentRoadmap) && (suppliedAnswers.Count != questions.Count ||
+            if ((assignmentId.HasValue || fromAssessmentRoadmap || isCheckpoint) && (suppliedAnswers.Count != questions.Count ||
                 suppliedAnswers.Any(answer => !answer.SelectedOptionId.HasValue)))
                 return ApiResponse<PracticeExerciseAttemptResultResponse>.Fail("Hãy trả lời tất cả câu hỏi trước khi nộp.");
 
@@ -290,20 +436,39 @@ public class PracticeQuizService(
             var answerMap = suppliedAnswers.ToDictionary(answer => answer.QuestionId);
             var correctCount = 0;
             var persistedAnswers = new List<LearnerPracticeAnswer>(questions.Count);
+            var questionResults = new List<PracticeQuestionReviewResponse>(questions.Count);
+
             foreach (var question in questions)
             {
                 answerMap.TryGetValue(question.Id, out var supplied);
-                var selectedOption = supplied?.SelectedOptionId;
-                var isCorrect = selectedOption.HasValue &&
-                    (question.Options ?? []).Any(option => !option.IsDeleted &&
-                        option.Id == selectedOption.Value && option.IsCorrect);
+                var visibleOptions = (question.Options ?? []).Where(o => !o.IsDeleted).ToList();
+                var selectedOptionId = supplied?.SelectedOptionId;
+                var selectedOpt = selectedOptionId.HasValue
+                    ? visibleOptions.FirstOrDefault(o => o.Id == selectedOptionId.Value)
+                    : null;
+                var correctOpt = visibleOptions.FirstOrDefault(o => o.IsCorrect);
+                var isCorrect = selectedOpt is not null && selectedOpt.IsCorrect;
                 if (isCorrect) correctCount++;
+
                 persistedAnswers.Add(new LearnerPracticeAnswer
                 {
                     PracticeExerciseAttemptId = attempt.Id,
                     PracticeQuestionId = question.Id,
-                    SelectedOptionId = selectedOption,
+                    SelectedOptionId = selectedOptionId,
                     IsCorrect = isCorrect,
+                });
+
+                questionResults.Add(new PracticeQuestionReviewResponse
+                {
+                    QuestionId = question.Id,
+                    SortOrder = question.SortOrder,
+                    QuestionText = question.QuestionText,
+                    SelectedOptionId = selectedOptionId,
+                    SelectedOptionText = selectedOpt?.OptionText,
+                    CorrectOptionId = correctOpt?.Id,
+                    CorrectOptionText = correctOpt?.OptionText,
+                    IsCorrect = isCorrect,
+                    Explanation = question.Explanation,
                 });
             }
 
@@ -315,13 +480,14 @@ public class PracticeQuizService(
             await unitOfWork.LearnerPracticeAnswers.AddRangeAsync(persistedAnswers, cancellationToken);
             await unitOfWork.SaveChangesAsync(cancellationToken);
 
-            var passed = scorePercent >= MinimumPassingScorePercent;
+            var passingScore = exercise.PassingScorePercent > 0 ? exercise.PassingScorePercent : MinimumPassingScorePercent;
+            var passed = scorePercent >= passingScore;
             var unlockedNextDay = false;
-            if (passed && !assignmentId.HasValue && !fromAssessmentRoadmap)
+            if (passed && !assignmentId.HasValue && !fromAssessmentRoadmap && !isCheckpoint && exercise.LessonId is int completedLessonId)
             {
                 var latestPath = await learningPathService.GetLatestLearningPathAsync(cancellationToken);
                 var activeDay = latestPath.Result?.DailySchedules.FirstOrDefault(day =>
-                    day.IsStarted && !day.IsCompleted && day.LessonIds.Contains(exercise.LessonId));
+                    day.IsStarted && !day.IsCompleted && day.LessonIds.Contains(completedLessonId));
                 if (activeDay is not null)
                 {
                     var completion = await learningPathService.CompleteActiveDayAsync(
@@ -330,17 +496,31 @@ public class PracticeQuizService(
                 }
             }
 
+            var weakAreas = passed ? [] : new List<string> { exercise.Title };
+            var nextRecommendation = passed
+                ? (exercise.Scope == PracticeExerciseScopes.StageAssessment
+                    ? "Xuất sắc! Bạn đã hoàn thành đánh giá cuối chặng và cập nhật hồ sơ năng lực."
+                    : exercise.Scope == PracticeExerciseScopes.GroupQuiz
+                        ? "Bạn đã nắm vững kiến thức chặng này và sẵn sàng sang chặng tiếp theo."
+                        : "Bạn đã vượt qua Quick Check và cập nhật tiến độ học tập.")
+                : "Hãy xem kỹ phần giải thích từng câu bên dưới, ôn lại kiến thức trọng tâm và thử làm lại.";
+
             return ApiResponse<PracticeExerciseAttemptResultResponse>.Success(new PracticeExerciseAttemptResultResponse
             {
                 AttemptId = attempt.Id,
                 PracticeExerciseId = exercise.Id,
-                LessonId = exercise.LessonId,
+                ExerciseTitle = exercise.Title,
+                Scope = exercise.Scope,
+                LessonId = exercise.LessonId ?? 0,
                 ScorePercent = scorePercent,
                 CorrectCount = correctCount,
                 TotalQuestions = questions.Count,
-                MinimumPassingScorePercent = MinimumPassingScorePercent,
+                MinimumPassingScorePercent = passingScore,
                 Passed = passed,
                 UnlocksNextLearningPathDay = unlockedNextDay,
+                QuestionResults = questionResults,
+                WeakAreas = weakAreas,
+                NextRecommendation = nextRecommendation,
             });
         }
         catch (OperationCanceledException) { throw; }

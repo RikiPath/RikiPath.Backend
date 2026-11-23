@@ -118,6 +118,15 @@ namespace RikiPath.WebApi.Controllers
             return StatusCode((int)result.StatusCode, result);
         }
 
+        /// <summary>Chuyển chế độ hiển thị lộ trình giữa STANDARD và AI_PERSONALIZED, giữ nguyên toàn bộ tiến độ.</summary>
+        [Authorize(Roles = "Learner")]
+        [HttpPut("me/roadmap-mode")]
+        public async Task<IActionResult> SetRoadmapMode([FromBody] SetRoadmapModeRequest request, CancellationToken cancellationToken)
+        {
+            var result = await userProfileService.SetRoadmapModeAsync(request, cancellationToken);
+            return StatusCode((int)result.StatusCode, result);
+        }
+
         /// <summary>Atomically saves the complete learner goal, including the self-declared JLPT certificate.</summary>
         [Authorize(Roles = "Learner")]
         [HttpPut("me/learning-goal")]

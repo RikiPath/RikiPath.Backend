@@ -26,4 +26,13 @@ public interface IPracticeQuizService
         int assignmentId, int exerciseId, CancellationToken cancellationToken);
     Task<ApiResponse<PracticeExerciseAttemptResultResponse>> SubmitHomeworkAttemptAsync(
         int assignmentId, int attemptId, SubmitPracticeExerciseAttemptRequest request, CancellationToken cancellationToken);
+
+    Task<ApiResponse<IReadOnlyList<PracticeExerciseSummaryResponse>>> GetCheckpointsAsync(
+        int? topicId, int? certificateLevelId, CancellationToken cancellationToken);
+
+    Task<ApiResponse<PracticeExerciseAttemptResponse>> StartCheckpointAttemptAsync(
+        int practiceExerciseId, CancellationToken cancellationToken);
+
+    Task<ApiResponse<PracticeExerciseAttemptResultResponse>> SubmitCheckpointAttemptAsync(
+        int attemptId, SubmitPracticeExerciseAttemptRequest request, CancellationToken cancellationToken);
 }

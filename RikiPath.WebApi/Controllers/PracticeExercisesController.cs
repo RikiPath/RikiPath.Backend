@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using RikiPath.Application.IServices;
 using RikiPath.Application.Requests.PracticeExercises;
+using RikiPath.Domain.Enums;
 
 namespace RikiPath.WebApi.Controllers;
 
@@ -11,6 +12,7 @@ namespace RikiPath.WebApi.Controllers;
 public class PracticeExercisesController(IPracticeQuizService practiceQuizService) : ControllerBase
 {
     [HttpGet("lessons/{lessonId:int}")]
+    [RequireFeature(FeatureCodes.PracticeExercises)]
     public async Task<IActionResult> GetForLesson(int lessonId, CancellationToken cancellationToken)
     {
         var response = await practiceQuizService.GetLessonExercisesAsync(lessonId, cancellationToken);
@@ -18,7 +20,7 @@ public class PracticeExercisesController(IPracticeQuizService practiceQuizServic
     }
 
     [HttpGet("assessment-roadmap/lessons/{lessonId:int}")]
-    [RequireSelfStudy]
+    [RequireFeature(FeatureCodes.PracticeExercises)]
     public async Task<IActionResult> GetForAssessmentRoadmapLesson(int lessonId, CancellationToken cancellationToken)
     {
         var response = await practiceQuizService.GetAssessmentRoadmapExercisesAsync(lessonId, cancellationToken);
@@ -26,6 +28,7 @@ public class PracticeExercisesController(IPracticeQuizService practiceQuizServic
     }
 
     [HttpPost("{practiceExerciseId:int}/attempts")]
+    [RequireFeature(FeatureCodes.PracticeExercises)]
     public async Task<IActionResult> StartAttempt(int practiceExerciseId, CancellationToken cancellationToken,
         [FromQuery] bool fromCatalog = false, [FromQuery] string? skill = null)
     {
@@ -34,7 +37,7 @@ public class PracticeExercisesController(IPracticeQuizService practiceQuizServic
     }
 
     [HttpPost("{practiceExerciseId:int}/assessment-roadmap/attempts")]
-    [RequireSelfStudy]
+    [RequireFeature(FeatureCodes.PracticeExercises)]
     public async Task<IActionResult> StartAssessmentRoadmapAttempt(int practiceExerciseId, CancellationToken cancellationToken)
     {
         var response = await practiceQuizService.StartAssessmentRoadmapAttemptAsync(practiceExerciseId, cancellationToken);
@@ -42,6 +45,7 @@ public class PracticeExercisesController(IPracticeQuizService practiceQuizServic
     }
 
     [HttpPost("attempts/{attemptId:int}/submit")]
+    [RequireFeature(FeatureCodes.PracticeExercises)]
     public async Task<IActionResult> SubmitAttempt(
         int attemptId, [FromBody] SubmitPracticeExerciseAttemptRequest request, CancellationToken cancellationToken)
     {
@@ -50,11 +54,39 @@ public class PracticeExercisesController(IPracticeQuizService practiceQuizServic
     }
 
     [HttpPost("assessment-roadmap/attempts/{attemptId:int}/submit")]
-    [RequireSelfStudy]
+    [RequireFeature(FeatureCodes.PracticeExercises)]
     public async Task<IActionResult> SubmitAssessmentRoadmapAttempt(
         int attemptId, [FromBody] SubmitPracticeExerciseAttemptRequest request, CancellationToken cancellationToken)
     {
         var response = await practiceQuizService.SubmitAssessmentRoadmapAttemptAsync(attemptId, request, cancellationToken);
+        return StatusCode(response.StatusCode, response);
+    }
+
+    [HttpGet("checkpoints")]
+    [RequireFeature(FeatureCodes.PracticeExercises)]
+    public async Task<IActionResult> GetCheckpoints(
+        [FromQuery] int? topicId = null,
+        [FromQuery] int? certificateLevelId = null,
+        CancellationToken cancellationToken = default)
+    {
+        var response = await practiceQuizService.GetCheckpointsAsync(topicId, certificateLevelId, cancellationToken);
+        return StatusCode(response.StatusCode, response);
+    }
+
+    [HttpPost("checkpoints/{practiceExerciseId:int}/attempts")]
+    [RequireFeature(FeatureCodes.PracticeExercises)]
+    public async Task<IActionResult> StartCheckpointAttempt(int practiceExerciseId, CancellationToken cancellationToken)
+    {
+        var response = await practiceQuizService.StartCheckpointAttemptAsync(practiceExerciseId, cancellationToken);
+        return StatusCode(response.StatusCode, response);
+    }
+
+    [HttpPost("checkpoints/attempts/{attemptId:int}/submit")]
+    [RequireFeature(FeatureCodes.PracticeExercises)]
+    public async Task<IActionResult> SubmitCheckpointAttempt(
+        int attemptId, [FromBody] SubmitPracticeExerciseAttemptRequest request, CancellationToken cancellationToken)
+    {
+        var response = await practiceQuizService.SubmitCheckpointAttemptAsync(attemptId, request, cancellationToken);
         return StatusCode(response.StatusCode, response);
     }
 }

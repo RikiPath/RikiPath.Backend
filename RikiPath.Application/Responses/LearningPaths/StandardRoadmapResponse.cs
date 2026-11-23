@@ -14,6 +14,20 @@ public class StandardRoadmapResponse
     public int? PlacementAttemptId { get; set; }
     public string? ComparisonLevelCode { get; set; }
     public List<StandardRoadmapSkillResponse> Skills { get; set; } = [];
+
+    // Adaptive Roadmap V2 additive fields
+    public bool HasPlacementEvidence { get; set; }
+    public string PlacementDecision { get; set; } = "NOT_TAKEN";
+    public int DailyStudyMinutes { get; set; } = 30;
+    public int SrsDueTodayCount { get; set; }
+    public int DaysSinceLastStudy { get; set; }
+    public string? WorkloadAdvice { get; set; }
+    public string? AdaptiveNotice { get; set; }
+    public string? NextRecommendationReason { get; set; }
+    public string? NextActionType { get; set; }
+    public int? NextCheckpointExerciseId { get; set; }
+    public List<AdaptiveSkillProfileItemResponse> SkillProfile { get; set; } = [];
+    public List<StandardRoadmapStageResponse> Stages { get; set; } = [];
 }
 
 public class StandardRoadmapSkillResponse
@@ -39,4 +53,20 @@ public class StandardRoadmapLessonResponse
     public int KanjiCount { get; set; }
     public int VocabularyCount { get; set; }
     public int GrammarCount { get; set; }
+
+    // Adaptive Roadmap V2 additive fields
+    public int? TopicId { get; set; }
+    public string? TopicTitle { get; set; }
+    public string? Description { get; set; }
+    public int EstimatedMinutes { get; set; } = 15;
+    public int? PrerequisiteLessonId { get; set; }
+    public string? LearningObjectives { get; set; }
+    public string CompletionState { get; set; } = "NotStarted";
+    public bool IsRecommendedNext { get; set; }
+    public bool IsRemediation { get; set; }
+    public string? RecommendationReason { get; set; }
+    public double? BestPracticeScore { get; set; }
+    public int PracticeAttemptCount { get; set; }
+    public int? QuickCheckExerciseId { get; set; }
+    public int QuickCheckQuestionCount { get; set; }
 }

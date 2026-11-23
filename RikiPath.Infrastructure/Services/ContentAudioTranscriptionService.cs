@@ -33,7 +33,7 @@ public sealed class ContentAudioTranscriptionService(
         while ((count = await audio.ReadAsync(buffer, ct)) > 0)
         {
             if (buffered.Length + count > ListeningAudioFilePolicy.MaxBytes)
-                throw new ArgumentException("File MP3 tối đa 25 MB.");
+                throw new ArgumentException("File MP3 không được vượt quá 500 MB.");
             await buffered.WriteAsync(buffer.AsMemory(0, count), ct);
         }
         buffered.Position = 0;
@@ -320,6 +320,8 @@ public sealed class ContentAudioTranscriptionService(
 
     private string? NormalizeUrl(string audioUrl)
     {
+        if (Application.Helpers.AllowedMediaUrlPolicy.IsSafeLocalMediaPath(audioUrl))
+            return audioUrl.Trim();
         if (awsAudio?.TryGetContentReference(audioUrl, out var canonical) == true) return canonical;
         if (!Uri.TryCreate(audioUrl, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps ||
             !Uri.TryCreate(settings.Supabase?.Url, UriKind.Absolute, out var storage) ||

@@ -33,6 +33,8 @@ namespace RikiPath.Application.Responses.SharedBanks
         public string Structure { get; set; } = string.Empty;
         public string Explanation { get; set; } = string.Empty;
         public string ExampleSentence { get; set; } = string.Empty;
+        /// <summary>Published Vietnamese translation of <see cref="ExampleSentence"/> (null when the author did not provide one).</summary>
+        public string? ExampleSentenceMeaning { get; set; }
         public string JlptLevelName { get; set; } = string.Empty;
     }
 
@@ -61,6 +63,14 @@ namespace RikiPath.Application.Responses.SharedBanks
         public int MockTestId { get; set; }
         public string SectionTitle { get; set; } = string.Empty;
         public string? AnswerSummary { get; set; }
+        public int? QuestionBankItemId { get; set; }
+        public Guid? QuestionIdentity { get; set; }
+        public int Version { get; set; } = 1;
+        public string PublishStatus { get; set; } = "Published";
+        public string? TemplateKind { get; set; }
+        public int? PassageId { get; set; }
+        public string? PassageTitle { get; set; }
+        public string? SourceType { get; set; }
         public IReadOnlyList<QuestionBankOptionResponse> Options { get; set; } = [];
     }
 }

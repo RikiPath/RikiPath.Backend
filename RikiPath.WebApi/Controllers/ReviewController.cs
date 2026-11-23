@@ -1,9 +1,10 @@
+using System.Globalization;
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using RikiPath.Application.IServices;
 using RikiPath.Application.Requests.Reviews;
-using System.Security.Claims;
+using RikiPath.Domain.Enums;
 
 namespace RikiPath.WebApi.Controllers
 {
@@ -12,49 +13,213 @@ namespace RikiPath.WebApi.Controllers
     [Authorize(Roles = "Learner")]
     public class ReviewController(IReviewService reviewService) : ControllerBase
     {
-        /// <summary>
-        /// Lấy danh sách review hàng ngày (SM-2 queue) cho người dùng.
-        /// </summary>
-        /// <remarks>
-        /// - Màn hình sử dụng: Trang Daily Review / Flashcards của Learner.
-        /// - Luồng xử lý: Tính toán SM-2 hoặc thuật toán lặp lại cách quãng (spaced repetition) để trả về các item cần ôn; có thể đọc từ cache/DB.
-        /// - Lưu ý cho FE: Yêu cầu Bearer Token (Role = Learner). Response gồm mặt trước và đáp án; FE cần ẩn đáp án đến khi người học chọn xem.
-        /// - FE có thể giữ danh sách Items làm phiên hiện tại, chuyển sang item tiếp theo sau khi gửi kết quả.
-        /// </remarks>
-        /// <param name="cancellationToken">Token hủy request (Optional).</param>
-        /// <response code="200">Thành công: Trả về danh sách item cần review hôm nay.</response>
-        /// <response code="401">Chưa xác thực: Thiếu Bearer Token.</response>
-        /// <response code="500">Lỗi server khi tính toán queue (thuật toán SM-2).</response>
-        [HttpGet("daily-queue")]
-        public async Task<IActionResult> GetDailyQueue(CancellationToken cancellationToken)
+        [HttpGet("summary")]
+        public async Task<IActionResult> GetSummary(CancellationToken cancellationToken)
         {
-            var response = await reviewService.GetDailyReviewQueueAsync(GetCurrentUserId(), cancellationToken);
+            var response = await reviewService.GetSummaryAsync(GetCurrentUserId(), cancellationToken);
             return StatusCode(response.StatusCode, response);
         }
 
-        /// <summary>
-        /// Gửi kết quả ôn tập (answer) cho một review item.
-        /// </summary>
-        /// <remarks>
-        /// - Màn hình sử dụng: Khi người dùng trả lời 1 item trên Daily Review.
-        /// - Luồng xử lý: Cập nhật điểm/interval theo SM-2 và lưu lịch sử.
-        /// - Lưu ý cho FE: Quality nhận 1-5. Nếu ShouldRepeatInSession=true, đưa thẻ sai vào cuối hàng retry của phiên hiện tại.
-        /// </remarks>
-        /// <param name="request">SubmitReviewRequest: ReviewCardId (Required), Quality (Required numeric 1-5).</param>
-        /// <param name="cancellationToken">Token hủy request (Optional).</param>
-        /// <response code="200">Thành công: Trả về interval/gap mới và trạng thái item.</response>
-        /// <response code="400">Dữ liệu không hợp lệ: quality ngoài khoảng cho phép.</response>
-        /// <response code="401">Chưa xác thực: Thiếu Bearer Token.</response>
-        /// <response code="403">Không có quyền: item không thuộc user.</response>
-        /// <response code="500">Lỗi server khi cập nhật thuật toán SM-2.</response>
+        [HttpGet("daily-queue")]
+        public async Task<IActionResult> GetDailyQueue(
+            [FromQuery] string mode = "flip",
+            [FromQuery] string? cardType = null,
+            [FromQuery] string? jlptLevel = null,
+            [FromQuery] string? sourceType = null,
+            CancellationToken cancellationToken = default)
+        {
+            var response = await reviewService.GetDailyReviewQueueAsync(
+                GetCurrentUserId(),
+                mode,
+                cardType,
+                jlptLevel,
+                sourceType,
+                cancellationToken);
+            return StatusCode(response.StatusCode, response);
+        }
+
+        [HttpGet("cards")]
+        public async Task<IActionResult> GetCardLibrary(
+            [FromQuery] SrsCardStatus? status = null,
+            [FromQuery] SrsLearningState? learningState = null,
+            [FromQuery] string? cardType = null,
+            [FromQuery] string? jlptLevel = null,
+            [FromQuery] string? sourceType = null,
+            [FromQuery] string? search = null,
+            [FromQuery] int page = 1,
+            [FromQuery] int pageSize = 25,
+            CancellationToken cancellationToken = default)
+        {
+            var response = await reviewService.GetCardLibraryAsync(
+                GetCurrentUserId(),
+                status,
+                learningState,
+                cardType,
+                jlptLevel,
+                sourceType,
+                search,
+                page,
+                pageSize,
+                cancellationToken);
+            return StatusCode(response.StatusCode, response);
+        }
+
+        [HttpGet("cards/{cardId:int}")]
+        public async Task<IActionResult> GetCardById(int cardId, CancellationToken cancellationToken)
+        {
+            var response = await reviewService.GetCardByIdAsync(GetCurrentUserId(), cardId, cancellationToken);
+            return StatusCode(response.StatusCode, response);
+        }
+
+        [HttpGet("cards/{cardId:int}/history")]
+        public async Task<IActionResult> GetCardHistory(int cardId, CancellationToken cancellationToken)
+        {
+            var response = await reviewService.GetCardHistoryAsync(GetCurrentUserId(), cardId, cancellationToken);
+            return StatusCode(response.StatusCode, response);
+        }
+
+        [HttpPost("preview-enroll")]
+        public async Task<IActionResult> PreviewEnroll(
+            [FromBody] EnrollSrsCardRequest request,
+            CancellationToken cancellationToken)
+        {
+            var response = await reviewService.PreviewEnrollAsync(GetCurrentUserId(), request, cancellationToken);
+            return StatusCode(response.StatusCode, response);
+        }
+
+        // Feature control: suspending SRS blocks starting/adding new study, never finishing an in-progress session.
+        [RequireFeature(FeatureCodes.SrsStudy)]
+        [HttpPost("enroll")]
+        public async Task<IActionResult> EnrollCard(
+            [FromBody] EnrollSrsCardRequest request,
+            CancellationToken cancellationToken)
+        {
+            var response = await reviewService.EnrollCardAsync(GetCurrentUserId(), request, cancellationToken);
+            return StatusCode(response.StatusCode, response);
+        }
+
+        [RequireFeature(FeatureCodes.SrsStudy)]
+        [HttpPost("enroll-batch")]
+        public async Task<IActionResult> EnrollBatch(
+            [FromBody] BatchEnrollSrsCardsRequest request,
+            CancellationToken cancellationToken)
+        {
+            var response = await reviewService.BatchEnrollCardsAsync(GetCurrentUserId(), request, cancellationToken);
+            return StatusCode(response.StatusCode, response);
+        }
+
+        [HttpPut("cards/{cardId:int}")]
+        public async Task<IActionResult> UpdateCard(
+            int cardId,
+            [FromBody] UpdateSrsCardRequest request,
+            CancellationToken cancellationToken)
+        {
+            var response = await reviewService.UpdateCardAsync(GetCurrentUserId(), cardId, request, cancellationToken);
+            return StatusCode(response.StatusCode, response);
+        }
+
+        [HttpPost("cards/{cardId:int}/suspend")]
+        public async Task<IActionResult> SuspendCard(int cardId, CancellationToken cancellationToken)
+        {
+            var response = await reviewService.SuspendCardAsync(GetCurrentUserId(), cardId, cancellationToken);
+            return StatusCode(response.StatusCode, response);
+        }
+
+        [HttpPost("cards/{cardId:int}/resume")]
+        public async Task<IActionResult> ResumeCard(int cardId, CancellationToken cancellationToken)
+        {
+            var response = await reviewService.ResumeCardAsync(GetCurrentUserId(), cardId, cancellationToken);
+            return StatusCode(response.StatusCode, response);
+        }
+
+        [HttpPost("cards/{cardId:int}/restore")]
+        public async Task<IActionResult> RestoreCard(int cardId, CancellationToken cancellationToken)
+        {
+            var response = await reviewService.RestoreCardAsync(GetCurrentUserId(), cardId, cancellationToken);
+            return StatusCode(response.StatusCode, response);
+        }
+
+        [HttpDelete("cards/{cardId:int}")]
+        public async Task<IActionResult> SoftDeleteCard(int cardId, CancellationToken cancellationToken)
+        {
+            var response = await reviewService.SoftDeleteCardAsync(GetCurrentUserId(), cardId, cancellationToken);
+            return StatusCode(response.StatusCode, response);
+        }
+
+        [HttpGet("preferences")]
+        public async Task<IActionResult> GetPreferences(CancellationToken cancellationToken)
+        {
+            var response = await reviewService.GetPreferencesAsync(GetCurrentUserId(), cancellationToken);
+            return StatusCode(response.StatusCode, response);
+        }
+
+        [HttpPut("preferences")]
+        public async Task<IActionResult> UpdatePreferences(
+            [FromBody] UpdateUserSrsPreferenceRequest request,
+            CancellationToken cancellationToken)
+        {
+            var response = await reviewService.UpdatePreferencesAsync(GetCurrentUserId(), request, cancellationToken);
+            return StatusCode(response.StatusCode, response);
+        }
+
         [HttpPost("submit-result")]
-        public async Task<IActionResult> SubmitResult([FromBody] SubmitReviewRequest request, CancellationToken cancellationToken)
+        public async Task<IActionResult> SubmitResult(
+            [FromBody] SubmitReviewRequest request,
+            CancellationToken cancellationToken)
         {
             var response = await reviewService.SubmitReviewResultAsync(GetCurrentUserId(), request, cancellationToken);
             return StatusCode(response.StatusCode, response);
         }
 
+        [RequireFeature(FeatureCodes.SrsStudy)]
+        [HttpPost("sessions/start")]
+        public async Task<IActionResult> StartSession(
+            [FromBody] StartSrsSessionRequest request,
+            CancellationToken cancellationToken)
+        {
+            var response = await reviewService.StartSessionAsync(GetCurrentUserId(), request ?? new(), cancellationToken);
+            return StatusCode(response.StatusCode, response);
+        }
+
+        [HttpGet("sessions/active")]
+        public async Task<IActionResult> GetActiveSession(
+            [FromQuery] string? sessionKind = null,
+            CancellationToken cancellationToken = default)
+        {
+            var response = await reviewService.GetActiveSessionAsync(GetCurrentUserId(), sessionKind, cancellationToken);
+            return StatusCode(response.StatusCode, response);
+        }
+
+        [HttpPost("sessions/{sessionKey:guid}/finish")]
+        public async Task<IActionResult> FinishSession(Guid sessionKey, CancellationToken cancellationToken)
+        {
+            var response = await reviewService.FinishSessionAsync(GetCurrentUserId(), sessionKey, cancellationToken);
+            return StatusCode(response.StatusCode, response);
+        }
+
+        [HttpPost("sessions/{sessionKey:guid}/abandon")]
+        public async Task<IActionResult> AbandonSession(Guid sessionKey, CancellationToken cancellationToken)
+        {
+            var response = await reviewService.AbandonSessionAsync(GetCurrentUserId(), sessionKey, cancellationToken);
+            return StatusCode(response.StatusCode, response);
+        }
+
+        [HttpGet("calendar")]
+        public async Task<IActionResult> GetCalendar(
+            [FromQuery] int? year,
+            [FromQuery] int? month,
+            CancellationToken cancellationToken)
+        {
+            var utcNow = DateTime.UtcNow;
+            var response = await reviewService.GetReviewCalendarAsync(
+                GetCurrentUserId(),
+                year ?? utcNow.Year,
+                month ?? utcNow.Month,
+                cancellationToken);
+            return StatusCode(response.StatusCode, response);
+        }
+
         private int GetCurrentUserId()
-            => int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+            => int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!, CultureInfo.InvariantCulture);
     }
 }

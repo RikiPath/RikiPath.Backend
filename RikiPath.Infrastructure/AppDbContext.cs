@@ -50,7 +50,9 @@ namespace RikiPath.Infrastructure
         public DbSet<LessonGrammar> LessonGrammars { get; set; }
 
         // Personal vocabulary notebook
+        public DbSet<NotebookFolder> NotebookFolders { get; set; }
         public DbSet<LearnerNote> LearnerNotes { get; set; }
+        public DbSet<NotebookPage> NotebookPages { get; set; }
         public DbSet<LearnerNoteEntry> LearnerNoteEntries { get; set; }
         public DbSet<LearnerEssay> LearnerEssays { get; set; }
 
@@ -89,6 +91,8 @@ namespace RikiPath.Infrastructure
         public DbSet<MentorChatMessage> MentorChatMessages { get; set; }
         public DbSet<Note> Notes { get; set; }
         public DbSet<MentorAvailability> MentorAvailabilities { get; set; }
+        public DbSet<MentorTeachingProposal> MentorTeachingProposals { get; set; }
+        public DbSet<MentorTeachingProposalEvent> MentorTeachingProposalEvents { get; set; }
         public DbSet<MentorWeeklyAvailability> MentorWeeklyAvailabilities { get; set; }
         public DbSet<MentorProfile> MentorProfiles { get; set; }
         public DbSet<MentorCreditGrant> MentorCreditGrants { get; set; }
@@ -118,9 +122,13 @@ namespace RikiPath.Infrastructure
         public DbSet<AiCreditTopUp> AiCreditTopUps { get; set; }
         public DbSet<AdminAuditLog> AdminAuditLogs { get; set; }
 
-        // Spaced-repetition review queue
+        // Spaced-repetition review queue & smart learning
         public DbSet<ReviewCard> ReviewCards { get; set; }
         public DbSet<ReviewHistory> ReviewHistories { get; set; }
+        public DbSet<UserSrsPreference> UserSrsPreferences { get; set; }
+        public DbSet<LearnerHighlight> LearnerHighlights { get; set; }
+        public DbSet<SrsCardTemplate> SrsCardTemplates { get; set; }
+        public DbSet<SrsReviewSession> SrsReviewSessions { get; set; }
 
         // Notifications
         public DbSet<EmailVerification> EmailVerifications { get; set; }
@@ -130,6 +138,8 @@ namespace RikiPath.Infrastructure
 
         public DbSet<ContentAiReview> ContentAiReviews { get; set; }
         public DbSet<ContentAudioTranscription> ContentAudioTranscriptions { get; set; }
+        public DbSet<ContentPassage> ContentPassages { get; set; }
+        public DbSet<QuestionBankItem> QuestionBankItems { get; set; }
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             modelBuilder.ApplyConfiguration(new MentorWeeklyAvailabilityConfig());
@@ -156,7 +166,9 @@ namespace RikiPath.Infrastructure
             modelBuilder.ApplyConfiguration(new LessonVocabularyConfig());
             modelBuilder.ApplyConfiguration(new LessonGrammarConfig());
 
+            modelBuilder.ApplyConfiguration(new NotebookFolderConfig());
             modelBuilder.ApplyConfiguration(new LearnerNoteConfig());
+            modelBuilder.ApplyConfiguration(new NotebookPageConfig());
             modelBuilder.ApplyConfiguration(new LearnerNoteEntryConfig());
             modelBuilder.ApplyConfiguration(new LearnerEssayConfig());
 
@@ -191,6 +203,8 @@ namespace RikiPath.Infrastructure
             modelBuilder.ApplyConfiguration(new MentorChatMessageConfig());
             modelBuilder.ApplyConfiguration(new NoteConfig());
             modelBuilder.ApplyConfiguration(new MentorAvailabilityConfig());
+            modelBuilder.ApplyConfiguration(new MentorTeachingProposalConfig());
+            modelBuilder.ApplyConfiguration(new MentorTeachingProposalEventConfig());
             modelBuilder.ApplyConfiguration(new MentorProfileConfig());
             modelBuilder.ApplyConfiguration(new MentorCreditGrantConfig());
             modelBuilder.ApplyConfiguration(new MentorCreditEntryConfig());
@@ -220,6 +234,10 @@ namespace RikiPath.Infrastructure
 
             modelBuilder.ApplyConfiguration(new ReviewCardConfig());
             modelBuilder.ApplyConfiguration(new ReviewHistoryConfig());
+            modelBuilder.ApplyConfiguration(new UserSrsPreferenceConfig());
+            modelBuilder.ApplyConfiguration(new LearnerHighlightConfig());
+            modelBuilder.ApplyConfiguration(new SrsCardTemplateConfig());
+            modelBuilder.ApplyConfiguration(new SrsReviewSessionConfig());
 
             modelBuilder.ApplyConfiguration(new NotificationConfig());
             modelBuilder.ApplyConfiguration(new UserDeviceTokenConfig());
@@ -251,6 +269,8 @@ namespace RikiPath.Infrastructure
 
             modelBuilder.ApplyConfiguration(new ContentAiReviewConfig());
             modelBuilder.ApplyConfiguration(new ContentAudioTranscriptionConfig());
+            modelBuilder.ApplyConfiguration(new ContentPassageConfig());
+            modelBuilder.ApplyConfiguration(new QuestionBankItemConfig());
             modelBuilder.ApplyConfiguration(new AdminAuditLogConfig());
             modelBuilder.ApplyConfiguration(new LearnerFeedbackConfig());
         }

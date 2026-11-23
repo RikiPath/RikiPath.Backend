@@ -2,30 +2,182 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using RikiPath.Application.IServices;
 using RikiPath.Application.Requests.Notebook;
-using System.Security.Claims;
+using RikiPath.Domain.Enums;
 
 namespace RikiPath.WebApi.Controllers
 {
     [Route("api/[controller]")]
     [ApiController]
     [Authorize(Roles = "Learner")]
-    [RequireSelfStudy]
+    [RequireFeature(FeatureCodes.PersonalNotebook)]
     public class NotebookController(INotebookService notebookService) : ControllerBase
     {
-        /// <summary>
-        /// Tạo danh sách từ vựng/kanji mới cho người dùng.
-        /// </summary>
-        /// <remarks>
-        /// - Màn hình sử dụng: Trang Notebook -> Tạo danh sách mới (Create List) trong app Learner.
-        /// - Luồng xử lý: Lưu danh sách vào CSDL liên kết với user; không gọi AI.
-        /// - Lưu ý cho FE: Yêu cầu Bearer Token (Role = Learner). Trường Title là Required; Items có thể optional. Response trả nhanh.
-        /// </remarks>
-        /// <param name="request">CreateLearnerNoteRequest: Title (Required), Description (Optional), Items (Optional).</param>
-        /// <param name="cancellationToken">Token hủy request (Optional).</param>
-        /// <response code="200">Thành công: Trả về danh sách đã tạo.</response>
-        /// <response code="400">Dữ liệu không hợp lệ: thiếu Title hoặc format Items sai.</response>
-        /// <response code="401">Chưa xác thực: Thiếu Bearer Token.</response>
-        /// <response code="500">Lỗi server khi lưu danh sách.</response>
+        // =========================================================================
+        // Personal Notebook V3: Hierarchy Tree, Folders, Files, Pages, Smart Views
+        // =========================================================================
+
+        /// <summary>Lấy toàn bộ cây điều hướng Sổ tay cá nhân (Folder -> File -> Page) kèm thống kê tổng quan.</summary>
+        [HttpGet("tree")]
+        public async Task<IActionResult> GetTree(CancellationToken cancellationToken)
+        {
+            var result = await notebookService.GetTreeAsync(cancellationToken);
+            return StatusCode((int)result.StatusCode, result);
+        }
+
+        /// <summary>Lấy danh sách Thư mục của học viên hiện tại.</summary>
+        [HttpGet("folders")]
+        public async Task<IActionResult> GetFolders(CancellationToken cancellationToken)
+        {
+            var result = await notebookService.GetFoldersAsync(cancellationToken);
+            return StatusCode((int)result.StatusCode, result);
+        }
+
+        /// <summary>Tạo Thư mục ghi chú mới.</summary>
+        [HttpPost("folders")]
+        public async Task<IActionResult> CreateFolder([FromBody] CreateNotebookFolderRequest request, CancellationToken cancellationToken)
+        {
+            var result = await notebookService.CreateFolderAsync(request, cancellationToken);
+            return StatusCode((int)result.StatusCode, result);
+        }
+
+        /// <summary>Đổi tên Thư mục ghi chú (có kiểm tra ExpectedRevision khi cung cấp).</summary>
+        [HttpPut("folders/{folderId:int}")]
+        public async Task<IActionResult> UpdateFolder(int folderId, [FromBody] UpdateNotebookFolderRequest request, CancellationToken cancellationToken)
+        {
+            var result = await notebookService.UpdateFolderAsync(folderId, request, cancellationToken);
+            return StatusCode((int)result.StatusCode, result);
+        }
+
+        /// <summary>Xóa mềm Thư mục (yêu cầu cascade=true nếu bên trong còn tệp ghi chú; luôn giữ nguyên thẻ SRS).</summary>
+        [HttpDelete("folders/{folderId:int}")]
+        public async Task<IActionResult> DeleteFolder(int folderId, [FromQuery] bool cascade = false, CancellationToken cancellationToken = default)
+        {
+            var result = await notebookService.DeleteFolderAsync(folderId, cascade, cancellationToken);
+            return StatusCode((int)result.StatusCode, result);
+        }
+
+        /// <summary>Lấy chi tiết một Tệp ghi chú cùng danh sách các Trang bên trong.</summary>
+        [HttpGet("files/{fileId:int}")]
+        public async Task<IActionResult> GetFile(int fileId, CancellationToken cancellationToken)
+        {
+            var result = await notebookService.GetFileAsync(fileId, cancellationToken);
+            return StatusCode((int)result.StatusCode, result);
+        }
+
+        /// <summary>Tạo Tệp ghi chú mới bên trong một Thư mục (không yêu cầu upload tệp vật lý).</summary>
+        [HttpPost("files")]
+        public async Task<IActionResult> CreateFile([FromBody] CreateNotebookFileRequest request, CancellationToken cancellationToken)
+        {
+            var result = await notebookService.CreateFileAsync(request, cancellationToken);
+            return StatusCode((int)result.StatusCode, result);
+        }
+
+        /// <summary>Đổi tên hoặc di chuyển Tệp ghi chú sang Thư mục khác.</summary>
+        [HttpPut("files/{fileId:int}")]
+        public async Task<IActionResult> UpdateFile(int fileId, [FromBody] UpdateNotebookFileRequest request, CancellationToken cancellationToken)
+        {
+            var result = await notebookService.UpdateFileAsync(fileId, request, cancellationToken);
+            return StatusCode((int)result.StatusCode, result);
+        }
+
+        /// <summary>Xóa mềm Tệp ghi chú (yêu cầu cascade=true nếu còn trang; không xóa thẻ SRS).</summary>
+        [HttpDelete("files/{fileId:int}")]
+        public async Task<IActionResult> DeleteFile(int fileId, [FromQuery] bool cascade = false, CancellationToken cancellationToken = default)
+        {
+            var result = await notebookService.DeleteFileAsync(fileId, cascade, cancellationToken);
+            return StatusCode((int)result.StatusCode, result);
+        }
+
+        /// <summary>Lấy chi tiết Trang ghi chú (nội dung soạn thảo + mục đã lưu thuộc trang).</summary>
+        [HttpGet("pages/{pageId:int}")]
+        public async Task<IActionResult> GetPage(int pageId, CancellationToken cancellationToken)
+        {
+            var result = await notebookService.GetPageAsync(pageId, cancellationToken);
+            return StatusCode((int)result.StatusCode, result);
+        }
+
+        /// <summary>Tạo Trang ghi chú mới trong Tệp ghi chú.</summary>
+        [HttpPost("pages")]
+        public async Task<IActionResult> CreatePage([FromBody] CreateNotebookPageRequest request, CancellationToken cancellationToken)
+        {
+            var result = await notebookService.CreatePageAsync(request, cancellationToken);
+            return StatusCode((int)result.StatusCode, result);
+        }
+
+        /// <summary>Cập nhật tiêu đề, nội dung rich text (autosave), di chuyển tệp cha hoặc đồng bộ yêu thích với kiểm soát xung đột Revision.</summary>
+        [HttpPut("pages/{pageId:int}")]
+        public async Task<IActionResult> UpdatePage(int pageId, [FromBody] UpdateNotebookPageRequest request, CancellationToken cancellationToken)
+        {
+            var result = await notebookService.UpdatePageAsync(pageId, request, cancellationToken);
+            return StatusCode((int)result.StatusCode, result);
+        }
+
+        /// <summary>Bật/tắt đánh dấu yêu thích cho Trang ghi chú.</summary>
+        [HttpPatch("pages/{pageId:int}/favorite")]
+        public async Task<IActionResult> TogglePageFavorite(int pageId, [FromBody] TogglePageFavoriteRequest request, CancellationToken cancellationToken)
+        {
+            var result = await notebookService.TogglePageFavoriteAsync(pageId, request.IsFavorite, cancellationToken);
+            return StatusCode((int)result.StatusCode, result);
+        }
+
+        /// <summary>Xóa mềm Trang ghi chú (ẩn các mục đã lưu thuộc trang nhưng giữ nguyên mọi thẻ SRS đã tạo).</summary>
+        [HttpDelete("pages/{pageId:int}")]
+        public async Task<IActionResult> DeletePage(int pageId, CancellationToken cancellationToken)
+        {
+            var result = await notebookService.DeletePageAsync(pageId, cancellationToken);
+            return StatusCode((int)result.StatusCode, result);
+        }
+
+        /// <summary>Smart View: danh sách Trang yêu thích (không nhân bản dữ liệu).</summary>
+        [HttpGet("pages/favorites")]
+        public async Task<IActionResult> GetFavoritePages(CancellationToken cancellationToken)
+        {
+            var result = await notebookService.GetFavoritePagesAsync(cancellationToken);
+            return StatusCode((int)result.StatusCode, result);
+        }
+
+        /// <summary>Smart View: danh sách toàn bộ Mục đã lưu (hỗ trợ tìm kiếm, lọc loại, sắp xếp và phân trang phía server).</summary>
+        [HttpGet("saved-items")]
+        public async Task<IActionResult> GetSavedItems(
+            [FromQuery] string? search,
+            [FromQuery] string? kind,
+            [FromQuery] int? pageId,
+            [FromQuery] int? fileId,
+            [FromQuery] int? folderId,
+            [FromQuery] bool? favoriteOnly,
+            [FromQuery] string? sortBy = "recent",
+            [FromQuery] int page = 1,
+            [FromQuery] int pageSize = 24,
+            CancellationToken cancellationToken = default)
+        {
+            var result = await notebookService.GetSavedItemsAsync(search, kind, pageId, fileId, folderId, favoriteOnly, sortBy, page, pageSize, cancellationToken);
+            return StatusCode((int)result.StatusCode, result);
+        }
+
+        /// <summary>Tìm kiếm thống nhất trên Thư mục, Tệp ghi chú, Trang và Mục đã lưu.</summary>
+        [HttpGet("search")]
+        public async Task<IActionResult> Search(
+            [FromQuery] string? q,
+            [FromQuery] int limit = 20,
+            CancellationToken cancellationToken = default)
+        {
+            var result = await notebookService.SearchAsync(q, limit, cancellationToken);
+            return StatusCode((int)result.StatusCode, result);
+        }
+
+        /// <summary>Lưu nhanh đoạn văn bản/từ vựng từ Smart Text Selection vào một Trang (mặc định Sổ tay chung nếu chưa chọn).</summary>
+        [HttpPost("quick-save")]
+        public async Task<IActionResult> QuickSave([FromBody] QuickSaveNotebookRequest request, CancellationToken cancellationToken)
+        {
+            var result = await notebookService.QuickSaveAsync(request, cancellationToken);
+            return StatusCode((int)result.StatusCode, result);
+        }
+
+        // =========================================================================
+        // Backward-Compatible Endpoints (Lists & Entries & Explicit SRS Actions)
+        // =========================================================================
+
+        /// <summary>Tạo Tệp ghi chú mới (tên endpoint legacy /lists).</summary>
         [HttpPost("lists")]
         public async Task<IActionResult> CreateList([FromBody] CreateLearnerNoteRequest request, CancellationToken cancellationToken)
         {
@@ -33,18 +185,7 @@ namespace RikiPath.WebApi.Controllers
             return StatusCode((int)result.StatusCode, result);
         }
 
-        /// <summary>
-        /// Lấy danh sách notebook (vocabulary lists) của user.
-        /// </summary>
-        /// <remarks>
-        /// - Màn hình sử dụng: Notebook -> My Lists.
-        /// - Luồng xử lý: Truy vấn CSDL; có thể hỗ trợ phân trang/filters.
-        /// - Lưu ý cho FE: Yêu cầu Bearer Token. FE nên hỗ trợ pagination nếu backend trả nhiều kết quả.
-        /// </remarks>
-        /// <param name="cancellationToken">Token hủy request (Optional).</param>
-        /// <response code="200">Thành công: Trả về danh sách notebook của user.</response>
-        /// <response code="401">Chưa xác thực: Thiếu Bearer Token.</response>
-        /// <response code="500">Lỗi server khi truy vấn dữ liệu.</response>
+        /// <summary>Lấy danh sách Tệp ghi chú của học viên.</summary>
         [HttpGet("lists")]
         public async Task<IActionResult> GetMyLists(CancellationToken cancellationToken)
         {
@@ -52,23 +193,7 @@ namespace RikiPath.WebApi.Controllers
             return StatusCode((int)result.StatusCode, result);
         }
 
-        /// <summary>
-        /// Cập nhật thông tin danh sách từ vựng (title, description, items).
-        /// </summary>
-        /// <remarks>
-        /// - Màn hình sử dụng: Chỉnh sửa notebook list.
-        /// - Luồng xử lý: Cập nhật record trong CSDL; đảm bảo user sở hữu list.
-        /// - Lưu ý cho FE: Yêu cầu Bearer Token. Trường Title nếu thay đổi phải không rỗng.
-        /// </remarks>
-        /// <param name="listId">ID danh sách (Required).</param>
-        /// <param name="request">UpdateLearnerNoteRequest: Title (Optional), Items (Optional).</param>
-        /// <param name="cancellationToken">Token hủy request (Optional).</param>
-        /// <response code="200">Thành công: Danh sách đã được cập nhật.</response>
-        /// <response code="400">Dữ liệu không hợp lệ.</response>
-        /// <response code="401">Chưa xác thực: Thiếu Bearer Token.</response>
-        /// <response code="403">Không có quyền: User không sở hữu list này.</response>
-        /// <response code="404">Không tìm thấy list.</response>
-        /// <response code="500">Lỗi server khi cập nhật dữ liệu.</response>
+        /// <summary>Cập nhật Tệp ghi chú.</summary>
         [HttpPut("lists/{listId:int}")]
         public async Task<IActionResult> UpdateList(int listId, [FromBody] UpdateLearnerNoteRequest request, CancellationToken cancellationToken)
         {
@@ -76,21 +201,7 @@ namespace RikiPath.WebApi.Controllers
             return StatusCode((int)result.StatusCode, result);
         }
 
-        /// <summary>
-        /// Xóa một danh sách từ vựng của user.
-        /// </summary>
-        /// <remarks>
-        /// - Màn hình sử dụng: Chức năng xóa list trong Notebook.
-        /// - Luồng xử lý: Xóa record và entries liên quan trong CSDL; có thể soft-delete tùy cấu hình.
-        /// - Lưu ý cho FE: Yêu cầu Bearer Token. Hiển thị confirm dialog trước khi gọi API.
-        /// </remarks>
-        /// <param name="listId">ID danh sách cần xóa (Required).</param>
-        /// <param name="cancellationToken">Token hủy request (Optional).</param>
-        /// <response code="200">Thành công: Danh sách đã được xóa.</response>
-        /// <response code="401">Chưa xác thực: Thiếu Bearer Token.</response>
-        /// <response code="403">Không có quyền: User không sở hữu list này.</response>
-        /// <response code="404">Không tìm thấy list.</response>
-        /// <response code="500">Lỗi server khi xóa.</response>
+        /// <summary>Xóa mềm Tệp ghi chú.</summary>
         [HttpDelete("lists/{listId:int}")]
         public async Task<IActionResult> DeleteList(int listId, CancellationToken cancellationToken)
         {
@@ -98,21 +209,7 @@ namespace RikiPath.WebApi.Controllers
             return StatusCode((int)result.StatusCode, result);
         }
 
-        /// <summary>
-        /// Lấy các mục/entries trong một danh sách cụ thể.
-        /// </summary>
-        /// <remarks>
-        /// - Màn hình sử dụng: Hiển thị nội dung của một notebook list.
-        /// - Luồng xử lý: Truy vấn entries theo listId; có thể hỗ trợ phân trang.
-        /// - Lưu ý cho FE: Yêu cầu Bearer Token. Nếu list private, FE cần kiểm tra quyền sở hữu.
-        /// </remarks>
-        /// <param name="listId">ID danh sách (Required).</param>
-        /// <param name="cancellationToken">Token hủy request (Optional).</param>
-        /// <response code="200">Thành công: Trả về danh sách entries.</response>
-        /// <response code="401">Chưa xác thực: Thiếu Bearer Token.</response>
-        /// <response code="403">Không có quyền truy cập list này.</response>
-        /// <response code="404">Không tìm thấy list.</response>
-        /// <response code="500">Lỗi server khi truy vấn dữ liệu.</response>
+        /// <summary>Lấy các mục đã lưu thuộc một Tệp ghi chú.</summary>
         [HttpGet("lists/{listId:int}/entries")]
         public async Task<IActionResult> GetListEntries(int listId, CancellationToken cancellationToken)
         {
@@ -120,20 +217,7 @@ namespace RikiPath.WebApi.Controllers
             return StatusCode((int)result.StatusCode, result);
         }
 
-        /// <summary>
-        /// Đánh dấu từ vựng vào notebook (bookmark vocabulary).
-        /// </summary>
-        /// <remarks>
-        /// - Màn hình sử dụng: Tính năng bookmark từ vựng/kanji trong lesson hoặc search results.
-        /// - Luồng xử lý: Thêm mục vào notebook của user; không gọi AI.
-        /// - Lưu ý cho FE: Yêu cầu Bearer Token. Trường VocabularyId hoặc text là Required tuỳ request model.
-        /// </remarks>
-        /// <param name="request">BookmarkVocabularyRequest: VocabularyId (Required) hoặc Text (Required).</param>
-        /// <param name="cancellationToken">Token hủy request (Optional).</param>
-        /// <response code="200">Thành công: Item đã được thêm vào notebook.</response>
-        /// <response code="400">Dữ liệu không hợp lệ.</response>
-        /// <response code="401">Chưa xác thực: Thiếu Bearer Token.</response>
-        /// <response code="500">Lỗi server khi lưu dữ liệu.</response>
+        /// <summary>Lưu Từ vựng từ ngân hàng chung vào Sổ tay (chỉ thêm SRS khi EnrollSrs=true).</summary>
         [HttpPost("bookmark/vocabulary")]
         public async Task<IActionResult> BookmarkVocabulary([FromBody] BookmarkVocabularyRequest request, CancellationToken cancellationToken)
         {
@@ -141,20 +225,7 @@ namespace RikiPath.WebApi.Controllers
             return StatusCode((int)result.StatusCode, result);
         }
 
-        /// <summary>
-        /// Đánh dấu (bookmark) 1 Kanji vào notebook.
-        /// </summary>
-        /// <remarks>
-        /// - Màn hình sử dụng: Chức năng bookmark Kanji trong bài học hoặc tra cứu Kanji.
-        /// - Luồng xử lý: Thêm Kanji vào notebook user; có thể lưu thông tin JLPT level.
-        /// - Lưu ý cho FE: Yêu cầu Bearer Token. Trường KanjiId hoặc Character là Required tuỳ model.
-        /// </remarks>
-        /// <param name="request">BookmarkKanjiRequest: KanjiId (Required) hoặc Character (Required).</param>
-        /// <param name="cancellationToken">Token hủy request (Optional).</param>
-        /// <response code="200">Thành công: Kanji đã được bookmark.</response>
-        /// <response code="400">Dữ liệu không hợp lệ.</response>
-        /// <response code="401">Chưa xác thực: Thiếu Bearer Token.</response>
-        /// <response code="500">Lỗi server khi lưu dữ liệu.</response>
+        /// <summary>Lưu Kanji từ ngân hàng chung vào Sổ tay (chỉ thêm SRS khi EnrollSrs=true).</summary>
         [HttpPost("bookmark/kanji")]
         public async Task<IActionResult> BookmarkKanji([FromBody] BookmarkKanjiRequest request, CancellationToken cancellationToken)
         {
@@ -162,20 +233,7 @@ namespace RikiPath.WebApi.Controllers
             return StatusCode((int)result.StatusCode, result);
         }
 
-        /// <summary>
-        /// Đánh dấu một điểm ngữ pháp vào notebook.
-        /// </summary>
-        /// <remarks>
-        /// - Màn hình sử dụng: Chức năng bookmark grammar point trong lesson.
-        /// - Luồng xử lý: Thêm record liên kết user-grammar vào CSDL.
-        /// - Lưu ý cho FE: Yêu cầu Bearer Token. Gọi nhanh, trả status ngay.
-        /// </remarks>
-        /// <param name="grammarPointId">ID điểm ngữ pháp (Required).</param>
-        /// <param name="cancellationToken">Token hủy request (Optional).</param>
-        /// <response code="200">Thành công: Grammar point đã được bookmark.</response>
-        /// <response code="400">Dữ liệu không hợp lệ.</response>
-        /// <response code="401">Chưa xác thực: Thiếu Bearer Token.</response>
-        /// <response code="500">Lỗi server khi lưu dữ liệu.</response>
+        /// <summary>Thêm trực tiếp một điểm ngữ pháp vào hàng chờ ôn tập SRS.</summary>
         [HttpPost("bookmark/grammar/{grammarPointId:int}")]
         public async Task<IActionResult> BookmarkGrammar(int grammarPointId, CancellationToken cancellationToken)
         {
@@ -183,23 +241,7 @@ namespace RikiPath.WebApi.Controllers
             return StatusCode((int)result.StatusCode, result);
         }
 
-        /// <summary>
-        /// Thêm mục ghi chú thủ công vào notebook.
-        /// </summary>
-        /// <remarks>
-        /// - Màn hình sử dụng: Chức năng thêm note/manual entry trong Notebook.
-        /// - Luồng xử lý: Kiểm tra ownership của LearnerNote, sau đó lưu entry và ReviewCard trong cùng một transaction.
-        /// - Lưu ý cho FE: LearnerNoteId, Word và Meaning là bắt buộc. Retry cùng nội dung trả lại entry hiện có.
-        /// </remarks>
-        /// <param name="request">AddManualEntryRequest: LearnerNoteId, Word, Meaning (Required); Reading, Note (Optional).</param>
-        /// <param name="cancellationToken">Token hủy request (Optional).</param>
-        /// <response code="200">Retry thành công: Trả lại entry giống hệt đã tồn tại.</response>
-        /// <response code="201">Thành công: Entry và ReviewCard đã được tạo.</response>
-        /// <response code="400">Dữ liệu không hợp lệ.</response>
-        /// <response code="401">Chưa xác thực: Thiếu Bearer Token.</response>
-        /// <response code="403">Không có quyền: Learner không sở hữu danh sách.</response>
-        /// <response code="404">Không tìm thấy danh sách.</response>
-        /// <response code="500">Lỗi server khi lưu note.</response>
+        /// <summary>Thêm mục đã lưu vào Tệp / Trang ghi chú.</summary>
         [HttpPost("entries")]
         public async Task<IActionResult> AddManualEntry([FromBody] AddManualEntryRequest request, CancellationToken cancellationToken)
         {
@@ -207,20 +249,15 @@ namespace RikiPath.WebApi.Controllers
             return StatusCode((int)result.StatusCode, result);
         }
 
-        /// <summary>
-        /// Cập nhật nội dung cá nhân hoặc chuyển mục ghi chú sang danh sách (note page) khác của Learner.
-        /// </summary>
+        /// <summary>Cập nhật nội dung mục đã lưu hoặc di chuyển mục sang trang ghi chú khác.</summary>
         [HttpPut("entries/{noteEntryId:int}")]
-        public async Task<IActionResult> UpdateEntry(
-            int noteEntryId, [FromBody] UpdateNotebookEntryRequest request, CancellationToken cancellationToken)
+        public async Task<IActionResult> UpdateEntry(int noteEntryId, [FromBody] UpdateNotebookEntryRequest request, CancellationToken cancellationToken)
         {
             var result = await notebookService.UpdateEntryAsync(noteEntryId, request, cancellationToken);
             return StatusCode((int)result.StatusCode, result);
         }
 
-        /// <summary>
-        /// Đưa một mục trong sổ tay vào hàng chờ ôn tập SRS (nếu chưa có thẻ SRS, chống tạo trùng).
-        /// </summary>
+        /// <summary>Chủ động đưa một mục đã lưu từ Sổ tay vào hàng chờ ôn tập SRS.</summary>
         [HttpPost("entries/{noteEntryId:int}/srs")]
         public async Task<IActionResult> EnrollEntryToSrs(int noteEntryId, CancellationToken cancellationToken)
         {
@@ -228,21 +265,7 @@ namespace RikiPath.WebApi.Controllers
             return StatusCode((int)result.StatusCode, result);
         }
 
-        /// <summary>
-        /// Xóa một mục ghi chú trong notebook.
-        /// </summary>
-        /// <remarks>
-        /// - Màn hình sử dụng: Chức năng xóa note trong Notebook.
-        /// - Luồng xử lý: Kiểm tra ownership qua LearnerNote, sau đó xóa ReviewCard và entry trong cùng một transaction.
-        /// - Lưu ý cho FE: Yêu cầu Bearer Token. Hiển thị confirm trước khi gọi.
-        /// </remarks>
-        /// <param name="noteEntryId">ID mục cần xóa (Required).</param>
-        /// <param name="cancellationToken">Token hủy request (Optional).</param>
-        /// <response code="200">Thành công: Entry đã được xóa.</response>
-        /// <response code="401">Chưa xác thực: Thiếu Bearer Token.</response>
-        /// <response code="403">Không có quyền: User không sở hữu entry.</response>
-        /// <response code="404">Không tìm thấy entry.</response>
-        /// <response code="500">Lỗi server khi xóa.</response>
+        /// <summary>Xóa mềm mục đã lưu khỏi Sổ tay (không tự xóa thẻ SRS đã tạo).</summary>
         [HttpDelete("entries/{noteEntryId:int}")]
         public async Task<IActionResult> RemoveEntry(int noteEntryId, CancellationToken cancellationToken)
         {

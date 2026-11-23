@@ -21,7 +21,7 @@ namespace RikiPath.WebApi.Controllers
         {
             ".jpg", ".jpeg", ".png", ".webp", ".gif",
             ".pdf", ".mp3", ".wav", ".m4a", ".ogg", ".webm", ".mp4",
-            ".xlsx", ".xls", ".csv", ".txt"
+            ".xlsx", ".xls", ".csv", ".txt", ".docx", ".doc"
         };
 
         /// <summary>
@@ -45,6 +45,7 @@ namespace RikiPath.WebApi.Controllers
 
             await using var stream = file.OpenReadStream();
             if (transcriptions is not null && claims is not null &&
+                fileStorageService is not LocalDevMediaStorageService &&
                 (User.IsInRole("ContentAuthor") || User.IsInRole("Admin")) &&
                 ext.Equals(".mp3", StringComparison.OrdinalIgnoreCase))
             {
@@ -84,6 +85,23 @@ namespace RikiPath.WebApi.Controllers
                 var failure = AwsAudioUploadErrors.Create<UploadedFileResult>(ex, logger);
                 return StatusCode(failure.StatusCode, failure);
             }
+        }
+
+        /// <summary>
+        /// Đọc tệp media cục bộ chỉ trong chế độ Development LocalDevMediaStorage.
+        /// </summary>
+        [HttpGet("local/{folder}/{fileName}")]
+        [AllowAnonymous]
+        public IActionResult GetLocalMedia(string folder, string fileName)
+        {
+            if (fileStorageService is not LocalDevMediaStorageService localDev ||
+                !localDev.TryOpenPublicMedia(folder, fileName, out var stream, out var contentType) ||
+                stream is null)
+            {
+                return NotFound();
+            }
+
+            return File(stream, contentType, enableRangeProcessing: true);
         }
 
         /// <summary>

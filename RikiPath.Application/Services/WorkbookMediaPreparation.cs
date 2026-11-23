@@ -2,61 +2,30 @@ using RikiPath.Application.Helpers;
 
 namespace RikiPath.Application.Services;
 
-/// <summary>Resolves local media references before any sheet handler creates an import payload.</summary>
-public sealed class WorkbookMediaPreparation(
-    Func<string, CancellationToken, Task<string>>? audio,
-    Func<string, CancellationToken, Task<string>>? images)
+/// <summary>Validates media references without writing to storage during preview.</summary>
+public sealed class WorkbookMediaPreparation
 {
-    private readonly Dictionary<(bool Audio, string Source), string> uploaded = new();
-    private readonly Dictionary<(bool Audio, string Source), string> failed = new();
     private static readonly string[] Columns = ["AudioUrl", "ImageUrl", "StrokeOrderImageUrl", "ExerciseImageUrl",
         "Option1ImageUrl", "Option2ImageUrl", "Option3ImageUrl", "Option4ImageUrl"];
 
-    public async Task PrepareAsync(IReadOnlyList<ExcelRow> rows, CancellationToken ct)
+    public Task PrepareAsync(IReadOnlyList<ExcelRow> rows, CancellationToken ct)
     {
         foreach (var row in rows)
         {
             ValidateHostedMediaUrls(row);
-        foreach (var column in Columns)
-        {
-            ct.ThrowIfCancellationRequested();
-            var isAudio = column == "AudioUrl";
-            var resolve = isAudio ? audio : images;
-            if (resolve is null) continue;
-            var stem = column[..^3]; // Audio, Image, Option1Image, ...
-            var source = new[] { row.Get(column), column == "ImageUrl" ? row.Get("QuestionImageUrl") : null,
-                row.Get(stem + "FileName"), row.Get(stem + "File"), row.Get(stem + "Path") }
-                .FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim().Trim('"');
-            if (string.IsNullOrWhiteSpace(source)) continue;
-            var directory = new[] { row.Get(stem + "Directory"), row.Get(stem + "Folder"),
-                isAudio ? null : row.Get("ImageDirectory"), isAudio ? null : row.Get("ImageFolder") }
-                .FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
-            if (!string.IsNullOrWhiteSpace(directory) && !Path.IsPathFullyQualified(source) &&
-                !Uri.TryCreate(source, UriKind.Absolute, out _))
-                source = directory.Trim().Trim('"').TrimEnd('/', '\\') + "/" + source;
-            if (!isAudio && Uri.TryCreate(source, UriKind.Absolute, out var uri) && uri.Scheme is "https" or "http")
+            foreach (var column in Columns)
             {
-                row.Fields[ExcelSheetReader.Normalize(column)] = source;
-                continue;
-            }
-            var key = (isAudio, source);
-            if (failed.TryGetValue(key, out var error)) { row.MediaImportErrors.Add(column + ": " + error); continue; }
-            try
-            {
-                if (!uploaded.TryGetValue(key, out var url))
-                {
-                    url = await resolve(source, ct);
-                    uploaded[key] = url;
-                }
-                row.Fields[ExcelSheetReader.Normalize(column)] = url;
-            }
-            catch (InvalidDataException ex)
-            {
-                failed[key] = ex.Message;
-                row.MediaImportErrors.Add(column + ": " + ex.Message);
+                ct.ThrowIfCancellationRequested();
+                var stem = column[..^3];
+                var source = new[] { row.Get(column), column == "ImageUrl" ? row.Get("QuestionImageUrl") : null,
+                    row.Get(stem + "FileName"), row.Get(stem + "File"), row.Get(stem + "Path") }
+                    .FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim().Trim('"');
+                if (string.IsNullOrWhiteSpace(source)) continue;
+                if (!IsAllowedStorageUrl(source) && !row.MediaImportErrors.Any(error => error.StartsWith(column + ":", StringComparison.OrdinalIgnoreCase)))
+                    row.MediaImportErrors.Add(column + ": cần URL media hợp lệ đã tải lên storage trước khi xem trước.");
             }
         }
-        }
+        return Task.CompletedTask;
     }
 
     private static void ValidateHostedMediaUrls(ExcelRow row)
@@ -64,19 +33,17 @@ public sealed class WorkbookMediaPreparation(
         foreach (var field in row.Fields)
         {
             var key = field.Key.ToLowerInvariant();
-            if (!key.EndsWith("imageurl", StringComparison.Ordinal) && !key.EndsWith("videourl", StringComparison.Ordinal)) continue;
+            if (!key.EndsWith("imageurl", StringComparison.Ordinal) && !key.EndsWith("videourl", StringComparison.Ordinal)
+                && !key.EndsWith("audiourl", StringComparison.Ordinal)) continue;
             var value = field.Value?.Trim();
             if (string.IsNullOrWhiteSpace(value)) continue;
-            if (!Uri.TryCreate(value, UriKind.Absolute, out var uri) ||
-                uri.Scheme is not ("http" or "https"))
+            if (!IsAllowedStorageUrl(value))
             {
-                row.MediaImportErrors.Add(field.Key + " phải là URL http/https.");
-                continue;
+                row.MediaImportErrors.Add(field.Key + " phải là URL media hợp lệ trên storage được phép.");
             }
-            var host = uri.Host.TrimEnd('.').ToLowerInvariant();
-            if (host != "supabase.co" && !host.EndsWith(".supabase.co", StringComparison.Ordinal) &&
-                host != "amazonaws.com" && !host.EndsWith(".amazonaws.com", StringComparison.Ordinal))
-                row.MediaImportErrors.Add(field.Key + " phải là URL file trên Supabase Storage hoặc Amazon S3.");
         }
     }
+
+    private static bool IsAllowedStorageUrl(string value)
+        => AllowedMediaUrlPolicy.IsApprovedMediaUrl(value);
 }

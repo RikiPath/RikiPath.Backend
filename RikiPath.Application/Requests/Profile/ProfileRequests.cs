@@ -41,6 +41,12 @@ namespace RikiPath.Application.Requests.Profile
         public bool Confirmed { get; set; }
     }
 
+    public class SetRoadmapModeRequest
+    {
+        [Required]
+        public string Mode { get; set; } = "STANDARD";
+    }
+
     public class SetLearningGoalRequest
     {
         public int CurrentStudyLevelId { get; set; }

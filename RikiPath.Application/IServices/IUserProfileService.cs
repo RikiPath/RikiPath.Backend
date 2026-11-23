@@ -19,6 +19,8 @@ namespace RikiPath.Application.IServices
 
         Task<ApiResponse<UserProfileResponse>> SetStudyLevelAsync(SetStudyLevelRequest request, CancellationToken cancellationToken);
 
+        Task<ApiResponse<UserProfileResponse>> SetRoadmapModeAsync(SetRoadmapModeRequest request, CancellationToken cancellationToken);
+
         Task<ApiResponse<UserProfileResponse>> SetLearningGoalAsync(SetLearningGoalRequest request, CancellationToken cancellationToken);
 
         Task<ApiResponse<UserProfileResponse>> UpdateNotificationSettingsAsync(UpdateNotificationSettingsRequest request, CancellationToken cancellationToken);

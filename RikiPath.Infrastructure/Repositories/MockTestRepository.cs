@@ -40,6 +40,9 @@ namespace RikiPath.Infrastructure.Repositories
                 .Include(x => x.Sections.Where(s => !s.IsDeleted))
                     .ThenInclude(s => s.Questions.Where(q => !q.IsDeleted))
                     .ThenInclude(q => q.Options.Where(o => !o.IsDeleted))
+                .Include(x => x.Sections.Where(s => !s.IsDeleted))
+                    .ThenInclude(s => s.Questions.Where(q => !q.IsDeleted))
+                    .ThenInclude(q => q.Passage)
                 .AsSplitQuery()
                 .FirstOrDefaultAsync(x => x.Id == practiceTestId, cancellationToken);
 
@@ -52,6 +55,9 @@ namespace RikiPath.Infrastructure.Repositories
                 .Include(x => x.Sections.Where(s => !s.IsDeleted))
                     .ThenInclude(s => s.Questions.Where(q => !q.IsDeleted))
                     .ThenInclude(q => q.Options.Where(o => !o.IsDeleted))
+                .Include(x => x.Sections.Where(s => !s.IsDeleted))
+                    .ThenInclude(s => s.Questions.Where(q => !q.IsDeleted))
+                    .ThenInclude(q => q.Passage)
                 .AsSplitQuery()
                 .OrderBy(x => x.Id)
                 .ToListAsync(cancellationToken);

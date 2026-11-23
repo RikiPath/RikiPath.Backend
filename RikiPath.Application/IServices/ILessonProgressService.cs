@@ -1,6 +1,7 @@
 using RikiPath.Application.Requests.Lessons;
 using RikiPath.Application.Responses;
 using RikiPath.Application.Responses.Lessons;
+using RikiPath.Application.Responses.Reviews;
 
 namespace RikiPath.Application.IServices
 {
@@ -11,6 +12,10 @@ namespace RikiPath.Application.IServices
             CancellationToken cancellationToken);
 
         Task<ApiResponse<LessonDetailResponse>> GetLessonDetailAsync(int lessonId, CancellationToken cancellationToken);
+
+        Task<ApiResponse<LessonDetailResponse>> RecordInteractionAsync(int lessonId, CancellationToken cancellationToken);
+
+        Task<ApiResponse<List<SrsSuggestedCardResponse>>> GetLessonSrsSuggestionsAsync(int lessonId, CancellationToken cancellationToken);
 
         /// <summary>
         /// Lưu vị trí phát video hiện tại (resume), tự tính lại % tiến độ, và tự động đánh dấu

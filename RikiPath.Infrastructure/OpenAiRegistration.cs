@@ -25,6 +25,7 @@ public static class OpenAiRegistration
         services.AddScoped<IAiEssayGradingClient, OpenAiEssayGradingClient>();
         services.AddScoped<IAiContentReviewClient, OpenAiContentReviewClient>();
         services.AddScoped<IAiOcrClient, OpenAiOcrClient>();
+        services.AddScoped<IAiTranslationClient, OpenAiTranslationClient>();
         services.AddScoped<ISpeechRecognitionClient, AwsAudioTranscriptionClient>();
         return services;
     }

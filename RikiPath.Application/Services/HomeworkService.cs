@@ -1,11 +1,14 @@
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
+using RikiPath.Application.EmailTemplates;
+using RikiPath.Application.Helpers;
 using RikiPath.Application.IClients;
 using RikiPath.Application.IServices;
 using RikiPath.Application.Requests.Homework;
 using RikiPath.Application.Responses;
 using RikiPath.Application.Responses.Homework;
 using RikiPath.Application.Responses.Lessons;
+using RikiPath.Domain;
 using RikiPath.Domain.Entities;
 using RikiPath.Domain.Enums;
 using System.Net;
@@ -22,7 +25,10 @@ public sealed partial class HomeworkService(
     IFileStorageService? storage = null,
     IAiEssayGradingClient? grader = null,
     IAiOcrClient? ocr = null,
-    IMentorGroupPolicyService? groupPolicies = null)
+    IMentorGroupPolicyService? groupPolicies = null,
+    IEmailService? emailService = null,
+    IEmailTemplateService? emailTemplates = null,
+    AppSettings? appSettings = null)
 {
     private static readonly TimeSpan VietnamOffset = TimeSpan.FromHours(7);
     private static readonly string[] SupportedLevels = ["N5", "N4", "N3", "N2", "N1"];
@@ -67,11 +73,11 @@ public sealed partial class HomeworkService(
             .Select(lesson => new HomeworkLesson(lesson.Id, lesson.Title, lesson.CertificateLevel.Code,
                 lesson.LanguageSkill.Name)).ToListAsync(ct);
         var lessonIds = items.Select(lesson => lesson.Id).ToArray();
-        var exercises = await UsableExercises().Where(exercise => lessonIds.Contains(exercise.LessonId))
+        var exercises = await UsableExercises().Where(exercise => exercise.LessonId.HasValue && lessonIds.Contains(exercise.LessonId.Value))
             .OrderBy(exercise => exercise.SortOrder).ThenBy(exercise => exercise.Id)
             .Select(exercise => new
             {
-                exercise.LessonId,
+                LessonId = exercise.LessonId!.Value,
                 Item = new HomeworkExercise(exercise.Id,
                 exercise.Title, exercise.Description, exercise.Questions!.Count(question => !question.IsDeleted), null)
             })
@@ -163,7 +169,7 @@ public sealed partial class HomeworkService(
             .Select(exercise => new { exercise.Id, exercise.LessonId }).ToListAsync(ct);
         if (selectedExercises.Count != exerciseIds.Length)
             return (ApiResponse<int>.Fail("Có bài luyện tập chưa sẵn sàng hoặc không tồn tại."), null, [], []);
-        lessonIds = lessonIds.Union(selectedExercises.Select(exercise => exercise.LessonId)).ToList();
+        lessonIds = lessonIds.Union(selectedExercises.Where(exercise => exercise.LessonId.HasValue).Select(exercise => exercise.LessonId!.Value)).ToList();
         if (await VisibleLessons().CountAsync(lesson => lessonIds.Contains(lesson.Id), ct) != lessonIds.Count)
             return (ApiResponse<int>.Fail("Có bài học không còn khả dụng."), null, [], []);
         if (lessonIds.Count == 0 && string.IsNullOrWhiteSpace(request.Instructions))
@@ -207,7 +213,7 @@ public sealed partial class HomeworkService(
             query = query.Where(item => item.CohortId == cohortId.Value);
         var rows = await query.AsNoTracking().OrderByDescending(item => item.CreatedDate)
             .ThenByDescending(item => item.Id)
-            .Include(item => item.Learner).Include(item => item.Mentor)
+            .Include(item => item.Learner).Include(item => item.Mentor).Include(item => item.Cohort)
             .Include(item => item.HomeworkAssignmentLessons).ThenInclude(link => link.Lesson).ThenInclude(lesson => lesson.CertificateLevel)
             .Include(item => item.HomeworkAssignmentLessons).ThenInclude(link => link.Lesson).ThenInclude(lesson => lesson.LanguageSkill)
             .Include(item => item.Exercises).ThenInclude(link => link.PracticeExercise)
@@ -253,7 +259,9 @@ public sealed partial class HomeworkService(
             item.PublishedFeedbackAtUtc.HasValue
                 ? new HomeworkPublishedGradeView(item.Passed, item.MentorScore, item.MentorFeedback, item.PublishedFeedbackAtUtc.Value, item.PublishedByMentorId)
                 : null,
-            item.MentorBookingId), item, user.Role)).ToList();
+            item.MentorBookingId,
+            StudyCourseId: item.StudyCourseId,
+            CohortName: item.Cohort?.Name), item, user.Role)).ToList();
     }
 
     public async Task<ApiResponse<LessonDetailResponse>> GetAssignedLessonAsync(int assignmentId, int lessonId, CancellationToken ct)

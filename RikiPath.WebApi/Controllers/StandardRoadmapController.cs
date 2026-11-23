@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using RikiPath.Application.IServices;
+using RikiPath.Domain.Enums;
 
 namespace RikiPath.WebApi.Controllers;
 
@@ -13,14 +14,17 @@ public sealed class StandardRoadmapController(
     /// <summary>Lộ trình JLPT tiêu chuẩn từ cấp độ Learner tự chọn; không gọi AI và không yêu cầu Placement.</summary>
     /// <remarks>Danh sách rỗng là trạng thái nội dung hợp lệ. Tiến độ lấy từ LessonProgress của JWT owner.</remarks>
     [HttpGet]
+    [RequireFeature(FeatureCodes.StandardRoadmap)]
     public async Task<IActionResult> Get(CancellationToken cancellationToken)
     {
         var result = await service.GetAsync(cancellationToken);
         return StatusCode((int)result.StatusCode, result);
     }
 
-    /// <summary>Lộ trình tự học theo điểm từng kỹ năng của bài đánh giá gần nhất.</summary>
+    /// <summary>Lộ trình tự học thích ứng theo mục tiêu, điểm mạnh/yếu từng kỹ năng và tiến độ học tập.</summary>
     [HttpGet("assessment")]
+    [HttpGet("adaptive")]
+    [RequireFeature(FeatureCodes.StandardRoadmap)]
     public async Task<IActionResult> GetAssessmentRoadmap(CancellationToken cancellationToken)
     {
         var result = await service.GetAssessmentRoadmapAsync(cancellationToken);
@@ -28,7 +32,7 @@ public sealed class StandardRoadmapController(
     }
 
     [HttpGet("assessment/lessons/{lessonId:int}")]
-    [RequireSelfStudy]
+    [RequireFeature(FeatureCodes.LessonsContent)]
     public async Task<IActionResult> GetAssessmentLesson(int lessonId, CancellationToken cancellationToken)
     {
         var access = await service.CheckAssessmentLessonAsync(lessonId, cancellationToken);
@@ -39,7 +43,7 @@ public sealed class StandardRoadmapController(
     }
 
     [HttpPost("assessment/lessons/{lessonId:int}/complete")]
-    [RequireSelfStudy]
+    [RequireFeature(FeatureCodes.LessonsContent)]
     public async Task<IActionResult> CompleteAssessmentLesson(int lessonId, CancellationToken cancellationToken)
     {
         var access = await service.CheckAssessmentLessonAsync(lessonId, cancellationToken);
