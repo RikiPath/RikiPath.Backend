@@ -26,6 +26,7 @@ public sealed partial class HomeworkService(
     IAiEssayGradingClient? grader = null,
     IAiOcrClient? ocr = null,
     IMentorGroupPolicyService? groupPolicies = null,
+    ISpeechRecognitionClient? speechRecognition = null,
     IEmailService? emailService = null,
     IEmailTemplateService? emailTemplates = null,
     AppSettings? appSettings = null)
@@ -358,6 +359,9 @@ public sealed partial class HomeworkService(
             {
                 existing.TextContent = string.IsNullOrEmpty(text) ? null : text;
                 existing.FileUrl = string.IsNullOrEmpty(link) ? null : link;
+                existing.SelectedOptionsJson = request.SelectedOptions is null
+                    ? null
+                    : JsonSerializer.Serialize(request.SelectedOptions);
                 if (privateScanReference is not null) existing.PrivateScanReference = privateScanReference;
                 existing.SubmittedAt = nowUtc;
                 existing.LastRevisedAtUtc = nowUtc;
@@ -380,6 +384,9 @@ public sealed partial class HomeworkService(
                 LessonId = assignment.HomeworkAssignmentLessons.Select(item => (int?)item.LessonId).Order().FirstOrDefault(),
                 TextContent = string.IsNullOrEmpty(text) ? null : text,
                 FileUrl = string.IsNullOrEmpty(link) ? null : link,
+                SelectedOptionsJson = request.SelectedOptions is null
+                    ? null
+                    : JsonSerializer.Serialize(request.SelectedOptions),
                 PrivateScanReference = privateScanReference,
                 SubmittedAt = nowUtc,
                 RevisionCount = 1
@@ -508,7 +515,8 @@ public sealed partial class HomeworkService(
 
     private static HomeworkSubmissionDetail ToSubmission(HomeworkSubmission submission) =>
         new(submission.Id, submission.TextContent, submission.FileUrl, submission.SubmittedAt, submission.RevisionCount,
-            submission.LastRevisedAtUtc, ScanReference(submission) is not null, PublishedGrade(submission.GradingResult));
+            submission.LastRevisedAtUtc, ScanReference(submission) is not null, PublishedGrade(submission.GradingResult),
+            submission.PrivateAudioReference is not null, ReadSelectedOptions(submission.SelectedOptionsJson));
 
     private static string FullName(UserAccount user) => $"{user.FirstName} {user.LastName}".Trim();
     private static double? Percent(int count, int total) => total == 0 ? null : Math.Round(count * 100d / total, 2);

@@ -5,6 +5,7 @@ using RikiPath.Application.IClients;
 using RikiPath.Application.IServices;
 using RikiPath.Application.Requests.ContentAuthoring;
 using RikiPath.Application.Responses;
+using RikiPath.Application.Responses.Content;
 using RikiPath.Application.Responses.ContentAuthoring;
 using RikiPath.Domain.Entities;
 using RikiPath.Domain.Enums;
@@ -2015,6 +2016,28 @@ namespace RikiPath.Application.Services
             if (string.IsNullOrWhiteSpace(skillName)) return false;
             var s = skillName.ToLowerInvariant();
             return s.Contains("listen") || s.Contains("nghe") || s.Contains("聴");
+        }
+
+        private static MockQuestionPayloadResponse ToMockQuestionPayload(ChoiceQuestionDraft question, int sortOrder)
+        {
+            JsonElement? interaction = string.IsNullOrWhiteSpace(question.AudioScript)
+                ? null
+                : JsonSerializer.SerializeToElement(new { transcript = question.AudioScript.Trim() }, JsonOpts);
+
+            return new MockQuestionPayloadResponse
+            {
+                SortOrder = sortOrder,
+                QuestionText = question.QuestionText.Trim(),
+                QuestionType = "SingleChoice",
+                InteractionData = interaction,
+                Explanation = question.Explanation.Trim(),
+                Options = question.Options.Select((option, index) => new ImportOptionPayloadResponse
+                {
+                    SortOrder = index + 1,
+                    OptionText = option.Text.Trim(),
+                    IsCorrect = option.IsCorrect
+                }).ToList()
+            };
         }
 
         private static bool IsKanaOnly(string text) =>

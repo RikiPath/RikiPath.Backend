@@ -192,8 +192,47 @@ public sealed partial class HomeworkService
                     && value.ValueKind == JsonValueKind.String) transcription = value.GetString();
                 text = transcription;
             }
-            if (string.IsNullOrWhiteSpace(text) || text.Length > 20000)
+            // Bài nói được lưu riêng trong AWS. Chỉ chuyển thành chữ khi mentor thực sự
+            // yêu cầu AI chấm, sau đó dùng chính bản chép này làm dữ liệu đầu vào.
+            if (definition?.Type == SpeakingHomework && string.IsNullOrWhiteSpace(text) &&
+                !string.IsNullOrWhiteSpace(submission.PrivateAudioReference))
+            {
+                if (speechRecognition is null)
+                    return await DraftUnavailableAsync(assignment, "Dịch vụ chép lời bài nói chưa sẵn sàng. Mentor có thể chấm trực tiếp.",
+                        HttpStatusCode.ServiceUnavailable, ct);
+                string? transcribedText;
+                try
+                {
+                    transcribedText = (await speechRecognition.TranscribeFromUrlAsync(submission.PrivateAudioReference, ct))
+                        .TranscribedText?.Trim();
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception)
+                {
+                    return await DraftUnavailableAsync(assignment,
+                        "Chưa chép được bản thu âm tiếng Nhật. Mentor có thể xem bản thu và chấm trực tiếp.",
+                        HttpStatusCode.BadGateway, ct);
+                }
+                transcription = transcribedText;
+                text = transcribedText;
+            }
+
+            var quizErrors = BuildQuizErrors(assignment.Title, definition, submission.SelectedOptionsJson);
+            var quizScore = definition?.Type == MultipleChoiceHomework && definition.Questions.Length > 0
+                ? new QuizScore(Math.Round((definition.Questions.Length - quizErrors.Count) * 100d / definition.Questions.Length, 2), definition.Level)
+                : null;
+
+            if (definition?.Type != MultipleChoiceHomework && (string.IsNullOrWhiteSpace(text) || text.Length > 20000))
                 return await DraftUnavailableAsync(assignment, "Chưa có phần chữ để AI chấm. Mentor có thể xem bài nộp và chấm trực tiếp.", HttpStatusCode.BadRequest, ct);
+            if (definition?.Type == MultipleChoiceHomework && quizScore is null)
+                return await DraftUnavailableAsync(assignment, "Đề trắc nghiệm chưa có đáp án chuẩn để chấm.", HttpStatusCode.UnprocessableEntity, ct);
+
+            if (text is not null && Encoding.UTF8.GetByteCount(text) > MaxGradingInputBytes)
+                return await DraftUnavailableAsync(assignment, "Nội dung bài nộp vượt giới hạn AI chấm. Hãy rút gọn rồi nộp lại.",
+                    HttpStatusCode.BadRequest, ct);
 
             var levels = new List<string>();
             if (!string.IsNullOrWhiteSpace(jlptLevel)) levels.Add(jlptLevel.Trim().ToUpperInvariant());
@@ -207,17 +246,33 @@ public sealed partial class HomeworkService
                 Text = text,
                 WritingLevels = levels,
                 Rubrics = levels.Where(HomeworkRubrics.ContainsKey).Distinct().ToDictionary(l => l, l => HomeworkRubrics[l]),
-                MentorPrompt = mentorPrompt?.Trim()
+                MentorPrompt = mentorPrompt?.Trim(),
+                QuizScore = quizScore,
+                QuizErrors = quizErrors,
+                AuthoredQuestions = definition?.Type == MultipleChoiceHomework
+                    ? definition.Questions.Select((question, index) => new
+                    {
+                        QuestionId = index + 1,
+                        question.Question,
+                        question.Options,
+                        CorrectOptionIndex = question.CorrectOptionIndex,
+                        question.Explanation,
+                        SelectedOptionIndex = ReadSelectedOptions(submission.SelectedOptionsJson)?
+                            .ElementAtOrDefault(index)
+                    })
+                    : null
             };
 
             var raw = await grader.GenerateGradingJsonAsync(actor.Id,
                 HomeworkGradingPrompt,
-                JsonSerializer.Serialize(payload, HomeworkAiJson), ct);
+                JsonSerializer.Serialize(payload, HomeworkAiJson), ct,
+                MaxGradingOutputTokens);
             var result = string.IsNullOrWhiteSpace(raw) ? null : JsonSerializer.Deserialize<HomeworkAiDraft>(raw, HomeworkJson);
             if (result is not { Score: >= 0 and <= 100 } || result.Feedback?.Trim().Length is not (> 0 and <= 2000))
                 return await DraftUnavailableAsync(assignment, "AI chưa trả nhận xét hợp lệ. Mentor có thể chấm trực tiếp.", HttpStatusCode.BadGateway, ct);
 
-            var score = Math.Round(result.Score.Value, 2);
+            // Đáp án trắc nghiệm được chấm bằng answer key trên server, không để AI thay đổi điểm khách quan.
+            var score = quizScore is not null ? (decimal)quizScore.Score : Math.Round(result.Score.Value, 2);
             var corrections = (result.Corrections ?? [])
                 .Where(c => !string.IsNullOrWhiteSpace(c.Category) && !string.IsNullOrWhiteSpace(c.Original)
                     && !string.IsNullOrWhiteSpace(c.Reason) && !string.IsNullOrWhiteSpace(c.Correction))
@@ -243,7 +298,7 @@ public sealed partial class HomeworkService
                 assignment.AiDraftFeedback,
                 transcription,
                 corrections,
-                false,
+                quizErrors.Any(error => result.Corrections?.Any(c => c.QuestionId == error.QuestionId) != true),
                 levels));
         }
         catch (Exception ex) when (!ct.IsCancellationRequested && (ex is AiServiceException or AiQuotaExceededException or JsonException
@@ -251,6 +306,30 @@ public sealed partial class HomeworkService
         {
             return await DraftUnavailableAsync(assignment, "Chưa tạo được gợi ý chấm bằng AI. Hãy thử lại hoặc chấm trực tiếp.", HttpStatusCode.BadGateway, ct);
         }
+    }
+
+    private static List<QuizError> BuildQuizErrors(string assignmentTitle, AuthoredDefinition? definition, string? selectedJson)
+    {
+        if (definition?.Type != MultipleChoiceHomework || definition.Questions.Length == 0)
+            return [];
+
+        var selected = ReadSelectedOptions(selectedJson) ?? [];
+        var errors = new List<QuizError>();
+        for (var index = 0; index < definition.Questions.Length; index++)
+        {
+            var question = definition.Questions[index];
+            var selectedIndex = index < selected.Length ? selected[index] : -1;
+            if (selectedIndex == question.CorrectOptionIndex) continue;
+            var original = selectedIndex >= 0 && selectedIndex < question.Options.Length
+                ? question.Options[selectedIndex]
+                : "Bỏ trống";
+            var correct = question.CorrectOptionIndex is int correctIndex && correctIndex >= 0 && correctIndex < question.Options.Length
+                ? new List<string> { $"{(char)('A' + correctIndex)}. {question.Options[correctIndex]}" }
+                : new List<string>();
+            errors.Add(new QuizError(index + 1, assignmentTitle, definition.Level, question.Question,
+                original, correct, question.Explanation));
+        }
+        return errors;
     }
 
     // Lỗi AI/OCR chỉ ghi lý do vào bài tập; bài nộp của học viên không bị thay đổi.

@@ -56,7 +56,11 @@ public sealed class MockTestExplanationService(IMockTestService mockTests, IClai
             var selectedIds = ReadSelectedOptionIds(question);
             var images = new[] { question.ImageUrl }.Concat(question.Options.Select(option => option.ImageUrl))
                 .OfType<string>().Where(url => !string.IsNullOrWhiteSpace(url)).ToArray();
-            var transcript = question.AudioTranscript ?? JlptMockQuestionFormats.ReadString(question.InteractionData, "transcript");
+            // Ưu tiên transcript đã lưu trong DB hoặc trong InteractionData (do author nhập),
+            // kể cả khi AudioUrl tồn tại; chỉ gọi AWS khi thực sự chưa có text.
+            var transcript = string.IsNullOrWhiteSpace(question.AudioTranscript)
+                ? JlptMockQuestionFormats.ReadString(question.InteractionData, "transcript")
+                : question.AudioTranscript;
             if (!string.IsNullOrWhiteSpace(question.AudioUrl) && string.IsNullOrWhiteSpace(transcript))
             {
                 var audio = audioTranscriptions is null ? null : await audioTranscriptions.GetForGradingAsync(
