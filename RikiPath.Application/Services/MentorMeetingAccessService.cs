@@ -65,7 +65,7 @@ namespace RikiPath.Application.Services
         {
             var slot = await unitOfWork.MentorAvailabilities.GetActiveSlotByRoomIdAsync(roomId, cancellationToken);
             if (slot is null || slot.IsDeleted || !slot.IsApproved || slot.RejectedAt != null
-                || DateTime.UtcNow < slot.StartTime.AddMinutes(-10) || DateTime.UtcNow >= slot.EndTime)
+                || DateTime.UtcNow < slot.StartTime.AddMinutes(-15) || DateTime.UtcNow >= slot.EndTime.AddMinutes(30))
                 return null;
 
             // Giữ đúng guard cũ: chỉ coi là Mentor hợp lệ nếu Role thực sự là Mentor

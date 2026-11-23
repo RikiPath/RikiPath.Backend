@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text.Json;
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -94,6 +95,7 @@ public sealed class SubscriptionAccessService(
     public async Task<IReadOnlyList<StudyPlanOffer>> GetPlansAsync(CancellationToken ct)
     {
         var candidates = await unitOfWork.SubscriptionPlans.Query().AsNoTracking()
+            .Include(p => p.Features)
             .Where(p => p.IsActive && !p.IsDeleted && p.MeetingSessionCount == 0 && p.PlanCategory != CategoryMentorLegacy)
             .OrderBy(p => p.SortOrder).ThenBy(p => p.Id).ToListAsync(ct);
         return candidates
@@ -106,14 +108,29 @@ public sealed class SubscriptionAccessService(
                 p.DurationDays,
                 p.AiGradingQuota,
                 p.IsPopular,
-                ResolveCategory(p, p.Id)))
+                ResolveCategory(p, p.Id),
+                p.Features
+                    .Where(f => !f.IsDeleted && !string.Equals(f.Category, CategoryMentorLegacy, StringComparison.OrdinalIgnoreCase))
+                    .OrderBy(f => f.SortOrder)
+                    .ThenBy(f => f.Id)
+                    .Select(f => new StudyPlanFeatureDto(
+                        f.Id,
+                        f.Code,
+                        f.Name,
+                        f.Description,
+                        f.Category,
+                        FeatureAccessModes.Normalize(f.AccessMode)))
+                    .ToList()))
             .ToList();
     }
 
     public async Task<StudyAccessResponse> GetAccessAsync(CancellationToken ct)
     {
         var userId = claims.GetUserClaim().Id;
-        var purchases = await unitOfWork.UserSubscriptions.Query().AsNoTracking().Include(s => s.SubscriptionPlan)
+        await ReconcileRecentPendingAsync(userId, ct);
+        var purchases = await unitOfWork.UserSubscriptions.Query().AsNoTracking()
+            .Include(s => s.SubscriptionPlan)
+                .ThenInclude(p => p!.Features)
             .Where(s => s.UserId == userId && !s.IsDeleted && s.PaymentStatus == PaymentStatus.Paid)
             .OrderByDescending(s => s.Id).ToListAsync(ct);
         var now = DateTime.UtcNow;
@@ -128,6 +145,13 @@ public sealed class SubscriptionAccessService(
             .Sum(RemainingAi);
         var speaking = active.Any(s => OrderCategory(s) == CategorySpeaking) || study is not null || grading > 0;
         var writing = active.Any(s => OrderCategory(s) == CategoryWriting) || study is not null || grading > 0;
+        var allFeatures = await unitOfWork.Features.Query().AsNoTracking()
+            .Where(f => !f.IsDeleted && f.Category != CategoryMentorLegacy)
+            .OrderBy(f => f.SortOrder).ThenBy(f => f.Id)
+            .ToListAsync(ct);
+        var grants = ToGrantSnapshots(active);
+        var evaluatedFeatures = allFeatures.Select(f => EvaluateFeaturePolicy(f, grants)).ToList();
+
         return new StudyAccessResponse(
             study is not null,
             study is null ? null : (study.PlanNameSnapshot ?? study.SubscriptionPlan?.Name),
@@ -146,93 +170,473 @@ public sealed class SubscriptionAccessService(
                 s.StartDate,
                 s.EndDate,
                 IsActive(s, now),
-                RemainingAi(s))).ToList(),
+                RemainingAi(s),
+                s.PurchasedAt,
+                OrderCategory(s),
+                s.PaymentStatus.ToString())).ToList(),
             studyExpiresAt,
-            studyDaysRemaining);
+            studyDaysRemaining,
+            evaluatedFeatures);
     }
+
+    public async Task<FeatureAccessDecision> EvaluateFeatureAsync(string featureCode, CancellationToken ct)
+    {
+        var feature = await unitOfWork.Features.Query().AsNoTracking()
+            .FirstOrDefaultAsync(f => !f.IsDeleted && f.Code == featureCode, ct);
+        if (feature is null)
+            return new FeatureAccessDecision(true, featureCode, FeatureAccessModes.Free, "FREE", null, null, HttpStatusCode.OK);
+
+        // Admin suspension is checked first and independently of plans: a suspended feature is unavailable to every
+        // learner (including core-free tools and paying learners) until it is re-opened.
+        var mode = EffectiveMode(feature);
+        if (mode == FeatureAccessModes.Disabled)
+            return new FeatureAccessDecision(false, feature.Code, mode, "DISABLED",
+                "FEATURE_DISABLED", SuspendedMessage, HttpStatusCode.Forbidden);
+        if (mode == FeatureAccessModes.Free)
+            return new FeatureAccessDecision(true, feature.Code, mode, "FREE", null, null, HttpStatusCode.OK);
+
+        var userId = claims.GetUserClaim().Id;
+        var now = DateTime.UtcNow;
+        var active = (await unitOfWork.UserSubscriptions.Query().AsNoTracking()
+            .Include(s => s.SubscriptionPlan)
+                .ThenInclude(p => p!.Features)
+            .Where(s => s.UserId == userId && !s.IsDeleted && s.PaymentStatus == PaymentStatus.Paid)
+            .ToListAsync(ct))
+            .Where(s => IsActive(s, now))
+            .ToList();
+
+        var evaluated = EvaluateFeaturePolicy(feature, ToGrantSnapshots(active));
+        if (evaluated.Allowed)
+            return new FeatureAccessDecision(true, evaluated.Code, evaluated.AccessMode, evaluated.AccessSource, null, null, HttpStatusCode.OK);
+
+        var errCode = evaluated.AccessSource == "LOCKED" && evaluated.Code == FeatureCodes.LessonsContent && mode == FeatureAccessModes.PlanRequired
+            ? "SELF_STUDY_PACKAGE_REQUIRED"
+            : evaluated.RequiresCredit && evaluated.CreditsRemaining <= 0 &&
+              (mode == FeatureAccessModes.CreditRequired || (mode == FeatureAccessModes.PlanAndCredit && evaluated.GrantedByPlanName is not null))
+                ? "AI_CREDIT_REQUIRED"
+                : "FEATURE_PLAN_REQUIRED";
+        return new FeatureAccessDecision(false, evaluated.Code, evaluated.AccessMode, evaluated.AccessSource,
+            errCode, evaluated.LockReason ?? "Bạn cần gói tự học đang hiệu lực.", HttpStatusCode.Forbidden);
+    }
+
+    internal static IReadOnlyList<string> ParseFeatureRoutes(string? routePrefixesJson)
+    {
+        if (string.IsNullOrWhiteSpace(routePrefixesJson)) return [];
+        try
+        {
+            var parsed = JsonSerializer.Deserialize<string[]>(routePrefixesJson);
+            return parsed is { Length: > 0 }
+                ? parsed.Where(r => !string.IsNullOrWhiteSpace(r)).Select(r => r.Trim()).ToList()
+                : [];
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+    }
+
+    internal sealed record SubscriptionGrantSnapshot(
+        string? PlanName,
+        string Category,
+        int AiQuotaRemaining,
+        IReadOnlySet<int> FeatureIds);
+
+    private static List<SubscriptionGrantSnapshot> ToGrantSnapshots(IReadOnlyList<UserSubscription> activeOrders)
+        => activeOrders.Select(order => new SubscriptionGrantSnapshot(
+            order.PlanNameSnapshot ?? order.SubscriptionPlan?.Name,
+            OrderCategory(order),
+            RemainingAi(order),
+            order.SubscriptionPlan?.Features?
+                .Where(f => !f.IsDeleted)
+                .Select(f => f.Id)
+                .ToHashSet() ?? (IReadOnlySet<int>)new HashSet<int>()))
+            .ToList();
+
+    internal static FeatureEntitlementDto EvaluateFeaturePolicy(
+        Feature feature,
+        IReadOnlyList<SubscriptionGrantSnapshot> activeGrants)
+    {
+        var routes = ParseFeatureRoutes(feature.RoutePrefixesJson);
+        var mode = EffectiveMode(feature);
+
+        // Suspension wins over everything (core-free, purchased plans, credits).
+        if (mode == FeatureAccessModes.Disabled)
+        {
+            return new FeatureEntitlementDto(
+                feature.Id, feature.Code, feature.Name, feature.Description, feature.Category,
+                mode, feature.IsCoreFree, false, "DISABLED", null, false, 0,
+                SuspendedMessage, null, routes);
+        }
+
+        if (mode == FeatureAccessModes.Free)
+        {
+            return new FeatureEntitlementDto(
+                feature.Id, feature.Code, feature.Name, feature.Description, feature.Category,
+                mode, feature.IsCoreFree, true, "FREE", null, false, 0, null, null, routes);
+        }
+
+        var matchingPlan = activeGrants.FirstOrDefault(grant =>
+            grant.FeatureIds.Contains(feature.Id) ||
+            (feature.Code == FeatureCodes.LessonsContent && grant.Category == CategorySelfStudy));
+
+        var creditKey = feature.CreditFeatureKey?.Trim();
+        var creditsRemaining = string.IsNullOrWhiteSpace(creditKey)
+            ? 0
+            : activeGrants.Where(grant => SupportsCredit(grant.Category, creditKey)).Sum(grant => grant.AiQuotaRemaining);
+
+        return mode switch
+        {
+            FeatureAccessModes.PlanRequired => new FeatureEntitlementDto(
+                feature.Id, feature.Code, feature.Name, feature.Description, feature.Category,
+                mode, false, matchingPlan is not null, matchingPlan is not null ? "PLAN" : "LOCKED",
+                matchingPlan?.PlanName, false, 0,
+                matchingPlan is not null
+                    ? null
+                    : (feature.Code == FeatureCodes.LessonsContent
+                        ? "Bạn cần gói tự học đang hiệu lực."
+                        : $"Tính năng {feature.Name} yêu cầu gói học phù hợp."),
+                matchingPlan is not null ? null : "/plans/",
+                routes),
+
+            FeatureAccessModes.CreditRequired => new FeatureEntitlementDto(
+                feature.Id, feature.Code, feature.Name, feature.Description, feature.Category,
+                mode, false, creditsRemaining > 0, creditsRemaining > 0 ? "CREDIT" : "LOCKED",
+                null, true, creditsRemaining,
+                creditsRemaining > 0 ? null : "Bạn chưa có lượt AI cho tính năng này. Vào Mua gói để mua thêm lượt.",
+                creditsRemaining > 0 ? null : "/plans/",
+                routes),
+
+            FeatureAccessModes.PlanAndCredit => new FeatureEntitlementDto(
+                feature.Id, feature.Code, feature.Name, feature.Description, feature.Category,
+                mode, false, matchingPlan is not null && creditsRemaining > 0,
+                matchingPlan is not null && creditsRemaining > 0 ? "PLAN_AND_CREDIT" : "LOCKED",
+                matchingPlan?.PlanName, true, creditsRemaining,
+                matchingPlan is null
+                    ? $"Tính năng {feature.Name} yêu cầu gói học phù hợp và lượt AI."
+                    : (creditsRemaining > 0 ? null : "Bạn đã hết lượt AI khả dụng cho tính năng này."),
+                matchingPlan is not null && creditsRemaining > 0 ? null : "/plans/",
+                routes),
+
+            _ => new FeatureEntitlementDto(
+                feature.Id, feature.Code, feature.Name, feature.Description, feature.Category,
+                FeatureAccessModes.Free, feature.IsCoreFree, true, "FREE", null, false, 0, null, null, routes),
+        };
+    }
+
+    public const string SuspendedMessage = "Tính năng này đang tạm ngừng cung cấp. Bạn có thể quay lại sử dụng khi hệ thống mở lại.";
+
+    /// <summary>
+    /// The one mode the engine evaluates: DISABLED while an Admin suspends the feature, otherwise its stored access
+    /// policy. `IsCoreFree` is only the seed's original classification; every feature's policy is Admin-configurable.
+    /// </summary>
+    internal static string EffectiveMode(Feature feature)
+        => FeatureAccessModes.IsSuspended(feature.AccessMode)
+            ? FeatureAccessModes.Disabled
+            : FeatureAccessModes.Normalize(feature.AccessMode);
+
+    /// <summary>
+    /// Effective feature state for one learner/plan scenario (internal codes; UIs translate them):
+    /// AVAILABLE · ADMIN_DISABLED · CREDIT_LOCKED · PLAN_AND_CREDIT_LOCKED · PLAN_LOCKED.
+    /// </summary>
+    public static string EffectiveState(FeatureEntitlementDto evaluated)
+    {
+        if (evaluated.Allowed) return "AVAILABLE";
+        if (evaluated.AccessSource == "DISABLED") return "ADMIN_DISABLED";
+        return evaluated.AccessMode switch
+        {
+            FeatureAccessModes.CreditRequired => "CREDIT_LOCKED",
+            FeatureAccessModes.PlanAndCredit => evaluated.GrantedByPlanName is not null ? "CREDIT_LOCKED" : "PLAN_AND_CREDIT_LOCKED",
+            _ => "PLAN_LOCKED",
+        };
+    }
+
+    private static bool SupportsCredit(string category, string feature) => feature switch
+    {
+        "learning_path" => category == CategoryLearningPath,
+        "speaking" => category is CategorySpeaking or CategoryAiGrading or CategorySelfStudy,
+        "writing" => category is CategoryWriting or CategoryAiGrading or CategorySelfStudy,
+        MockTestExplanationService.CreditFeature => category is CategoryAiGrading or CategorySelfStudy,
+        _ => false
+    };
+
+    /// <summary>PayOS hosted-checkout link lifetime for a self-study order; the order is held Pending for the same window.</summary>
+    public static readonly TimeSpan PaymentLinkLifetime = TimeSpan.FromMinutes(15);
+    private static readonly TimeSpan LinkCreationGrace = TimeSpan.FromSeconds(45);
+    private const int MaxOrderCodeAttempts = 3;
 
     public async Task<ApiResponse<StudyCheckout>> PurchaseAsync(int planId, CancellationToken ct)
     {
+        var userId = claims.GetUserClaim().Id;
         var plan = await unitOfWork.SubscriptionPlans.GetByIdAsync(planId, ct);
         if (!IsSellable(plan))
-            return ApiResponse<StudyCheckout>.NotFound("Gói học không còn mở bán.");
+            return ApiResponse<StudyCheckout>.Fail("Gói học không còn mở bán.", HttpStatusCode.NotFound, "PLAN_NOT_AVAILABLE");
+        if (plan!.Price <= 0 || plan.Price != decimal.Truncate(plan.Price) || plan.Price > int.MaxValue)
+        {
+            logger?.LogError("Study plan has a price PayOS cannot charge. PlanId={PlanId}", plan.Id);
+            return ApiResponse<StudyCheckout>.Fail("Gói học đang được cập nhật giá. Vui lòng thử lại sau.", HttpStatusCode.Conflict, "PLAN_PRICE_INVALID");
+        }
         var returnBase = settings.PayOs?.WebReturnUrl;
         var cancelBase = settings.PayOs?.WebCancelUrl;
         if (!IsWebUrl(returnBase) || !IsWebUrl(cancelBase))
-            return ApiResponse<StudyCheckout>.Fail("Chưa cấu hình URL thành công và hủy thanh toán PayOS.", HttpStatusCode.ServiceUnavailable);
+        {
+            logger?.LogError("PayOS return/cancel URLs are not configured; study checkout disabled.");
+            return ApiResponse<StudyCheckout>.Fail("Cổng thanh toán tạm thời chưa sẵn sàng. Vui lòng thử lại sau.",
+                HttpStatusCode.ServiceUnavailable, "PAYMENT_GATEWAY_NOT_CONFIGURED");
+        }
 
-        var order = new UserSubscription
+        ApiResponse<StudyCheckout>? response = null;
+        // One checkout at a time per learner: the account row lock serialises double clicks, parallel tabs and retries,
+        // so a learner never ends up with several payable links for the same plan.
+        await unitOfWork.ExecuteInTransactionAsync(async token =>
         {
-            UserId = claims.GetUserClaim().Id,
-            SubscriptionPlanId = plan!.Id,
-            AmountPaid = plan.Price,
-            PurchasedAt = DateTime.UtcNow,
-            AiGradingQuota = plan.AiGradingQuota,
-            DurationDaysSnapshot = plan.DurationDays,
-            PlanNameSnapshot = plan.Name,
-            PlanCategorySnapshot = ResolveCategory(plan, plan.Id),
-            PlanRevisionSnapshot = plan.Revision,
-        };
-        await unitOfWork.UserSubscriptions.AddAsync(order, ct);
-        await unitOfWork.SaveChangesAsync(ct);
-        try
-        {
-            var returnUrl = QueryHelpers.AddQueryString(returnBase!, "purchaseId", order.Id.ToString());
-            var cancelUrl = QueryHelpers.AddQueryString(cancelBase!, "purchaseId", order.Id.ToString());
-            var link = await payments.CreatePaymentLinkAsync(OrderPrefix + (long)order.Id, checked((int)order.AmountPaid),
-                $"RikiPath {order.Id}", returnUrl, cancelUrl, ct);
-            order.PaymentTransactionId = link.PaymentLinkId;
-            await unitOfWork.SaveChangesAsync(ct);
-            return ApiResponse<StudyCheckout>.Success(new(order.Id, link.CheckoutUrl));
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            return ApiResponse<StudyCheckout>.Fail("Không tạo được liên kết thanh toán PayOS.", HttpStatusCode.BadGateway);
-        }
+            response = null;
+            await unitOfWork.UserAccounts.GetByIdForUpdateAsync(userId, token);
+            var now = DateTime.UtcNow;
+
+            var pending = await unitOfWork.UserSubscriptions.Query()
+                .Where(s => s.UserId == userId && !s.IsDeleted && s.SubscriptionPlanId == plan.Id
+                    && s.PaymentStatus == PaymentStatus.Pending)
+                .OrderByDescending(s => s.Id)
+                .ToListAsync(token);
+
+            foreach (var open in pending)
+            {
+                var reusable = StudyOrderCodes.TryReadPendingReference(open.PaymentTransactionId, open.Id, out _, out _)
+                    && open.PaymentExpiresAt is { } expires && expires > now.AddMinutes(1)
+                    && open.AmountPaid == plan.Price
+                    && open.PlanRevisionSnapshot == plan.Revision;
+                if (reusable)
+                {
+                    // Resume the still-valid link instead of opening a second order for the same plan.
+                    StudyOrderCodes.TryReadPendingReference(open.PaymentTransactionId, open.Id, out var openLinkId, out _);
+                    response = ApiResponse<StudyCheckout>.Success(new(open.Id, CheckoutUrlFor(openLinkId),
+                        DateTime.SpecifyKind(open.PaymentExpiresAt!.Value, DateTimeKind.Utc), true));
+                    return;
+                }
+                if (string.IsNullOrWhiteSpace(open.PaymentTransactionId) && open.PurchasedAt > now - LinkCreationGrace)
+                {
+                    response = ApiResponse<StudyCheckout>.Fail("Đơn hàng đang được tạo. Vui lòng đợi trong giây lát.",
+                        HttpStatusCode.Conflict, "PAYMENT_LINK_IN_PROGRESS", retryable: true);
+                    return;
+                }
+            }
+
+            var order = new UserSubscription
+            {
+                UserId = userId,
+                SubscriptionPlanId = plan.Id,
+                AmountPaid = plan.Price,
+                PurchasedAt = now,
+                PaymentExpiresAt = now + PaymentLinkLifetime,
+                AiGradingQuota = plan.AiGradingQuota,
+                DurationDaysSnapshot = plan.DurationDays,
+                PlanNameSnapshot = plan.Name,
+                PlanCategorySnapshot = ResolveCategory(plan, plan.Id),
+                PlanRevisionSnapshot = plan.Revision,
+            };
+            await unitOfWork.UserSubscriptions.AddAsync(order, token);
+            await unitOfWork.SaveChangesAsync(token);
+
+            var orderId = order.Id.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            var returnUrl = QueryHelpers.AddQueryString(returnBase!, "purchaseId", orderId);
+            var cancelUrl = QueryHelpers.AddQueryString(cancelBase!, "purchaseId", orderId);
+            // ≤ 9 ký tự để chuyển khoản được với mọi ngân hàng (giới hạn PayOS cho tài khoản không liên kết).
+            var description = order.Id <= 99_999_999 ? $"RP{order.Id}" : $"RP{order.Id % 10_000_000}";
+            PaymentGatewayException? lastFailure = null;
+            for (var attempt = 1; attempt <= MaxOrderCodeAttempts; attempt++)
+            {
+                var orderCode = StudyOrderCodes.Create(order.Id);
+                try
+                {
+                    var link = await payments.CreatePaymentLinkAsync(orderCode, checked((int)order.AmountPaid), description,
+                        returnUrl, cancelUrl, order.PaymentExpiresAt, token);
+                    order.PaymentTransactionId = StudyOrderCodes.PendingReference(link.PaymentLinkId, orderCode);
+                    await unitOfWork.SaveChangesAsync(token);
+                    logger?.LogInformation("Study checkout created. PurchaseId={PurchaseId} PlanId={PlanId} OrderCode={OrderCode} Attempt={Attempt}",
+                        order.Id, plan.Id, orderCode, attempt);
+                    response = ApiResponse<StudyCheckout>.Success(new(order.Id, link.CheckoutUrl,
+                        DateTime.SpecifyKind(order.PaymentExpiresAt!.Value, DateTimeKind.Utc), false));
+                    return;
+                }
+                catch (PaymentGatewayException ex) when (ex.Failure == PaymentGatewayFailure.DuplicateOrderCode)
+                {
+                    // Another environment sharing this PayOS channel already used the code: draw a new one.
+                    lastFailure = ex;
+                    logger?.LogWarning("PayOS order code already used; retrying with a new code. PurchaseId={PurchaseId} OrderCode={OrderCode} Attempt={Attempt}",
+                        order.Id, orderCode, attempt);
+                }
+                catch (PaymentGatewayException ex)
+                {
+                    lastFailure = ex;
+                    break;
+                }
+            }
+
+            // No usable link reached the learner, so the order can never be paid: close it instead of leaving it Pending.
+            order.PaymentStatus = PaymentStatus.Failed;
+            await unitOfWork.SaveChangesAsync(token);
+            logger?.LogWarning("Study checkout failed. PurchaseId={PurchaseId} PlanId={PlanId} Failure={Failure} HttpStatus={HttpStatus} ProviderCode={ProviderCode} ProviderDesc={ProviderDesc}",
+                order.Id, plan.Id, lastFailure?.Failure, lastFailure?.HttpStatus, lastFailure?.ProviderCode, lastFailure?.ProviderMessage);
+            response = CheckoutFailure(lastFailure);
+        }, ct);
+
+        return response ?? ApiResponse<StudyCheckout>.Fail("Không tạo được đơn mua gói.", HttpStatusCode.InternalServerError);
     }
+
+    private static ApiResponse<StudyCheckout> CheckoutFailure(PaymentGatewayException? failure) => failure?.Failure switch
+    {
+        PaymentGatewayFailure.NotConfigured or PaymentGatewayFailure.AuthenticationFailed => ApiResponse<StudyCheckout>.Fail(
+            "Cổng thanh toán tạm thời chưa sẵn sàng. Vui lòng thử lại sau.", HttpStatusCode.ServiceUnavailable, "PAYMENT_GATEWAY_UNAVAILABLE", retryable: false),
+        PaymentGatewayFailure.RateLimited => ApiResponse<StudyCheckout>.Fail(
+            "PayOS đang nhận quá nhiều yêu cầu. Vui lòng thử lại sau ít phút.", HttpStatusCode.TooManyRequests, "PAYMENT_GATEWAY_RATE_LIMITED", retryable: true),
+        PaymentGatewayFailure.Timeout or PaymentGatewayFailure.Network or PaymentGatewayFailure.ProviderUnavailable => ApiResponse<StudyCheckout>.Fail(
+            "PayOS đang phản hồi chậm. Vui lòng thử lại.", HttpStatusCode.GatewayTimeout, "PAYMENT_GATEWAY_TIMEOUT", retryable: true),
+        _ => ApiResponse<StudyCheckout>.Fail(
+            "PayOS chưa tạo được liên kết thanh toán. Vui lòng thử lại.", HttpStatusCode.BadGateway, "PAYMENT_GATEWAY_REJECTED", retryable: true),
+    };
+
+    /// <summary>PayOS hosted-checkout address of a payment link (the same URL PayOS returns as <c>checkoutUrl</c>).</summary>
+    internal static string CheckoutUrlFor(string paymentLinkId) => $"https://pay.payos.vn/web/{Uri.EscapeDataString(paymentLinkId)}";
 
     public async Task<ApiResponse<string>> GetPurchaseStatusAsync(int id, CancellationToken ct)
     {
         var userId = claims.GetUserClaim().Id;
-        var order = await unitOfWork.UserSubscriptions.Query().AsNoTracking().Include(s => s.SubscriptionPlan)
+        var order = await unitOfWork.UserSubscriptions.Query().AsNoTracking()
             .FirstOrDefaultAsync(s => s.Id == id && !s.IsDeleted && s.UserId == userId, ct);
         if (order is null) return ApiResponse<string>.NotFound("Không tìm thấy đơn mua gói.");
-        if (order.PaymentStatus != PaymentStatus.Pending || string.IsNullOrWhiteSpace(order.PaymentTransactionId))
+        if (order.PaymentStatus != PaymentStatus.Pending)
             return ApiResponse<string>.Success(order.PaymentStatus.ToString());
 
-        try
-        {
-            var orderCode = OrderPrefix + (long)id;
-            var remote = await payments.GetPaymentInformationAsync(orderCode, ct);
-            var paid = remote.Status == "PAID" && remote.AmountPaid == order.AmountPaid;
-            var cancelled = remote.Status == "CANCELLED" && remote.AmountPaid == 0;
-            if ((paid || cancelled) && remote.OrderCode == orderCode &&
-                remote.PaymentLinkId == order.PaymentTransactionId &&
-                remote.Amount == order.AmountPaid)
-            {
-                await unitOfWork.ExecuteInTransactionAsync(async token =>
-                {
-                    await unitOfWork.UserAccounts.GetByIdForUpdateAsync(userId, token);
-                    var current = await unitOfWork.UserSubscriptions.GetWithPlanAsync(id, token);
-                    if (current is null) return;
-                    if (current.PaymentStatus == PaymentStatus.Pending)
-                    {
-                        if (paid) Activate(current, remote.PaymentLinkId);
-                        else current.PaymentStatus = PaymentStatus.Failed;
-                        await unitOfWork.SaveChangesAsync(token);
-                    }
-                    order.PaymentStatus = current.PaymentStatus;
-                }, ct);
-            }
-        }
-        catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or DbUpdateConcurrencyException)
-        {
-            // A provider outage or concurrent webhook can be retried by the next status poll.
-        }
-        return ApiResponse<string>.Success(order.PaymentStatus.ToString());
+        var status = await ReconcileAsync(userId, order, ct);
+        return ApiResponse<string>.Success(status.ToString());
     }
 
-    internal static void Activate(UserSubscription order, string? reference)
+    /// <summary>
+    /// Server-to-server reconciliation of one Pending order with PayOS (covers a lost/late webhook, a webhook that hit a
+    /// database error, a closed tab or a new device). Only an authenticated provider lookup whose link id, amount and order
+    /// code all match the stored order can change it; a provider outage leaves it Pending for the next attempt.
+    /// </summary>
+    private async Task<PaymentStatus> ReconcileAsync(int userId, UserSubscription order, CancellationToken ct)
+    {
+        var now = DateTime.UtcNow;
+        if (string.IsNullOrWhiteSpace(order.PaymentTransactionId))
+        {
+            // The link was never created (or its creation outcome was lost); after the grace period the order is unpayable.
+            return order.PurchasedAt <= now - LinkCreationGrace
+                ? await TransitionAsync(userId, order.Id, null, PaymentStatus.Failed, ct)
+                : PaymentStatus.Pending;
+        }
+
+        if (!StudyOrderCodes.TryReadPendingReference(order.PaymentTransactionId, order.Id, out var linkId, out var boundOrderCode))
+        {
+            logger?.LogError("Pending study order has an unreadable payment reference; left for manual review. PurchaseId={PurchaseId}", order.Id);
+            return PaymentStatus.Pending;
+        }
+
+        PaymentLinkInformation remote;
+        try
+        {
+            remote = await payments.GetPaymentInformationAsync(linkId, ct);
+        }
+        catch (PaymentGatewayException ex)
+        {
+            logger?.LogWarning("PayOS reconciliation lookup failed; order stays Pending. PurchaseId={PurchaseId} Failure={Failure} ProviderCode={ProviderCode}",
+                order.Id, ex.Failure, ex.ProviderCode);
+            return PaymentStatus.Pending;
+        }
+
+        var matches = string.Equals(remote.PaymentLinkId, linkId, StringComparison.Ordinal)
+            && remote.Amount == order.AmountPaid
+            && remote.OrderCode == boundOrderCode;
+        if (!matches)
+        {
+            logger?.LogError("PayOS reconciliation mismatch; order left untouched. PurchaseId={PurchaseId} RemoteOrderCode={OrderCode}",
+                order.Id, remote.OrderCode);
+            return PaymentStatus.Pending;
+        }
+
+        PaymentStatus? target = remote.Status.Trim().ToUpperInvariant() switch
+        {
+            "PAID" when remote.AmountPaid >= order.AmountPaid => PaymentStatus.Paid,
+            "CANCELLED" when remote.AmountPaid == 0 => PaymentStatus.Cancelled,
+            "EXPIRED" when remote.AmountPaid == 0 => PaymentStatus.Expired,
+            _ => null,
+        };
+        if (target is null) return PaymentStatus.Pending;
+        return await TransitionAsync(userId, order.Id, target == PaymentStatus.Paid ? remote.PaymentLinkId : null, target.Value, ct);
+    }
+
+    /// <summary>Moves a Pending order to its final state under the learner lock; a concurrent webhook/poll that already did it wins.</summary>
+    private async Task<PaymentStatus> TransitionAsync(int userId, int orderId, string? reference, PaymentStatus target, CancellationToken ct)
+    {
+        var result = PaymentStatus.Pending;
+        try
+        {
+            await unitOfWork.ExecuteInTransactionAsync(async token =>
+            {
+                await unitOfWork.UserAccounts.GetByIdForUpdateAsync(userId, token);
+                var current = await unitOfWork.UserSubscriptions.GetWithPlanAsync(orderId, token);
+                if (current is null) return;
+                if (current.PaymentStatus == PaymentStatus.Pending)
+                {
+                    if (target == PaymentStatus.Paid)
+                    {
+                        var stackFrom = await FindActiveCategoryExpiryAsync(
+                            unitOfWork, userId, OrderCategory(current), current.Id, DateTime.UtcNow, token);
+                        Activate(current, reference, stackFrom);
+                        logger?.LogInformation("Study plan activated by reconciliation. PurchaseId={PurchaseId} PlanId={PlanId}",
+                            current.Id, current.SubscriptionPlanId);
+                    }
+                    else current.PaymentStatus = target;
+                    await unitOfWork.SaveChangesAsync(token);
+                }
+                result = current.PaymentStatus;
+            }, ct);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            // A webhook updated the same order first; the next poll reads its final state.
+        }
+        return result;
+    }
+
+    /// <summary>Reconciles the learner's recent Pending orders so entitlements appear on any device even if no webhook arrived.</summary>
+    private async Task ReconcileRecentPendingAsync(int userId, CancellationToken ct)
+    {
+        var cutoff = DateTime.UtcNow.AddDays(-2);
+        var open = await unitOfWork.UserSubscriptions.Query().AsNoTracking()
+            .Where(s => s.UserId == userId && !s.IsDeleted && s.PaymentStatus == PaymentStatus.Pending
+                && s.MeetingSessionsIncluded == 0 && s.PurchasedAt > cutoff)
+            .OrderByDescending(s => s.Id)
+            .Take(3)
+            .ToListAsync(ct);
+        foreach (var order in open)
+            await ReconcileAsync(userId, order, ct);
+    }
+
+    internal static async Task<DateTime?> FindActiveCategoryExpiryAsync(
+        IUnitOfWork unitOfWork, int userId, string category, int excludeOrderId, DateTime now, CancellationToken ct)
+    {
+        if (IsCreditCategory(category)) return null;
+        var activeExpiries = await unitOfWork.UserSubscriptions.Query()
+            .AsNoTracking()
+            .Include(s => s.SubscriptionPlan)
+            .Where(s => s.UserId == userId
+                && s.Id != excludeOrderId
+                && !s.IsDeleted
+                && s.PaymentStatus == PaymentStatus.Paid
+                && s.EndDate != null
+                && s.EndDate > now)
+            .ToListAsync(ct);
+
+        return activeExpiries
+            .Where(s => string.Equals(OrderCategory(s), category, StringComparison.OrdinalIgnoreCase))
+            .Max(s => s.EndDate);
+    }
+
+    internal static string OrderCategoryPublic(UserSubscription order) => OrderCategory(order);
+
+    internal static void Activate(UserSubscription order, string? reference, DateTime? stackFromUtc = null)
     {
         var now = DateTime.UtcNow;
         var category = OrderCategory(order);
@@ -240,9 +644,15 @@ public sealed class SubscriptionAccessService(
         order.PaymentStatus = PaymentStatus.Paid;
         order.PaymentTransactionId = reference;
         order.StartDate = now;
-        order.EndDate = IsCreditCategory(category) || IsCredit(order.SubscriptionPlanId)
-            ? null
-            : now.AddDays(durationDays);
+        if (IsCreditCategory(category) || IsCredit(order.SubscriptionPlanId))
+        {
+            order.EndDate = null;
+        }
+        else
+        {
+            var effectiveStart = stackFromUtc.HasValue && stackFromUtc.Value > now ? stackFromUtc.Value : now;
+            order.EndDate = effectiveStart.AddDays(durationDays);
+        }
         order.AiGradingUsedCount = 0;
     }
 
@@ -301,17 +711,7 @@ public sealed class SubscriptionAccessService(
     }
 
     private static bool Supports(UserSubscription order, string feature)
-    {
-        var category = OrderCategory(order);
-        return feature switch
-        {
-            "learning_path" => category == CategoryLearningPath,
-            "speaking" => category is CategorySpeaking or CategoryAiGrading or CategorySelfStudy,
-            "writing" => category is CategoryWriting or CategoryAiGrading or CategorySelfStudy,
-            MockTestExplanationService.CreditFeature => category is CategoryAiGrading or CategorySelfStudy,
-            _ => false
-        };
-    }
+        => SupportsCredit(OrderCategory(order), feature);
 
 
     private static bool IsActive(UserSubscription order, DateTime now)
@@ -322,12 +722,47 @@ public sealed class SubscriptionAccessService(
         => Uri.TryCreate(value, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https";
 }
 
+public sealed record StudyPlanFeatureDto(
+    int Id,
+    string Code,
+    string Name,
+    string? Description,
+    string Category,
+    string AccessMode);
+
+public sealed record FeatureEntitlementDto(
+    int FeatureId,
+    string Code,
+    string Name,
+    string? Description,
+    string Category,
+    string AccessMode,
+    bool IsCoreFree,
+    bool Allowed,
+    string AccessSource,
+    string? GrantedByPlanName,
+    bool RequiresCredit,
+    int CreditsRemaining,
+    string? LockReason,
+    string? UnlockPath,
+    IReadOnlyList<string> Routes);
+
+public sealed record FeatureAccessDecision(
+    bool Allowed,
+    string Code,
+    string AccessMode,
+    string AccessSource,
+    string? ErrorCode,
+    string? Message,
+    HttpStatusCode StatusCode);
+
 public sealed record StudyPlanOffer(int Id, string Name, string? Description, decimal Price, int DurationDays,
-    int AiUses, bool IsPopular, string Kind);
-public sealed record StudyCheckout(int PurchaseId, string CheckoutUrl);
+    int AiUses, bool IsPopular, string Kind, IReadOnlyList<StudyPlanFeatureDto>? Features = null);
+public sealed record StudyCheckout(int PurchaseId, string CheckoutUrl, DateTime? ExpiresAt = null, bool Resumed = false);
 public sealed record PurchasedStudyPlan(int Id, int PlanId, string PlanName, decimal AmountPaid, DateTime? StartDate,
-    DateTime? EndDate, bool Active, int AiUsesRemaining);
+    DateTime? EndDate, bool Active, int AiUsesRemaining, DateTime? PurchasedAt = null, string? Kind = null, string? PaymentStatus = null);
 public sealed record StudyAccessResponse(bool Active, string? PlanName, bool Speaking, bool Writing,
     int AiGradingUsesRemaining, int SpeakingUsesRemaining, int WritingUsesRemaining, int LearningPathUsesRemaining,
     int MentorSessionsRemaining, IReadOnlyList<PurchasedStudyPlan> Purchases,
-    DateTime? SelfStudyExpiresAt, int? SelfStudyDaysRemaining);
+    DateTime? SelfStudyExpiresAt, int? SelfStudyDaysRemaining,
+    IReadOnlyList<FeatureEntitlementDto>? Features = null);

@@ -26,5 +26,8 @@ namespace RikiPath.Application.Requests.SharedBanks
     {
         public string? QuestionType { get; set; }
         public int? LanguageSkillId { get; set; }
+        public string? TemplateKind { get; set; }
+        public string? SourceType { get; set; }
+        public int? PassageId { get; set; }
     }
 }

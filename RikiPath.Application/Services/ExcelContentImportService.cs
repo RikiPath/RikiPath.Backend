@@ -20,6 +20,7 @@ namespace RikiPath.Application.Services
     public sealed class ExcelContentImportService(
         IUnitOfWork unitOfWork,
         IEnumerable<ISheetImportHandler> handlers,
+        ManualContentService manualContent,
         IContentAudioTranscriptionService? audioTranscriptions = null) : IExcelContentImportService
     {
         public ApiResponse<WorkbookPreviewResponse> PreviewWorkbook(Stream fileStream, string fileName, CancellationToken cancellationToken)
@@ -53,9 +54,7 @@ namespace RikiPath.Application.Services
         }
 
         public async Task<ApiResponse<ImportPreviewResponse>> PreviewAsync(
-            Stream fileStream, string fileName, ImportEntityType? onlyType, CancellationToken cancellationToken,
-            Func<string, CancellationToken, Task<string>>? uploadLocalAudio = null,
-            Func<string, CancellationToken, Task<string>>? uploadLocalImage = null)
+            Stream fileStream, string fileName, ImportEntityType? onlyType, CancellationToken cancellationToken)
         {
             try
             {
@@ -70,7 +69,7 @@ namespace RikiPath.Application.Services
                     : allHandlers.Where(h => h.EntityType == onlyType.Value)).ToList();
 
                 var response = new ImportPreviewResponse { PreviewId = Guid.NewGuid(), FileName = fileName };
-                var media = new WorkbookMediaPreparation(uploadLocalAudio, uploadLocalImage);
+                var media = new WorkbookMediaPreparation();
 
                 // Resolve Lesson rows first, even when only Practice Exercise was requested.
                 var lessonHandler = allHandlers.FirstOrDefault(handler => handler.EntityType == ImportEntityType.Lesson);
@@ -233,6 +232,9 @@ namespace RikiPath.Application.Services
                 var info = ManualContentService.ReadListInfo(row.PayloadJson);
                 if (info?.CertificateLevelId is not int levelId || !levelCodes.TryGetValue(levelId, out _))
                     return ApiResponse<ImportConfirmResponse>.Fail($"Dòng {row.SourceRowNumber}: hãy chọn cấp độ hợp lệ.");
+                var payloadError = await manualContent.ValidateImportPayloadAsync(row.EntityType, row.PayloadJson, cancellationToken);
+                if (payloadError is not null)
+                    return ApiResponse<ImportConfirmResponse>.Fail($"Dòng {row.SourceRowNumber}: {payloadError}");
                 if (!seen.Add((row.EntityType, row.RowKey, row.EntityType == ImportEntityType.PracticeExercise ? levelId : null))) continue;
                 if (row.Action == ImportRowAction.Modified)
                 {

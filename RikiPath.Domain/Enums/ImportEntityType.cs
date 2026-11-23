@@ -9,5 +9,8 @@ namespace RikiPath.Domain.Enums
         Lesson,
         MockTest,
         PracticeExercise,
+        QuestionBank,
+        PracticeSet,
+        Passage,
     }
 }

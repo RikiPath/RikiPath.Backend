@@ -1,17 +1,21 @@
 using System.Net;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using RikiPath.Application.EmailTemplates;
+using RikiPath.Application.Helpers;
 using RikiPath.Application.IServices;
 using RikiPath.Application.Requests.MentorMeetings;
 using RikiPath.Application.Responses;
 using RikiPath.Application.Responses.MentorMeetings;
+using RikiPath.Domain;
 using RikiPath.Domain.Entities;
 using RikiPath.Domain.Enums;
 
 namespace RikiPath.Application.Services;
 
 public sealed class MentorScheduleService(IUnitOfWork uow, IClaimService claims, IEmailService email,
-    ILogger<MentorScheduleService> logger) : IMentorScheduleService
+    ILogger<MentorScheduleService> logger, IEmailTemplateService? emailTemplates = null,
+    AppSettings? appSettings = null) : IMentorScheduleService
 {
     private bool IsAdmin => claims.GetUserClaim().Role == Role.Admin;
     private static ApiResponse<bool> Fail(string message) => ApiResponse<bool>.Fail(message);
@@ -80,9 +84,31 @@ public sealed class MentorScheduleService(IUnitOfWork uow, IClaimService claims,
             }, token);
             await uow.SaveChangesAsync(token);
         }, ct);
-        if (slot.Mentor?.EmailNotificationsEnabled != false && !string.IsNullOrWhiteSpace(slot.Mentor?.Email))
+        if (slot.Mentor is not null && NotificationPreferenceHelper.ShouldDeliverEmail(slot.Mentor, "MentorSchedule"))
         {
-            try { await email.SendEmailAsync(slot.Mentor.Email, "Điều chỉnh lịch dạy · RikiPath", "<h2>Điều chỉnh lịch dạy</h2><p>" + System.Net.WebUtility.HtmlEncode(reason) + "</p>", ct); }
+            try
+            {
+                var templates = emailTemplates ?? new EmailTemplateService(appSettings);
+                var mentorName = UserNameHelper.FormatFullName(slot.Mentor.FirstName, slot.Mentor.LastName);
+                var slotRange = EmailTemplateService.FormatVietnamSlotRange(slot.StartTime, slot.EndTime);
+                var rendered = templates.BuildScheduleNotification(new ScheduleNotificationEmailData(
+                    mentorName,
+                    "Điều chỉnh lịch dạy · RikiPath",
+                    "Điều chỉnh lịch dạy",
+                    "Yêu cầu điều chỉnh lịch dạy đã được xử lý",
+                    "Quản trị viên RikiPath vừa phản hồi yêu cầu điều chỉnh khung giờ giảng dạy của bạn.",
+                    [
+                        new("Khung giờ", slotRange),
+                        new("Mã khung giờ", $"#{slot.Id}"),
+                        new("Trạng thái", "Đã xử lý bởi quản trị viên"),
+                    ],
+                    SakuraEmailTone.Info,
+                    "Nội dung phản hồi từ quản trị viên",
+                    reason,
+                    "Xem lịch dạy của tôi",
+                    "/mentor-shift-schedule/"));
+                await email.SendEmailAsync(slot.Mentor.Email!, rendered, ct);
+            }
             catch (Exception ex) { logger.LogWarning(ex, "Change resolution email failed for slot {SlotId}", slotId); }
         }
         return ApiResponse<bool>.Success(true);

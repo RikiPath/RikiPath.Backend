@@ -143,7 +143,7 @@ namespace RikiPath.Infrastructure.Repositories
                             !a.IsDeleted &&
                             a.IsCompleted &&
                             (a.AttemptKind == AttemptKind.MockTest || a.AttemptKind == AttemptKind.Placement))
-                .Select(a => (a.SubmittedAt ?? a.StartedAt).Date)
+                .Select(a => a.SubmittedAt ?? a.StartedAt)
                 .Distinct()
                 .ToListAsync();
         }

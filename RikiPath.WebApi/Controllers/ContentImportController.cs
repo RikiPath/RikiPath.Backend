@@ -27,6 +27,8 @@ namespace RikiPath.Api.Controllers
         [HttpPost("listening-audio")]
         [Authorize(Roles = "ContentAuthor,Admin")]
         [Consumes("multipart/form-data")]
+        [RequestSizeLimit(ListeningAudioFilePolicy.MaxBytes + 4L * 1024 * 1024)]
+        [RequestFormLimits(MultipartBodyLengthLimit = ListeningAudioFilePolicy.MaxBytes + 4L * 1024 * 1024)]
         public async Task<IActionResult> UploadListeningAudio(IFormFile? file, CancellationToken cancellationToken)
         {
             if (file is null || file.Length < 4 || !string.Equals(Path.GetExtension(file.FileName), ".mp3", StringComparison.OrdinalIgnoreCase))
@@ -45,6 +47,7 @@ namespace RikiPath.Api.Controllers
                 try
                 {
                     var result = await transcriptions.UploadAsync(audio, file.FileName, GetCurrentUserId() ?? 0, cancellationToken);
+                    result = result with { Url = NormalizeLocalMediaUrl(result.Url) };
                     return Ok(ApiResponse<ListeningAudioUploadResponse>.Success(result));
                 }
                 catch (ArgumentException ex)
@@ -70,32 +73,54 @@ namespace RikiPath.Api.Controllers
                 }
             }
             var uploaded = await fileStorage.UploadAsync(audio, file.FileName, "audio/mpeg", "jlpt-listening", cancellationToken);
+            uploaded = uploaded with { Url = NormalizeLocalMediaUrl(uploaded.Url) };
             return Ok(ApiResponse<UploadedFileResult>.Success(uploaded));
         }
 
         [HttpPost("content-image")]
         [Consumes("multipart/form-data")]
+        [RequestSizeLimit(11L * 1024 * 1024)]
+        [RequestFormLimits(MultipartBodyLengthLimit = 11L * 1024 * 1024)]
         public async Task<IActionResult> UploadContentImage(IFormFile? file, CancellationToken cancellationToken)
         {
-            if (file is null || file.Length == 0)
+            if (file is null || file.Length < 12)
                 return BadRequest(ApiResponse<UploadedFileResult>.Fail("Vui lòng chọn một hình ảnh."));
-            if (!file.ContentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
-                return BadRequest(ApiResponse<UploadedFileResult>.Fail("Chỉ hỗ trợ file hình ảnh."));
             if (file.Length > ImportImageFiles.MaxImageBytes)
                 return BadRequest(ApiResponse<UploadedFileResult>.Fail("Hình ảnh không được vượt quá 10 MB."));
 
             await using var stream = file.OpenReadStream();
-            var uploaded = await fileStorage.UploadAsync(stream, file.FileName, file.ContentType, "jlpt-images", cancellationToken);
+            var header = new byte[12];
+            var read = await stream.ReadAtLeastAsync(header, header.Length, false, cancellationToken);
+            string contentType;
+            try
+            {
+                contentType = ImportImageFiles.DetectContentType(header, read, file.FileName);
+            }
+            catch (InvalidDataException ex)
+            {
+                return BadRequest(ApiResponse<UploadedFileResult>.Fail(ex.Message));
+            }
+            await using var uploadStream = file.OpenReadStream();
+            var uploaded = await fileStorage.UploadAsync(uploadStream, file.FileName, contentType, "jlpt-images", cancellationToken);
+            uploaded = uploaded with { Url = NormalizeLocalMediaUrl(uploaded.Url) };
             return Ok(ApiResponse<UploadedFileResult>.Success(uploaded));
         }
+
+        private string NormalizeLocalMediaUrl(string url) =>
+            fileStorage is LocalDevMediaStorageService &&
+            url.StartsWith('/') &&
+            (Request.Host.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase) ||
+             Request.Host.Host.Equals("127.0.0.1", StringComparison.OrdinalIgnoreCase))
+                ? $"{Request.Scheme}://{Request.Host}{url}"
+                : url;
 
         /// <summary>
         /// Upload file Excel để xem trước (Preview) sự thay đổi và kiểm tra lỗi trước khi nhập chính thức.
         /// </summary>
         /// <param name="file">File Excel (.xlsx, .xls)</param>
         /// <param name="entityType">Tùy chọn: Chọn loại nội dung cụ thể nếu chỉ muốn đọc 1 sheet duy nhất</param>
-        /// <param name="audioFiles">Các MP3 được chọn cùng Excel, tải lên AWS S3.</param>
-        /// <param name="imageFiles">Các ảnh được chọn cùng Excel, tải lên Supabase.</param>
+        /// <param name="audioFiles">Không sử dụng trong Preview; tải media bằng endpoint riêng trước.</param>
+        /// <param name="imageFiles">Không sử dụng trong Preview; tải media bằng endpoint riêng trước.</param>
         /// <param name="cancellationToken"></param>
         [HttpPost("preview")]
         [Consumes("multipart/form-data")]
@@ -121,25 +146,12 @@ namespace RikiPath.Api.Controllers
                 return BadRequest(ApiResponse<ImportPreviewResponse>.Fail("Định dạng file không hỗ trợ. Vui lòng tải lên file .xlsx hoặc .xls."));
             }
 
+            if (audioFiles is { Count: > 0 } || imageFiles is { Count: > 0 })
+                return BadRequest(ApiResponse<ImportPreviewResponse>.Fail(
+                    "Preview không tải media. Hãy tải audio/ảnh bằng endpoint riêng và dùng URL storage trong Excel."));
+
             await using var stream = file.OpenReadStream();
-            ImportAudioFiles resolver;
-            ImportImageFiles imageResolver;
-            try
-            {
-                if ((audioFiles ?? []).Sum(item => item.Length) + (imageFiles ?? []).Sum(item => item.Length) > 250L * 1024 * 1024)
-                    throw new InvalidDataException("Tổng dung lượng ảnh và MP3 trong mỗi lần import tối đa 250 MB.");
-                resolver = new ImportAudioFiles(audioFiles, awsAudio, transcriptions, GetCurrentUserId() ?? 0,
-                    (path, token) => UploadLocalMediaAsync(path, isAudio: true, token));
-                imageResolver = new ImportImageFiles(imageFiles, fileStorage,
-                    (path, token) => UploadLocalMediaAsync(path, isAudio: false, token));
-            }
-            catch (InvalidDataException ex)
-            {
-                return BadRequest(ApiResponse<ImportPreviewResponse>.Fail(ex.Message));
-            }
-            var result = await importService.PreviewAsync(stream, file.FileName, entityType, cancellationToken,
-                (path, token) => ResolveImportAudioAsync(resolver, path, token),
-                imageResolver.ResolveAsync);
+            var result = await importService.PreviewAsync(stream, file.FileName, entityType, cancellationToken);
 
             if (!result.IsSuccess)
             {

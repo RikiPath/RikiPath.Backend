@@ -35,7 +35,9 @@ namespace RikiPath.Application
         ILessonGrammarRepository LessonGrammars { get; }
 
         // 5. Personal Vocabulary Notebook
+        INotebookFolderRepository NotebookFolders { get; }
         ILearnerNoteRepository LearnerNotes { get; }
+        INotebookPageRepository NotebookPages { get; }
         ILearnerNoteEntryRepository LearnerNoteEntries { get; }
         ILearnerEssayRepository LearnerEssays { get; }
 
@@ -57,9 +59,13 @@ namespace RikiPath.Application
         IPracticeSubmissionRepository PracticeSubmissions { get; }
         IGradingResultRepository GradingResults { get; }
 
-        // 7. Spaced-Repetition Review Queue (SM-2)
+        // 7. Spaced-Repetition Review Queue (SM-2) & Smart Learning
         IReviewCardRepository ReviewCards { get; }
         IReviewHistoryRepository ReviewHistories { get; }
+        IUserSrsPreferenceRepository UserSrsPreferences { get; }
+        ILearnerHighlightRepository LearnerHighlights { get; }
+        ISrsCardTemplateRepository SrsCardTemplates { get; }
+        ISrsReviewSessionRepository SrsReviewSessions { get; }
 
         // 8. Subscriptions, Monetization & AI Advisory
         ISubscriptionPlanRepository SubscriptionPlans { get; }
@@ -74,6 +80,8 @@ namespace RikiPath.Application
         IMentorChatMessageRepository MentorChatMessages { get; }
         INoteRepository Notes { get; }
         IMentorAvailabilityRepository MentorAvailabilities { get; }
+        IGenericRepository<MentorTeachingProposal> MentorTeachingProposals { get; }
+        IGenericRepository<MentorTeachingProposalEvent> MentorTeachingProposalEvents { get; }
         IMentorWeeklyAvailabilityRepository MentorWeeklyAvailabilities { get; }
         IMentorProfileRepository MentorProfiles { get; }
         IMentorScheduleRepository MentorSchedules { get; }
@@ -84,6 +92,8 @@ namespace RikiPath.Application
         IContentApprovalRequestRepository ContentApprovalRequests { get; }
 
         IContentAiReviewRepository ContentAiReviews { get; }
+        IGenericRepository<ContentPassage> ContentPassages { get; }
+        IGenericRepository<QuestionBankItem> QuestionBankItems { get; }
         IStudyCourseRepository StudyCourses { get; }
         IGenericRepository<StudyCoursePlan> StudyCoursePlans { get; }
         IGenericRepository<StudyCohort> StudyCohorts { get; }

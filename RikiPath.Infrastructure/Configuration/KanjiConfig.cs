@@ -14,6 +14,14 @@ namespace RikiPath.Infrastructure.Configuration
 
             // Index trên Character để tìm kiếm Kanji nhanh
             builder.HasIndex(x => x.Character);
+            builder.Property(x => x.Status)
+                .HasConversion<string>()
+                .HasMaxLength(20)
+                .HasDefaultValue(RikiPath.Domain.Enums.ContentStatus.Published)
+                .HasSentinel((RikiPath.Domain.Enums.ContentStatus)(-1));
+            builder.Property(x => x.Version).HasDefaultValue(1).HasSentinel(-1);
+            builder.Property(x => x.UnpublishedReason).HasMaxLength(500);
+            builder.HasIndex(x => x.Status);
 
             builder.HasData(
                 new Kanji

@@ -35,7 +35,9 @@ namespace RikiPath.Infrastructure.Configuration
                 .OnDelete(DeleteBehavior.Restrict);
 
             // Index tối ưu truy vấn theo Cấp độ và Mã phần thi
-            builder.HasIndex(x => new { x.CertificateLevelId, x.Code });
+            builder.HasIndex(x => new { x.CertificateLevelId, x.Code })
+                .IsUnique()
+                .HasFilter("\"IsDeleted\" = false");
 
             // Seed data mẫu cho các phần thi JLPT (N5 và N4) với Id là int
             builder.HasData(

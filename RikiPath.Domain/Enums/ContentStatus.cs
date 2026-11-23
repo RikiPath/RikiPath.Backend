@@ -9,6 +9,8 @@ namespace RikiPath.Domain.Enums
         Draft,
         PendingReview,
         Published,
-        Rejected
+        Rejected,
+        Unpublished,
+        ChangesRequested
     }
 }

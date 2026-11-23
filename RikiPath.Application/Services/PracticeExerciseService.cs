@@ -77,7 +77,7 @@ namespace RikiPath.Application.Services
                         return new PracticeExerciseSummaryResponse
                         {
                             Id = exercise.Id,
-                            LessonId = exercise.LessonId,
+                            LessonId = exercise.LessonId ?? 0,
                             Title = exercise.Title,
                             ImageUrl = exercise.ImageUrl,
                             Description = exercise.Description,
@@ -133,7 +133,8 @@ namespace RikiPath.Application.Services
                     return ApiResponse<StartPracticeAttemptResponse>.NotFound(
                         "Không tìm thấy bài luyện tập.");
 
-                if (!await LessonPracticeProgress.HasStudiedAsync(unitOfWork, userId, exercise.LessonId, cancellationToken))
+                if (exercise.LessonId is int linkedLessonId &&
+                    !await LessonPracticeProgress.HasStudiedAsync(unitOfWork, userId, linkedLessonId, cancellationToken))
                     return ApiResponse<StartPracticeAttemptResponse>.Fail(
                         "Hãy đánh dấu đã học xong bài trước khi làm bài luyện tập.",
                         HttpStatusCode.Conflict, "LESSON_STUDY_REQUIRED");

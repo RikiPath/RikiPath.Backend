@@ -13,6 +13,8 @@ namespace RikiPath.Infrastructure.Configuration
             builder.Property(x => x.LanguageSkillId).HasColumnName("SkillId");
             builder.Property(x => x.CertificateSectionId).HasColumnName("CertificationSectionId");
             builder.Property(x => x.Title).IsRequired().HasMaxLength(200);
+            builder.Property(x => x.Instructions).HasMaxLength(1000);
+            builder.Property(x => x.SectionPolicyJson).HasColumnType("jsonb");
 
             builder.HasOne(x => x.MockTest)
                 .WithMany(x => x.Sections)

@@ -9,6 +9,7 @@ namespace RikiPath.Application.IServices
     public interface IMockTestService
     {
         Task<ApiResponse<List<TestSummaryResponse>>> GetTestsByLevelAsync(int certificationLevelId, CancellationToken cancellationToken = default);
+        Task<ApiResponse<TestSummaryResponse>> GetTestInfoAsync(int practiceTestId, CancellationToken cancellationToken = default);
         Task<ApiResponse<StartAttemptResponse>> StartAttemptAsync(int practiceTestId, CancellationToken cancellationToken = default);
         Task<ApiResponse<StartAttemptResponse>> GetAttemptSnapshotAsync(int attemptId, CancellationToken cancellationToken = default);
         Task<ApiResponse<AttemptResultResponse>> SaveAttemptAnswersAsync(int attemptId, SubmitAttemptRequest request, CancellationToken cancellationToken = default);
@@ -79,6 +80,18 @@ namespace RikiPath.Application.IServices
 
         Task<ApiResponse<List<QuestionReviewCard>>> GetWrongQuestionsReviewSessionAsync(
             int? practiceTestId = null,
+            CancellationToken cancellationToken = default);
+
+        Task<ApiResponse<List<TestSummaryResponse>>> GetPracticeSetsAsync(
+            int? certificateLevelId = null,
+            int? languageSkillId = null,
+            string? examKind = null,
+            string? keyword = null,
+            CancellationToken cancellationToken = default);
+
+        Task<ApiResponse<List<TestSummaryResponse>>> GetFullMockTestsAsync(
+            int? certificateLevelId = null,
+            string? keyword = null,
             CancellationToken cancellationToken = default);
     }
 }

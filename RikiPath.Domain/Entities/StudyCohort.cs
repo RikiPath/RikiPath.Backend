@@ -16,6 +16,8 @@ public sealed class StudyCohort
     public int? GroupPolicyId { get; set; }
     public MentorGroupPolicy? GroupPolicy { get; set; }
     public int? PolicyVersionSnapshot { get; set; }
+    public int? SourceProposalId { get; set; }
+    public MentorTeachingProposal? SourceProposal { get; set; }
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
     public string Status { get; set; } = "Draft";
     public int Revision { get; set; } = 1;

@@ -2,6 +2,9 @@ using System.Net;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using RikiPath.Application.EmailTemplates;
+using RikiPath.Application.Helpers;
 using RikiPath.Application.IClients;
 using RikiPath.Application.IServices;
 using RikiPath.Application.Requests.StudyCourses;
@@ -17,7 +20,10 @@ public sealed partial class StudyCourseService(IUnitOfWork uow, IClaimService cl
     IGroupEnrollmentEntitlementContract? groupEntitlementContract = null,
     IMentorGroupPolicyService? groupPolicies = null,
     IMentorTeachingConflictService? teachingConflicts = null,
-    IMentorLearnerSkillProfileService? skillProfiles = null) : IStudyCourseService
+    IMentorLearnerSkillProfileService? skillProfiles = null,
+    IEmailService? emailService = null,
+    IEmailTemplateService? emailTemplates = null,
+    ILogger<StudyCourseService>? logger = null) : IStudyCourseService
 {
     private ClaimDTO Actor => claims.GetUserClaim();
     private sealed class CourseRuleException(string message, HttpStatusCode status = HttpStatusCode.BadRequest, string? code = null) : Exception(message)
@@ -251,7 +257,8 @@ public sealed partial class StudyCourseService(IUnitOfWork uow, IClaimService cl
         MentorGroupPolicy? policy = null,
         IReadOnlyCollection<HomeworkAssignment>? cohortAssignments = null) => new
     {
-        c.Id, c.Name, c.PlanId, c.PlanRevision, c.CohortId, c.SessionType, c.TargetExamDate, c.CertificateLevelId, Level = c.CertificateLevel?.Code,
+        c.Id, c.Name, c.PlanId, c.PlanRevision, c.CohortId, CohortName = c.Cohort?.Name,
+        c.SessionType, c.TargetExamDate, c.CertificateLevelId, Level = c.CertificateLevel?.Code,
         c.LearnerId, LearnerName = $"{c.Learner?.FirstName} {c.Learner?.LastName}".Trim(), c.MentorId, MentorName = $"{c.Mentor?.FirstName} {c.Mentor?.LastName}".Trim(),
         c.DurationMonths, c.SessionsPerWeek, c.TotalSessions, c.SessionMinutes, c.Amount, c.Currency, c.PaymentStatus,
         c.Status, c.StartsAt, c.EndsAt, c.CompletedAt, c.RetakeOfId, c.RetakeClaimDays, c.CheckoutUrl, c.PaymentExpiresAt,
@@ -434,8 +441,12 @@ public sealed partial class StudyCourseService(IUnitOfWork uow, IClaimService cl
         RequireConflict(course.PaymentStatus != "Cancelled", "Đơn ghi danh đã hủy; hãy tạo yêu cầu mới.");
         RequireConflict(course.PaymentStatus != "Pending" || course.PaymentExpiresAt > DateTime.UtcNow, "Đơn hết hạn. Hãy tạo đơn mới.");
         if (!entitlementMode.RequiresCheckout)
+        {
+            if (!resumed && course.PaymentStatus == "Paid" && course.Status == "Active")
+                await SendEnrollmentConfirmationEmailBestEffortAsync(course.Id, ct);
             return new { course.Id, course.CohortId, course.CheckoutUrl, course.PaymentStatus, course.Status, course.Amount, course.Currency,
                 course.PaymentExpiresAt, course.CapacitySnapshot, course.PolicyVersionSnapshot, Resumed = resumed };
+        }
         await uow.ExecuteInTransactionAsync(async token =>
         {
             // Đơn được tiếp tục dùng mã giao dịch gốc của nó để tuần tự hóa việc tạo link thanh toán.
@@ -602,6 +613,7 @@ public sealed partial class StudyCourseService(IUnitOfWork uow, IClaimService cl
         string? reference, string source, CancellationToken ct)
     {
         object result = new { Confirmed = false };
+        var sendEnrollmentEmail = false;
         await uow.ExecuteInTransactionAsync(async token =>
         {
             var c = await uow.StudyCourses.LockAsync(courseId, token);
@@ -703,9 +715,73 @@ public sealed partial class StudyCourseService(IUnitOfWork uow, IClaimService cl
                 }
             }
             await uow.SaveChangesAsync(token);
+            sendEnrollmentEmail = c.Status is "Ready" or "Active" && c.PaymentStatus == "Paid";
             result = new { Confirmed = true, Idempotent = false, c.Status, c.PaymentReviewReason };
         }, ct);
+
+        if (sendEnrollmentEmail)
+            await SendEnrollmentConfirmationEmailBestEffortAsync(courseId, ct);
+
         return result;
+    }
+
+    private async Task SendEnrollmentConfirmationEmailBestEffortAsync(int courseId, CancellationToken ct)
+    {
+        if (emailService is null)
+            return;
+
+        try
+        {
+            var course = await uow.StudyCourses.Query().AsNoTracking()
+                .Include(x => x.Learner)
+                .Include(x => x.Mentor)
+                .Include(x => x.Cohort)
+                .Include(x => x.CertificateLevel)
+                .SingleOrDefaultAsync(x => x.Id == courseId, ct);
+
+            if (course?.Learner is null || !NotificationPreferenceHelper.ShouldDeliverEmail(course.Learner, "Cohort"))
+                return;
+
+            var templates = emailTemplates ?? new EmailTemplateService(settings);
+            var learnerName = UserNameHelper.FormatFullName(course.Learner.FirstName, course.Learner.LastName);
+            var courseTitle = !string.IsNullOrWhiteSpace(course.Cohort?.Name)
+                ? $"{course.Cohort.Name} ({course.Name})"
+                : course.Name;
+            var details = new List<EmailDetailItem>
+            {
+                new("Mã ghi danh", $"#{course.Id}"),
+                new("Cấp độ JLPT", course.CertificateLevel?.Code ?? "JLPT"),
+                new("Số buổi học", $"{course.TotalSessions} buổi ({course.SessionMinutes} phút/buổi)"),
+            };
+
+            if (course.StartsAt.HasValue)
+                details.Add(new("Khai giảng dự kiến", EmailTemplateService.FormatVietnamDateTime(course.StartsAt.Value)));
+
+            if (course.Mentor is not null)
+                details.Add(new("Giáo viên phụ trách", UserNameHelper.FormatFullName(course.Mentor.FirstName, course.Mentor.LastName)));
+
+            details.Add(new("Học phí", course.Amount > 0 ? $"{course.Amount:N0} {course.Currency}" : "Miễn phí theo quyền học"));
+
+            var rendered = templates.BuildBookingEnrollment(new BookingEnrollmentEmailData(
+                learnerName,
+                $"Xác nhận ghi danh {courseTitle} · RikiPath",
+                "Xác nhận ghi danh",
+                "Ghi danh khóa học thành công",
+                "Suất học của bạn trên RikiPath đã được xác nhận. Bạn có thể xem lịch học từng buổi và chuẩn bị trước khi khai giảng.",
+                courseTitle,
+                details,
+                SakuraEmailTone.Success,
+                "Chuẩn bị trước buổi học",
+                "Hãy kiểm tra lịch từng buổi và tài liệu ôn tập trong mục Khóa học của tôi trước giờ vào lớp 10 phút.",
+                "Xem khóa học của tôi",
+                $"/my-courses/{course.Id}"));
+
+            await emailService.SendEmailAsync(course.Learner.Email!, rendered, ct);
+        }
+        catch (Exception ex)
+        {
+            logger?.LogWarning(ex, "Enrollment confirmation email failed for course {CourseId}", courseId);
+        }
     }
 
     public Task<ApiResponse<object>> ReconcileCoursePaymentAsync(int courseId, CancellationToken ct) => Run(async () =>

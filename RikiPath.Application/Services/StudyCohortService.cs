@@ -103,6 +103,7 @@ public sealed partial class StudyCourseService
                 x.Capacity,
                 x.CapacitySnapshot,
                 x.PolicyVersionSnapshot,
+                x.SourceProposalId,
                 x.Status,
                 x.Revision,
                 Level = x.Plan.CertificateLevel.Code,
@@ -166,8 +167,13 @@ public sealed partial class StudyCourseService
             {
                 var hasQualification = await uow.MentorTeachingQualifications.Query()
                     .AnyAsync(q => q.MentorUserId == r.MentorId && q.CertificateLevelId == p!.CertificateLevelId && q.IsActive, token);
-                Rule(hasQualification, "MENTOR_NOT_QUALIFIED_FOR_LEVEL",
-                    "Giáo viên chưa được cấp quyền giảng dạy cấp độ của gói học này. Hãy phân quyền JLPT trước khi mở lớp.",
+                var hasApprovedProposal = await uow.MentorTeachingProposals.Query()
+                    .AnyAsync(pr => pr.MentorId == r.MentorId
+                        && pr.Status == MentorTeachingProposalStatus.Approved
+                        && pr.CertificateLevelId == p!.CertificateLevelId
+                        && (!r.SourceProposalId.HasValue || pr.Id == r.SourceProposalId.Value), token);
+                Rule(hasQualification || hasApprovedProposal, "MENTOR_NOT_QUALIFIED_FOR_LEVEL",
+                    "Giáo viên chưa có đề xuất mở lớp đã duyệt hoặc phân quyền giảng dạy cho cấp độ của gói học này.",
                     HttpStatusCode.Conflict);
             }
             var c = id.HasValue ? await uow.StudyCohorts.Query().Include(x => x.Sessions).Include(x => x.Enrollments)
@@ -212,12 +218,21 @@ public sealed partial class StudyCourseService
             if (!(r.Publish && standardPlan))
                 Require(slots[^1].EndTime <= slots[0].StartTime.AddMonths(p!.DurationMonths), "Lịch lớp vượt thời gian học của gói.");
             Require(!p.TargetExamDate.HasValue || slots[^1].EndTime <= p.TargetExamDate, "Lớp phải kết thúc trước kỳ thi mục tiêu.");
-            var weekly = slots.GroupBy(s => { var d = s.StartTime.AddHours(7).Date; return d.AddDays(-(((int)d.DayOfWeek + 6) % 7)); });
+            var weekly = slots.GroupBy(s => { var d = LocalTime(s.StartTime).Date; return d.AddDays(-(((int)d.DayOfWeek + 6) % 7)); });
             Require(weekly.All(g => g.Count() <= p.SessionsPerWeek), "Số buổi trong tuần vượt cấu hình gói.");
             c!.Name = r.Name.Trim(); c.PlanId = r.PlanId; c.MentorId = r.MentorId; c.Capacity = r.Capacity;
             c.CapacitySnapshot = r.Capacity;
             c.GroupPolicyId = slots[0].GroupPolicyId;
             c.PolicyVersionSnapshot = slots[0].GroupPolicy?.Version ?? slots[0].PolicyVersion;
+            if (!id.HasValue && r.SourceProposalId.HasValue)
+            {
+                var srcProposal = await uow.MentorTeachingProposals.Query().AsNoTracking()
+                    .FirstOrDefaultAsync(x => x.Id == r.SourceProposalId.Value, token);
+                Require(srcProposal is not null && srcProposal.Status == MentorTeachingProposalStatus.Approved
+                    && srcProposal.MentorId == r.MentorId,
+                    "Đề xuất nguồn không hợp lệ hoặc chưa được duyệt cho Giáo viên này.");
+                c.SourceProposalId = srcProposal!.Id;
+            }
             c.StartsAt = slots[0].StartTime; c.EndsAt = slots[^1].EndTime;
             c.Status = r.Publish ? "Published" : "Draft";
             if (r.Publish) Require(p.IsPublished, "Gói cần được mở bán trước khi công bố lớp.");

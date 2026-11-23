@@ -36,7 +36,7 @@ namespace RikiPath.Infrastructure.Repositories
         {
             return await _context.LessonProgresses
                 .Where(p => p.UserId == userId && p.LastWatchedAt.HasValue)
-                .Select(p => p.LastWatchedAt!.Value.Date)
+                .Select(p => p.LastWatchedAt!.Value)
                 .Distinct()
                 .ToListAsync(cancellationToken);
         }

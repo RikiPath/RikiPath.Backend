@@ -499,6 +499,7 @@ namespace RikiPath.Application.Services
                         lockedUser.DailyStudyMinutesMin = dailyStudyMinutes;
                         lockedUser.DailyStudyMinutesMax = dailyStudyMinutesMax;
                         lockedUser.TargetExamDate = normalizedExamDate;
+                        lockedUser.LearningMode = LearningMode.AiPersonalized;
                         unitOfWork.UserAccounts.Update(lockedUser);
                     }
                     await unitOfWork.RecommendedLearningPaths.AddAsync(suggestion, transactionCancellationToken);
@@ -741,6 +742,7 @@ namespace RikiPath.Application.Services
                         user.DailyStudyMinutesMax = confirmedOptions.DailyStudyMinutesMax;
                     }
                     if (confirmedOptions.HasTargetExamDate == true) user.TargetExamDate = confirmedOptions.TargetExamDate;
+                    user.LearningMode = LearningMode.AiPersonalized;
                     unitOfWork.UserAccounts.Update(user);
                     await unitOfWork.SaveChangesAsync(ct);
                     outcome = ApiResponse<LearningPathResponse>.Success(
@@ -919,7 +921,7 @@ namespace RikiPath.Application.Services
             // CẦN: unitOfWork.LanguageSkills (repository cho bảng LanguageSkill) với 1 method lấy toàn bộ.
             // Nếu IUnitOfWork/ILanguageSkillRepository của bạn đặt tên khác GetAllAsync(), đổi lại dòng dưới.
             var languageSkills = await unitOfWork.LanguageSkills.GetAllAsync();
-            var skillGroupById = languageSkills.ToDictionary(skill => skill.Id, skill => ClassifySkillGroup(skill.Name));
+            var skillGroupById = languageSkills.ToDictionary(skill => skill.Id, skill => JlptCurriculum.ResolveStudyGroup(skill.Id, skill.Code, skill.Name));
 
             var progressByLesson = lessonProgresses
                 .GroupBy(p => p.LessonId)
@@ -963,7 +965,10 @@ namespace RikiPath.Application.Services
                 .Select(x => x.Lesson)
                 .ToList();
 
+            var visibleLessonIds = loadedLevels.Values.SelectMany(levelLessons => levelLessons)
+                .Select(lesson => lesson.Id).ToHashSet();
             var progressList = lessonProgresses
+                .Where(progress => visibleLessonIds.Contains(progress.LessonId))
                 .Take(MaxLessonProgressItems)
                 .Select(p => (p.Lesson?.Title ?? string.Empty, p.ProgressPercent))
                 .ToList();

@@ -121,19 +121,21 @@ namespace RikiPath.Application.Handlers
         public static string? Consistent(IReadOnlyList<ExcelRow> group, string header, List<string> errors)
             => Consistent(group, header, r => r.Get(header), errors);
 
-        /// <summary>Cột URL tùy chọn: rỗng -> null; có giá trị thì phải là http/https hợp lệ.</summary>
+        /// <summary>Cột URL tùy chọn: rỗng -> null; có giá trị thì phải là URL media hoặc http/https hợp lệ.</summary>
         public static string? CheckUrl(string? raw, string label, string rowPrefix, List<string> errors)
         {
             var v = Clean(raw);
             if (v is null) return null;
+            if (AllowedMediaUrlPolicy.IsSafeLocalMediaPath(v))
+                return v;
             if (!IsHttpUrl(v))
             {
-                errors.Add($"{rowPrefix}{label} phải là đường dẫn http/https hợp lệ.");
+                errors.Add($"{rowPrefix}{label} phải là đường dẫn http/https hoặc URL media hợp lệ.");
                 return null;
             }
             if (IsHostedMediaField(label) && !IsApprovedMediaUrl(v))
             {
-                errors.Add($"{rowPrefix}{label} phải là URL file đã lưu trên Supabase Storage hoặc Amazon S3.");
+                errors.Add($"{rowPrefix}{label} phải là URL file đã lưu trên storage được phép.");
                 return null;
             }
             return v;
@@ -149,10 +151,10 @@ namespace RikiPath.Application.Handlers
             if (!isListening) return null;
 
             var url = Clean(audioUrl);
-            if (url is null) return "Câu Nghe hiểu thiếu AudioUrl. Hãy tải file MP3 lên và điền đường dẫn.";
-            if (!IsHttpUrl(url)) return "AudioUrl của câu Nghe hiểu phải là đường dẫn http/https hợp lệ.";
-            return new Uri(url).AbsolutePath.EndsWith(".mp3", StringComparison.OrdinalIgnoreCase)
-                ? null : "AudioUrl của câu Nghe hiểu phải trỏ tới file .mp3.";
+            if (url is null) return "Câu Nghe hiểu thiếu AudioUrl. Hãy tải file audio lên trước.";
+            if (!AllowedMediaUrlPolicy.IsApprovedMediaUrl(url)) return "AudioUrl của câu Nghe hiểu phải là đường dẫn media hợp lệ.";
+            return AllowedMediaUrlPolicy.HasSupportedAudioExtension(url)
+                ? null : "AudioUrl của câu Nghe hiểu phải trỏ tới file audio hợp lệ (.mp3, .wav, .m4a, .ogg).";
         }
 
         public static string? ValidateMockTestCoverage(string? levelCode,
@@ -178,12 +180,7 @@ namespace RikiPath.Application.Handlers
             label.Contains("VideoUrl", StringComparison.OrdinalIgnoreCase);
 
         private static bool IsApprovedMediaUrl(string value)
-        {
-            if (!Uri.TryCreate(value, UriKind.Absolute, out var uri)) return false;
-            var host = uri.Host.TrimEnd('.').ToLowerInvariant();
-            return host == "supabase.co" || host.EndsWith(".supabase.co", StringComparison.Ordinal) ||
-                   host == "amazonaws.com" || host.EndsWith(".amazonaws.com", StringComparison.Ordinal);
-        }
+            => AllowedMediaUrlPolicy.IsApprovedMediaUrl(value);
 
         /// <summary>
         /// Đọc Option1..4 + số thứ tự đáp án đúng. Cần >= 2 đáp án, không được bỏ trống giữa chừng

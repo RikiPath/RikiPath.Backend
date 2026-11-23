@@ -24,6 +24,21 @@ namespace RikiPath.Infrastructure.Configuration
                 .OnDelete(DeleteBehavior.Restrict);
 
             builder.HasIndex(x => new { x.CertificateLevelId, x.LanguageSkillId });
+            builder.Property(x => x.Status)
+                .HasConversion<string>()
+                .HasMaxLength(20)
+                .HasDefaultValue(RikiPath.Domain.Enums.ContentStatus.Published)
+                .HasSentinel((RikiPath.Domain.Enums.ContentStatus)(-1));
+            builder.Property(x => x.Version).HasDefaultValue(1).HasSentinel(-1);
+            builder.Property(x => x.EstimatedMinutes).HasDefaultValue(15).HasSentinel(-1);
+            builder.Property(x => x.LearningObjectives).HasMaxLength(1000);
+            builder.Property(x => x.SourceProvenance).HasMaxLength(300);
+            builder.HasOne(x => x.PrerequisiteLesson)
+                .WithMany()
+                .HasForeignKey(x => x.PrerequisiteLessonId)
+                .OnDelete(DeleteBehavior.SetNull);
+            builder.Property(x => x.UnpublishedReason).HasMaxLength(500);
+            builder.HasIndex(x => x.Status);
         }
     }
 }

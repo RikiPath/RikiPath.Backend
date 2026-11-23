@@ -3,7 +3,8 @@ namespace RikiPath.Application.IServices
     public enum AiFeature
     {
         Grading,
-        LearningPath
+        LearningPath,
+        Translation
     }
 
     // Kiểm tra & ghi nhận quota sử dụng AI theo từng user/theo ngày (giờ Việt Nam), dùng chung

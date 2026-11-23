@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using Amazon.Runtime;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Logging;
 using RikiPath.Application.IClients;
 using RikiPath.Application.IServices;
@@ -32,7 +33,7 @@ public sealed class ContentAudioTranscriptionService(
         while ((count = await audio.ReadAsync(buffer, ct)) > 0)
         {
             if (buffered.Length + count > ListeningAudioFilePolicy.MaxBytes)
-                throw new ArgumentException("File MP3 tối đa 25 MB.");
+                throw new ArgumentException("File MP3 không được vượt quá 500 MB.");
             await buffered.WriteAsync(buffer.AsMemory(0, count), ct);
         }
         buffered.Position = 0;
@@ -215,13 +216,14 @@ public sealed class ContentAudioTranscriptionService(
             return true;
         }
 
+        IDbContextTransaction? transaction = null;
         try
         {
             var result = await transcriber.TranscribeListeningAsync(item.AudioUrl, ct);
             if (string.IsNullOrWhiteSpace(result.TranscribedText))
                 throw new InvalidOperationException("No speech recognized.");
             now = DateTime.UtcNow;
-            await using var transaction = await db.Database.BeginTransactionAsync(ct);
+            transaction = await db.Database.BeginTransactionAsync(ct);
             var completed = await db.ContentAudioTranscriptions.Where(x => x.Id == item.Id && x.LeaseId == leaseId)
                 .ExecuteUpdateAsync(update => update.SetProperty(x => x.Status, "Completed")
                     .SetProperty(x => x.Transcript, result.TranscribedText)
@@ -239,6 +241,7 @@ public sealed class ContentAudioTranscriptionService(
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
+            await RollbackQuietlyAsync(transaction);
             using var release = new CancellationTokenSource(TimeSpan.FromSeconds(10));
             try
             {
@@ -252,6 +255,7 @@ public sealed class ContentAudioTranscriptionService(
         }
         catch (Exception exception)
         {
+            await RollbackQuietlyAsync(transaction);
             var code = exception is AmazonServiceException aws &&
                 aws.ErrorCode is "AccessDenied" or "AccessDeniedException" or "UnauthorizedException"
                 ? "AUDIO_TRANSCRIPTION_ACCESS_DENIED" : "AUDIO_TRANSCRIPTION_FAILED";
@@ -268,7 +272,26 @@ public sealed class ContentAudioTranscriptionService(
                     .SetProperty(x => x.UpdatedAtUtc, now).SetProperty(x => x.LeaseId, (Guid?)null)
                     .SetProperty(x => x.LeaseExpiresAtUtc, (DateTime?)null), ct);
         }
+        finally
+        {
+            if (transaction is not null)
+                await transaction.DisposeAsync();
+        }
         return true;
+    }
+
+    private static async Task RollbackQuietlyAsync(IDbContextTransaction? transaction)
+    {
+        if (transaction is null) return;
+        try
+        {
+            // Cleanup must not reuse an already-cancelled request/worker token.
+            await transaction.RollbackAsync(CancellationToken.None);
+        }
+        catch
+        {
+            // Disposed by caller's finally block.
+        }
     }
 
     private async Task SynchronizeQuestionsAsync(string audioUrl, ContentAudioTranscriptionResponse response, string? raw, CancellationToken ct)
@@ -296,6 +319,8 @@ public sealed class ContentAudioTranscriptionService(
 
     private string? NormalizeUrl(string audioUrl)
     {
+        if (Application.Helpers.AllowedMediaUrlPolicy.IsSafeLocalMediaPath(audioUrl))
+            return audioUrl.Trim();
         if (awsAudio?.TryGetContentReference(audioUrl, out var canonical) == true) return canonical;
         if (!Uri.TryCreate(audioUrl, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps ||
             !Uri.TryCreate(settings.Supabase?.Url, UriKind.Absolute, out var storage) ||

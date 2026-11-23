@@ -2,8 +2,43 @@ namespace RikiPath.Application.Responses.AdminConfig;
 
 public sealed record AdminFeatureItemDto(
     int Id,
+    string Code,
     string Name,
-    string? Description);
+    string? Description,
+    string Category,
+    string AccessMode,
+    bool IsCoreFree,
+    string? CreditFeatureKey,
+    IReadOnlyList<string> Routes,
+    int SortOrder,
+    int LinkedPlanCount,
+    // Availability (ACTIVE / DISABLED) and access policy kept separately; AccessMode above stays the effective mode
+    // (DISABLED while suspended) for older clients. AccessPolicy is null for a legacy suspension with no recorded policy.
+    string Availability = "ACTIVE",
+    string? AccessPolicy = null,
+    string? StoredState = null);
+
+public sealed record AdminEntitlementPreviewItemDto(
+    int FeatureId,
+    string Code,
+    string Name,
+    string Category,
+    string AccessMode,
+    bool IsCoreFree,
+    bool Allowed,
+    string AccessSource,
+    string? Note,
+    // AVAILABLE / PLAN_LOCKED / CREDIT_LOCKED / PLAN_AND_CREDIT_LOCKED / ADMIN_DISABLED (internal codes; UI shows Vietnamese).
+    string State = "AVAILABLE",
+    string? Description = null);
+
+public sealed record AdminEntitlementPreviewResponse(
+    int? PlanId,
+    string? PlanName,
+    string? PlanCategory,
+    int DurationDays,
+    int AiGradingQuota,
+    IReadOnlyList<AdminEntitlementPreviewItemDto> Features);
 
 public sealed record AdminSubscriptionPlanDto(
     int Id,

@@ -66,6 +66,12 @@ namespace RikiPath.Application.Responses
 
         public static ApiResponse<T> Unauthorized(string message = "Unauthorized access")
             => Fail(message, HttpStatusCode.Unauthorized);
+
+        public static ApiResponse<T> Forbidden(string message = "Forbidden")
+            => Fail(message, HttpStatusCode.Forbidden);
+
+        public static ApiResponse<T> Conflict(string message = "Conflict")
+            => Fail(message, HttpStatusCode.Conflict);
     }
 
     // Lớp non-generic cho API không trả về Result
@@ -127,5 +133,8 @@ namespace RikiPath.Application.Responses
 
         public static new ApiResponse Forbidden(string message = "Forbidden")
             => Fail(message, HttpStatusCode.Forbidden);
+
+        public static new ApiResponse Conflict(string message = "Conflict")
+            => Fail(message, HttpStatusCode.Conflict);
     }
 }

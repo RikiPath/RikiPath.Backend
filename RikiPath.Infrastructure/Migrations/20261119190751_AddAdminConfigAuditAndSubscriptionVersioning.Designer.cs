@@ -4791,7 +4791,7 @@ namespace RikiPath.Infrastructure.Migrations
                     b.ToTable("MentorBookingIntents", (string)null);
                 });
 
-            modelBuilder.Entity("RikiPath.Domain.Entities.MentorBookingReservation", b =>
+            modelBuilder.Entity("RikiPath.Domain.Entities.  tion", b =>
                 {
                     b.Property<long>("Id")
                         .ValueGeneratedOnAdd()

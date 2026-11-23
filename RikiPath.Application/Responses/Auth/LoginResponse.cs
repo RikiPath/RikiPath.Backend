@@ -14,4 +14,10 @@ namespace RikiPath.Application.Responses.Auth
         public bool HasPassword { get; set; }
         public bool GoogleLinked { get; set; }
     }
+
+    public sealed class GoogleAuthConfigResponse
+    {
+        public bool Enabled { get; set; }
+        public string? ClientId { get; set; }
+    }
 }

@@ -1,16 +1,24 @@
+using RikiPath.Application.Helpers;
+using RikiPath.Application.Requests.Reviews;
+using RikiPath.Application.Responses.Reviews;
 using RikiPath.Domain.Entities;
+using RikiPath.Domain.Enums;
 using RikiPath.Application.IServices;
 using RikiPath.Application.Requests.Lessons;
 using RikiPath.Application.Responses;
 using RikiPath.Application.Responses.Lessons;
 using System.Net;
 using System.Data.Common;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 namespace RikiPath.Application.Services
 {
-    public class LessonProgressService(IUnitOfWork unitOfWork, IClaimService claimService,
-        ILogger<LessonProgressService>? logger = null) : ILessonProgressService
+    public class LessonProgressService(
+        IUnitOfWork unitOfWork,
+        IClaimService claimService,
+        ILogger<LessonProgressService>? logger = null,
+        IReviewService? reviewService = null) : ILessonProgressService
     {
         private const int AutoCompleteThresholdPercent = 95;
 
@@ -100,7 +108,34 @@ namespace RikiPath.Application.Services
                     lessonId,
                     cancellationToken);
 
-                return ApiResponse<LessonDetailResponse>.Success(MapToResponse(lesson, progress));
+                var now = DateTime.UtcNow;
+                if (progress is null)
+                {
+                    progress = new LessonProgress
+                    {
+                        UserId = userId,
+                        LessonId = lessonId,
+                        ProgressPercent = 0,
+                        IsCompleted = false,
+                        FirstViewedAt = now,
+                        LastWatchedAt = now,
+                    };
+                    await unitOfWork.LessonProgresses.AddAsync(progress, cancellationToken);
+                    await unitOfWork.SaveChangesAsync(cancellationToken);
+                }
+                else if (progress.FirstViewedAt is null || progress.IsDeleted)
+                {
+                    progress.IsDeleted = false;
+                    progress.FirstViewedAt ??= now;
+                    unitOfWork.LessonProgresses.Update(progress);
+                    await unitOfWork.SaveChangesAsync(cancellationToken);
+                }
+
+                var detail = MapToResponse(lesson, progress);
+                if (progress.IsCompleted)
+                    detail.SuggestedSrsCards = await BuildLessonSrsSuggestionsAsync(userId, lesson, cancellationToken);
+
+                return ApiResponse<LessonDetailResponse>.Success(detail);
             }
             catch (OperationCanceledException)
             {
@@ -149,44 +184,68 @@ namespace RikiPath.Application.Services
                         $"Không tìm thấy bài học Id = {lessonId}.");
                 }
 
-                var progress = await unitOfWork.LessonProgresses.GetByUserAndLessonAsync(
-                    userId,
-                    lessonId,
-                    cancellationToken);
+                LessonProgress? progress = null;
                 var now = DateTime.UtcNow;
                 var clampedPosition = Math.Min(request.PositionSeconds, request.DurationSeconds);
                 var percent = (int)Math.Round(clampedPosition * 100.0 / request.DurationSeconds);
                 percent = Math.Clamp(percent, 0, 100);
+                bool newlyCompleted = false;
 
-                if (progress is null)
+                await unitOfWork.ExecuteInTransactionAsync(async token =>
                 {
-                    progress = new LessonProgress
+                    await unitOfWork.UserAccounts.GetByIdForUpdateAsync(userId, token);
+                    progress = await unitOfWork.LessonProgresses.GetByUserAndLessonAsync(
+                        userId,
+                        lessonId,
+                        token);
+
+                    if (progress is null)
                     {
-                        UserId = userId,
-                        LessonId = lessonId,
-                        ProgressPercent = percent,
-                        LastPositionSeconds = clampedPosition,
-                        LastWatchedAt = now,
-                    };
-                    await unitOfWork.LessonProgresses.AddAsync(progress, cancellationToken);
-                }
-                else
-                {
-                    progress.IsDeleted = false;
-                    progress.ProgressPercent = Math.Max(progress.ProgressPercent, percent);
-                    progress.LastPositionSeconds = clampedPosition;
-                    progress.LastWatchedAt = now;
-                    unitOfWork.LessonProgresses.Update(progress);
-                }
+                        progress = new LessonProgress
+                        {
+                            UserId = userId,
+                            LessonId = lessonId,
+                            ProgressPercent = percent,
+                            LastPositionSeconds = clampedPosition,
+                            LastWatchedAt = now,
+                            FirstViewedAt = now,
+                            LastInteractedAt = now,
+                            InteractionCount = 1,
+                        };
+                        await unitOfWork.LessonProgresses.AddAsync(progress, token);
+                    }
+                    else
+                    {
+                        progress.IsDeleted = false;
+                        progress.ProgressPercent = Math.Max(progress.ProgressPercent, percent);
+                        progress.LastPositionSeconds = clampedPosition;
+                        progress.LastWatchedAt = now;
+                        progress.FirstViewedAt ??= now;
+                        progress.LastInteractedAt = now;
+                        progress.InteractionCount++;
+                        unitOfWork.LessonProgresses.Update(progress);
+                    }
 
-                if (!progress.IsCompleted && progress.ProgressPercent >= AutoCompleteThresholdPercent)
-                {
-                    progress.IsCompleted = true;
-                    progress.ModifiedDate = now;
-                }
+                    if (!progress.IsCompleted && progress.ProgressPercent >= AutoCompleteThresholdPercent)
+                    {
+                        progress.IsCompleted = true;
+                        progress.CompletedAt = now;
+                        progress.ModifiedDate = now;
+                        newlyCompleted = true;
+                    }
 
-                await unitOfWork.SaveChangesAsync(cancellationToken);
-                return ApiResponse<LessonDetailResponse>.Success(MapToResponse(lesson, progress));
+                    await unitOfWork.SaveChangesAsync(token);
+                }, cancellationToken);
+
+                var detail = MapToResponse(lesson, progress!);
+                if (newlyCompleted || progress!.IsCompleted)
+                {
+                    var (suggestions, autoEnrolledCount) = await PrepareCompletionSuggestionsAndAutoEnrollAsync(
+                        userId, lesson, newlyCompleted, cancellationToken);
+                    detail.SuggestedSrsCards = suggestions;
+                    detail.AutoEnrolledSrsCount = autoEnrolledCount;
+                }
+                return ApiResponse<LessonDetailResponse>.Success(detail);
             }
             catch (OperationCanceledException)
             {
@@ -216,44 +275,63 @@ namespace RikiPath.Application.Services
                         $"Không tìm thấy bài học Id = {lessonId}.");
                 }
 
-                var progress = await unitOfWork.LessonProgresses.GetByUserAndLessonAsync(
-                    userId,
-                    lessonId,
-                    cancellationToken);
-                if (progress?.IsCompleted == true && !progress.IsDeleted)
-                {
-                    return ApiResponse<LessonDetailResponse>.Success(
-                        MapToResponse(lesson, progress));
-                }
-
+                LessonProgress? progress = null;
+                var newlyCompleted = false;
                 var now = DateTime.UtcNow;
-                if (progress is null)
-                {
-                    progress = new LessonProgress
-                    {
-                        UserId = userId,
-                        LessonId = lessonId,
-                        ProgressPercent = 100,
-                        IsCompleted = true,
-                        LastWatchedAt = now,
-                        ModifiedDate = now,
-                    };
-                    await unitOfWork.LessonProgresses.AddAsync(progress, cancellationToken);
-                }
-                else
-                {
-                    // Retry hoàn thành cùng một lesson không được tạo thêm progress trùng.
-                    progress.IsDeleted = false;
-                    progress.ProgressPercent = 100;
-                    progress.IsCompleted = true;
-                    progress.LastWatchedAt = now;
-                    progress.ModifiedDate ??= now;
-                    unitOfWork.LessonProgresses.Update(progress);
-                }
 
-                // Chỉ một progress row được ghi; thống kê discovery luôn tính lại từ dữ liệu này.
-                await unitOfWork.SaveChangesAsync(cancellationToken);
-                return ApiResponse<LessonDetailResponse>.Success(MapToResponse(lesson, progress));
+                await unitOfWork.ExecuteInTransactionAsync(async token =>
+                {
+                    await unitOfWork.UserAccounts.GetByIdForUpdateAsync(userId, token);
+                    progress = await unitOfWork.LessonProgresses.GetByUserAndLessonAsync(
+                        userId,
+                        lessonId,
+                        token);
+
+                    if (progress?.IsCompleted == true && !progress.IsDeleted)
+                        return;
+
+                    newlyCompleted = true;
+                    if (progress is null)
+                    {
+                        progress = new LessonProgress
+                        {
+                            UserId = userId,
+                            LessonId = lessonId,
+                            ProgressPercent = 100,
+                            IsCompleted = true,
+                            FirstViewedAt = now,
+                            LastInteractedAt = now,
+                            InteractionCount = 1,
+                            CompletedAt = now,
+                            LastWatchedAt = now,
+                            ModifiedDate = now,
+                        };
+                        await unitOfWork.LessonProgresses.AddAsync(progress, token);
+                    }
+                    else
+                    {
+                        // Retry hoặc concurrent completion cùng một lesson không tạo progress trùng và không auto-enroll lặp.
+                        progress.IsDeleted = false;
+                        progress.ProgressPercent = 100;
+                        progress.IsCompleted = true;
+                        progress.FirstViewedAt ??= now;
+                        progress.LastInteractedAt = now;
+                        progress.InteractionCount = Math.Max(1, progress.InteractionCount);
+                        progress.CompletedAt ??= now;
+                        progress.LastWatchedAt = now;
+                        progress.ModifiedDate ??= now;
+                        unitOfWork.LessonProgresses.Update(progress);
+                    }
+
+                    await unitOfWork.SaveChangesAsync(token);
+                }, cancellationToken);
+
+                var (suggestions, autoEnrolled) = await PrepareCompletionSuggestionsAndAutoEnrollAsync(
+                    userId, lesson, triggerAutoEnroll: newlyCompleted, cancellationToken);
+                var detail = MapToResponse(lesson, progress!);
+                detail.SuggestedSrsCards = suggestions;
+                detail.AutoEnrolledSrsCount = autoEnrolled;
+                return ApiResponse<LessonDetailResponse>.Success(detail);
             }
             catch (OperationCanceledException)
             {
@@ -265,6 +343,277 @@ namespace RikiPath.Application.Services
                     "Không thể hoàn thành bài học.",
                     HttpStatusCode.InternalServerError);
             }
+        }
+
+        public async Task<ApiResponse<LessonDetailResponse>> RecordInteractionAsync(
+            int lessonId,
+            CancellationToken cancellationToken)
+        {
+            try
+            {
+                var userId = claimService.GetUserClaim().Id;
+                var lesson = await unitOfWork.Lessons.GetLearnerVisibleByIdAsync(lessonId, cancellationToken);
+                if (lesson is null)
+                    return ApiResponse<LessonDetailResponse>.NotFound($"Không tìm thấy bài học Id = {lessonId}.");
+
+                var now = DateTime.UtcNow;
+                var progress = await unitOfWork.LessonProgresses.GetByUserAndLessonAsync(userId, lessonId, cancellationToken);
+                if (progress is null)
+                {
+                    progress = new LessonProgress
+                    {
+                        UserId = userId,
+                        LessonId = lessonId,
+                        ProgressPercent = 0,
+                        IsCompleted = false,
+                        FirstViewedAt = now,
+                        LastInteractedAt = now,
+                        InteractionCount = 1,
+                        LastWatchedAt = now,
+                    };
+                    await unitOfWork.LessonProgresses.AddAsync(progress, cancellationToken);
+                }
+                else
+                {
+                    progress.IsDeleted = false;
+                    progress.FirstViewedAt ??= now;
+                    progress.LastInteractedAt = now;
+                    progress.InteractionCount++;
+                    unitOfWork.LessonProgresses.Update(progress);
+                }
+
+                await unitOfWork.SaveChangesAsync(cancellationToken);
+                var detail = MapToResponse(lesson, progress);
+                if (progress.IsCompleted)
+                    detail.SuggestedSrsCards = await BuildLessonSrsSuggestionsAsync(userId, lesson, cancellationToken);
+
+                return ApiResponse<LessonDetailResponse>.Success(detail);
+            }
+            catch (OperationCanceledException) { throw; }
+            catch
+            {
+                return ApiResponse<LessonDetailResponse>.Fail("Không thể ghi nhận tương tác bài học.", HttpStatusCode.InternalServerError);
+            }
+        }
+
+        public async Task<ApiResponse<List<SrsSuggestedCardResponse>>> GetLessonSrsSuggestionsAsync(
+            int lessonId,
+            CancellationToken cancellationToken)
+        {
+            try
+            {
+                var userId = claimService.GetUserClaim().Id;
+                var lesson = await unitOfWork.Lessons.GetLearnerVisibleByIdAsync(lessonId, cancellationToken);
+                if (lesson is null)
+                    return ApiResponse<List<SrsSuggestedCardResponse>>.NotFound($"Không tìm thấy bài học Id = {lessonId}.");
+
+                var suggestions = await BuildLessonSrsSuggestionsAsync(userId, lesson, cancellationToken);
+                return ApiResponse<List<SrsSuggestedCardResponse>>.Success(suggestions);
+            }
+            catch (OperationCanceledException) { throw; }
+            catch
+            {
+                return ApiResponse<List<SrsSuggestedCardResponse>>.Fail("Không thể tải gợi ý thẻ SRS từ bài học.", HttpStatusCode.InternalServerError);
+            }
+        }
+
+        private async Task<(List<SrsSuggestedCardResponse> Suggestions, int AutoEnrolledCount)> PrepareCompletionSuggestionsAndAutoEnrollAsync(
+            int userId,
+            Lesson lesson,
+            bool triggerAutoEnroll,
+            CancellationToken cancellationToken)
+        {
+            var suggestions = await BuildLessonSrsSuggestionsAsync(userId, lesson, cancellationToken);
+            var autoEnrolled = 0;
+
+            if (triggerAutoEnroll && reviewService is not null)
+            {
+                var pref = await unitOfWork.UserSrsPreferences.GetByUserIdAsync(userId, cancellationToken);
+                if (pref?.AutoEnrollAfterLesson == true)
+                {
+                    var pending = suggestions.Where(s => !s.AlreadyEnrolled).Select(s => new EnrollSrsCardRequest
+                    {
+                        VocabularyId = s.VocabularyId,
+                        KanjiId = s.KanjiId,
+                        GrammarPatternId = s.GrammarPatternId,
+                        SrsCardTemplateId = s.SrsCardTemplateId,
+                        LessonId = lesson.Id,
+                        SourceType = "Lesson",
+                        SourceId = lesson.Id,
+                        SourceLabel = lesson.Title,
+                        CardType = s.CardType,
+                        JlptLevel = s.JlptLevel,
+                    }).ToList();
+
+                    if (pending.Count > 0)
+                    {
+                        foreach (var chunk in pending.Chunk(100))
+                        {
+                            var enrolled = await reviewService.BatchEnrollCardsAsync(
+                                userId,
+                                new BatchEnrollSrsCardsRequest { Cards = [.. chunk] },
+                                cancellationToken);
+                            if (enrolled.IsSuccess && enrolled.Result is not null)
+                            {
+                                autoEnrolled += enrolled.Result.CreatedCount + enrolled.Result.ReactivatedCount;
+                            }
+                        }
+                        suggestions = await BuildLessonSrsSuggestionsAsync(userId, lesson, cancellationToken);
+                    }
+                }
+            }
+
+            return (suggestions, autoEnrolled);
+        }
+
+        private async Task<List<SrsSuggestedCardResponse>> BuildLessonSrsSuggestionsAsync(
+            int userId,
+            Lesson lesson,
+            CancellationToken cancellationToken)
+        {
+            var levelCode = SrsSchedulingHelper.NormalizeSupportedJlptLevel(lesson.CertificateLevel?.Code);
+            var cards = await unitOfWork.ReviewCards.GetAllForUserAsync(userId, cancellationToken);
+            var vocabCards = cards
+                .Where(c => !c.IsDeleted && c.Status != SrsCardStatus.Archived && c.VocabularyId.HasValue)
+                .GroupBy(c => c.VocabularyId!.Value)
+                .ToDictionary(g => g.Key, g => g.First());
+            var kanjiCards = cards
+                .Where(c => !c.IsDeleted && c.Status != SrsCardStatus.Archived && c.KanjiId.HasValue)
+                .GroupBy(c => c.KanjiId!.Value)
+                .ToDictionary(g => g.Key, g => g.First());
+            var grammarCards = cards
+                .Where(c => !c.IsDeleted && c.Status != SrsCardStatus.Archived && c.GrammarPatternId.HasValue)
+                .GroupBy(c => c.GrammarPatternId!.Value)
+                .ToDictionary(g => g.Key, g => g.First());
+            var templateCards = cards
+                .Where(c => !c.IsDeleted && c.Status != SrsCardStatus.Archived && c.SrsCardTemplateId.HasValue)
+                .GroupBy(c => c.SrsCardTemplateId!.Value)
+                .ToDictionary(g => g.Key, g => g.First());
+
+            var suggestions = new List<SrsSuggestedCardResponse>();
+
+            foreach (var link in (lesson.LessonVocabularies ?? []).Where(l => l.Vocabulary is not null && !l.Vocabulary.IsDeleted && l.Vocabulary.Status == ContentStatus.Published).OrderBy(l => l.VocabularyId))
+            {
+                var v = link.Vocabulary;
+                vocabCards.TryGetValue(v.Id, out var existing);
+                suggestions.Add(new SrsSuggestedCardResponse
+                {
+                    SuggestedKey = $"vocabulary:{v.Id}",
+                    CardType = "Vocabulary",
+                    SourceType = "Lesson",
+                    SourceId = lesson.Id,
+                    LessonId = lesson.Id,
+                    VocabularyId = v.Id,
+                    JlptLevel = levelCode,
+                    FrontText = v.Word,
+                    BackText = v.Meaning,
+                    Reading = v.Reading,
+                    Meaning = v.Meaning,
+                    ExampleSentence = v.ExampleSentence,
+                    ExampleMeaning = v.ExampleSentenceMeaning,
+                    AudioUrl = v.AudioUrl,
+                    SourceLabel = lesson.Title,
+                    AlreadyEnrolled = existing is not null,
+                    ExistingReviewCardId = existing?.Id,
+                    ExistingStatus = existing?.Status,
+                });
+            }
+
+            foreach (var link in (lesson.LessonKanjis ?? []).Where(l => l.Kanji is not null && !l.Kanji.IsDeleted && l.Kanji.Status == ContentStatus.Published).OrderBy(l => l.KanjiId))
+            {
+                var k = link.Kanji;
+                kanjiCards.TryGetValue(k.Id, out var existing);
+                suggestions.Add(new SrsSuggestedCardResponse
+                {
+                    SuggestedKey = $"kanji:{k.Id}",
+                    CardType = "Kanji",
+                    SourceType = "Lesson",
+                    SourceId = lesson.Id,
+                    LessonId = lesson.Id,
+                    KanjiId = k.Id,
+                    JlptLevel = levelCode,
+                    FrontText = k.Character,
+                    BackText = k.Meaning,
+                    Reading = k.OnYomi ?? k.KunYomi ?? k.SinoVietnamese,
+                    Meaning = k.Meaning,
+                    AudioUrl = k.AudioUrl,
+                    SourceLabel = lesson.Title,
+                    AlreadyEnrolled = existing is not null,
+                    ExistingReviewCardId = existing?.Id,
+                    ExistingStatus = existing?.Status,
+                });
+            }
+
+            foreach (var link in (lesson.LessonGrammars ?? []).Where(l => l.GrammarPattern is not null && !l.GrammarPattern.IsDeleted && l.GrammarPattern.Status == ContentStatus.Published).OrderBy(l => l.GrammarPatternId))
+            {
+                var g = link.GrammarPattern;
+                grammarCards.TryGetValue(g.Id, out var existing);
+                var meaning = !string.IsNullOrWhiteSpace(g.UsageNotes) ? g.UsageNotes : g.Structure;
+                suggestions.Add(new SrsSuggestedCardResponse
+                {
+                    SuggestedKey = $"grammar:{g.Id}",
+                    CardType = "Grammar",
+                    SourceType = "Lesson",
+                    SourceId = lesson.Id,
+                    LessonId = lesson.Id,
+                    GrammarPatternId = g.Id,
+                    JlptLevel = levelCode,
+                    FrontText = g.Title,
+                    BackText = meaning,
+                    Reading = g.Structure,
+                    Meaning = meaning,
+                    ExampleSentence = g.ExampleSentence,
+                    ExampleMeaning = g.ExampleSentenceMeaning,
+                    SourceLabel = lesson.Title,
+                    AlreadyEnrolled = existing is not null,
+                    ExistingReviewCardId = existing?.Id,
+                    ExistingStatus = existing?.Status,
+                });
+            }
+
+            var publishedTemplates = await unitOfWork.SrsCardTemplates.Query()
+                .AsNoTracking()
+                .Where(t => !t.IsDeleted && t.Status == ContentStatus.Published && t.LessonId == lesson.Id)
+                .ToListAsync(cancellationToken);
+
+            foreach (var t in publishedTemplates)
+            {
+                ReviewCard? existing = null;
+                templateCards.TryGetValue(t.Id, out existing);
+                if (existing is null && t.VocabularyId.HasValue)
+                    vocabCards.TryGetValue(t.VocabularyId.Value, out existing);
+                if (existing is null && t.KanjiId.HasValue)
+                    kanjiCards.TryGetValue(t.KanjiId.Value, out existing);
+                if (existing is null && t.GrammarPatternId.HasValue)
+                    grammarCards.TryGetValue(t.GrammarPatternId.Value, out existing);
+
+                suggestions.Add(new SrsSuggestedCardResponse
+                {
+                    SuggestedKey = $"template:{t.Id}",
+                    CardType = t.CardType,
+                    SourceType = "AuthorTemplate",
+                    SourceId = t.Id,
+                    LessonId = lesson.Id,
+                    SrsCardTemplateId = t.Id,
+                    VocabularyId = t.VocabularyId,
+                    KanjiId = t.KanjiId,
+                    GrammarPatternId = t.GrammarPatternId,
+                    JlptLevel = t.JlptLevel ?? levelCode,
+                    FrontText = t.FrontText,
+                    BackText = t.BackText,
+                    Reading = t.Reading,
+                    Meaning = t.Meaning ?? t.BackText,
+                    ExampleSentence = t.ExampleSentence,
+                    ExampleMeaning = t.ExampleMeaning,
+                    AudioUrl = t.AudioUrl,
+                    SourceLabel = $"{lesson.Title} · Thẻ mẫu",
+                    AlreadyEnrolled = existing is not null,
+                    ExistingReviewCardId = existing?.Id,
+                    ExistingStatus = existing?.Status,
+                });
+            }
+
+            return suggestions;
         }
 
         private static LearningLessonSummaryResponse MapToSummary(Lesson lesson, bool hasPracticeExercise, bool practicePassed)
@@ -306,9 +655,12 @@ namespace RikiPath.Application.Services
             ProgressPercent = progress?.ProgressPercent ?? 0,
             ResumePositionSeconds = progress?.LastPositionSeconds ?? 0,
             IsCompleted = progress?.IsCompleted ?? false,
-            CompletedAt = progress?.ModifiedDate,
+            CompletedAt = progress?.CompletedAt ?? progress?.ModifiedDate,
+            FirstViewedAt = progress?.FirstViewedAt,
+            LastInteractedAt = progress?.LastInteractedAt,
+            InteractionCount = progress?.InteractionCount ?? 0,
             Vocabularies = (lesson.LessonVocabularies ?? new List<LessonVocabulary>())
-                .Where(link => link.Vocabulary is not null && !link.Vocabulary.IsDeleted)
+                .Where(link => link.Vocabulary is not null && !link.Vocabulary.IsDeleted && link.Vocabulary.Status == ContentStatus.Published)
                 .OrderBy(link => link.VocabularyId)
                 .Select(link => new LessonVocabularyResponse
                 {
@@ -323,7 +675,7 @@ namespace RikiPath.Application.Services
                 })
                 .ToList(),
             Kanjis = (lesson.LessonKanjis ?? new List<LessonKanji>())
-                .Where(link => link.Kanji is not null && !link.Kanji.IsDeleted)
+                .Where(link => link.Kanji is not null && !link.Kanji.IsDeleted && link.Kanji.Status == ContentStatus.Published)
                 .OrderBy(link => link.KanjiId)
                 .Select(link => new LessonKanjiResponse
                 {
@@ -340,7 +692,7 @@ namespace RikiPath.Application.Services
                 })
                 .ToList(),
             Grammars = (lesson.LessonGrammars ?? new List<LessonGrammar>())
-                .Where(link => link.GrammarPattern is not null && !link.GrammarPattern.IsDeleted)
+                .Where(link => link.GrammarPattern is not null && !link.GrammarPattern.IsDeleted && link.GrammarPattern.Status == ContentStatus.Published)
                 .OrderBy(link => link.GrammarPatternId)
                 .Select(link => new LessonGrammarResponse
                 {

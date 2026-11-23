@@ -121,6 +121,17 @@ namespace RikiPath.WebApi.Controllers
         }
 
         /// <summary>
+        /// Xác thực email một chạm bằng liên kết ký riêng đã gửi tới hộp thư.
+        /// </summary>
+        [HttpPost("verify-email-link")]
+        [EnableRateLimiting("auth-sensitive")]
+        public async Task<IActionResult> VerifyEmailByLink([FromBody] VerifyEmailLinkRequest request, CancellationToken cancellationToken)
+        {
+            var result = await authService.VerifyEmailByLinkAsync(request, cancellationToken);
+            return StatusCode((int)result.StatusCode, result);
+        }
+
+        /// <summary>
         /// Đăng nhập và lấy JWT token.
         /// </summary>
         /// <remarks>
@@ -143,6 +154,15 @@ namespace RikiPath.WebApi.Controllers
         }
 
         [AllowAnonymous]
+        [HttpGet("google-config")]
+        public IActionResult GetGoogleConfig()
+        {
+            var result = authService.GetGoogleAuthConfig();
+            return StatusCode(result.StatusCode, result);
+        }
+
+        [AllowAnonymous]
+        [EnableRateLimiting("auth-sensitive")]
         [HttpPost("google")]
         [Consumes("application/json")]
         public async Task<IActionResult> ContinueWithGoogle([FromBody] GoogleAuthRequest request, CancellationToken cancellationToken)

@@ -63,7 +63,11 @@ internal class Program
         appSettings.GoogleAuth = configuration.GetSection("GoogleAuth").Get<GoogleAuthSettings>()
                                 ?? appSettings.GoogleAuth;
         configuration.GetSection("AwsAudio").Bind(appSettings.AwsAudio);
+        RikiPath.Application.Helpers.AllowedMediaUrlPolicy.ConfigureApprovedAudioBaseUrl(appSettings.AwsAudio.PublicBaseUrl);
         builder.Services.AddSingleton(appSettings);
+        var disableQaBackgroundWorkers = configuration.GetValue<bool>("LocalQaVerification:DisableBackgroundWorkers");
+        if (disableQaBackgroundWorkers && !builder.Environment.IsEnvironment("MentorQA"))
+            throw new InvalidOperationException("Background workers may only be disabled for isolated MentorQA verification.");
 
         builder.Services.Configure<PayOsSettings>(payOsSection);
         builder.Services.Configure<AiSettings>(configuration.GetSection("Ai"));
@@ -103,6 +107,15 @@ internal class Program
                     _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
                     {
                         PermitLimit = 20,
+                        Window = TimeSpan.FromMinutes(1),
+                        QueueLimit = 0,
+                    }));
+            options.AddPolicy("dictionary-translate", context =>
+                System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+                    context.User.FindFirstValue(ClaimTypes.NameIdentifier) ?? context.Connection.RemoteIpAddress?.ToString() ?? "anonymous",
+                    _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+                    {
+                        PermitLimit = 30,
                         Window = TimeSpan.FromMinutes(1),
                         QueueLimit = 0,
                     }));
@@ -158,9 +171,14 @@ internal class Program
         if (!string.IsNullOrWhiteSpace(calendarKeysPath)) calendarProtection.PersistKeysToFileSystem(new DirectoryInfo(calendarKeysPath));
         builder.Services.AddHttpClient("MentorCalendar", c => c.Timeout = TimeSpan.FromSeconds(15));
         builder.Services.AddScoped<IMentorCalendarService, MentorCalendarService>();
-        builder.Services.AddHostedService<MentorCalendarWorker>();
+        if (!disableQaBackgroundWorkers)
+            builder.Services.AddHostedService<MentorCalendarWorker>();
         builder.Services.AddHttpClient<IJlptExamSource, RikiPath.Infrastructure.Services.JlptExamSource>(c => c.Timeout = TimeSpan.FromSeconds(15));
-        builder.Services.AddHostedService<ContentAudioTranscriptionWorker>();
+        if (!disableQaBackgroundWorkers)
+        {
+            builder.Services.AddHostedService<ContentAudioTranscriptionWorker>();
+            builder.Services.AddHostedService<RikiPath.Infrastructure.Services.SrsReminderWorker>();
+        }
         builder.Services.AddMemoryCache();
 
         // 3b. Firebase Admin SDK — dùng để verify idToken do React (Firebase Phone Auth) gửi lên.
@@ -289,8 +307,13 @@ internal class Program
                 throw new InvalidOperationException("Local QA verification storage chỉ được bật trong MentorQA.");
             builder.Services.AddScoped<IFileStorageService, LocalQaFileStorageService>();
         }
+        else if ((builder.Environment.IsDevelopment() || builder.Environment.IsEnvironment("MentorQA")) &&
+            configuration.GetValue<bool>("LocalDevMediaStorage:Enabled"))
+        {
+            builder.Services.AddScoped<IFileStorageService, LocalDevMediaStorageService>();
+        }
 
-        var manuallyRegisteredClientInterfaces = new[] { typeof(IPaymentGatewayClient), typeof(IAiLearningPathClient), typeof(IAiGradingClient), typeof(IAiOcrClient), typeof(IAiContentAuthoringClient), typeof(IAiEssayGradingClient), typeof(IAiContentReviewClient), typeof(ISpeechRecognitionClient) };
+        var manuallyRegisteredClientInterfaces = new[] { typeof(IPaymentGatewayClient), typeof(IAiLearningPathClient), typeof(IAiGradingClient), typeof(IAiOcrClient), typeof(IAiContentAuthoringClient), typeof(IAiEssayGradingClient), typeof(IAiContentReviewClient), typeof(IAiTranslationClient), typeof(ISpeechRecognitionClient) };
 
         if (Type.GetType("RikiPath.Infrastructure.Clients.PayOsClient, RikiPath.Infrastructure") != null)
         {
@@ -304,6 +327,7 @@ internal class Program
 
         builder.Services.AddOpenAiFeatures(configuration);
         builder.Services.AddScoped<RikiPath.Application.Services.SubscriptionAccessService>();
+        builder.Services.AddScoped<RikiPath.Application.Services.AdaptiveSkillProfileService>();
         builder.Services.AddScoped<RikiPath.Application.Services.MockTestExplanationService>();
         builder.Services.AddScoped<RikiPath.Application.Services.ManualContentService>();
         builder.Services.AddScoped<RikiPath.Application.Services.HomeworkService>();
@@ -355,7 +379,8 @@ internal class Program
         builder.Services.AddScoped<ISheetImportHandler, LessonImportHandler>();
         builder.Services.AddScoped<ISheetImportHandler, MockTestImportHandler>();
         builder.Services.AddScoped<ISheetImportHandler, PracticeExerciseImportHandler>();
-        builder.Services.AddHostedService<MentorOutboxDispatcherService>();
+        if (!disableQaBackgroundWorkers)
+            builder.Services.AddHostedService<MentorOutboxDispatcherService>();
         builder.Services.AddScoped<MentorOutboxDispatcherService>();
         builder.Services.Configure<FcmOptions>(builder.Configuration.GetSection("Fcm"));
         builder.Services.AddHttpClient<IFcmTransport, DefaultFcmTransport>();

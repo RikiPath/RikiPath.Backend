@@ -217,7 +217,7 @@ public sealed class ManualContentService(IUnitOfWork uow, IClaimService claims, 
         var batchName = string.Empty;
         await uow.ExecuteContentAuthorWriteAsync(userId, async token =>
         {
-            var items = await uow.ContentApprovalRequests.Query()
+            var items = await uow.ContentApprovalRequests.Query().AsNoTracking()
                 .Where(item => !item.IsDeleted && item.SubmittedByUserId == userId &&
                     (id.HasValue ? item.Id == id : item.BatchId == batchId))
                 .OrderBy(item => item.SourceRowNumber).ThenBy(item => item.Id).ToListAsync(token);
@@ -239,9 +239,15 @@ public sealed class ManualContentService(IUnitOfWork uow, IClaimService claims, 
                 ? ApiResponse<int>.Fail("Hãy lưu bản nháp trước khi gửi duyệt.", HttpStatusCode.Conflict)
                 : ApiResponse<int>.Success(0);
 
-        var lessonKeys = drafts.Where(item => item.EntityType == ImportEntityType.Lesson)
+        var lessonDraftInfos = drafts.Where(item => item.EntityType == ImportEntityType.Lesson)
             .Select(item => ReadListInfo(item.PayloadJson))
+            .ToList();
+        var lessonKeys = lessonDraftInfos
             .Select(info => (info?.Title, info?.CertificateLevelId))
+            .ToHashSet();
+        var topicKeys = lessonDraftInfos
+            .Where(info => !string.IsNullOrWhiteSpace(info?.TopicTitle))
+            .Select(info => (TopicTitle: info!.TopicTitle!.Trim(), info.CertificateLevelId))
             .ToHashSet();
         if (drafts.Any(item => item.EntityType == ImportEntityType.PracticeExercise))
         {
@@ -249,13 +255,23 @@ public sealed class ManualContentService(IUnitOfWork uow, IClaimService claims, 
                 .Where(item => !item.IsDeleted && item.SubmittedByUserId == drafts[0].SubmittedByUserId &&
                     item.EntityType == ImportEntityType.Lesson && item.Status == ContentApprovalStatus.PendingReview)
                 .Select(item => item.PayloadJson).ToListAsync(ct);
-            lessonKeys.UnionWith(pendingLessons.Select(ReadListInfo).Select(info => (info?.Title, info?.CertificateLevelId)));
+            var pendingInfos = pendingLessons.Select(ReadListInfo).ToList();
+            lessonKeys.UnionWith(pendingInfos.Select(info => (info?.Title, info?.CertificateLevelId)));
+            topicKeys.UnionWith(pendingInfos
+                .Where(info => !string.IsNullOrWhiteSpace(info?.TopicTitle))
+                .Select(info => (TopicTitle: info!.TopicTitle!.Trim(), info.CertificateLevelId)));
         }
 
         foreach (var item in drafts)
         {
             try
             {
+                if (IsExcelImportDraft(item) && item.Action == ImportRowAction.New && item.EntityType != ImportEntityType.PracticeExercise)
+                {
+                    ValidateStoredImportPayload(item);
+                    continue;
+                }
+
                 var input = JsonSerializer.Deserialize<JsonElement>(item.PayloadJson);
                 var (payload, _) = await ValidateAsync(item.EntityType, input, ct);
                 if (item.SourceRowNumber > 0)
@@ -265,11 +281,35 @@ public sealed class ManualContentService(IUnitOfWork uow, IClaimService claims, 
                     if (targetId != originalTargetId)
                         throw new ArgumentException("Học liệu gốc đã thay đổi. Hãy kiểm tra lại bản nháp trước khi gửi.");
                 }
-                if (payload is PracticeExerciseImportPayloadResponse exercise &&
-                    !lessonKeys.Contains((exercise.LessonTitle, exercise.CertificateLevelId)) &&
-                    !await uow.Lessons.Query().AnyAsync(lesson => !lesson.IsDeleted &&
-                        lesson.Title == exercise.LessonTitle && lesson.CertificateLevelId == exercise.CertificateLevelId, ct))
-                    throw new ArgumentException($"Hãy gửi bài học '{exercise.LessonTitle}' cùng lô hoặc trước bài luyện tập.");
+                if (payload is PracticeExerciseImportPayloadResponse exercise)
+                {
+                    var scope = Domain.Enums.PracticeExerciseScopes.Normalize(exercise.Scope);
+                    if (scope == Domain.Enums.PracticeExerciseScopes.LessonQuickCheck)
+                    {
+                        if (!lessonKeys.Contains((exercise.LessonTitle, exercise.CertificateLevelId)) &&
+                            !await uow.Lessons.Query().AnyAsync(lesson => !lesson.IsDeleted &&
+                                lesson.Title == exercise.LessonTitle && lesson.CertificateLevelId == exercise.CertificateLevelId, ct))
+                        {
+                            throw new ArgumentException($"Hãy gửi bài học '{exercise.LessonTitle}' cùng lô hoặc trước bài luyện tập.");
+                        }
+                    }
+                    else if (scope == Domain.Enums.PracticeExerciseScopes.GroupQuiz)
+                    {
+                        var tt = exercise.TopicTitle?.Trim();
+                        var topicExistsInBatch = !string.IsNullOrWhiteSpace(tt) && topicKeys.Contains((tt, (int?)exercise.CertificateLevelId));
+                        var topicExistsInDb = !topicExistsInBatch && !string.IsNullOrWhiteSpace(tt) &&
+                            await uow.Topics.Query().AnyAsync(t => !t.IsDeleted && t.Title == tt
+                                && (!t.CertificateLevelId.HasValue || t.CertificateLevelId == exercise.CertificateLevelId), ct);
+                        var topicIdExists = !topicExistsInBatch && !topicExistsInDb && exercise.TopicId.HasValue &&
+                            await uow.Topics.Query().AnyAsync(t => !t.IsDeleted && t.Id == exercise.TopicId.Value, ct);
+                        if (!topicExistsInBatch && !topicExistsInDb && !topicIdExists)
+                            throw new ArgumentException($"Hãy gửi bài học thuộc chặng '{exercise.TopicTitle}' cùng lô hoặc trước GroupQuiz.");
+                    }
+                    else if (scope == Domain.Enums.PracticeExerciseScopes.StageAssessment && exercise.CertificateLevelId <= 0)
+                    {
+                        throw new ArgumentException("StageAssessment cần cấp độ JLPT hợp lệ.");
+                    }
+                }
             }
             catch (Exception ex) when (ex is JsonException or ArgumentException)
             {
@@ -277,14 +317,64 @@ public sealed class ManualContentService(IUnitOfWork uow, IClaimService claims, 
             }
         }
 
+        // Batch large Excel draft submissions into one atomic SQL statement while preserving concurrency safety.
         var now = DateTime.UtcNow;
-        foreach (var item in drafts)
+        var draftIds = drafts.Select(item => item.Id).ToArray();
+        var updatedCount = await uow.ContentApprovalRequests.Query()
+            .Where(item => draftIds.Contains(item.Id) && !item.IsDeleted &&
+                item.Status == ContentApprovalStatus.Draft)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(item => item.Status, ContentApprovalStatus.PendingReview)
+                .SetProperty(item => item.SubmittedAt, now), ct);
+
+        return updatedCount == drafts.Count
+            ? ApiResponse<int>.Success(updatedCount)
+            : ApiResponse<int>.Fail("Một số bản nháp vừa được thao tác bởi yêu cầu khác. Vui lòng tải lại lô import.",
+                HttpStatusCode.Conflict);
+    }
+
+    private static bool IsExcelImportDraft(ContentApprovalRequest item) =>
+        item.SourceRowNumber > 0 &&
+        (item.SourceFileName.EndsWith(".xlsx", StringComparison.OrdinalIgnoreCase) ||
+         item.SourceFileName.EndsWith(".xls", StringComparison.OrdinalIgnoreCase));
+
+    private static void ValidateStoredImportPayload(ContentApprovalRequest item)
+    {
+        if (string.IsNullOrWhiteSpace(item.PayloadJson))
+            throw new ArgumentException("Payload bản nháp bị rỗng.");
+
+        try
         {
-            item.Status = ContentApprovalStatus.PendingReview;
-            item.SubmittedAt = now;
+            using var document = JsonDocument.Parse(item.PayloadJson);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+                throw new ArgumentException("Payload bản nháp không hợp lệ.");
+
+            var info = ReadListInfo(item.PayloadJson);
+            if (info?.CertificateLevelId is not > 0)
+                throw new ArgumentException("Payload bản nháp thiếu cấp độ JLPT.");
+
+            if (item.EntityType == ImportEntityType.MockTest)
+            {
+                var hasSections = false;
+                var sections = default(JsonElement);
+                foreach (var property in document.RootElement.EnumerateObject())
+                {
+                    if (!string.Equals(property.Name, "sections", StringComparison.OrdinalIgnoreCase))
+                        continue;
+
+                    sections = property.Value;
+                    hasSections = true;
+                    break;
+                }
+
+                if (!hasSections || sections.ValueKind != JsonValueKind.Array || sections.GetArrayLength() == 0)
+                    throw new ArgumentException("Đề thi phải có ít nhất một phần thi.");
+            }
         }
-        await uow.SaveChangesAsync(ct);
-        return ApiResponse<int>.Success(drafts.Count);
+        catch (JsonException ex)
+        {
+            throw new ArgumentException("Payload bản nháp không hợp lệ.", ex);
+        }
     }
 
     private Task<ContentApprovalRequest?> FindMineAsync(int id, CancellationToken ct)
@@ -350,9 +440,26 @@ public sealed class ManualContentService(IUnitOfWork uow, IClaimService claims, 
             case ImportEntityType.PracticeExercise:
                 var exercise = Read<PracticeExerciseImportPayloadResponse>(input);
                 await ValidateExerciseAsync(exercise, ct);
-                return (exercise, $"{exercise.Title} / {exercise.LessonTitle}");
+                var exTarget = !string.IsNullOrEmpty(exercise.LessonTitle)
+                    ? exercise.LessonTitle
+                    : (!string.IsNullOrEmpty(exercise.TopicTitle) ? exercise.TopicTitle : level.Code);
+                return (exercise, $"{exercise.Title} / {exTarget}");
             default:
                 throw new ArgumentException("Loại nội dung không được hỗ trợ.");
+        }
+    }
+
+    public async Task<string?> ValidateImportPayloadAsync(ImportEntityType type, string payloadJson, CancellationToken ct)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(payloadJson);
+            await ValidateAsync(type, document.RootElement, ct);
+            return null;
+        }
+        catch (Exception ex) when (ex is JsonException or ArgumentException)
+        {
+            return ex.Message;
         }
     }
 
@@ -403,6 +510,9 @@ public sealed class ManualContentService(IUnitOfWork uow, IClaimService claims, 
     private async Task ValidateExerciseAsync(PracticeExerciseImportPayloadResponse exercise, CancellationToken ct)
     {
         exercise.Title = Required(exercise.Title, "Tên bài luyện tập");
+        exercise.Scope = Domain.Enums.PracticeExerciseScopes.Normalize(exercise.Scope);
+        if (exercise.PassingScorePercent <= 0 || exercise.PassingScorePercent > 100)
+            exercise.PassingScorePercent = 70;
         if (exercise.ImageUrl is not null) exercise.ImageUrl = MediaUrl(exercise.ImageUrl, "URL ảnh bài tập") ?? string.Empty;
         exercise.LanguageSkillName = await RequireSkillAsync(exercise.LanguageSkillId, ct);
         if (exercise.LessonId.HasValue)
@@ -412,7 +522,17 @@ public sealed class ManualContentService(IUnitOfWork uow, IClaimService claims, 
                 .Select(x => x.Title).SingleOrDefaultAsync(ct)
                 ?? throw new ArgumentException("Bài học không thuộc cấp độ đã chọn.");
         }
-        exercise.LessonTitle = Required(exercise.LessonTitle, "Bài học");
+        if (exercise.Scope == Domain.Enums.PracticeExerciseScopes.LessonQuickCheck)
+        {
+            exercise.LessonTitle = Required(exercise.LessonTitle, "Bài học");
+        }
+        else if (exercise.Scope == Domain.Enums.PracticeExerciseScopes.GroupQuiz)
+        {
+            exercise.TopicTitle = exercise.TopicId is int tid
+                ? await uow.Topics.Query().Where(t => t.Id == tid && !t.IsDeleted).Select(t => t.Title).SingleOrDefaultAsync(ct)
+                    ?? throw new ArgumentException("Chặng/Chủ đề không tồn tại.")
+                : Required(exercise.TopicTitle, "Chủ đề / Chặng học");
+        }
         if (exercise.Questions is not { Count: > 0 }) throw new ArgumentException("Hãy thêm câu hỏi.");
         for (var i = 0; i < exercise.Questions.Count; i++)
         {
@@ -458,21 +578,40 @@ public sealed class ManualContentService(IUnitOfWork uow, IClaimService claims, 
     private async Task<int?> ResolveTargetAsync(ImportEntityType type, JsonElement input, CancellationToken ct)
     {
         var fields = Read<ManualIdentity>(input);
-        var ids = type switch
+        IQueryable<int> ids;
+        if (type == ImportEntityType.PracticeExercise)
         {
-            ImportEntityType.Lesson => uow.Lessons.Query().Where(x => !x.IsDeleted
-                && x.Title == fields.Title && x.CertificateLevelId == fields.CertificateLevelId).Select(x => x.Id),
-            ImportEntityType.MockTest => uow.MockTests.Query().Where(x => !x.IsDeleted
-                && x.Title == fields.Title && x.CertificateLevelId == fields.CertificateLevelId).Select(x => x.Id),
-            ImportEntityType.Kanji => uow.Kanjis.Query().Where(x => !x.IsDeleted && x.Character == fields.Character).Select(x => x.Id),
-            ImportEntityType.Vocabulary => uow.Vocabularies.Query().Where(x => !x.IsDeleted
-                && x.Word == fields.Word && x.Reading == fields.Reading).Select(x => x.Id),
-            ImportEntityType.Grammar => uow.GrammarPatterns.Query().Where(x => !x.IsDeleted && x.Title == fields.Title).Select(x => x.Id),
-            ImportEntityType.PracticeExercise => uow.PracticeExercises.Query().Where(x => !x.IsDeleted && x.Title == fields.Title
-                && !x.Lesson.IsDeleted && x.Lesson.Title == fields.LessonTitle
-                && x.Lesson.CertificateLevelId == fields.CertificateLevelId).Select(x => x.Id),
-            _ => throw new ArgumentException("Loại nội dung không được hỗ trợ.")
-        };
+            var scope = Domain.Enums.PracticeExerciseScopes.Normalize(fields.Scope);
+            ids = scope switch
+            {
+                Domain.Enums.PracticeExerciseScopes.GroupQuiz => uow.PracticeExercises.Query().Where(x =>
+                    !x.IsDeleted && x.Scope == Domain.Enums.PracticeExerciseScopes.GroupQuiz && x.Title == fields.Title
+                    && x.Topic != null && !x.Topic.IsDeleted && x.Topic.Title == fields.TopicTitle
+                    && (fields.CertificateLevelId <= 0 || x.CertificateLevelId == fields.CertificateLevelId)).Select(x => x.Id),
+                Domain.Enums.PracticeExerciseScopes.StageAssessment => uow.PracticeExercises.Query().Where(x =>
+                    !x.IsDeleted && x.Scope == Domain.Enums.PracticeExerciseScopes.StageAssessment && x.Title == fields.Title
+                    && x.CertificateLevelId == fields.CertificateLevelId).Select(x => x.Id),
+                _ => uow.PracticeExercises.Query().Where(x =>
+                    !x.IsDeleted && x.Scope == Domain.Enums.PracticeExerciseScopes.LessonQuickCheck && x.Title == fields.Title
+                    && x.Lesson != null && !x.Lesson.IsDeleted && x.Lesson.Title == fields.LessonTitle
+                    && x.Lesson.CertificateLevelId == fields.CertificateLevelId).Select(x => x.Id),
+            };
+        }
+        else
+        {
+            ids = type switch
+            {
+                ImportEntityType.Lesson => uow.Lessons.Query().Where(x => !x.IsDeleted
+                    && x.Title == fields.Title && x.CertificateLevelId == fields.CertificateLevelId).Select(x => x.Id),
+                ImportEntityType.MockTest => uow.MockTests.Query().Where(x => !x.IsDeleted
+                    && x.Title == fields.Title && x.CertificateLevelId == fields.CertificateLevelId).Select(x => x.Id),
+                ImportEntityType.Kanji => uow.Kanjis.Query().Where(x => !x.IsDeleted && x.Character == fields.Character).Select(x => x.Id),
+                ImportEntityType.Vocabulary => uow.Vocabularies.Query().Where(x => !x.IsDeleted
+                    && x.Word == fields.Word && x.Reading == fields.Reading).Select(x => x.Id),
+                ImportEntityType.Grammar => uow.GrammarPatterns.Query().Where(x => !x.IsDeleted && x.Title == fields.Title).Select(x => x.Id),
+                _ => throw new ArgumentException("Loại nội dung không được hỗ trợ.")
+            };
+        }
         var matches = await ids.Take(2).ToListAsync(ct);
         if (matches.Count > 1) throw new ArgumentException("Có nhiều bản đã xuất bản trùng thông tin. Hãy kiểm tra lại.");
         return matches.Count == 1 ? matches[0] : null;
@@ -481,9 +620,10 @@ public sealed class ManualContentService(IUnitOfWork uow, IClaimService claims, 
     private static string? MediaUrl(string? value, string label)
     {
         if (string.IsNullOrWhiteSpace(value)) return null;
-        if (!Uri.TryCreate(value.Trim(), UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https"))
-            throw new ArgumentException($"{label} phải là đường dẫn HTTP hoặc HTTPS.");
-        return value.Trim();
+        var trimmed = value.Trim();
+        if (!Helpers.AllowedMediaUrlPolicy.IsApprovedMediaUrl(trimmed))
+            throw new ArgumentException($"{label} phải là URL media hợp lệ trên storage được phép.");
+        return trimmed;
     }
 
     internal static string? NormalizeTopicTitle(string? value)
@@ -507,7 +647,7 @@ public sealed class ManualContentService(IUnitOfWork uow, IClaimService claims, 
         string.IsNullOrWhiteSpace(value) ? throw new ArgumentException($"{label} không được để trống.") : value.Trim();
 
     private sealed record ManualIdentity(string? Title, string? Character, string? Word, string? Reading,
-        string? LessonTitle, int CertificateLevelId);
+        string? LessonTitle, int CertificateLevelId, string? Scope = null, string? TopicTitle = null);
 
     internal sealed record ManualListInfo(int? CertificateLevelId, string? TopicTitle, string? Title);
 }

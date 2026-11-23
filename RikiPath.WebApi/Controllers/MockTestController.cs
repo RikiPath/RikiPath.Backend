@@ -7,6 +7,7 @@ using RikiPath.Application.Responses;
 using RikiPath.Application.Responses.MockTests;
 using RikiPath.Application.Responses.PlacementTests;
 using RikiPath.Application.Services;
+using RikiPath.Domain.Enums;
 
 namespace RikiPath.WebApi.Controllers
 {
@@ -19,6 +20,35 @@ namespace RikiPath.WebApi.Controllers
         public async Task<IActionResult> ListMockTests(int certificateLevelId, CancellationToken ct)
         {
             var result = await mockTestService.GetTestsByLevelAsync(certificateLevelId, ct);
+            return StatusCode(result.StatusCode, result);
+        }
+
+        [HttpGet("practice-sets")]
+        public async Task<IActionResult> ListPracticeSets(
+            [FromQuery] int? certificateLevelId,
+            [FromQuery] int? languageSkillId,
+            [FromQuery] string? examKind,
+            [FromQuery] string? keyword,
+            CancellationToken ct)
+        {
+            var result = await mockTestService.GetPracticeSetsAsync(certificateLevelId, languageSkillId, examKind, keyword, ct);
+            return StatusCode(result.StatusCode, result);
+        }
+
+        [HttpGet("mock-exams")]
+        public async Task<IActionResult> ListFullMockTests(
+            [FromQuery] int? certificateLevelId,
+            [FromQuery] string? keyword,
+            CancellationToken ct)
+        {
+            var result = await mockTestService.GetFullMockTestsAsync(certificateLevelId, keyword, ct);
+            return StatusCode(result.StatusCode, result);
+        }
+
+        [HttpGet("{practiceTestId:int}/info")]
+        public async Task<IActionResult> GetTestInfo(int practiceTestId, CancellationToken ct)
+        {
+            var result = await mockTestService.GetTestInfoAsync(practiceTestId, ct);
             return StatusCode(result.StatusCode, result);
         }
 
@@ -304,6 +334,8 @@ namespace RikiPath.WebApi.Controllers
         /// </summary>
         /// <param name="practiceTestId">ID practice test (Required).</param>
         /// <param name="cancellationToken">Token hủy request (Optional).</param>
+        // Feature control: a suspended mock-test feature cannot start new attempts; saving/submitting a running attempt stays open.
+        [RequireFeature(FeatureCodes.MockTests)]
         [HttpPost("{practiceTestId:int}/start")]
         [ProducesResponseType(typeof(ApiResponse<StartAttemptResponse>), StatusCodes.Status201Created)]
         [ProducesResponseType(typeof(ApiResponse<StartAttemptResponse>), StatusCodes.Status200OK)]

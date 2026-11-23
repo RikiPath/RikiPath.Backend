@@ -994,19 +994,58 @@ namespace RikiPath.Application.Services
                         newGrammar = (lesson.NewGrammar ?? new()).Distinct().ToList(),
                     }, false, null));
 
+                var allLevels = (await unitOfWork.CertificateLevels.Query().Where(l => !l.IsDeleted).ToListAsync(cancellationToken))
+                    .ToDictionary(l => l.Id);
+                var allSkills = (await unitOfWork.LanguageSkills.Query().Where(s => !s.IsDeleted).ToListAsync(cancellationToken))
+                    .ToDictionary(s => s.Id);
+                var allSections = (await unitOfWork.CertificateSections.Query().Where(s => !s.IsDeleted).ToListAsync(cancellationToken))
+                    .ToDictionary(s => s.Id);
+                var existingLessonsMap = existingLessonIds.Count == 0
+                    ? new Dictionary<int, Domain.Entities.Lesson>()
+                    : (await unitOfWork.Lessons.Query().Where(l => !l.IsDeleted && existingLessonIds.Contains(l.Id)).ToListAsync(cancellationToken))
+                        .ToDictionary(l => l.Id);
+
                 foreach (var p in practices)
-                    planRows.Add(new PlanRow(ImportEntityType.PracticeExercise, p.Title.Trim(), new
-                    {
-                        lessonId = p.ExistingLessonId,
-                        newLessonTitle = string.IsNullOrWhiteSpace(p.NewLessonTitle) ? null : p.NewLessonTitle.Trim(),
-                        languageSkillId = p.LanguageSkillId,
-                        title = p.Title.Trim(),
-                        description = p.Description?.Trim(),
-                        questions = p.Questions,
-                    }, false, null));
+                {
+                    var skill = allSkills[p.LanguageSkillId];
+                    var existingLesson = p.ExistingLessonId.HasValue && existingLessonsMap.TryGetValue(p.ExistingLessonId.Value, out var el)
+                        ? el : null;
+                    var matchingNewLesson = existingLesson is null && !string.IsNullOrWhiteSpace(p.NewLessonTitle)
+                        ? lessons.FirstOrDefault(l => l.Title.Trim().Equals(p.NewLessonTitle.Trim(), StringComparison.OrdinalIgnoreCase))
+                        : null;
+                    var lessonTitle = existingLesson?.Title ?? p.NewLessonTitle?.Trim() ?? string.Empty;
+                    var certLevelId = existingLesson?.CertificateLevelId ?? matchingNewLesson?.CertificateLevelId ?? 0;
+
+                    var canonicalPractice = ContentAuthoring.AuthoringPayloadConverter.ToPracticeExerciseImportPayload(
+                        p.Title,
+                        p.Description,
+                        lessonTitle,
+                        p.ExistingLessonId,
+                        certLevelId,
+                        skill,
+                        p.Questions ?? []);
+                    planRows.Add(new PlanRow(ImportEntityType.PracticeExercise, p.Title.Trim(), canonicalPractice, false, null));
+                }
 
                 foreach (var test in mockTests)
-                    planRows.Add(new PlanRow(ImportEntityType.MockTest, test.Title.Trim(), test, false, null));
+                {
+                    var level = allLevels[test.CertificateLevelId];
+                    var mappedSections = test.Sections
+                        .Select(sec => (
+                            SectionTitle: sec.Title,
+                            sec.SortOrder,
+                            Skill: allSkills[sec.LanguageSkillId],
+                            CertSection: allSections[sec.CertificateSectionId],
+                            Questions: sec.Questions ?? []))
+                        .ToList();
+                    var canonicalMock = ContentAuthoring.AuthoringPayloadConverter.ToMockTestImportPayload(
+                        test.Title,
+                        null,
+                        test.TimeLimitMinutes,
+                        level,
+                        mappedSections);
+                    planRows.Add(new PlanRow(ImportEntityType.MockTest, test.Title.Trim(), canonicalMock, false, null));
+                }
 
                 var batchId = Guid.NewGuid();
                 var now = DateTime.UtcNow;

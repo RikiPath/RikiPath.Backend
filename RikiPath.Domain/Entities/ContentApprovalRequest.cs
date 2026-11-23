@@ -42,5 +42,16 @@ namespace RikiPath.Domain.Entities
         // Giữ nguyên ngày duyệt và ghi chú:
         public DateTime? ReviewedAt { get; set; }
         public string? ReviewNote { get; set; }
+
+        public string SourceType { get; set; } = "ImportExcel";
+        public string? SourceReference { get; set; }
+        public string? RightsStatus { get; set; }
+        public bool RightsConfirmed { get; set; }
+        public int? CertificateLevelId { get; set; }
+        public int? LanguageSkillId { get; set; }
+        public string? ValidationSummaryJson { get; set; }
+        public string? AiProvenanceJson { get; set; }
+        public string? ReviewHistoryJson { get; set; }
+        public string? IdempotencyKey { get; set; }
     }
 }
