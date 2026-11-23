@@ -46,15 +46,27 @@ public sealed class OpenAiContentAuthoringClient(OpenAiClient client) : IAiConte
         => (await client.CompleteAsync(client.Settings.ContentModel, systemPrompt + "\nChỉ trả JSON object hợp lệ.", userPrompt, true, cancellationToken)).Text;
 }
 
-public sealed class OpenAiEssayGradingClient(OpenAiClient client) : IAiEssayGradingClient
+public sealed class OpenAiEssayGradingClient(OpenAiClient client, IAiUsageQuotaService quota) : IAiEssayGradingClient
 {
     public async Task<string> GenerateGradingJsonAsync(int userId, string systemPrompt, string userPrompt, CancellationToken cancellationToken)
-        => (await client.CompleteAsync(client.Settings.GradingModel, systemPrompt + "\nChỉ trả JSON object hợp lệ.", userPrompt, true, cancellationToken)).Text;
+    {
+        await quota.EnsureWithinQuotaAsync(userId, AiFeature.Grading, cancellationToken);
+        var result = await client.CompleteAsync(client.Settings.GradingModel,
+            systemPrompt + "\nChỉ trả JSON object hợp lệ.", userPrompt, true, cancellationToken);
+        await quota.RecordUsageAsync(userId, AiFeature.Grading, result.TotalTokens, cancellationToken);
+        return result.Text;
+    }
 
     public async Task<string> GenerateGradingJsonAsync(int userId, string systemPrompt, string userPrompt,
         CancellationToken cancellationToken, int maxOutputTokens)
-        => (await client.CompleteAsync(client.Settings.GradingModel, systemPrompt + "\nChỉ trả JSON object hợp lệ.", userPrompt, true,
-            cancellationToken, maxOutputTokens: maxOutputTokens)).Text;
+    {
+        await quota.EnsureWithinQuotaAsync(userId, AiFeature.Grading, cancellationToken);
+        var result = await client.CompleteAsync(client.Settings.GradingModel,
+            systemPrompt + "\nChỉ trả JSON object hợp lệ.", userPrompt, true,
+            cancellationToken, maxOutputTokens: Math.Clamp(maxOutputTokens, 1, 4000));
+        await quota.RecordUsageAsync(userId, AiFeature.Grading, result.TotalTokens, cancellationToken);
+        return result.Text;
+    }
 }
 
 public sealed class OpenAiContentReviewClient(OpenAiClient client) : IAiContentReviewClient

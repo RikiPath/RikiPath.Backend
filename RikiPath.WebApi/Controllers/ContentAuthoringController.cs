@@ -7,8 +7,7 @@ using RikiPath.Application.Responses.ContentAuthoring;
 
 namespace RikiPath.WebApi.Controllers
 {
-    /// <summary>API AI hỗ trợ content author soạn và kiểm tra nội dung (Kanji trước; Vocabulary/
-    /// GrammarPattern/Lesson/Practice Exercise sẽ bổ sung theo cùng pattern).</summary>
+    /// <summary>API AI hỗ trợ content author soạn và kiểm tra toàn bộ nội dung JLPT.</summary>
     [ApiController]
     [Route("api/content-authoring")]
     [Authorize(Roles = "ContentAuthor,Admin")]
@@ -62,6 +61,86 @@ namespace RikiPath.WebApi.Controllers
             CancellationToken cancellationToken)
         {
             var result = await service.ConfirmKanjiSuggestionsAsync(request, cancellationToken);
+            return StatusCode(result.StatusCode, result);
+        }
+
+        [HttpPost("vocabulary/suggest")]
+        public async Task<IActionResult> SuggestVocabulary(
+            [FromBody] SuggestVocabularyRequest request, CancellationToken cancellationToken)
+        {
+            var result = await service.SuggestVocabularyAsync(request, cancellationToken);
+            return StatusCode(result.StatusCode, result);
+        }
+
+        [HttpPost("vocabulary/confirm")]
+        public async Task<IActionResult> ConfirmVocabulary(
+            [FromBody] ConfirmVocabularySuggestionsRequest request, CancellationToken cancellationToken)
+        {
+            var result = await service.ConfirmVocabularySuggestionsAsync(request, cancellationToken);
+            return StatusCode(result.StatusCode, result);
+        }
+
+        [HttpPost("grammar/suggest")]
+        public async Task<IActionResult> SuggestGrammar(
+            [FromBody] SuggestGrammarRequest request, CancellationToken cancellationToken)
+        {
+            var result = await service.SuggestGrammarAsync(request, cancellationToken);
+            return StatusCode(result.StatusCode, result);
+        }
+
+        [HttpPost("grammar/confirm")]
+        public async Task<IActionResult> ConfirmGrammar(
+            [FromBody] ConfirmGrammarSuggestionsRequest request, CancellationToken cancellationToken)
+        {
+            var result = await service.ConfirmGrammarSuggestionsAsync(request, cancellationToken);
+            return StatusCode(result.StatusCode, result);
+        }
+
+        [HttpPost("lesson/suggest")]
+        public async Task<IActionResult> SuggestLesson(
+            [FromBody] SuggestLessonRequest request, CancellationToken cancellationToken)
+        {
+            var result = await service.SuggestLessonAsync(request, cancellationToken);
+            return StatusCode(result.StatusCode, result);
+        }
+
+        [HttpPost("lesson/confirm")]
+        public async Task<IActionResult> ConfirmLesson(
+            [FromBody] ConfirmLessonSuggestionRequest request, CancellationToken cancellationToken)
+        {
+            var result = await service.ConfirmLessonSuggestionAsync(request, cancellationToken);
+            return StatusCode(result.StatusCode, result);
+        }
+
+        [HttpPost("practice-exercise/suggest")]
+        public async Task<IActionResult> SuggestPracticeExercise(
+            [FromBody] SuggestPracticeExerciseRequest request, CancellationToken cancellationToken)
+        {
+            var result = await service.SuggestPracticeExerciseAsync(request, cancellationToken);
+            return StatusCode(result.StatusCode, result);
+        }
+
+        [HttpPost("practice-exercise/confirm")]
+        public async Task<IActionResult> ConfirmPracticeExercise(
+            [FromBody] ConfirmPracticeExerciseRequest request, CancellationToken cancellationToken)
+        {
+            var result = await service.ConfirmPracticeExerciseSuggestionAsync(request, cancellationToken);
+            return StatusCode(result.StatusCode, result);
+        }
+
+        [HttpPost("mock-test/suggest")]
+        public async Task<IActionResult> SuggestMockTest(
+            [FromBody] SuggestMockTestRequest request, CancellationToken cancellationToken)
+        {
+            var result = await service.SuggestMockTestAsync(request, cancellationToken);
+            return StatusCode(result.StatusCode, result);
+        }
+
+        [HttpPost("mock-test/confirm")]
+        public async Task<IActionResult> ConfirmMockTest(
+            [FromBody] ConfirmMockTestRequest request, CancellationToken cancellationToken)
+        {
+            var result = await service.ConfirmMockTestSuggestionAsync(request, cancellationToken);
             return StatusCode(result.StatusCode, result);
         }
 

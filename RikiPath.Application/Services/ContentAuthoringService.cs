@@ -5,6 +5,7 @@ using RikiPath.Application.IClients;
 using RikiPath.Application.IServices;
 using RikiPath.Application.Requests.ContentAuthoring;
 using RikiPath.Application.Responses;
+using RikiPath.Application.Responses.Content;
 using RikiPath.Application.Responses.ContentAuthoring;
 using RikiPath.Domain.Entities;
 using RikiPath.Domain.Enums;
@@ -1452,8 +1453,32 @@ namespace RikiPath.Application.Services
                 if (skill is null || skill.IsDeleted)
                     return ApiResponse<SubmitContentApprovalResponse>.NotFound("Không tìm thấy kỹ năng.");
 
+                var payload = new PracticeExerciseImportPayloadResponse
+                {
+                    Title = request.Title.Trim(),
+                    Description = request.Description?.Trim(),
+                    SortOrder = 1,
+                    LessonId = lesson.Id,
+                    LessonTitle = lesson.Title,
+                    CertificateLevelId = lesson.CertificateLevelId,
+                    LanguageSkillId = skill.Id,
+                    LanguageSkillName = skill.Name,
+                    Questions = request.Questions.Select((question, questionIndex) => new PracticeQuestionPayloadResponse
+                    {
+                        QuestionText = question.QuestionText.Trim(),
+                        Explanation = question.Explanation?.Trim(),
+                        SortOrder = questionIndex + 1,
+                        Options = question.Options.Select((option, optionIndex) => new ImportOptionPayloadResponse
+                        {
+                            OptionText = option.Text.Trim(),
+                            IsCorrect = option.IsCorrect,
+                            SortOrder = optionIndex + 1
+                        }).ToList()
+                    }).ToList()
+                };
+
                 return await SubmitForApprovalAsync(ImportEntityType.PracticeExercise,
-                    new List<ApprovalDraft> { new(request.Title.Trim(), request, false, null) }, cancellationToken);
+                    new List<ApprovalDraft> { new(payload.Title, payload, false, null) }, cancellationToken);
             }
             catch (OperationCanceledException) { throw; }
             catch (Exception ex)
@@ -1592,6 +1617,7 @@ namespace RikiPath.Application.Services
                 if (level is null)
                     return ContextError<SubmitContentApprovalResponse>(levelError, levelStatus);
 
+                var sections = new List<MockTestSectionPayloadResponse>(request.Sections.Count);
                 foreach (var section in request.Sections)
                 {
                     var certSection = await unitOfWork.CertificateSections.GetByIdAsync(section.CertificateSectionId, cancellationToken);
@@ -1602,10 +1628,30 @@ namespace RikiPath.Application.Services
                     var skill = await unitOfWork.LanguageSkills.GetByIdAsync(section.LanguageSkillId, cancellationToken);
                     if (skill is null || skill.IsDeleted)
                         return ApiResponse<SubmitContentApprovalResponse>.Fail($"Phần thi \"{section.Title}\": không tìm thấy kỹ năng.");
+
+                    sections.Add(new MockTestSectionPayloadResponse
+                    {
+                        Title = section.Title.Trim(),
+                        SortOrder = section.SortOrder,
+                        CertificateSectionCode = certSection.Code,
+                        LanguageSkillId = skill.Id,
+                        LanguageSkillName = skill.Name,
+                        Questions = section.Questions.Select((question, questionIndex) => ToMockQuestionPayload(question, questionIndex + 1)).ToList()
+                    });
                 }
 
+                var payload = new MockTestImportPayloadResponse
+                {
+                    Title = request.Title.Trim(),
+                    Description = null,
+                    TimeLimitMinutes = request.TimeLimitMinutes,
+                    CertificateLevelId = level.Id,
+                    CertificateLevelCode = level.Code,
+                    Sections = sections
+                };
+
                 return await SubmitForApprovalAsync(ImportEntityType.MockTest,
-                    new List<ApprovalDraft> { new(request.Title.Trim(), request, false, null) }, cancellationToken);
+                    new List<ApprovalDraft> { new(payload.Title, payload, false, null) }, cancellationToken);
             }
             catch (OperationCanceledException) { throw; }
             catch (Exception ex)
@@ -1996,6 +2042,28 @@ namespace RikiPath.Application.Services
             if (string.IsNullOrWhiteSpace(skillName)) return false;
             var s = skillName.ToLowerInvariant();
             return s.Contains("listen") || s.Contains("nghe") || s.Contains("聴");
+        }
+
+        private static MockQuestionPayloadResponse ToMockQuestionPayload(ChoiceQuestionDraft question, int sortOrder)
+        {
+            JsonElement? interaction = string.IsNullOrWhiteSpace(question.AudioScript)
+                ? null
+                : JsonSerializer.SerializeToElement(new { transcript = question.AudioScript.Trim() }, JsonOpts);
+
+            return new MockQuestionPayloadResponse
+            {
+                SortOrder = sortOrder,
+                QuestionText = question.QuestionText.Trim(),
+                QuestionType = "SingleChoice",
+                InteractionData = interaction,
+                Explanation = question.Explanation.Trim(),
+                Options = question.Options.Select((option, index) => new ImportOptionPayloadResponse
+                {
+                    SortOrder = index + 1,
+                    OptionText = option.Text.Trim(),
+                    IsCorrect = option.IsCorrect
+                }).ToList()
+            };
         }
 
         private static bool IsKanaOnly(string text) =>
