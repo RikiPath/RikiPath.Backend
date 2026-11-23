@@ -1,8 +1,8 @@
 # Phase 4.1 — Full Object-Level Database Schema Diff Report
 
-**Generated:** 2026-11-23  
-**Mode:** Strictly READ-ONLY inspection (`BEGIN READ ONLY; ... ROLLBACK;` on Shared Supabase; no mutations to Shared).  
-**Canonical Codebase Reference:** `AppDbContext` + `AppDbContextModelSnapshot` (60 EF Core migrations, 0 pending model changes via `verify-migration-readiness.ps1 -SkipDatabaseCheck`).
+- **Generated:** 2026-11-23
+- **Mode:** Strictly READ-ONLY inspection (`BEGIN READ ONLY; ... ROLLBACK;` on Shared Supabase; no mutations to Shared).
+- **Canonical Codebase Reference:** `AppDbContext` + `AppDbContextModelSnapshot` (60 EF Core migrations, 0 pending model changes via `verify-migration-readiness.ps1 -SkipDatabaseCheck`).
 
 ## 1. Executive Summary Matrix
 

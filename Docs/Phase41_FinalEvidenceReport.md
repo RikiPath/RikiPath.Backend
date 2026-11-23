@@ -1,9 +1,9 @@
 # RikiPath — Phase 4.1 Final Evidence & Release Readiness Report
 
-**Date:** 2026-11-23  
-**Scope:** `RikiPath.Backend` & `RikiPath.Web`  
-**QA Release Decision:** **`GO FOR QA`**  
-**Production Release Decision:** **`BLOCKED / NO-GO FOR PRODUCTION`** (pending maintenance window, production snapshot/restore check, PII-safe full-data clone rehearsal, and large official JLPT Mock Test authoring)
+- **Date:** 2026-11-23
+- **Scope:** `RikiPath.Backend` & `RikiPath.Web`
+- **QA Release Decision:** **`GO FOR QA`**
+- **Production Release Decision:** **`BLOCKED / NO-GO FOR PRODUCTION`** (pending maintenance window, production snapshot/restore check, PII-safe full-data clone rehearsal, and large official JLPT Mock Test authoring)
 
 ---
 

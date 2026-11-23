@@ -1,8 +1,8 @@
 # Phase 4.1 — Database Reconciliation, Recovery Strategy & Rehearsal Evidence Package
 
-**Date:** 2026-11-23  
-**Production Release Reconciliation Status:** **`BLOCKED`**  
-**Shared Supabase Mutation Performed:** **NO** (0 writes, 0 DDL, 0 `dotnet ef database update` calls; all Shared inspection executed strictly under `BEGIN READ ONLY; ... ROLLBACK;`).
+- **Date:** 2026-11-23
+- **Production Release Reconciliation Status:** **`BLOCKED`**
+- **Shared Supabase Mutation Performed:** **NO** (0 writes, 0 DDL, 0 `dotnet ef database update` calls; all Shared inspection executed strictly under `BEGIN READ ONLY; ... ROLLBACK;`).
 
 ---
 
