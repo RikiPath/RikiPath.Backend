@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using RikiPath.Domain.Entities;
+using RikiPath.Domain.Enums;
 
 namespace RikiPath.Application.Services;
 
@@ -18,22 +19,26 @@ internal static class LessonPracticeProgress
         IReadOnlyCollection<int> lessonIds, CancellationToken ct)
     {
         if (lessonIds.Count == 0) return [];
-        return (await ReadyExercises(unit).Where(exercise => lessonIds.Contains(exercise.LessonId))
-            .Select(exercise => exercise.LessonId).Distinct().ToListAsync(ct)).ToHashSet();
+        return (await ReadyExercises(unit)
+            .Where(exercise => exercise.LessonId.HasValue
+                && exercise.Scope == PracticeExerciseScopes.LessonQuickCheck
+                && lessonIds.Contains(exercise.LessonId.Value))
+            .Select(exercise => exercise.LessonId!.Value).Distinct().ToListAsync(ct)).ToHashSet();
     }
 
     public static async Task<HashSet<int>> PassedAsync(IUnitOfWork unit, int userId,
         IReadOnlyCollection<int> lessonIds, CancellationToken ct, bool requireReadyExercise = false)
     {
         if (lessonIds.Count == 0) return [];
-        var exercises = requireReadyExercise ? ReadyExercises(unit) : unit.PracticeExercises.Query();
+        var exercises = (requireReadyExercise ? ReadyExercises(unit) : unit.PracticeExercises.Query())
+            .Where(exercise => exercise.LessonId.HasValue && exercise.Scope == PracticeExerciseScopes.LessonQuickCheck);
         return (await unit.PracticeExerciseAttempts.Query()
             .Join(exercises, attempt => attempt.PracticeExerciseId,
                 exercise => exercise.Id, (attempt, exercise) => new { attempt, exercise })
             .Where(row => !row.attempt.IsDeleted && !row.exercise.IsDeleted &&
                 row.attempt.UserId == userId && row.attempt.HomeworkAssignmentId == null && row.attempt.IsCompleted &&
-                row.attempt.ScorePercent >= PassingScore && lessonIds.Contains(row.exercise.LessonId))
-            .Select(row => row.exercise.LessonId).Distinct().ToListAsync(ct)).ToHashSet();
+                row.attempt.ScorePercent >= PassingScore && lessonIds.Contains(row.exercise.LessonId!.Value))
+            .Select(row => row.exercise.LessonId!.Value).Distinct().ToListAsync(ct)).ToHashSet();
     }
 
     public static async Task<HashSet<int>> WithExercisesAsync(IUnitOfWork unit,
@@ -41,8 +46,8 @@ internal static class LessonPracticeProgress
     {
         if (lessonIds.Count == 0) return [];
         return (await unit.PracticeExercises.Query()
-            .Where(row => !row.IsDeleted && lessonIds.Contains(row.LessonId))
-            .Select(row => row.LessonId).Distinct().ToListAsync(ct)).ToHashSet();
+            .Where(row => !row.IsDeleted && row.LessonId.HasValue && lessonIds.Contains(row.LessonId.Value))
+            .Select(row => row.LessonId!.Value).Distinct().ToListAsync(ct)).ToHashSet();
     }
 
     public static async Task<bool> HasStudiedAsync(IUnitOfWork unit, int userId, int lessonId, CancellationToken ct)

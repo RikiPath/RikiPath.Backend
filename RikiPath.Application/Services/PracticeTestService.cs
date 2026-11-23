@@ -454,7 +454,10 @@ namespace RikiPath.Application.Services
 
                 var seenQuestionIds = new HashSet<int>();
 
-                foreach (var test in (tests ?? []).Where(t => t is not null && !t.IsDeleted && t.Id > 0 && t.CertificateLevelId > 0).OrderBy(t => t.Id))
+                foreach (var test in (tests ?? []).Where(t => t is not null && !t.IsDeleted && t.Id > 0 && t.CertificateLevelId > 0
+                    && t.ExamKind is ExamKind.FullMockTest or ExamKind.Placement
+                    && !t.IsArchivedVersion
+                    && (!t.IsManagedWorkflow || t.PublishStatus == ContentStatus.Published)).OrderBy(t => t.Id))
                 {
                     if (test.CertificateLevel is { IsDeleted: true })
                     {
@@ -1654,7 +1657,7 @@ namespace RikiPath.Application.Services
             if (assessedScore >= 75.0)
             {
                 var nextLevel = knownLevels
-                    .Where(l => l.Rank > assessed.Rank && l.Rank <= 3)
+                    .Where(l => l.Rank > assessed.Rank && l.Rank <= 4)
                     .OrderBy(l => l.Rank)
                     .FirstOrDefault();
                 if (nextLevel.LevelCode is not null)

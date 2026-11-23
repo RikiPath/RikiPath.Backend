@@ -58,12 +58,17 @@ public sealed partial class AdminBusinessConfigService(
             })
             .ToDictionaryAsync(x => x.PlanId, x => x, ct);
 
-        var features = await uow.Features.Query()
+        var featureEntities = await uow.Features.Query()
             .AsNoTracking()
-            .Where(f => !f.IsDeleted)
-            .OrderBy(f => f.Id)
-            .Select(f => new AdminFeatureItemDto(f.Id, f.Name, f.Description))
+            .Include(f => f.SubscriptionPlans)
+            .Where(f => !f.IsDeleted && f.Category != SubscriptionAccessService.CategoryMentorLegacy)
+            .OrderBy(f => f.SortOrder)
+            .ThenBy(f => f.Id)
             .ToListAsync(ct);
+
+        var features = featureEntities
+            .Select(ToFeatureDto)
+            .ToList();
 
         var items = plans
             .Where(p => SubscriptionAccessService.ResolveCategory(p, p.Id) != SubscriptionAccessService.CategoryMentorLegacy)
@@ -282,7 +287,7 @@ public sealed partial class AdminBusinessConfigService(
                     ActorUserId = adminUserId,
                     EntityType = "SubscriptionPlan",
                     EntityId = entity.Id,
-                    Action = existing is null ? "Created" : "Updated",
+                    Action = existing is null ? "Created" : PlanAuditAction(beforeJson, afterJson),
                     BeforeJson = beforeJson,
                     AfterJson = afterJson,
                     Reason = SanitizeReason(request.Reason),
@@ -321,6 +326,243 @@ public sealed partial class AdminBusinessConfigService(
         return ApiResponse<AdminSubscriptionPlanDto>.Success(
             ToPlanDto(saved!, totalPurchases, paidPurchases),
             message: id.HasValue ? "Đã cập nhật gói học." : "Đã tạo gói học mới.");
+    }
+
+    public async Task<ApiResponse<AdminFeatureItemDto>> UpdateFeaturePolicyAsync(
+        int featureId,
+        UpdateFeaturePolicyRequest request,
+        int adminUserId,
+        CancellationToken ct = default)
+    {
+        var requestedMode = FeatureAccessModes.Normalize(request.AccessMode);
+        var availability = string.IsNullOrWhiteSpace(request.Availability)
+            ? null
+            : request.Availability.Trim().ToUpperInvariant();
+        if (availability is not null && availability is not (FeatureAccessModes.AvailabilityActive or FeatureAccessModes.AvailabilityDisabled))
+            return ApiResponse<AdminFeatureItemDto>.Fail(
+                "Trạng thái cung cấp không hợp lệ.",
+                HttpStatusCode.BadRequest,
+                "FEATURE_AVAILABILITY_INVALID");
+
+        // Legacy contract: AccessMode = DISABLED (no Availability) means "suspend, keep the current policy".
+        var legacySuspend = requestedMode == FeatureAccessModes.Disabled && availability is null;
+        if (!legacySuspend && !FeatureAccessModes.Policies.Contains(requestedMode))
+            return ApiResponse<AdminFeatureItemDto>.Fail(
+                "Điều kiện truy cập không hợp lệ.",
+                HttpStatusCode.BadRequest,
+                "FEATURE_ACCESS_MODE_INVALID");
+
+        if (request.Name is not null)
+        {
+            var trimmedName = CollapseSpaces(request.Name);
+            if (string.IsNullOrWhiteSpace(trimmedName) || trimmedName.Length > 150)
+                return ApiResponse<AdminFeatureItemDto>.Fail(
+                    "Tên tính năng là bắt buộc và tối đa 150 ký tự.",
+                    HttpStatusCode.BadRequest,
+                    "FEATURE_NAME_INVALID");
+        }
+
+        if ((NormalizeDescription(request.Description)?.Length ?? 0) > 500)
+            return ApiResponse<AdminFeatureItemDto>.Fail(
+                "Mô tả tính năng tối đa 500 ký tự.",
+                HttpStatusCode.BadRequest,
+                "FEATURE_DESCRIPTION_TOO_LONG");
+
+        AdminFeatureItemDto? updatedDto = null;
+        ApiResponse<AdminFeatureItemDto>? failure = null;
+
+        await uow.ExecuteInTransactionAsync(async token =>
+        {
+            failure = null;
+            var feature = await uow.Features.Query()
+                .Include(f => f.SubscriptionPlans)
+                .FirstOrDefaultAsync(f => f.Id == featureId && !f.IsDeleted, token);
+            if (feature is null)
+            {
+                failure = ApiResponse<AdminFeatureItemDto>.NotFound("Không tìm thấy tính năng.");
+                return;
+            }
+
+            if (string.Equals(feature.Category, SubscriptionAccessService.CategoryMentorLegacy, StringComparison.OrdinalIgnoreCase))
+            {
+                failure = ApiResponse<AdminFeatureItemDto>.Fail(
+                    "Không thể chỉnh sửa tính năng mentor cũ đã ngừng sử dụng.",
+                    HttpStatusCode.BadRequest,
+                    "FEATURE_LEGACY_READONLY");
+                return;
+            }
+
+            var storedBefore = StoredStateOf(feature);
+            // Optimistic concurrency: the Admin saved on top of the state they saw; a newer change is never overwritten.
+            if (!string.IsNullOrWhiteSpace(request.ExpectedState) &&
+                !string.Equals(request.ExpectedState.Trim(), storedBefore, StringComparison.OrdinalIgnoreCase))
+            {
+                failure = ApiResponse<AdminFeatureItemDto>.Fail(
+                    "Tính năng vừa được quản trị viên khác cập nhật. Vui lòng tải lại trước khi lưu.",
+                    HttpStatusCode.Conflict,
+                    "ORDER_REVISION_CONFLICT");
+                return;
+            }
+
+            var wasSuspended = FeatureAccessModes.IsSuspended(feature.AccessMode);
+            var previousPolicy = FeatureAccessModes.PolicyOf(feature.AccessMode);
+            // Without Availability, a legacy client sending a policy re-opens the feature (the previous single-field behaviour).
+            var nextSuspended = availability is null ? legacySuspend : availability == FeatureAccessModes.AvailabilityDisabled;
+            var nextPolicy = legacySuspend
+                ? previousPolicy ?? (feature.IsCoreFree ? FeatureAccessModes.Free : FeatureAccessModes.PlanRequired)
+                : requestedMode;
+
+            var nextCreditKey = request.CreditFeatureKey is null
+                ? feature.CreditFeatureKey
+                : (string.IsNullOrWhiteSpace(request.CreditFeatureKey) ? null : request.CreditFeatureKey.Trim());
+            if ((nextPolicy is FeatureAccessModes.CreditRequired or FeatureAccessModes.PlanAndCredit) &&
+                string.IsNullOrWhiteSpace(nextCreditKey))
+            {
+                failure = ApiResponse<AdminFeatureItemDto>.Fail(
+                    "Tính năng này chưa gắn với loại lượt AI nào nên chưa thể yêu cầu lượt AI.",
+                    HttpStatusCode.BadRequest,
+                    "FEATURE_CREDIT_KEY_REQUIRED");
+                return;
+            }
+
+            var availabilityChanged = wasSuspended != nextSuspended;
+            var policyChanged = !string.Equals(previousPolicy, nextPolicy, StringComparison.Ordinal);
+            var reason = SanitizeReason(request.Reason);
+            // Sensitive = learners lose access they have today: suspending, or moving a free feature behind a plan/credits.
+            var sensitive = (availabilityChanged && nextSuspended)
+                || (policyChanged && previousPolicy == FeatureAccessModes.Free && nextPolicy != FeatureAccessModes.Free);
+            if (sensitive && (!request.ConfirmImpact || string.IsNullOrWhiteSpace(reason)))
+            {
+                failure = ApiResponse<AdminFeatureItemDto>.Fail(
+                    "Thay đổi này ảnh hưởng tới học viên đang sử dụng. Vui lòng nhập lý do và xác nhận trước khi lưu.",
+                    HttpStatusCode.BadRequest,
+                    "FEATURE_CHANGE_CONFIRMATION_REQUIRED");
+                return;
+            }
+
+            var beforeJson = JsonSerializer.Serialize(new
+            {
+                feature.Id,
+                feature.Code,
+                feature.Name,
+                feature.Description,
+                Availability = wasSuspended ? FeatureAccessModes.AvailabilityDisabled : FeatureAccessModes.AvailabilityActive,
+                AccessPolicy = previousPolicy,
+                feature.CreditFeatureKey,
+                feature.IsCoreFree,
+            });
+
+            var now = DateTime.UtcNow;
+            feature.AccessMode = FeatureAccessModes.Compose(nextPolicy, nextSuspended);
+            feature.CreditFeatureKey = nextCreditKey;
+            if (request.Name is not null)
+                feature.Name = CollapseSpaces(request.Name);
+            if (request.Description is not null)
+                feature.Description = NormalizeDescription(request.Description);
+            feature.ModifiedDate = now;
+
+            var afterJson = JsonSerializer.Serialize(new
+            {
+                feature.Id,
+                feature.Code,
+                feature.Name,
+                feature.Description,
+                Availability = nextSuspended ? FeatureAccessModes.AvailabilityDisabled : FeatureAccessModes.AvailabilityActive,
+                AccessPolicy = nextPolicy,
+                feature.CreditFeatureKey,
+                feature.IsCoreFree,
+            });
+
+            await uow.AdminAuditLogs.AddAsync(new AdminAuditLog
+            {
+                ActorUserId = adminUserId,
+                EntityType = "FeatureAccessPolicy",
+                EntityId = feature.Id,
+                Action = availabilityChanged
+                    ? (nextSuspended ? "FeatureSuspended" : "FeatureReopened")
+                    : policyChanged ? "AccessPolicyChanged" : "Updated",
+                BeforeJson = beforeJson,
+                AfterJson = afterJson,
+                Reason = reason,
+                CreatedAtUtc = now,
+            }, token);
+
+            await uow.SaveChangesAsync(token);
+            updatedDto = ToFeatureDto(feature);
+        }, ct);
+
+        if (failure is not null) return failure;
+        return ApiResponse<AdminFeatureItemDto>.Success(updatedDto!, message: "Đã lưu cấu hình tính năng.");
+    }
+
+    public async Task<ApiResponse<AdminEntitlementPreviewResponse>> GetEntitlementPreviewAsync(
+        int? planId,
+        CancellationToken ct = default)
+    {
+        SubscriptionPlan? plan = null;
+        var grants = new List<SubscriptionAccessService.SubscriptionGrantSnapshot>();
+
+        if (planId.HasValue)
+        {
+            plan = await uow.SubscriptionPlans.Query()
+                .AsNoTracking()
+                .Include(p => p.Features)
+                .FirstOrDefaultAsync(p => p.Id == planId.Value && !p.IsDeleted, ct);
+            if (plan is null || plan.MeetingSessionCount > 0 ||
+                SubscriptionAccessService.ResolveCategory(plan, plan.Id) == SubscriptionAccessService.CategoryMentorLegacy)
+            {
+                return ApiResponse<AdminEntitlementPreviewResponse>.NotFound("Không tìm thấy gói tự học hợp lệ.");
+            }
+
+            grants.Add(new SubscriptionAccessService.SubscriptionGrantSnapshot(
+                plan.Name,
+                SubscriptionAccessService.ResolveCategory(plan, plan.Id),
+                plan.AiGradingQuota,
+                plan.Features.Where(f => !f.IsDeleted).Select(f => f.Id).ToHashSet()));
+        }
+
+        var features = await uow.Features.Query()
+            .AsNoTracking()
+            .Where(f => !f.IsDeleted && f.Category != SubscriptionAccessService.CategoryMentorLegacy)
+            .OrderBy(f => f.SortOrder)
+            .ThenBy(f => f.Id)
+            .ToListAsync(ct);
+
+        var items = features.Select(f =>
+        {
+            var evaluated = SubscriptionAccessService.EvaluateFeaturePolicy(f, grants);
+            var note = evaluated.Allowed
+                ? evaluated.AccessSource switch
+                {
+                    "FREE" => "Miễn phí cho mọi học viên",
+                    "PLAN" => $"Mở bởi gói {evaluated.GrantedByPlanName ?? "đã chọn"}",
+                    "CREDIT" => $"Khả dụng {evaluated.CreditsRemaining} lượt AI",
+                    "PLAN_AND_CREDIT" => $"Mở bởi gói + {evaluated.CreditsRemaining} lượt AI",
+                    _ => null,
+                }
+                : evaluated.LockReason;
+
+            return new AdminEntitlementPreviewItemDto(
+                evaluated.FeatureId,
+                evaluated.Code,
+                evaluated.Name,
+                evaluated.Category,
+                evaluated.AccessMode,
+                evaluated.IsCoreFree,
+                evaluated.Allowed,
+                evaluated.AccessSource,
+                note,
+                SubscriptionAccessService.EffectiveState(evaluated),
+                f.Description);
+        }).ToList();
+
+        return ApiResponse<AdminEntitlementPreviewResponse>.Success(new AdminEntitlementPreviewResponse(
+            plan?.Id,
+            plan?.Name,
+            plan is null ? "free" : SubscriptionAccessService.ResolveCategory(plan, plan.Id),
+            plan?.DurationDays ?? 0,
+            plan?.AiGradingQuota ?? 0,
+            items));
     }
 
     public async Task<ApiResponse<AdminPaymentListResponse>> GetPaymentsAsync(AdminPaymentQuery query, CancellationToken ct = default)
@@ -545,7 +787,12 @@ public sealed partial class AdminBusinessConfigService(
         var clampedTake = Math.Clamp(take, 1, 100);
         var q = uow.AdminAuditLogs.Query().AsNoTracking();
         if (!string.IsNullOrWhiteSpace(entityType))
-            q = q.Where(x => x.EntityType == entityType.Trim());
+        {
+            var types = entityType.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Take(10)
+                .ToList();
+            q = types.Count == 1 ? q.Where(x => x.EntityType == types[0]) : q.Where(x => types.Contains(x.EntityType));
+        }
         if (entityId.HasValue)
             q = q.Where(x => x.EntityId == entityId.Value);
 
@@ -674,6 +921,56 @@ public sealed partial class AdminBusinessConfigService(
         }
 
         return list;
+    }
+
+    private static AdminFeatureItemDto ToFeatureDto(Feature f)
+        => new(
+            f.Id,
+            f.Code,
+            f.Name,
+            f.Description,
+            f.Category,
+            SubscriptionAccessService.EffectiveMode(f),
+            f.IsCoreFree,
+            f.CreditFeatureKey,
+            SubscriptionAccessService.ParseFeatureRoutes(f.RoutePrefixesJson),
+            f.SortOrder,
+            f.SubscriptionPlans.Count(p => !p.IsDeleted && p.MeetingSessionCount == 0 &&
+                SubscriptionAccessService.ResolveCategory(p, p.Id) != SubscriptionAccessService.CategoryMentorLegacy),
+            FeatureAccessModes.IsSuspended(f.AccessMode) ? FeatureAccessModes.AvailabilityDisabled : FeatureAccessModes.AvailabilityActive,
+            FeatureAccessModes.PolicyOf(f.AccessMode),
+            StoredStateOf(f));
+
+    /// <summary>The raw stored availability+policy value, echoed back by the Admin UI for optimistic concurrency.</summary>
+    private static string StoredStateOf(Feature f)
+        => string.IsNullOrWhiteSpace(f.AccessMode) ? FeatureAccessModes.Free : f.AccessMode.Trim().ToUpperInvariant();
+
+    /// <summary>
+    /// "SaleStopped" / "SaleResumed" when only the selling status changed (so history never reads "deleted" for a plan
+    /// that was merely taken off sale), otherwise "Updated". Revision is ignored because every save bumps it.
+    /// </summary>
+    private static string PlanAuditAction(string? beforeJson, string afterJson)
+    {
+        if (string.IsNullOrWhiteSpace(beforeJson)) return "Updated";
+        try
+        {
+            using var before = JsonDocument.Parse(beforeJson);
+            using var after = JsonDocument.Parse(afterJson);
+            var changed = new List<string>();
+            foreach (var property in after.RootElement.EnumerateObject())
+            {
+                if (property.Name == nameof(SubscriptionPlan.Revision)) continue;
+                if (!before.RootElement.TryGetProperty(property.Name, out var old) || old.GetRawText() != property.Value.GetRawText())
+                    changed.Add(property.Name);
+            }
+            if (changed.Count == 1 && changed[0] == nameof(SubscriptionPlan.IsActive))
+                return after.RootElement.GetProperty(nameof(SubscriptionPlan.IsActive)).GetBoolean() ? "SaleResumed" : "SaleStopped";
+            return "Updated";
+        }
+        catch (JsonException)
+        {
+            return "Updated";
+        }
     }
 
     private static AdminSubscriptionPlanDto ToPlanDto(SubscriptionPlan p, int totalPurchases, int paidPurchases)

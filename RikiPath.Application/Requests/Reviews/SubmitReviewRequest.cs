@@ -1,9 +1,5 @@
-using System;
-using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+using RikiPath.Domain.Enums;
 
 namespace RikiPath.Application.Requests.Reviews
 {
@@ -12,7 +8,22 @@ namespace RikiPath.Application.Requests.Reviews
         [Required]
         public int ReviewCardId { get; set; }
 
-        [Range(1, 5, ErrorMessage = "Quality phải trong khoảng 1-5.")]
-        public int Quality { get; set; }
+        [Range(0, 5, ErrorMessage = "Quality phải trong khoảng 0-5.")]
+        public int Quality { get; set; } = 4;
+
+        public ReviewRating? Rating { get; set; }
+
+        [MaxLength(20)]
+        public string StudyMode { get; set; } = "flip";
+
+        [MaxLength(500)]
+        public string? UserAnswer { get; set; }
+
+        public int? ResponseTimeMs { get; set; }
+
+        [MaxLength(120)]
+        public string? IdempotencyKey { get; set; }
+
+        public Guid? SessionKey { get; set; }
     }
 }

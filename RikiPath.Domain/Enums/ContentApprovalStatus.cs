@@ -7,5 +7,6 @@ namespace RikiPath.Domain.Enums
         PendingReview,
         Approved,
         Rejected,
+        ChangesRequested,
     }
 }

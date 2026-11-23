@@ -4,6 +4,7 @@ using RikiPath.Application.IServices;
 using RikiPath.Application.Requests.Lessons;
 using RikiPath.Application.Responses;
 using RikiPath.Application.Responses.Lessons;
+using RikiPath.Domain.Enums;
 
 namespace RikiPath.WebApi.Controllers
 {
@@ -28,7 +29,7 @@ namespace RikiPath.WebApi.Controllers
         /// <response code="404">Cấp độ JLPT không khả dụng.</response>
         /// <response code="500">Không thể truy vấn nội dung học.</response>
         [HttpGet("lessons")]
-        [RequireSelfStudy]
+        [RequireFeature(FeatureCodes.LessonsContent)]
         [ProducesResponseType(typeof(ApiResponse<LearningDiscoveryResponse>), StatusCodes.Status200OK)]
         [ProducesResponseType(typeof(ApiResponse<LearningDiscoveryResponse>), StatusCodes.Status400BadRequest)]
         [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -61,7 +62,7 @@ namespace RikiPath.WebApi.Controllers
         /// <response code="404">Không tìm thấy lesson này.</response>
         /// <response code="500">Lỗi server khi truy vấn dữ liệu.</response>
         [HttpGet("lessons/{lessonId:int}")]
-        [RequireSelfStudy]
+        [RequireFeature(FeatureCodes.LessonsContent)]
         [ProducesResponseType(typeof(ApiResponse<LessonDetailResponse>), StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status401Unauthorized)]
         [ProducesResponseType(StatusCodes.Status403Forbidden)]
@@ -132,6 +133,25 @@ namespace RikiPath.WebApi.Controllers
             var result = await lessonProgressService.CompleteLessonAsync(
                 lessonId,
                 cancellationToken);
+            return StatusCode(result.StatusCode, result);
+        }
+
+        [HttpPost("lessons/{lessonId:int}/interact")]
+        public async Task<IActionResult> RecordInteraction(
+            int lessonId,
+            CancellationToken cancellationToken)
+        {
+            var result = await lessonProgressService.RecordInteractionAsync(lessonId, cancellationToken);
+            return StatusCode(result.StatusCode, result);
+        }
+
+        [HttpGet("lessons/{lessonId:int}/srs-suggestions")]
+        [RequireFeature(FeatureCodes.LessonsContent)]
+        public async Task<IActionResult> GetSrsSuggestions(
+            int lessonId,
+            CancellationToken cancellationToken)
+        {
+            var result = await lessonProgressService.GetLessonSrsSuggestionsAsync(lessonId, cancellationToken);
             return StatusCode(result.StatusCode, result);
         }
     }

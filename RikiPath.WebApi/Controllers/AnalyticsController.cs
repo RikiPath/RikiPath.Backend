@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using RikiPath.Application.IServices;
+using RikiPath.Application.Requests.Analytics;
 using System.Security.Claims;
 
 namespace RikiPath.WebApi.Controllers
@@ -28,6 +29,38 @@ namespace RikiPath.WebApi.Controllers
         public async Task<IActionResult> GetStudyStreak(CancellationToken cancellationToken)
         {
             var result = await analyticsService.GetStudyStreakAsync(cancellationToken);
+            return StatusCode((int)result.StatusCode, result);
+        }
+
+        /// <summary>
+        /// Kiểm tra sự kiện chúc mừng chuỗi ngày học của hôm nay (giờ Việt Nam) cho người học hiện tại.
+        /// </summary>
+        /// <remarks>
+        /// - Chỉ đọc: không bao giờ tạo hoạt động học hay sự kiện mới khi mở trang.
+        /// - `hasPendingEvent = true` chỉ khi hôm nay đã có hoạt động học hợp lệ và sự kiện chưa được nhận trên bất kỳ thiết bị nào.
+        /// </remarks>
+        /// <response code="200">Trạng thái sự kiện, chuỗi hiện tại, mốc và các ngày học trong tuần.</response>
+        [HttpGet("streak-celebration")]
+        public async Task<IActionResult> GetStreakCelebration(CancellationToken cancellationToken)
+        {
+            var result = await analyticsService.GetStreakCelebrationAsync(cancellationToken);
+            return StatusCode((int)result.StatusCode, result);
+        }
+
+        /// <summary>
+        /// Nhận (claim) sự kiện chúc mừng chuỗi ngày học của hôm nay ngay trước khi hiển thị popup.
+        /// </summary>
+        /// <remarks>
+        /// - Idempotent theo learner + ngày học: chỉ một request thắng (`claimed = true`); tab/thiết bị khác nhận `claimed = false`.
+        /// - Máy chủ tự tính lại sự kiện; `eventId` cũ (ví dụ qua nửa đêm) không được nhận.
+        /// </remarks>
+        /// <response code="200">`claimed = true` nếu request này được phép hiển thị popup.</response>
+        [HttpPost("streak-celebration/claim")]
+        public async Task<IActionResult> ClaimStreakCelebration(
+            [FromBody] ClaimStreakCelebrationRequest request,
+            CancellationToken cancellationToken)
+        {
+            var result = await analyticsService.ClaimStreakCelebrationAsync(request, cancellationToken);
             return StatusCode((int)result.StatusCode, result);
         }
 

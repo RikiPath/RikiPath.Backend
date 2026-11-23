@@ -28,6 +28,7 @@ namespace RikiPath.Application.Services
             public MockAttemptSnapshot() { }
             public int MockTestId { get; set; }
             public string? Title { get; set; }
+            public string? JlptLevelName { get; set; }
             public List<int> PreviouslyWrongQuestionIds { get; set; } = [];
             public List<MockQuestionSnapshot> Questions { get; set; } = [];
         }
@@ -89,9 +90,179 @@ namespace RikiPath.Application.Services
             return document.RootElement.Clone();
         }
 
-        private static string PublicOptionText(MockQuestionOption option, string? interactionData, int index) =>
-            JlptMockQuestionFormats.HasAudioOptions(ParseJsonElement(interactionData))
-                ? (index + 1).ToString(CultureInfo.InvariantCulture) : option.OptionText;
+        private static string? ResolvePassageText(string? passageText, JsonElement? interactionData)
+        {
+            if (!string.IsNullOrWhiteSpace(passageText)) return passageText;
+            if (interactionData is not { ValueKind: JsonValueKind.Object } obj) return null;
+            var parts = new List<string>(2);
+            foreach (var key in new[] { "passage", "secondPassage" })
+            {
+                if (obj.TryGetProperty(key, out var node) && node.ValueKind == JsonValueKind.String)
+                {
+                    var text = node.GetString()?.Trim();
+                    if (!string.IsNullOrEmpty(text)) parts.Add(text);
+                }
+            }
+            return parts.Count > 0 ? string.Join("\n\n---\n\n", parts) : null;
+        }
+
+        private static string PublicOptionText(MockQuestionOption option, string? interactionData, int index)
+        {
+            if (JlptMockQuestionFormats.HasAudioOptions(ParseJsonElement(interactionData)))
+                return (index + 1).ToString(CultureInfo.InvariantCulture);
+            return RemoveAnswerSuffix(option.OptionText);
+        }
+
+        private static string RemoveAnswerSuffix(string text)
+        {
+            foreach (var suffix in new[] { " (Chính xác)", " (Correct)" })
+                if (text.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+                    return text[..^suffix.Length];
+            return text;
+        }
+
+        private static StartAttemptQuestionResponse SanitizeExamPrompt(StartAttemptQuestionResponse prompt)
+        {
+            foreach (var option in prompt.Options)
+                option.Content = RemoveAnswerSuffix(option.Content);
+            return prompt;
+        }
+
+        private static bool HasAnswerMetadata(JsonElement node)
+        {
+            if (node.ValueKind == JsonValueKind.Array)
+                return node.EnumerateArray().Any(HasAnswerMetadata);
+            if (node.ValueKind != JsonValueKind.Object) return false;
+            foreach (var property in node.EnumerateObject())
+            {
+                if (property.Name.Contains("answer", StringComparison.OrdinalIgnoreCase) ||
+                    property.Name.Contains("correct", StringComparison.OrdinalIgnoreCase) ||
+                    property.Name.Contains("explanation", StringComparison.OrdinalIgnoreCase) ||
+                    HasAnswerMetadata(property.Value)) return true;
+            }
+            return false;
+        }
+
+        private static bool IsLearnerReady(MockTest test)
+        {
+            if (test.IsDeleted || test.TimeLimitMinutes <= 0 || test.CertificateLevel is null ||
+                test.CertificateLevel.IsDeleted || JlptCurriculum.Rank(test.CertificateLevel.Code) == 0)
+                return false;
+
+            var sections = (test.Sections ?? []).Where(section => !section.IsDeleted).ToList();
+            if (sections.Count == 0) return false;
+            foreach (var section in sections)
+            {
+                var questions = (section.Questions ?? []).Where(question => !question.IsDeleted).ToList();
+                if (questions.Count == 0) return false;
+                foreach (var question in questions)
+                {
+                    // Legacy sample rows announce the answer in their option text. Never serve them to learners.
+                    if (string.IsNullOrWhiteSpace(question.QuestionText) ||
+                        question.QuestionText.Contains("Câu hỏi mẫu #", StringComparison.OrdinalIgnoreCase) ||
+                        question.QuestionText.Contains("(Chính xác)", StringComparison.OrdinalIgnoreCase) ||
+                        (JlptSkillAssessmentPolicy.Classify(section.LanguageSkill?.Name ?? section.Title) == JlptStudySkill.Listening &&
+                         string.IsNullOrWhiteSpace(question.AudioUrl ?? question.Passage?.AudioUrl)))
+                        return false;
+
+                    if (!string.IsNullOrWhiteSpace(question.InteractionDataJson))
+                    {
+                        try
+                        {
+                            using var metadata = JsonDocument.Parse(question.InteractionDataJson);
+                            if (HasAnswerMetadata(metadata.RootElement)) return false;
+                        }
+                        catch (JsonException)
+                        {
+                            return false;
+                        }
+                    }
+
+                    if (!IsSingleChoiceQuestion(question.QuestionType) &&
+                        !question.QuestionType.Equals("MultipleChoice", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (string.IsNullOrWhiteSpace(question.AnswerKeyJson)) return false;
+                        continue;
+                    }
+
+                    var options = (question.Options ?? []).Where(option => !option.IsDeleted).ToList();
+                    if (options.Count < 2 || options.Any(option =>
+                            string.IsNullOrWhiteSpace(option.OptionText) ||
+                            option.OptionText.Contains("(Chính xác)", StringComparison.OrdinalIgnoreCase) ||
+                            option.OptionText.Contains("(Correct)", StringComparison.OrdinalIgnoreCase)) ||
+                        options.Select(option => option.OptionText.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).Count() != options.Count ||
+                        (IsSingleChoiceQuestion(question.QuestionType)
+                            ? options.Count(option => option.IsCorrect) != 1
+                            : !options.Any(option => option.IsCorrect)))
+                        return false;
+                }
+            }
+            return true;
+        }
+
+        private static TestSummaryResponse ToTestSummary(MockTest test)
+        {
+            List<string> includedSkills = [];
+            if (!string.IsNullOrWhiteSpace(test.IncludedSkillsJson))
+            {
+                try { includedSkills = JsonSerializer.Deserialize<List<string>>(test.IncludedSkillsJson, MockSnapshotJson) ?? []; }
+                catch (JsonException) { }
+            }
+            if (includedSkills.Count == 0)
+            {
+                includedSkills = (test.Sections ?? []).Where(s => !s.IsDeleted)
+                    .Select(s => s.LanguageSkill?.Name ?? string.Empty)
+                    .Where(n => !string.IsNullOrWhiteSpace(n))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+            }
+
+            return new TestSummaryResponse
+            {
+                MockTestId = test.Id,
+                CertificateLevelId = test.CertificateLevelId,
+                Title = test.Title,
+                Description = test.Description ?? string.Empty,
+                JlptLevelName = test.CertificateLevel?.Code ?? string.Empty,
+                ExamKind = test.ExamKind.ToString(),
+                Version = test.Version,
+                TimeLimitMinutes = test.TimeLimitMinutes,
+                IncludedSkills = includedSkills,
+                Sections = (test.Sections ?? []).Where(section => !section.IsDeleted)
+                    .OrderBy(section => section.SortOrder).ThenBy(section => section.Id)
+                    .Select(section => new TestSectionSummaryResponse
+                    {
+                        Title = section.Title,
+                        SkillName = section.LanguageSkill?.Name ?? string.Empty,
+                        DurationMinutes = section.DurationMinutes,
+                        QuestionCount = (section.Questions ?? []).Count(question => !question.IsDeleted),
+                        RequiresAudio = (section.Questions ?? []).Any(question => !question.IsDeleted &&
+                            !string.IsNullOrWhiteSpace(question.AudioUrl ?? question.Passage?.AudioUrl)),
+                    }).ToList(),
+                QuestionCount = (test.Sections ?? []).Where(section => !section.IsDeleted)
+                    .Sum(section => (section.Questions ?? []).Count(question => !question.IsDeleted)),
+            };
+        }
+
+        private async Task<bool> IsApprovedForLearnersAsync(MockTest test, CancellationToken cancellationToken)
+        {
+            if (test.IsDeleted || test.IsArchivedVersion) return false;
+            if (ContentAuthoring.JlptBlueprintPolicy.IsRightsBlockedForLegacyOrManaged(test.RightsStatus, test.IsManagedWorkflow))
+                return false;
+            if (test.PublishStatus is ContentStatus.PendingReview or ContentStatus.Rejected or ContentStatus.ChangesRequested or ContentStatus.Unpublished)
+                return false;
+            if (test.IsManagedWorkflow)
+                return test.PublishStatus == ContentStatus.Published;
+            if (test.PublishStatus == ContentStatus.Published)
+                return true;
+
+            return await unitOfWork.ContentApprovalRequests.Query().AsNoTracking().AnyAsync(request =>
+                !request.IsDeleted && request.EntityType == ImportEntityType.MockTest &&
+                request.Status == ContentApprovalStatus.Approved &&
+                (request.TargetEntityId == test.Id ||
+                 (request.TargetEntityId == null && request.RowKey == test.Title + " / " + test.CertificateLevel.Code)),
+                cancellationToken);
+        }
 
         private static bool IsStructuredResponseCorrect(MockQuestion question, JsonElement? response) =>
             IsStructuredResponseCorrect(question.AnswerKeyJson, ParseJsonElement(question.InteractionDataJson), response);
@@ -109,12 +280,52 @@ namespace RikiPath.Application.Services
                         SentenceOrdering.TryReadSequence(ParseJsonElement(answerKey), out var correct) && correct.Length == 4 &&
                         submitted[position - 1] == correct[position - 1];
                 }
+                if (SentenceOrdering.TryReadSequence(ParseJsonElement(answerKey), out var expectedOrder) &&
+                    SentenceOrdering.TryReadSequence(response, out var submittedOrder))
+                {
+                    return expectedOrder.SequenceEqual(submittedOrder);
+                }
+
+                var keyRoot = ParseJsonElement(answerKey);
+                if (keyRoot is { ValueKind: JsonValueKind.Object } keyObj &&
+                    keyObj.TryGetProperty("acceptedAnswers", out var acceptedArr) &&
+                    acceptedArr.ValueKind == JsonValueKind.Array)
+                {
+                    var submittedText = response.Value.ValueKind == JsonValueKind.String
+                        ? response.Value.GetString()
+                        : (response.Value.ValueKind == JsonValueKind.Array && response.Value.GetArrayLength() == 1 && response.Value[0].ValueKind == JsonValueKind.String
+                            ? response.Value[0].GetString()
+                            : (response.Value.ValueKind == JsonValueKind.Object && response.Value.TryGetProperty("text", out var tEl)
+                                ? tEl.GetString()
+                                : (response.Value.ValueKind == JsonValueKind.Object && response.Value.TryGetProperty("answer", out var aEl) ? aEl.GetString() : null)));
+                    if (string.IsNullOrWhiteSpace(submittedText)) return false;
+
+                    var caseSensitive = data is { ValueKind: JsonValueKind.Object } dObj &&
+                        dObj.TryGetProperty("caseSensitive", out var cs) && cs.ValueKind == JsonValueKind.True;
+                    var normSubmitted = NormalizeFillBlankText(submittedText, caseSensitive);
+
+                    foreach (var ansEl in acceptedArr.EnumerateArray())
+                    {
+                        var ans = ansEl.GetString();
+                        if (!string.IsNullOrWhiteSpace(ans) && NormalizeFillBlankText(ans, caseSensitive) == normSubmitted)
+                            return true;
+                    }
+                    return false;
+                }
+
                 return JsonNode.DeepEquals(JsonNode.Parse(answerKey), JsonNode.Parse(response.Value.GetRawText()));
             }
             catch (JsonException)
             {
                 return false;
             }
+        }
+
+        private static string NormalizeFillBlankText(string input, bool caseSensitive)
+        {
+            var collapsed = string.Join(" ", input.Replace('\u3000', ' ').Trim()
+                .Split(' ', StringSplitOptions.RemoveEmptyEntries));
+            return caseSensitive ? collapsed : collapsed.ToLowerInvariant();
         }
 
         private static bool IsMultipleChoiceCorrect(MockQuestion question, JsonElement? response)
@@ -155,6 +366,9 @@ namespace RikiPath.Application.Services
                 if (test is null)
                     return ApiResponse<MockTestDetailResponse>.NotFound(
                         "Chưa có bài đánh giá năng lực cho cấp độ này.");
+                if (!IsLearnerReady(test) || !await IsApprovedForLearnersAsync(test, cancellationToken))
+                    return ApiResponse<MockTestDetailResponse>.NotFound(
+                        "Bài đánh giá năng lực chưa được duyệt nội dung.");
 
                 var result = new MockTestDetailResponse
                 {
@@ -222,6 +436,10 @@ namespace RikiPath.Application.Services
                     return ApiResponse<StartAttemptResponse>.NotFound(
                         $"Không tìm thấy MockTest có Id = {practiceTestId}.");
 
+                if (!IsLearnerReady(test) || !await IsApprovedForLearnersAsync(test, cancellationToken))
+                    return ApiResponse<StartAttemptResponse>.Fail(
+                        "Đề thi chưa đạt điều kiện nội dung để bắt đầu.", HttpStatusCode.Conflict);
+
                 var orderedQuestions = (test.Sections ?? [])
                     .Where(section => !section.IsDeleted)
                     .OrderBy(section => section.SortOrder)
@@ -252,8 +470,15 @@ namespace RikiPath.Application.Services
                         Content = item.Question.QuestionText,
                         QuestionType = item.Question.QuestionType,
                         InteractionData = ParseJsonElement(item.Question.InteractionDataJson),
-                        AudioUrl = item.Question.AudioUrl,
+                        AudioUrl = item.Question.AudioUrl ?? item.Question.Passage?.AudioUrl,
                         ImageUrl = item.Question.ImageUrl,
+                        PassageId = item.Question.PassageId,
+                        PassageTitle = item.Question.Passage?.Title,
+                        PassageText = ResolvePassageText(item.Question.Passage?.PassageText, ParseJsonElement(item.Question.InteractionDataJson)),
+                        PassageInstructions = item.Question.Passage?.Instructions,
+                        PassageImageUrl = item.Question.Passage?.ImageUrl,
+                        TemplateKind = item.Question.TemplateKind,
+                        PlaybackPolicy = TryDeserializePlaybackPolicy(item.Question.PlaybackPolicyJson ?? item.Question.Passage?.PlaybackPolicyJson),
                         Options = (item.Question.Options ?? [])
                             .Where(option => !option.IsDeleted)
                             .OrderBy(option => option.SortOrder).ThenBy(option => option.Id)
@@ -325,6 +550,7 @@ namespace RikiPath.Application.Services
                         {
                             MockTestId = practiceTestId,
                             Title = test.Title,
+                            JlptLevelName = test.CertificateLevel?.Code,
                             PreviouslyWrongQuestionIds = previouslyWrongQuestionIds,
                             Questions = frozenQuestions,
                         }),
@@ -392,7 +618,8 @@ namespace RikiPath.Application.Services
                         AttemptId = attempt.Id,
                         MockTestId = frozen.MockTestId,
                         Title = frozen.Title ?? answers[0].MockQuestion.MockTestSection.MockTest.Title,
-                        JlptLevelName = answers[0].MockQuestion.MockTestSection.MockTest.CertificateLevel?.Code ?? string.Empty,
+                        JlptLevelName = frozen.JlptLevelName ??
+                            answers[0].MockQuestion.MockTestSection.MockTest.CertificateLevel?.Code ?? string.Empty,
                         StartedAt = attempt.StartedAt,
                         TimeLimitMinutes = attempt.ExpiresAt is { } expiry
                             ? (int)Math.Ceiling((expiry - attempt.StartedAt).TotalMinutes)
@@ -411,6 +638,7 @@ namespace RikiPath.Application.Services
                 if (attempt.ExpiresAt is { } expiresAt) snapshot.ExpiresAt = BusinessDateHelper.EnsureUtc(expiresAt);
                 foreach (var question in snapshot.Questions)
                 {
+                    SanitizeExamPrompt(question);
                     var answer = byQuestion[question.QuestionId];
                     question.SelectedOptionId = answer.SelectedOptionId;
                     question.Response = ParseJsonElement(answer.ResponseJson);
@@ -474,8 +702,11 @@ namespace RikiPath.Application.Services
                     // Attempt đã hoàn tất không được chấm lại khi client retry request.
                     if (attempt.IsCompleted)
                     {
-                        response = ApiResponse<AttemptResultResponse>.Fail(
-                            "Lượt làm bài này đã được nộp trước đó.", HttpStatusCode.BadRequest, errorCode: "MOCK_TEST_COMPLETED");
+                        response = submit
+                            ? await GetAttemptResultAsync(attemptId, transactionCancellationToken)
+                            : ApiResponse<AttemptResultResponse>.Fail(
+                                "Lượt làm bài này đã được nộp trước đó.", HttpStatusCode.BadRequest,
+                                errorCode: "MOCK_TEST_COMPLETED");
                         return;
                     }
 
@@ -773,7 +1004,7 @@ namespace RikiPath.Application.Services
                         AttemptId = attempt.Id,
                         MockTestId = practiceTestId,
                         Title = frozen?.Title ?? test.Title,
-                        JlptLevelName = test.CertificateLevel?.Code ?? string.Empty,
+                        JlptLevelName = frozen?.JlptLevelName ?? test.CertificateLevel?.Code ?? string.Empty,
                         StartedAt = BusinessDateHelper.EnsureUtc(attempt.StartedAt),
                         ServerNow = DateTime.UtcNow,
                         ExpiresAt = attempt.ExpiresAt is { } expiry ? BusinessDateHelper.EnsureUtc(expiry) : null,
@@ -791,7 +1022,7 @@ namespace RikiPath.Application.Services
                             {
                                 frozenQuestion.Prompt.SelectedOptionId = answer.SelectedOptionId;
                                 frozenQuestion.Prompt.Response = ParseJsonElement(answer.ResponseJson);
-                                return frozenQuestion.Prompt;
+                                return SanitizeExamPrompt(frozenQuestion.Prompt);
                             }
                             var question = answer.MockQuestion;
                             var section = question.MockTestSection;
@@ -987,17 +1218,35 @@ namespace RikiPath.Application.Services
         {
             try
             {
-                var tests = await unitOfWork.MockTests.GetByLevelAsync(certificationLevelId);
+                var tests = await unitOfWork.MockTests.Query().AsNoTracking()
+                    .Where(test => !test.IsDeleted && test.CertificateLevelId == certificationLevelId
+                        && test.ExamKind == ExamKind.FullMockTest
+                        && !test.IsArchivedVersion)
+                    .Include(test => test.CertificateLevel)
+                    .Include(test => test.Sections.Where(section => !section.IsDeleted))
+                        .ThenInclude(section => section.LanguageSkill)
+                    .Include(test => test.Sections.Where(section => !section.IsDeleted))
+                        .ThenInclude(section => section.Questions.Where(question => !question.IsDeleted))
+                        .ThenInclude(question => question.Options.Where(option => !option.IsDeleted))
+                    .Include(test => test.Sections.Where(section => !section.IsDeleted))
+                        .ThenInclude(section => section.Questions.Where(question => !question.IsDeleted))
+                        .ThenInclude(question => question.Passage)
+                    .AsSplitQuery().ToListAsync(cancellationToken);
 
-                var result = tests.Where(t => t.CertificateLevel is { IsDeleted: false } level && JlptCurriculum.Rank(level.Code) > 0)
-                    .OrderBy(t => t.Title).ThenBy(t => t.Id).Select(t => new TestSummaryResponse
-                {
-                    MockTestId = t.Id,
-                    Title = t.Title,
-                    Description = t.Description ?? string.Empty,
-                    JlptLevelName = t.CertificateLevel?.Code ?? string.Empty,
-                    TimeLimitMinutes = t.TimeLimitMinutes,
-                }).ToList();
+                var approvals = await unitOfWork.ContentApprovalRequests.Query().AsNoTracking()
+                    .Where(request => !request.IsDeleted && request.EntityType == ImportEntityType.MockTest &&
+                        request.Status == ContentApprovalStatus.Approved)
+                    .Select(request => new { request.TargetEntityId, request.RowKey })
+                    .ToListAsync(cancellationToken);
+                var result = tests.Where(test => IsLearnerReady(test) &&
+                        !ContentAuthoring.JlptBlueprintPolicy.IsRightsBlockedForLegacyOrManaged(test.RightsStatus, test.IsManagedWorkflow) &&
+                        ((test.IsManagedWorkflow && test.PublishStatus == ContentStatus.Published) ||
+                         (!test.IsManagedWorkflow && test.PublishStatus != ContentStatus.Unpublished &&
+                          (test.PublishStatus == ContentStatus.Published ||
+                           approvals.Any(request => request.TargetEntityId == test.Id ||
+                               (request.TargetEntityId == null && request.RowKey == test.Title + " / " + test.CertificateLevel.Code))))))
+                    .OrderBy(test => test.Title).ThenBy(test => test.Id)
+                    .Select(ToTestSummary).ToList();
 
                 return ApiResponse<List<TestSummaryResponse>>.Success(result);
             }
@@ -1006,6 +1255,113 @@ namespace RikiPath.Application.Services
                 return ApiResponse<List<TestSummaryResponse>>.Fail(
                     "Không thể tải danh sách đề thi.", HttpStatusCode.InternalServerError);
             }
+        }
+
+        public async Task<ApiResponse<List<TestSummaryResponse>>> GetPracticeSetsAsync(
+            int? certificateLevelId = null, int? languageSkillId = null, string? examKind = null, string? keyword = null,
+            CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                var query = unitOfWork.MockTests.Query().AsNoTracking()
+                    .Where(t => !t.IsDeleted && !t.IsArchivedVersion &&
+                                (t.ExamKind == ExamKind.PracticeSet || t.ExamKind == ExamKind.MixedPractice) &&
+                                t.PublishStatus == ContentStatus.Published);
+
+                if (certificateLevelId.HasValue)
+                    query = query.Where(t => t.CertificateLevelId == certificateLevelId.Value);
+                if (Enum.TryParse<ExamKind>(examKind, true, out var parsedKind) && parsedKind is ExamKind.PracticeSet or ExamKind.MixedPractice)
+                    query = query.Where(t => t.ExamKind == parsedKind);
+                if (!string.IsNullOrWhiteSpace(keyword))
+                {
+                    var kw = keyword.Trim().ToLower();
+                    query = query.Where(t => t.Title.ToLower().Contains(kw) || (t.Description != null && t.Description.ToLower().Contains(kw)));
+                }
+
+                var tests = await query
+                    .Include(t => t.CertificateLevel)
+                    .Include(t => t.Sections!.Where(s => !s.IsDeleted)).ThenInclude(s => s.LanguageSkill)
+                    .Include(t => t.Sections!.Where(s => !s.IsDeleted)).ThenInclude(s => s.Questions!.Where(q => !q.IsDeleted)).ThenInclude(q => q.Options!.Where(o => !o.IsDeleted))
+                    .Include(t => t.Sections!.Where(s => !s.IsDeleted)).ThenInclude(s => s.Questions!.Where(q => !q.IsDeleted)).ThenInclude(q => q.Passage)
+                    .AsSplitQuery()
+                    .OrderByDescending(t => t.PublishedAt ?? t.ModifiedDate ?? t.CreatedDate)
+                    .ToListAsync(cancellationToken);
+
+                if (languageSkillId.HasValue)
+                {
+                    tests = tests.Where(t =>
+                        t.FocusSkillId == languageSkillId.Value ||
+                        (t.Sections ?? []).Any(s => !s.IsDeleted && s.LanguageSkillId == languageSkillId.Value))
+                        .ToList();
+                }
+
+                var result = tests.Where(test =>
+                        IsLearnerReady(test) &&
+                        !ContentAuthoring.JlptBlueprintPolicy.IsRightsBlockedForLegacyOrManaged(test.RightsStatus, test.IsManagedWorkflow))
+                    .Select(ToTestSummary)
+                    .ToList();
+                return ApiResponse<List<TestSummaryResponse>>.Success(result);
+            }
+            catch (Exception)
+            {
+                return ApiResponse<List<TestSummaryResponse>>.Fail("Không thể tải danh sách bộ đề luyện tập.", HttpStatusCode.InternalServerError);
+            }
+        }
+
+        public async Task<ApiResponse<List<TestSummaryResponse>>> GetFullMockTestsAsync(
+            int? certificateLevelId = null, string? keyword = null, CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                var query = unitOfWork.MockTests.Query().AsNoTracking()
+                    .Where(t => !t.IsDeleted && !t.IsArchivedVersion && t.ExamKind == ExamKind.FullMockTest);
+
+                if (certificateLevelId.HasValue)
+                    query = query.Where(t => t.CertificateLevelId == certificateLevelId.Value);
+                if (!string.IsNullOrWhiteSpace(keyword))
+                {
+                    var kw = keyword.Trim().ToLower();
+                    query = query.Where(t => t.Title.ToLower().Contains(kw) || (t.Description != null && t.Description.ToLower().Contains(kw)));
+                }
+
+                var tests = await query
+                    .Include(t => t.CertificateLevel)
+                    .Include(t => t.Sections!.Where(s => !s.IsDeleted)).ThenInclude(s => s.LanguageSkill)
+                    .Include(t => t.Sections!.Where(s => !s.IsDeleted)).ThenInclude(s => s.Questions!.Where(q => !q.IsDeleted)).ThenInclude(q => q.Options!.Where(o => !o.IsDeleted))
+                    .Include(t => t.Sections!.Where(s => !s.IsDeleted)).ThenInclude(s => s.Questions!.Where(q => !q.IsDeleted)).ThenInclude(q => q.Passage)
+                    .AsSplitQuery()
+                    .OrderBy(t => t.CertificateLevelId).ThenByDescending(t => t.PublishedAt ?? t.CreatedDate)
+                    .ToListAsync(cancellationToken);
+
+                var ready = new List<TestSummaryResponse>();
+                foreach (var test in tests)
+                {
+                    if (IsLearnerReady(test) && await IsApprovedForLearnersAsync(test, cancellationToken))
+                        ready.Add(ToTestSummary(test));
+                }
+                return ApiResponse<List<TestSummaryResponse>>.Success(ready);
+            }
+            catch (Exception)
+            {
+                return ApiResponse<List<TestSummaryResponse>>.Fail("Không thể tải danh sách đề thi thử JLPT.", HttpStatusCode.InternalServerError);
+            }
+        }
+
+        private static DTOs.ContentAuthoring.ListeningPlaybackPolicyDto? TryDeserializePlaybackPolicy(string? json)
+        {
+            if (string.IsNullOrWhiteSpace(json)) return null;
+            try { return JsonSerializer.Deserialize<DTOs.ContentAuthoring.ListeningPlaybackPolicyDto>(json, MockSnapshotJson); }
+            catch (JsonException) { return null; }
+        }
+
+        public async Task<ApiResponse<TestSummaryResponse>> GetTestInfoAsync(int practiceTestId,
+            CancellationToken cancellationToken = default)
+        {
+            var test = await unitOfWork.MockTests.GetWithSectionsAndQuestionsAsync(practiceTestId, cancellationToken);
+            return test is not null && IsLearnerReady(test) &&
+                await IsApprovedForLearnersAsync(test, cancellationToken)
+                ? ApiResponse<TestSummaryResponse>.Success(ToTestSummary(test))
+                : ApiResponse<TestSummaryResponse>.NotFound("Đề thi chưa sẵn sàng.");
         }
 
         public async Task<ApiResponse<List<MockTestHistoryItem>>> GetHistoryAsync(CancellationToken cancellationToken = default)
@@ -1022,6 +1378,7 @@ namespace RikiPath.Application.Services
                         attempt.Id,
                         Date = attempt.SubmittedAt ?? attempt.StartedAt,
                         Score = attempt.TotalScore!.Value,
+                        attempt.QuestionSnapshotJson,
                         Test = attempt.SectionResults!.OrderBy(section => section.MockTestSectionId)
                             .Select(section => new
                             {
@@ -1031,8 +1388,19 @@ namespace RikiPath.Application.Services
                             }).FirstOrDefault(),
                     }).ToListAsync(cancellationToken);
                 return ApiResponse<List<MockTestHistoryItem>>.Success(attempts.Where(attempt => attempt.Test is not null)
-                    .Select(attempt => new MockTestHistoryItem(attempt.Id, attempt.Test!.Id, attempt.Test.Title,
-                        attempt.Test.Level, BusinessDateHelper.EnsureUtc(attempt.Date), attempt.Score)).ToList());
+                    .Select(attempt =>
+                    {
+                        MockAttemptSnapshot? frozen = null;
+                        if (!string.IsNullOrWhiteSpace(attempt.QuestionSnapshotJson))
+                        {
+                            try { frozen = JsonSerializer.Deserialize<MockAttemptSnapshot>(attempt.QuestionSnapshotJson, MockSnapshotJson); }
+                            catch (JsonException) { /* Preserve access to legacy history. */ }
+                        }
+                        return new MockTestHistoryItem(attempt.Id, attempt.Test!.Id,
+                            frozen?.Title ?? attempt.Test.Title,
+                            frozen?.JlptLevelName ?? attempt.Test.Level,
+                            BusinessDateHelper.EnsureUtc(attempt.Date), attempt.Score);
+                    }).ToList());
             }
             catch (Exception)
             {
@@ -1061,6 +1429,9 @@ namespace RikiPath.Application.Services
                 if (test is null)
                     return ApiResponse<MockTestDetailResponse>.NotFound(
                         "Chưa có bài đánh giá năng lực cho cấp độ này.");
+                if (!IsLearnerReady(test) || !await IsApprovedForLearnersAsync(test, cancellationToken))
+                    return ApiResponse<MockTestDetailResponse>.NotFound(
+                        "Bài đánh giá năng lực chưa được duyệt nội dung.");
 
                 var result = new MockTestDetailResponse
                 {
@@ -1154,6 +1525,14 @@ namespace RikiPath.Application.Services
                         Response = ParseJsonElement(a.ResponseJson),
                         AnswerKey = ParseJsonElement(frozen is null ? question.AnswerKeyJson : frozen.AnswerKeyJson),
                         Explanation = frozen is null ? question.Explanation : frozen.Explanation,
+                        PassageId = frozen?.Prompt.PassageId ?? question.PassageId,
+                        PassageTitle = frozen?.Prompt.PassageTitle ?? question.Passage?.Title,
+                        PassageText = ResolvePassageText(
+                            frozen?.Prompt.PassageText ?? question.Passage?.PassageText,
+                            frozen is null ? ParseJsonElement(question.InteractionDataJson) : frozen.Prompt.InteractionData),
+                        ReviewTranscript = frozen is null ||
+                            (string.Equals(frozen.Prompt.AudioUrl, question.AudioUrl, StringComparison.Ordinal))
+                            ? (question.AudioTranscript ?? question.Passage?.AudioTranscript) : null,
                         SelectedOptionId = a.SelectedOptionId,
                         IsCorrect = a.IsCorrect,
                         WasPreviouslyIncorrect = !a.IsCorrect,
@@ -1449,6 +1828,9 @@ namespace RikiPath.Application.Services
                     if (test is null || test.IsDeleted)
                         return ApiResponse<PlacementAttemptSnapshotResponse>.NotFound(
                             $"Không tìm thấy bài đánh giá năng lực có Id = {request.MockTestId}.");
+                    if (!IsLearnerReady(test) || !await IsApprovedForLearnersAsync(test, cancellationToken))
+                        return ApiResponse<PlacementAttemptSnapshotResponse>.Fail(
+                            "Bài đánh giá năng lực chưa được duyệt nội dung.", HttpStatusCode.Conflict);
 
                     // Lấy toàn bộ câu hỏi của đề theo đúng thứ tự section -> câu hỏi.
                     questions = (test.Sections ?? [])
@@ -1467,11 +1849,13 @@ namespace RikiPath.Application.Services
                 else
                 {
                     var allTests = await unitOfWork.MockTests.GetAllWithSectionsAndQuestionsAsync(cancellationToken);
-                    var eligibleTests = (allTests ?? [])
-                        .Where(t => t is not null && !t.IsDeleted && t.CertificateLevelId is >= 1 and <= 3)
-                        .OrderBy(t => t.CertificateLevelId)
-                        .ThenBy(t => t.Id)
-                        .ToList();
+                    var eligibleTests = new List<MockTest>();
+                    foreach (var test in (allTests ?? [])
+                        .Where(t => t.CertificateLevelId is >= 1 and <= 4 && IsLearnerReady(t))
+                        .OrderBy(t => t.CertificateLevelId).ThenBy(t => t.Id))
+                    {
+                        if (await IsApprovedForLearnersAsync(test, cancellationToken)) eligibleTests.Add(test);
+                    }
 
                     questions = eligibleTests
                         .GroupBy(t => t.CertificateLevelId)
@@ -1891,10 +2275,10 @@ namespace RikiPath.Application.Services
                         Options = (question.Options ?? [])
                             .Where(o => !o.IsDeleted)
                             .OrderBy(o => o.SortOrder).ThenBy(o => o.Id)
-                            .Select(o => new PlacementTestOptionResponse
+                            .Select((o, index) => new PlacementTestOptionResponse
                             {
                                 OptionId = o.Id,
-                                Content = o.OptionText,
+                                Content = PublicOptionText(o, question.InteractionDataJson, index),
                                 ImageUrl = o.ImageUrl,
                                 Order = o.SortOrder,
                             }).ToList(),

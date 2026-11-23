@@ -14,6 +14,21 @@ namespace RikiPath.Application.Services;
 
 public partial class AuthService
 {
+    public ApiResponse<GoogleAuthConfigResponse> GetGoogleAuthConfig()
+    {
+        var clientId = appSettings.GoogleAuth?.ClientId?.Trim();
+        if (string.IsNullOrWhiteSpace(clientId))
+            clientId = appSettings.Google?.ClientId?.Trim();
+
+        var enabled = !string.IsNullOrWhiteSpace(clientId);
+        return ApiResponse<GoogleAuthConfigResponse>.Success(
+            new GoogleAuthConfigResponse
+            {
+                Enabled = enabled,
+                ClientId = enabled ? clientId : null,
+            });
+    }
+
     public async Task<ApiResponse<LoginResponse>> ContinueWithGoogleAsync(
         GoogleAuthRequest request, CancellationToken cancellationToken)
     {
@@ -57,7 +72,19 @@ public partial class AuthService
             var linkedAccount = await accounts.FirstOrDefaultAsync(
                 user => user.GoogleSubject == identity.Subject, cancellationToken);
             if (linkedAccount is not null)
+            {
+                var validationError = ValidateGoogleLoginAccount(linkedAccount, identity);
+                if (validationError is not null)
+                    return validationError;
+
+                if (ApplyGoogleProfileSync(linkedAccount, identity))
+                {
+                    accounts.Update(linkedAccount);
+                    await unitOfWork.SaveChangesAsync(cancellationToken);
+                }
+
                 return GoogleLoginResponse(linkedAccount, identity);
+            }
 
             var email = identity.Email?.Trim().ToLowerInvariant();
             if (string.IsNullOrWhiteSpace(email) || !identity.EmailVerified)
@@ -94,6 +121,7 @@ public partial class AuthService
                         "Mật khẩu RikiPath không đúng.", HttpStatusCode.Unauthorized, "GOOGLE_LINK_PASSWORD_INVALID");
 
                 account.GoogleSubject = identity.Subject;
+                ApplyGoogleProfileSync(account, identity);
             }
             else
             {
@@ -117,6 +145,7 @@ public partial class AuthService
                     Email = email,
                     FirstName = firstName,
                     LastName = lastName,
+                    AvatarUrl = ResolveValidatedGoogleAvatarUrl(identity.Picture),
                     IsEmailVerified = true,
                     Role = Role.Learner,
                     PasswordHash = [],
@@ -158,8 +187,8 @@ public partial class AuthService
         }
     }
 
-    private ApiResponse<LoginResponse> GoogleLoginResponse(
-        UserAccount account, GoogleJsonWebSignature.Payload identity, bool created = false)
+    private static ApiResponse<LoginResponse>? ValidateGoogleLoginAccount(
+        UserAccount account, GoogleJsonWebSignature.Payload identity)
     {
         if (account.IsDeleted)
             return ApiResponse<LoginResponse>.Fail("Tài khoản RikiPath không còn hoạt động.", HttpStatusCode.Forbidden);
@@ -172,8 +201,88 @@ public partial class AuthService
                 "Thông tin email của tài khoản đã thay đổi. Hãy xác thực email và liên kết lại Google.",
                 HttpStatusCode.Forbidden);
 
+        return null;
+    }
+
+    private ApiResponse<LoginResponse> GoogleLoginResponse(
+        UserAccount account, GoogleJsonWebSignature.Payload identity, bool created = false)
+    {
+        var validationError = ValidateGoogleLoginAccount(account, identity);
+        if (validationError is not null)
+            return validationError;
+
         return ApiResponse<LoginResponse>.Success(
             BuildLoginResponse(account, CreateToken(account)),
             created ? HttpStatusCode.Created : HttpStatusCode.OK);
+    }
+
+    private static bool ApplyGoogleProfileSync(UserAccount account, GoogleJsonWebSignature.Payload identity)
+    {
+        var changed = false;
+
+        // Backfill missing name only; never overwrite user-edited RikiPath names.
+        if (string.IsNullOrWhiteSpace(account.FirstName) && string.IsNullOrWhiteSpace(account.LastName))
+        {
+            var googleFullName = !string.IsNullOrWhiteSpace(identity.Name)
+                ? identity.Name
+                : UserNameHelper.FormatFullName(identity.GivenName, identity.FamilyName);
+            var (firstName, lastName) = UserNameHelper.SplitFullName(googleFullName);
+            if (!string.IsNullOrWhiteSpace(firstName) || !string.IsNullOrWhiteSpace(lastName))
+            {
+                account.FirstName = firstName;
+                account.LastName = lastName;
+                changed = true;
+            }
+        }
+
+        var googleAvatarUrl = ResolveValidatedGoogleAvatarUrl(identity.Picture);
+        if (googleAvatarUrl is not null)
+        {
+            // Keep any custom RikiPath avatar; populate when blank or refresh when still pointing to Google CDN.
+            var hasCustomAvatar = !string.IsNullOrWhiteSpace(account.AvatarUrl) && !IsGoogleAvatarUrl(account.AvatarUrl);
+            if (!hasCustomAvatar && !string.Equals(account.AvatarUrl, googleAvatarUrl, StringComparison.Ordinal))
+            {
+                account.AvatarUrl = googleAvatarUrl;
+                changed = true;
+            }
+        }
+
+        if (changed)
+            account.ModifiedDate = DateTime.UtcNow;
+
+        return changed;
+    }
+
+    private static string? ResolveValidatedGoogleAvatarUrl(string? rawPicture)
+    {
+        var trimmed = rawPicture?.Trim();
+        if (string.IsNullOrWhiteSpace(trimmed) || trimmed.Length > 500)
+            return null;
+
+        if (!Uri.TryCreate(trimmed, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps)
+            return null;
+
+        return IsTrustedGoogleAvatarHost(uri.Host) ? trimmed : null;
+    }
+
+    private static bool IsGoogleAvatarUrl(string? avatarUrl)
+    {
+        if (string.IsNullOrWhiteSpace(avatarUrl) || !Uri.TryCreate(avatarUrl.Trim(), UriKind.Absolute, out var uri))
+            return false;
+
+        return IsTrustedGoogleAvatarHost(uri.Host);
+    }
+
+    private static bool IsTrustedGoogleAvatarHost(string? host)
+    {
+        if (string.IsNullOrWhiteSpace(host))
+            return false;
+
+        return host.Equals("googleusercontent.com", StringComparison.OrdinalIgnoreCase)
+            || host.EndsWith(".googleusercontent.com", StringComparison.OrdinalIgnoreCase)
+            || host.Equals("ggpht.com", StringComparison.OrdinalIgnoreCase)
+            || host.EndsWith(".ggpht.com", StringComparison.OrdinalIgnoreCase)
+            || host.Equals("gstatic.com", StringComparison.OrdinalIgnoreCase)
+            || host.EndsWith(".gstatic.com", StringComparison.OrdinalIgnoreCase);
     }
 }

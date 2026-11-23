@@ -23,7 +23,7 @@ namespace RikiPath.Infrastructure.Repositories
         {
             return await _context.ReviewHistories
                 .Where(x => x.ReviewCard.UserId == userId)
-                .Select(x => x.ReviewedAt.Date)
+                .Select(x => x.ReviewedAt)
                 .Distinct()
                 .ToListAsync();
         }

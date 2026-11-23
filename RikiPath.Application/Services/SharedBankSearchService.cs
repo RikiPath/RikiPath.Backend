@@ -164,54 +164,105 @@ namespace RikiPath.Application.Services
             try
             {
                 Normalize(filter);
-                var query = unitOfWork.MockQuestions.Query()
+
+                // Chỉ hiển thị câu hỏi đã Published từ QuestionBankItems hoặc MockQuestions đã xuất bản/duyệt (không rò rỉ Draft).
+                var approvedTestIds = await unitOfWork.ContentApprovalRequests.Query()
                     .AsNoTracking()
-                    .Include(q => q.Options)
-                    .Include(q => q.MockTestSection)
-                        .ThenInclude(s => s.LanguageSkill)
-                    .Include(q => q.MockTestSection)
-                        .ThenInclude(s => s.MockTest)
-                            .ThenInclude(t => t.CertificateLevel)
-                    .Where(q => !q.IsDeleted
-                        && !q.MockTestSection.IsDeleted
-                        && !q.MockTestSection.MockTest.IsDeleted);
+                    .Where(r => !r.IsDeleted && r.EntityType == Domain.Enums.ImportEntityType.MockTest
+                        && r.Status == Domain.Enums.ContentApprovalStatus.Approved
+                        && r.TargetEntityId.HasValue)
+                    .Select(r => r.TargetEntityId!.Value)
+                    .Distinct()
+                    .ToListAsync(cancellationToken);
+
+                var bankQuery = unitOfWork.QuestionBankItems.Query()
+                    .AsNoTracking()
+                    .Include(q => q.CertificateLevel)
+                    .Include(q => q.LanguageSkill)
+                    .Include(q => q.Passage)
+                    .Where(q => !q.IsDeleted && !q.IsArchivedVersion && q.PublishStatus == Domain.Enums.ContentStatus.Published);
 
                 if (filter.JlptLevelId.HasValue)
-                    query = query.Where(q => q.MockTestSection.MockTest.CertificateLevelId == filter.JlptLevelId.Value);
-
+                    bankQuery = bankQuery.Where(q => q.CertificateLevelId == filter.JlptLevelId.Value);
                 if (filter.LanguageSkillId.HasValue)
-                    query = query.Where(q => q.MockTestSection.LanguageSkillId == filter.LanguageSkillId.Value);
-
+                    bankQuery = bankQuery.Where(q => q.LanguageSkillId == filter.LanguageSkillId.Value);
                 if (!string.IsNullOrWhiteSpace(filter.QuestionType))
-                {
-                    var qt = filter.QuestionType.Trim();
-                    query = query.Where(q => q.QuestionType == qt);
-                }
-
+                    bankQuery = bankQuery.Where(q => q.QuestionType == filter.QuestionType.Trim());
+                if (!string.IsNullOrWhiteSpace(filter.TemplateKind))
+                    bankQuery = bankQuery.Where(q => q.TemplateKind == filter.TemplateKind.Trim());
+                if (!string.IsNullOrWhiteSpace(filter.SourceType))
+                    bankQuery = bankQuery.Where(q => q.SourceType == filter.SourceType.Trim());
+                if (filter.PassageId.HasValue)
+                    bankQuery = bankQuery.Where(q => q.PassageId == filter.PassageId.Value);
                 if (!string.IsNullOrWhiteSpace(filter.Keyword))
                 {
                     var kw = filter.Keyword.Trim().ToLower();
-                    query = query.Where(q =>
-                        q.QuestionText.ToLower().Contains(kw)
-                        || (q.Explanation != null && q.Explanation.ToLower().Contains(kw))
-                        || q.MockTestSection.MockTest.Title.ToLower().Contains(kw)
-                        || q.MockTestSection.Title.ToLower().Contains(kw));
+                    bankQuery = bankQuery.Where(q =>
+                        q.QuestionText.ToLower().Contains(kw) ||
+                        (q.Explanation != null && q.Explanation.ToLower().Contains(kw)) ||
+                        (q.Topic != null && q.Topic.ToLower().Contains(kw)) ||
+                        (q.Passage != null && q.Passage.Title.ToLower().Contains(kw)));
                 }
 
-                var total = await query.CountAsync(cancellationToken);
-                var rows = await query
+                var bankItems = await bankQuery
                     .OrderByDescending(q => q.ModifiedDate ?? q.CreatedDate)
                     .ThenByDescending(q => q.Id)
+                    .Take(500)
+                    .ToListAsync(cancellationToken);
+
+                var linkedMockIds = bankItems.Select(b => b.Id).ToHashSet();
+
+                var legacyQuery = unitOfWork.MockQuestions.Query()
+                    .AsNoTracking()
+                    .Include(q => q.Options)
+                    .Include(q => q.Passage)
+                    .Include(q => q.MockTestSection).ThenInclude(s => s.LanguageSkill)
+                    .Include(q => q.MockTestSection).ThenInclude(s => s.MockTest).ThenInclude(t => t.CertificateLevel)
+                    .Where(q => !q.IsDeleted
+                        && !q.MockTestSection.IsDeleted
+                        && !q.MockTestSection.MockTest.IsDeleted
+                        && !q.MockTestSection.MockTest.IsArchivedVersion
+                        && (!q.QuestionBankItemId.HasValue || !linkedMockIds.Contains(q.QuestionBankItemId.Value))
+                        && (q.MockTestSection.MockTest.PublishStatus == Domain.Enums.ContentStatus.Published
+                            || (!q.MockTestSection.MockTest.IsManagedWorkflow && approvedTestIds.Contains(q.MockTestSection.MockTestId))));
+
+                if (filter.JlptLevelId.HasValue)
+                    legacyQuery = legacyQuery.Where(q => q.MockTestSection.MockTest.CertificateLevelId == filter.JlptLevelId.Value);
+                if (filter.LanguageSkillId.HasValue)
+                    legacyQuery = legacyQuery.Where(q => q.MockTestSection.LanguageSkillId == filter.LanguageSkillId.Value);
+                if (!string.IsNullOrWhiteSpace(filter.QuestionType))
+                    legacyQuery = legacyQuery.Where(q => q.QuestionType == filter.QuestionType.Trim());
+                if (filter.PassageId.HasValue)
+                    legacyQuery = legacyQuery.Where(q => q.PassageId == filter.PassageId.Value);
+                if (!string.IsNullOrWhiteSpace(filter.Keyword))
+                {
+                    var kw = filter.Keyword.Trim().ToLower();
+                    legacyQuery = legacyQuery.Where(q =>
+                        q.QuestionText.ToLower().Contains(kw) ||
+                        (q.Explanation != null && q.Explanation.ToLower().Contains(kw)) ||
+                        q.MockTestSection.MockTest.Title.ToLower().Contains(kw));
+                }
+
+                var legacyRows = string.IsNullOrWhiteSpace(filter.TemplateKind) && string.IsNullOrWhiteSpace(filter.SourceType)
+                    ? await legacyQuery.OrderByDescending(q => q.ModifiedDate ?? q.CreatedDate).Take(500).ToListAsync(cancellationToken)
+                    : [];
+
+                var combined = bankItems.Select(MapBankQuestion)
+                    .Concat(legacyRows.Select(MapQuestion))
+                    .ToList();
+
+                var total = combined.Count;
+                var paged = combined
                     .Skip((filter.Page - 1) * filter.PageSize)
                     .Take(filter.PageSize)
-                    .ToListAsync(cancellationToken);
+                    .ToList();
 
                 return ApiResponse<PagedResult<QuestionBankCardResponse>>.Success(new PagedResult<QuestionBankCardResponse>
                 {
                     Page = filter.Page,
                     PageSize = filter.PageSize,
                     TotalCount = total,
-                    Items = rows.Select(MapQuestion).ToList(),
+                    Items = paged,
                 });
             }
             catch (Exception ex)
@@ -225,18 +276,36 @@ namespace RikiPath.Application.Services
         {
             try
             {
+                var bankRow = await unitOfWork.QuestionBankItems.Query()
+                    .AsNoTracking()
+                    .Include(q => q.CertificateLevel)
+                    .Include(q => q.LanguageSkill)
+                    .Include(q => q.Passage)
+                    .FirstOrDefaultAsync(q => q.Id == id && !q.IsDeleted && q.PublishStatus == Domain.Enums.ContentStatus.Published, cancellationToken);
+                if (bankRow is not null)
+                    return ApiResponse<QuestionBankCardResponse>.Success(MapBankQuestion(bankRow));
+
+                var approvedTestIds = await unitOfWork.ContentApprovalRequests.Query()
+                    .AsNoTracking()
+                    .Where(r => !r.IsDeleted && r.EntityType == Domain.Enums.ImportEntityType.MockTest
+                        && r.Status == Domain.Enums.ContentApprovalStatus.Approved
+                        && r.TargetEntityId.HasValue)
+                    .Select(r => r.TargetEntityId!.Value)
+                    .ToListAsync(cancellationToken);
+
                 var row = await unitOfWork.MockQuestions.Query()
                     .AsNoTracking()
                     .Include(q => q.Options)
-                    .Include(q => q.MockTestSection)
-                        .ThenInclude(s => s.LanguageSkill)
-                    .Include(q => q.MockTestSection)
-                        .ThenInclude(s => s.MockTest)
-                            .ThenInclude(t => t.CertificateLevel)
-                    .FirstOrDefaultAsync(q => q.Id == id && !q.IsDeleted && !q.MockTestSection.IsDeleted && !q.MockTestSection.MockTest.IsDeleted, cancellationToken);
+                    .Include(q => q.Passage)
+                    .Include(q => q.MockTestSection).ThenInclude(s => s.LanguageSkill)
+                    .Include(q => q.MockTestSection).ThenInclude(s => s.MockTest).ThenInclude(t => t.CertificateLevel)
+                    .FirstOrDefaultAsync(q => q.Id == id && !q.IsDeleted && !q.MockTestSection.IsDeleted && !q.MockTestSection.MockTest.IsDeleted
+                        && (q.MockTestSection.MockTest.PublishStatus == Domain.Enums.ContentStatus.Published
+                            || (!q.MockTestSection.MockTest.IsManagedWorkflow && approvedTestIds.Contains(q.MockTestSection.MockTestId))),
+                        cancellationToken);
 
                 if (row is null)
-                    return ApiResponse<QuestionBankCardResponse>.NotFound("Không tìm thấy câu hỏi.");
+                    return ApiResponse<QuestionBankCardResponse>.NotFound("Không tìm thấy câu hỏi đã xuất bản.");
 
                 return ApiResponse<QuestionBankCardResponse>.Success(MapQuestion(row));
             }
@@ -297,6 +366,7 @@ namespace RikiPath.Application.Services
             Structure = g.Structure,
             Explanation = g.UsageNotes,
             ExampleSentence = g.ExampleSentence,
+            ExampleSentenceMeaning = string.IsNullOrWhiteSpace(g.ExampleSentenceMeaning) ? null : g.ExampleSentenceMeaning,
             JlptLevelName = GetLevelNames(g.ContentLevelMappings)
         };
 
@@ -339,6 +409,68 @@ namespace RikiPath.Application.Services
                 MockTestTitle = q.MockTestSection?.MockTest?.Title ?? string.Empty,
                 MockTestId = q.MockTestSection?.MockTestId ?? 0,
                 SectionTitle = q.MockTestSection?.Title ?? string.Empty,
+                AnswerSummary = summary,
+                QuestionBankItemId = q.QuestionBankItemId,
+                Version = q.QuestionVersion,
+                PublishStatus = q.MockTestSection?.MockTest?.PublishStatus.ToString() ?? "Published",
+                TemplateKind = q.TemplateKind,
+                PassageId = q.PassageId,
+                PassageTitle = q.Passage?.Title,
+                SourceType = q.MockTestSection?.MockTest?.SourceType,
+                Options = options,
+            };
+        }
+
+        private static QuestionBankCardResponse MapBankQuestion(QuestionBankItem item)
+        {
+            List<QuestionBankOptionResponse> options = [];
+            if (!string.IsNullOrWhiteSpace(item.OptionsJson))
+            {
+                try
+                {
+                    var parsed = System.Text.Json.JsonSerializer.Deserialize<List<DTOs.ContentAuthoring.CanonicalOptionDto>>(
+                        item.OptionsJson,
+                        new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web)) ?? [];
+                    options = parsed.OrderBy(o => o.SortOrder).Select((o, idx) => new QuestionBankOptionResponse
+                    {
+                        Id = idx + 1,
+                        OptionText = o.OptionText,
+                        ImageUrl = o.ImageUrl,
+                        IsCorrect = o.IsCorrect,
+                        SortOrder = o.SortOrder > 0 ? o.SortOrder : idx + 1,
+                    }).ToList();
+                }
+                catch (System.Text.Json.JsonException) { }
+            }
+
+            var correctTexts = options.Where(o => o.IsCorrect && !string.IsNullOrWhiteSpace(o.OptionText))
+                .Select(o => o.OptionText).ToList();
+            var summary = correctTexts.Count > 0
+                ? string.Join(", ", correctTexts)
+                : (!string.IsNullOrWhiteSpace(item.AnswerKeyJson) ? item.AnswerKeyJson : null);
+
+            return new QuestionBankCardResponse
+            {
+                Id = item.Id,
+                QuestionBankItemId = item.Id,
+                QuestionIdentity = item.QuestionIdentity,
+                Version = item.Version,
+                PublishStatus = item.PublishStatus.ToString(),
+                TemplateKind = item.TemplateKind,
+                PassageId = item.PassageId,
+                PassageTitle = item.Passage?.Title,
+                SourceType = item.SourceType,
+                QuestionText = item.QuestionText,
+                QuestionType = item.QuestionType,
+                Explanation = item.Explanation,
+                AudioUrl = item.AudioUrl ?? item.Passage?.AudioUrl,
+                ImageUrl = item.ImageUrl ?? item.Passage?.ImageUrl,
+                JlptLevelName = item.CertificateLevel?.Code ?? string.Empty,
+                CertificateLevelId = item.CertificateLevelId,
+                SkillName = item.LanguageSkill?.Name ?? string.Empty,
+                LanguageSkillId = item.LanguageSkillId,
+                MockTestTitle = item.Passage?.Title ?? item.QuestionGroupTitle ?? "Ngân hàng câu hỏi",
+                SectionTitle = item.Topic ?? item.TemplateKind,
                 AnswerSummary = summary,
                 Options = options,
             };

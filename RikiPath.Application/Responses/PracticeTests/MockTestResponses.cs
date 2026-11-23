@@ -17,6 +17,10 @@ namespace RikiPath.Application.Responses.MockTests
         public int? SelectedOptionId { get; set; }
         public bool IsCorrect { get; set; }
         public string? Explanation { get; set; }
+        public int? PassageId { get; set; }
+        public string? PassageTitle { get; set; }
+        public string? PassageText { get; set; }
+        public string? ReviewTranscript { get; set; }
         public bool WasPreviouslyIncorrect { get; set; }
         public int TimesAnsweredWrong { get; set; }
     }

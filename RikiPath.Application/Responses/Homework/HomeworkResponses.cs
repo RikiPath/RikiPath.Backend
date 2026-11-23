@@ -24,7 +24,8 @@ public sealed record HomeworkItem(int Id, int LearnerId, string LearnerName, str
     List<HomeworkExercise> Exercises, HomeworkSubmissionDetail? Submission,
     int? CohortId = null, string AssignmentScope = "Booking1on1", Guid? CohortAssignmentGroupKey = null,
     HomeworkAiDraftView? AiDraft = null, HomeworkPublishedGradeView? PublishedGrade = null, int? BookingId = null,
-    string? AssignmentType = null, string? JlptLevel = null, IReadOnlyList<HomeworkAuthoredQuestion>? Questions = null);
+    string? AssignmentType = null, string? JlptLevel = null, IReadOnlyList<HomeworkAuthoredQuestion>? Questions = null,
+    int? StudyCourseId = null, string? CohortName = null);
 
 public sealed record HomeworkPeriodReport(DateOnly From, DateOnly To, int AssignedCount, int SubmittedCount,
     double? HomeworkPercent, int SessionCount, int AttendedCount, double? AttendancePercent, int UntrackedSessionCount);

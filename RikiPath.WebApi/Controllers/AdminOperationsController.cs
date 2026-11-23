@@ -246,6 +246,7 @@ public class AdminOperationsController(IUnitOfWork uow, IClaimService claimServi
         u.Id,
         u.Email,
         FullName = UserNameHelper.FormatFullName(u.FirstName, u.LastName),
+        u.AvatarUrl,
         u.PhoneNumber,
         Role = u.Role.ToString(),
         u.IsEmailVerified,

@@ -73,6 +73,23 @@ public static class JlptMockQuestionFormats
 
     internal static string? Validate(MockQuestionPayloadResponse question, string? level, string? skill)
     {
+        if (string.IsNullOrWhiteSpace(question.QuestionText) ||
+            question.QuestionText.Contains("Câu hỏi mẫu #", StringComparison.OrdinalIgnoreCase) ||
+            question.QuestionText.Contains("(Chính xác)", StringComparison.OrdinalIgnoreCase))
+            return "Câu hỏi mẫu hoặc nội dung tiết lộ đáp án không thể gửi duyệt.";
+        if (question.Options.Any(option =>
+                string.IsNullOrWhiteSpace(option.OptionText) ||
+                option.OptionText.Contains("(Chính xác)", StringComparison.OrdinalIgnoreCase) ||
+                option.OptionText.Contains("(Correct)", StringComparison.OrdinalIgnoreCase)))
+            return "Lựa chọn có nhãn tiết lộ đáp án hoặc thiếu nội dung.";
+        if (IsSingleChoice(question.QuestionType) &&
+            (question.Options.Count < 2 || question.Options.Count(option => option.IsCorrect) != 1 ||
+             question.Options.Select(option => option.OptionText.Trim())
+                 .Distinct(StringComparer.OrdinalIgnoreCase).Count() != question.Options.Count))
+            return "Câu chọn một đáp án cần ít nhất hai lựa chọn khác nhau và đúng một đáp án.";
+        if (JlptSkillAssessmentPolicy.Classify(skill) == JlptStudySkill.Listening &&
+            string.IsNullOrWhiteSpace(question.AudioUrl))
+            return "Câu nghe cần tệp audio trước khi gửi duyệt.";
         var data = question.InteractionData;
         if (string.Equals(question.QuestionType, VisualMultipleChoice, StringComparison.OrdinalIgnoreCase) &&
             string.IsNullOrWhiteSpace(question.ImageUrl) && !question.Options.Any(option => !string.IsNullOrWhiteSpace(option.ImageUrl)))

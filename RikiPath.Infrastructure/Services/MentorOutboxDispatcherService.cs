@@ -3,7 +3,11 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using RikiPath.Application.EmailTemplates;
+using RikiPath.Application.Helpers;
 using RikiPath.Application.IServices;
+using RikiPath.Application.Services;
+using RikiPath.Domain;
 using RikiPath.Domain.Entities;
 
 namespace RikiPath.Infrastructure.Services;
@@ -54,6 +58,9 @@ public class MentorOutboxDispatcherService : BackgroundService
         using var scope = _scopeFactory.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var notificationService = scope.ServiceProvider.GetRequiredService<INotificationService>();
+        var emailService = scope.ServiceProvider.GetService<IEmailService>();
+        var emailTemplates = scope.ServiceProvider.GetService<IEmailTemplateService>()
+            ?? new EmailTemplateService(scope.ServiceProvider.GetService<AppSettings>());
 
         var nowUtc = DateTime.UtcNow;
         List<MentorOutboxEvent> pendingEvents;
@@ -116,6 +123,13 @@ public class MentorOutboxDispatcherService : BackgroundService
                 {
                     var backoff = res.Result.PushBackoffSeconds ?? 60;
                     deferredBackoffSeconds = Math.Max(deferredBackoffSeconds, backoff);
+                }
+
+                // Gửi email ở lần dispatch đầu tiên để không lặp lại khi outbox retry do FCM backoff.
+                if (evt.Attempts == 1 && emailService is not null)
+                {
+                    await SendOutboxEmailBestEffortAsync(
+                        dbContext, emailService, emailTemplates, targetUserId, evt.EventType, title, message, type, linkUrl, ct);
                 }
             }
 
@@ -394,5 +408,107 @@ public class MentorOutboxDispatcherService : BackgroundService
 
         await dbContext.SaveChangesAsync(cancellationToken);
         return processedCount;
+    }
+
+    private async Task SendOutboxEmailBestEffortAsync(
+        AppDbContext dbContext,
+        IEmailService emailService,
+        IEmailTemplateService emailTemplates,
+        int targetUserId,
+        string eventType,
+        string title,
+        string message,
+        string notificationType,
+        string? linkUrl,
+        CancellationToken ct)
+    {
+        try
+        {
+            var user = await dbContext.Set<UserAccount>().AsNoTracking()
+                .FirstOrDefaultAsync(u => u.Id == targetUserId, ct);
+            if (user is null || !NotificationPreferenceHelper.ShouldDeliverEmail(user, notificationType))
+                return;
+
+            var name = UserNameHelper.FormatFullName(user.FirstName, user.LastName);
+            var sentAt = EmailTemplateService.FormatVietnamDateTime(DateTime.UtcNow);
+            RenderedEmailContent content;
+
+            if (eventType.StartsWith("Booking", StringComparison.Ordinal))
+            {
+                var tone = eventType.Contains("Cancelled", StringComparison.Ordinal)
+                    ? SakuraEmailTone.Warning
+                    : eventType is "BookingCreated" or "BookingRescheduled"
+                        ? SakuraEmailTone.Success
+                        : SakuraEmailTone.Info;
+
+                content = emailTemplates.BuildBookingEnrollment(new BookingEnrollmentEmailData(
+                    name,
+                    $"{title} · RikiPath",
+                    "Lịch hẹn tư vấn",
+                    title,
+                    message,
+                    "Buổi tư vấn cùng Giáo viên RikiPath",
+                    [
+                        new("Trạng thái", title),
+                        new("Thời gian cập nhật", sentAt),
+                    ],
+                    tone,
+                    "Chi tiết lịch hẹn",
+                    message,
+                    "Xem lịch hẹn trên RikiPath",
+                    linkUrl));
+            }
+            else if (notificationType.Contains("Schedule", StringComparison.OrdinalIgnoreCase)
+                || notificationType.Contains("MentorReplaced", StringComparison.OrdinalIgnoreCase))
+            {
+                var tone = title.Contains("từ chối", StringComparison.OrdinalIgnoreCase) || title.Contains("hủy", StringComparison.OrdinalIgnoreCase)
+                    ? SakuraEmailTone.Warning
+                    : SakuraEmailTone.Info;
+
+                content = emailTemplates.BuildScheduleNotification(new ScheduleNotificationEmailData(
+                    name,
+                    $"{title} · RikiPath",
+                    "Lịch học & Lớp học",
+                    title,
+                    message,
+                    [
+                        new("Loại thông báo", "Cập nhật lịch lớp học"),
+                        new("Thời gian cập nhật", sentAt),
+                    ],
+                    tone,
+                    "Thông tin lịch học",
+                    message,
+                    "Xem lịch học",
+                    linkUrl));
+            }
+            else
+            {
+                var tone = title.Contains("từ chối", StringComparison.OrdinalIgnoreCase) || notificationType.Contains("Dispute", StringComparison.OrdinalIgnoreCase)
+                    ? SakuraEmailTone.Warning
+                    : title.Contains("duyệt", StringComparison.OrdinalIgnoreCase)
+                        ? SakuraEmailTone.Success
+                        : SakuraEmailTone.Sakura;
+
+                content = emailTemplates.BuildStudyNotification(new StudyNotificationEmailData(
+                    name,
+                    $"{title} · RikiPath",
+                    "Thông báo RikiPath",
+                    title,
+                    message,
+                    Details:
+                    [
+                        new("Thời gian cập nhật", sentAt),
+                    ],
+                    Tone: tone,
+                    ActionText: string.IsNullOrWhiteSpace(linkUrl) ? null : "Xem trên RikiPath",
+                    ActionUrl: linkUrl));
+            }
+
+            await emailService.SendEmailAsync(user.Email!, content, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Best-effort outbox email skipped/failed for user {UserId} ({EventType}).", targetUserId, eventType);
+        }
     }
 }

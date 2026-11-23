@@ -8,11 +8,18 @@ namespace RikiPath.Application.Responses.Content
         public string? Description { get; set; }
         public string? AudioUrl { get; set; }
         public int SortOrder { get; set; }
+        public int EstimatedMinutes { get; set; } = 15;
+        public string? LearningObjectives { get; set; }
+        public string? PrerequisiteLessonTitle { get; set; }
+        public string? SourceProvenance { get; set; }
 
         public string CertificateLevelCode { get; set; } = string.Empty;
         public int CertificateLevelId { get; set; }
         public int LanguageSkillId { get; set; }
         public int? TopicId { get; set; }
         public string? TopicTitle { get; set; }
+        public string? StageCode { get; set; }
+        public int? StageSortOrder { get; set; }
+        public string? StageObjectives { get; set; }
     }
 }

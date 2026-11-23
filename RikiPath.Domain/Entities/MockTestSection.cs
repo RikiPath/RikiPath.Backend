@@ -15,6 +15,9 @@ namespace RikiPath.Domain.Entities
         public LanguageSkill LanguageSkill { get; set; }
         public int CertificateSectionId { get; set; }
         public CertificateSection CertificateSection { get; set; } = null!;
+        public int? DurationMinutes { get; set; }
+        public string? Instructions { get; set; }
+        public string? SectionPolicyJson { get; set; }
         public List<MockQuestion>? Questions { get; set; }
         public List<MockTestSectionResult>? SectionResults { get; set; }
     }

@@ -29,6 +29,13 @@
         public System.Text.Json.JsonElement? Response { get; set; }
         public string? AudioUrl { get; set; }
         public string? ImageUrl { get; set; }
+        public int? PassageId { get; set; }
+        public string? PassageTitle { get; set; }
+        public string? PassageText { get; set; }
+        public string? PassageInstructions { get; set; }
+        public string? PassageImageUrl { get; set; }
+        public string? TemplateKind { get; set; }
+        public DTOs.ContentAuthoring.ListeningPlaybackPolicyDto? PlaybackPolicy { get; set; }
         public List<StartAttemptOptionResponse> Options { get; set; } = [];
     }
 

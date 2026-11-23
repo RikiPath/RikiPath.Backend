@@ -1,3 +1,5 @@
+using RikiPath.Application.EmailTemplates;
+
 namespace RikiPath.Application.IServices
 {
     public class EmailSendResult
@@ -27,5 +29,7 @@ namespace RikiPath.Application.IServices
     {
         Task<EmailSendResult> SendValidationEmailAsync(string toEmail, string htmlContent, CancellationToken cancellationToken);
         Task<EmailSendResult> SendEmailAsync(string toEmail, string subject, string htmlContent, CancellationToken cancellationToken);
+        Task<EmailSendResult> SendEmailAsync(string toEmail, string subject, string htmlContent, string? plainTextContent, CancellationToken cancellationToken);
+        Task<EmailSendResult> SendEmailAsync(string toEmail, RenderedEmailContent content, CancellationToken cancellationToken);
     }
 }

@@ -29,6 +29,11 @@ public sealed class DatabaseSchemaReadinessService(
         "LearnerNotes",
         "LearnerNoteEntries",
         "StudyCohorts",
+        "ReviewCards",
+        "UserSrsPreferences",
+        "LearnerHighlights",
+        "SrsCardTemplates",
+        "SrsReviewSessions",
     ];
 
     public async Task<SchemaReadinessResult> CheckAsync(CancellationToken cancellationToken = default)
@@ -64,7 +69,12 @@ public sealed class DatabaseSchemaReadinessService(
                     'MentorGroupPolicies',
                     'LearnerNotes',
                     'LearnerNoteEntries',
-                    'StudyCohorts'
+                    'StudyCohorts',
+                    'ReviewCards',
+                    'UserSrsPreferences',
+                    'LearnerHighlights',
+                    'SrsCardTemplates',
+                    'SrsReviewSessions'
                   );
                 """;
 

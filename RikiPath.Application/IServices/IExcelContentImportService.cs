@@ -8,14 +8,12 @@ namespace RikiPath.Application.IServices
     public interface IExcelContentImportService
     {
         /// <summary>
-        /// Step 1: đọc và so sánh nội dung; file media đính kèm được tải lên storage trước khi dựng bản nháp.
+        /// Step 1: chỉ đọc và so sánh nội dung; không ghi database hoặc storage.
         /// onlyType = null -> Bulk upload (đọc mọi sheet handler hỗ trợ
         /// mà file có); onlyType có giá trị -> Single upload (chỉ đọc đúng 1 sheet tương ứng, bỏ qua sheet khác dù file có).
         /// </summary>
         Task<ApiResponse<ImportPreviewResponse>> PreviewAsync(
-            Stream fileStream, string fileName, ImportEntityType? onlyType, CancellationToken cancellationToken,
-            Func<string, CancellationToken, Task<string>>? uploadLocalAudio = null,
-            Func<string, CancellationToken, Task<string>>? uploadLocalImage = null);
+            Stream fileStream, string fileName, ImportEntityType? onlyType, CancellationToken cancellationToken);
 
         ApiResponse<WorkbookPreviewResponse> PreviewWorkbook(Stream fileStream, string fileName, CancellationToken cancellationToken);
         ApiResponse<byte[]> EditWorkbook(Stream fileStream, IReadOnlyList<WorkbookCellEdit> edits, CancellationToken cancellationToken);

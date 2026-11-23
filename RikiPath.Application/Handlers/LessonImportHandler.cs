@@ -18,6 +18,8 @@ namespace RikiPath.Application.Handlers
             var existingLessons = await unitOfWork.Lessons.Query()
                 .Include(l => l.CertificateLevel)
                 .Include(l => l.LanguageSkill)
+                .Include(l => l.Topic)
+                .Include(l => l.PrerequisiteLesson)
                 .Where(l => !l.IsDeleted)
                 .ToListAsync(cancellationToken);
             var existingByKey = existingLessons.ToLookup(lesson => (lesson.Title, lesson.CertificateLevelId));
@@ -63,6 +65,14 @@ namespace RikiPath.Application.Handlers
             var levelCode = row.Get("Certificate Level Code");
             var skillName = row.Get("Language Skill Name");
             var sortOrderRaw = row.Get("Sort Order");
+            var topicTitle = ImportHandlerSupport.Clean(row.Get("Topic Title") ?? row.Get("Chapter Title"));
+            var stageCode = ImportHandlerSupport.Clean(row.Get("Stage Code"));
+            var stageObjectives = ImportHandlerSupport.Clean(row.Get("Stage Objectives"));
+            var stageSortRaw = ImportHandlerSupport.Clean(row.Get("Stage Sort Order"));
+            var estimatedMinutesRaw = ImportHandlerSupport.Clean(row.Get("Estimated Minutes"));
+            var learningObjectives = ImportHandlerSupport.Clean(row.Get("Learning Objectives"));
+            var prerequisiteTitle = ImportHandlerSupport.Clean(row.Get("Prerequisite Lesson Title"));
+            var sourceProvenance = ImportHandlerSupport.Clean(row.Get("Source Provenance"));
 
             var hasKey = !string.IsNullOrWhiteSpace(title) && !string.IsNullOrWhiteSpace(levelCode);
             var rowKey = hasKey ? $"{title} / {levelCode}" : title ?? $"(dòng {row.RowNumber})";
@@ -79,13 +89,14 @@ namespace RikiPath.Application.Handlers
                     ["certificateLevelCode"] = levelCode,
                     ["languageSkillName"] = skillName,
                     ["sortOrder"] = sortOrderRaw,
+                    ["topicTitle"] = topicTitle,
+                    ["estimatedMinutes"] = estimatedMinutesRaw,
                 },
             };
 
             diff.Errors.AddRange(row.MediaImportErrors);
             var imageUrl = ImportHandlerSupport.CheckUrl(row.Get("ImageUrl"), "ImageUrl", "", diff.Errors);
 
-            // ---- Validate ----
             if (string.IsNullOrWhiteSpace(title)) diff.Errors.Add("Thiếu cột LessonTitle.");
             var audioUrl = ImportHandlerSupport.CheckUrl(audio, "AudioUrl", "", diff.Errors);
             ImportHandlerSupport.CheckLevel(levelCode, levelsByCode, ambiguousLevelCodes, diff.Errors);
@@ -105,7 +116,24 @@ namespace RikiPath.Application.Handlers
                 else diff.Errors.Add("Sort Order phải là số nguyên không âm.");
             }
 
-            // ---- Kiểm tra "đã có chưa" ngoài dữ liệu của chính dòng ----
+            int? estimatedMinutes = null;
+            if (!string.IsNullOrWhiteSpace(estimatedMinutesRaw))
+            {
+                if (int.TryParse(estimatedMinutesRaw, out var parsedMinutes) && parsedMinutes is >= 1 and <= 300)
+                    estimatedMinutes = parsedMinutes;
+                else
+                    diff.Errors.Add("Estimated Minutes phải từ 1 đến 300.");
+            }
+
+            int? stageSortOrder = null;
+            if (!string.IsNullOrWhiteSpace(stageSortRaw))
+            {
+                if (int.TryParse(stageSortRaw, out var parsedStageSort) && parsedStageSort >= 0)
+                    stageSortOrder = parsedStageSort;
+                else
+                    diff.Errors.Add("Stage Sort Order phải là số nguyên không âm.");
+            }
+
             if (hasKey)
             {
                 if (!seenInFile.Add(rowKey))
@@ -132,21 +160,27 @@ namespace RikiPath.Application.Handlers
 
             var existing = matches.SingleOrDefault();
 
-            // ---- Build payload (đã qua validate) ----
             var payload = new LessonImportPayloadResponse
             {
                 ImageUrl = imageUrl,
                 Title = title!,
                 Description = description,
                 AudioUrl = audioUrl,
-                // Không có cột Sort Order: giữ thứ tự cũ nếu bài đã có, bài mới lấy số dòng trong file.
                 SortOrder = sortOrder ?? existing?.SortOrder ?? row.RowNumber,
+                EstimatedMinutes = estimatedMinutes ?? existing?.EstimatedMinutes ?? 15,
+                LearningObjectives = learningObjectives ?? existing?.LearningObjectives,
+                PrerequisiteLessonTitle = prerequisiteTitle,
+                SourceProvenance = sourceProvenance ?? existing?.SourceProvenance,
                 CertificateLevelCode = levelCode!,
                 CertificateLevelId = levelId,
                 LanguageSkillId = skill!.Id,
+                TopicId = existing?.TopicId,
+                TopicTitle = topicTitle ?? existing?.Topic?.Title,
+                StageCode = stageCode ?? existing?.Topic?.StageCode,
+                StageSortOrder = stageSortOrder ?? existing?.Topic?.SortOrder,
+                StageObjectives = stageObjectives ?? existing?.Topic?.LearningObjectives,
             };
 
-            // ---- Diff với DB ----
             if (existing is null)
             {
                 diff.Action = ImportRowAction.New;
@@ -164,6 +198,14 @@ namespace RikiPath.Application.Handlers
                 ImportHandlerSupport.CompareField(changed, "audioUrl", existing.AudioUrl, audioUrl);
             ImportHandlerSupport.CompareField(changed, "languageSkillName", existing.LanguageSkill?.Name, skill.Name);
             ImportHandlerSupport.CompareField(changed, "sortOrder", existing.SortOrder.ToString(), payload.SortOrder.ToString());
+            if (topicTitle is not null)
+                ImportHandlerSupport.CompareField(changed, "topicTitle", existing.Topic?.Title, topicTitle);
+            if (estimatedMinutes.HasValue)
+                ImportHandlerSupport.CompareField(changed, "estimatedMinutes", existing.EstimatedMinutes.ToString(), estimatedMinutes.Value.ToString());
+            if (learningObjectives is not null)
+                ImportHandlerSupport.CompareField(changed, "learningObjectives", existing.LearningObjectives, learningObjectives);
+            if (prerequisiteTitle is not null)
+                ImportHandlerSupport.CompareField(changed, "prerequisiteLesson", existing.PrerequisiteLesson?.Title, prerequisiteTitle);
 
             if (changed.Count == 0)
             {

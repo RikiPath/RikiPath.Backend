@@ -38,6 +38,22 @@ public sealed class AdminBusinessConfigController(
         return StatusCode((int)result.StatusCode, result);
     }
 
+    [HttpPut("features/{id:int}/policy")]
+    [ProducesResponseType(typeof(ApiResponse<AdminFeatureItemDto>), 200)]
+    public async Task<IActionResult> UpdateFeaturePolicy(int id, [FromBody] UpdateFeaturePolicyRequest request, CancellationToken ct)
+    {
+        var result = await service.UpdateFeaturePolicyAsync(id, request, claims.GetUserClaim().Id, ct);
+        return StatusCode((int)result.StatusCode, result);
+    }
+
+    [HttpGet("entitlement-preview")]
+    [ProducesResponseType(typeof(ApiResponse<AdminEntitlementPreviewResponse>), 200)]
+    public async Task<IActionResult> GetEntitlementPreview([FromQuery] int? planId = null, CancellationToken ct = default)
+    {
+        var result = await service.GetEntitlementPreviewAsync(planId, ct);
+        return StatusCode((int)result.StatusCode, result);
+    }
+
     [HttpGet("payments")]
     [ProducesResponseType(typeof(ApiResponse<AdminPaymentListResponse>), 200)]
     public async Task<IActionResult> GetPayments([FromQuery] AdminPaymentQuery query, CancellationToken ct)

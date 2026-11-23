@@ -8,6 +8,45 @@ namespace RikiPath.Application.Responses.Analytics
         public bool IsActiveToday { get; set; }
     }
 
+    /// <summary>
+    /// Streak celebration state derived by the server (Asia/Ho_Chi_Minh study day). A celebration event exists only
+    /// when today already has a valid learning activity; it is pending until claimed once (any tab/device).
+    /// </summary>
+    public class StreakCelebrationResponse
+    {
+        /// <summary>True when today's streak event exists and has not been claimed on any device yet.</summary>
+        public bool HasPendingEvent { get; set; }
+
+        /// <summary>Stable event identity: <c>streak:{yyyyMMdd}:{days}</c>. Null when no event exists today.</summary>
+        public string? EventId { get; set; }
+
+        /// <summary>
+        /// <c>daily</c> / <c>milestone</c> (today already studied — celebrate) or <c>atRisk</c> (live streak, nothing
+        /// studied yet today — keep-the-streak reminder). Each kind is claimable once per study day.
+        /// </summary>
+        public string? EventType { get; set; }
+
+        public DateTime? StudyDate { get; set; }
+
+        /// <summary>UTC instant when today's Asia/Ho_Chi_Minh study day ends (keep-streak countdown).</summary>
+        public DateTime StudyDayEndsAtUtc { get; set; }
+
+        public int CurrentStreakDays { get; set; }
+        public int LongestStreakDays { get; set; }
+        public bool IsActiveToday { get; set; }
+
+        /// <summary>Milestone reached by this event, when <see cref="EventType"/> is <c>milestone</c>.</summary>
+        public int? Milestone { get; set; }
+        public int? NextMilestone { get; set; }
+        public List<int> Milestones { get; set; } = [];
+
+        /// <summary>Study days (Asia/Ho_Chi_Minh) with verified activity in the current Monday–Sunday week.</summary>
+        public List<DateTime> WeekActivityDates { get; set; } = [];
+
+        /// <summary>Set by the claim endpoint: true only for the single request that won the claim.</summary>
+        public bool Claimed { get; set; }
+    }
+
     public class CompletionStatsResponse
     {
         public int TotalLessons { get; set; }

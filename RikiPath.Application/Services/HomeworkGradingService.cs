@@ -4,7 +4,9 @@ using System.Text.Encodings.Web;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
+using RikiPath.Application.EmailTemplates;
 using RikiPath.Application.Exceptions;
+using RikiPath.Application.Helpers;
 using RikiPath.Application.IServices;
 using RikiPath.Application.Requests.Homework;
 using RikiPath.Application.Responses;
@@ -357,6 +359,7 @@ public sealed partial class HomeworkService
         var learnerId = await query.Select(a => (int?)a.LearnerId).SingleOrDefaultAsync(ct);
         var response = ApiResponse<HomeworkGrade>.NotFound("Không tìm thấy bài tập của mentor.");
         if (!learnerId.HasValue) return response;
+        (int LearnerId, string Title, int? CohortId, double Score, string Feedback, bool? Passed)? emailPayload = null;
         await unit.ExecuteInTransactionAsync(async token =>
         {
             await unit.UserAccounts.GetByIdForUpdateAsync(learnerId.Value, token);
@@ -398,9 +401,71 @@ public sealed partial class HomeworkService
             assignment.PublishedByMentorId = actor.Id;
             await NotifyAsync(assignment.LearnerId, "Mentor đã chấm bài tập", assignment.Title, assignment.CohortId, token);
             await unit.SaveChangesAsync(token);
+            emailPayload = (assignment.LearnerId, assignment.Title, assignment.CohortId, score, feedback, assignment.Passed);
             response = ApiResponse<HomeworkGrade>.Success(PublishedGrade(grade)!);
         }, ct);
+
+        if (emailPayload is { } graded)
+            await SendHomeworkGradedEmailBestEffortAsync(graded.LearnerId, graded.Title, graded.CohortId, graded.Score, graded.Feedback, graded.Passed, ct);
+
         return response;
+    }
+
+    private async Task SendHomeworkGradedEmailBestEffortAsync(
+        int learnerId,
+        string assignmentTitle,
+        int? cohortId,
+        double score,
+        string feedback,
+        bool? passed,
+        CancellationToken ct)
+    {
+        if (emailService is null)
+            return;
+
+        try
+        {
+            var learner = await unit.UserAccounts.GetByIdAsync(learnerId, ct);
+            if (learner is null || !NotificationPreferenceHelper.ShouldDeliverEmail(learner, "Homework"))
+                return;
+
+            var templates = emailTemplates ?? new EmailTemplateService(appSettings);
+            var learnerName = UserNameHelper.FormatFullName(learner.FirstName, learner.LastName);
+            var previewFeedback = feedback.Length > 260 ? $"{feedback[..257]}..." : feedback;
+            var linkUrl = cohortId.HasValue ? $"/homework/?cohortId={cohortId.Value}" : "/homework/";
+            var statusLabel = passed switch
+            {
+                true => "Đạt yêu cầu",
+                false => "Cần ôn luyện thêm",
+                _ => "Đã có kết quả chấm"
+            };
+            var tone = passed == false ? SakuraEmailTone.Warning : SakuraEmailTone.Success;
+
+            var rendered = templates.BuildStudyNotification(new StudyNotificationEmailData(
+                learnerName,
+                $"Kết quả bài tập: {assignmentTitle} · RikiPath",
+                "Thông báo học tập",
+                "Bài tập về nhà của bạn đã được chấm",
+                "Giáo viên vừa hoàn tất chấm điểm và gửi nhận xét chi tiết cho bài nộp của bạn trên RikiPath.",
+                "Điểm đánh giá",
+                $"{score:0.##} / 100",
+                [
+                    new("Bài tập", assignmentTitle),
+                    new("Kết quả", statusLabel),
+                    new("Thời gian công bố", EmailTemplateService.FormatVietnamDateTime(DateTime.UtcNow)),
+                ],
+                tone,
+                "Nhận xét từ Giáo viên",
+                previewFeedback,
+                "Xem bài chấm chi tiết",
+                linkUrl));
+
+            await emailService.SendEmailAsync(learner.Email!, rendered, ct);
+        }
+        catch
+        {
+            // Email notification is best-effort and must never fail grading.
+        }
     }
 
     private static bool TryNormalizeCorrections(IReadOnlyList<HomeworkCorrection>? input, out IReadOnlyList<HomeworkCorrection> normalized)

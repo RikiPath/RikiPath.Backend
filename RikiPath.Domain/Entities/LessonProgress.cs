@@ -8,13 +8,17 @@ namespace RikiPath.Domain.Entities
         public int Id { get; set; }
 
         public int UserId { get; set; }
-        public UserAccount UserAccount { get; set; }
+        public UserAccount UserAccount { get; set; } = null!;
         public int LessonId { get; set; }
-        public Lesson Lesson { get; set; }
+        public Lesson Lesson { get; set; } = null!;
 
         public int ProgressPercent { get; set; }
         public bool IsCompleted { get; set; }
         public int LastPositionSeconds { get; set; }
         public DateTime? LastWatchedAt { get; set; }
+        public DateTime? FirstViewedAt { get; set; }
+        public DateTime? LastInteractedAt { get; set; }
+        public int InteractionCount { get; set; }
+        public DateTime? CompletedAt { get; set; }
     }
 }

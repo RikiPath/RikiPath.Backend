@@ -54,6 +54,9 @@ namespace RikiPath.Domain.Entities
         public DateTime? RejectedAt { get; set; }
         public string? RejectionReason { get; set; }
 
+        public int? TeachingProposalId { get; set; }
+        public MentorTeachingProposal? TeachingProposal { get; set; }
+
         public ICollection<MentorBooking> MentorBookings { get; set; } = new List<MentorBooking>();
     }
 }

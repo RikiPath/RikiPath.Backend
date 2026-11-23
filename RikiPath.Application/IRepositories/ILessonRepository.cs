@@ -30,5 +30,16 @@ namespace RikiPath.Application.IRepositories
         LessonProgress? Progress,
         int KanjiCount,
         int VocabularyCount,
-        int GrammarCount);
+        int GrammarCount,
+        string? Description = null,
+        int SortOrder = 0,
+        int EstimatedMinutes = 15,
+        int? TopicId = null,
+        string? TopicTitle = null,
+        int? TopicSortOrder = null,
+        string? TopicStageCode = null,
+        string? TopicObjectives = null,
+        int? PrerequisiteLessonId = null,
+        string? LearningObjectives = null,
+        string? LanguageSkillCode = null);
 }

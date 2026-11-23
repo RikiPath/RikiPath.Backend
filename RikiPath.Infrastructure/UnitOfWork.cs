@@ -53,7 +53,9 @@ namespace RikiPath.Infrastructure
         public ILessonGrammarRepository LessonGrammars { get; }
 
         // 5. Personal Vocabulary Notebook
+        public INotebookFolderRepository NotebookFolders { get; }
         public ILearnerNoteRepository LearnerNotes { get; }
+        public INotebookPageRepository NotebookPages { get; }
         public ILearnerNoteEntryRepository LearnerNoteEntries { get; }
         public ILearnerEssayRepository LearnerEssays { get; }
 
@@ -75,9 +77,13 @@ namespace RikiPath.Infrastructure
         public IPracticeSubmissionRepository PracticeSubmissions { get; }
         public IGradingResultRepository GradingResults { get; }
 
-        // 7. Spaced-Repetition Review Queue (SM-2)
+        // 7. Spaced-Repetition Review Queue (SM-2) & Smart Learning
         public IReviewCardRepository ReviewCards { get; }
         public IReviewHistoryRepository ReviewHistories { get; }
+        public IUserSrsPreferenceRepository UserSrsPreferences { get; }
+        public ILearnerHighlightRepository LearnerHighlights { get; }
+        public ISrsCardTemplateRepository SrsCardTemplates { get; }
+        public ISrsReviewSessionRepository SrsReviewSessions { get; }
 
         // 8. Subscriptions, Monetization & AI Advisory
         public ISubscriptionPlanRepository SubscriptionPlans { get; }
@@ -92,6 +98,8 @@ namespace RikiPath.Infrastructure
         public IMentorChatMessageRepository MentorChatMessages { get; }
         public INoteRepository Notes { get; }
         public IMentorAvailabilityRepository MentorAvailabilities { get; }
+        public IGenericRepository<MentorTeachingProposal> MentorTeachingProposals { get; }
+        public IGenericRepository<MentorTeachingProposalEvent> MentorTeachingProposalEvents { get; }
         public IMentorWeeklyAvailabilityRepository MentorWeeklyAvailabilities { get; }
         public IMentorProfileRepository MentorProfiles { get; }
         public IMentorScheduleRepository MentorSchedules { get; }
@@ -101,6 +109,8 @@ namespace RikiPath.Infrastructure
         public IContentApprovalRequestRepository ContentApprovalRequests { get; }
 
         public IContentAiReviewRepository ContentAiReviews { get; }
+        public IGenericRepository<ContentPassage> ContentPassages { get; }
+        public IGenericRepository<QuestionBankItem> QuestionBankItems { get; }
         public UnitOfWork(AppDbContext context)
         {
             _context = context ?? throw new ArgumentNullException(nameof(context));
@@ -143,7 +153,9 @@ namespace RikiPath.Infrastructure
             LessonVocabularies = new LessonVocabularyRepository(_context);
             LessonGrammars = new LessonGrammarRepository(_context);
 
+            NotebookFolders = new NotebookFolderRepository(_context);
             LearnerNotes = new LearnerNoteRepository(_context);
+            NotebookPages = new NotebookPageRepository(_context);
             LearnerNoteEntries = new LearnerNoteEntryRepository(_context);
             LearnerEssays = new LearnerEssayRepository(_context);
 
@@ -166,6 +178,10 @@ namespace RikiPath.Infrastructure
 
             ReviewCards = new ReviewCardRepository(_context);
             ReviewHistories = new ReviewHistoryRepository(_context);
+            UserSrsPreferences = new UserSrsPreferenceRepository(_context);
+            LearnerHighlights = new LearnerHighlightRepository(_context);
+            SrsCardTemplates = new SrsCardTemplateRepository(_context);
+            SrsReviewSessions = new SrsReviewSessionRepository(_context);
 
             SubscriptionPlans = new SubscriptionPlanRepository(_context);
             Features = new FeatureRepository(_context);
@@ -178,6 +194,8 @@ namespace RikiPath.Infrastructure
             MentorChatMessages = new MentorChatMessageRepository(_context);
             Notes = new NoteRepository(_context);
             MentorAvailabilities = new MentorAvailabilityRepository(_context);
+            MentorTeachingProposals = new GenericRepository<MentorTeachingProposal>(_context);
+            MentorTeachingProposalEvents = new GenericRepository<MentorTeachingProposalEvent>(_context);
             MentorWeeklyAvailabilities = new MentorWeeklyAvailabilityRepository(_context);
             MentorProfiles = new MentorProfileRepository(_context);
             MentorSchedules = new MentorScheduleRepository(_context);
@@ -186,6 +204,8 @@ namespace RikiPath.Infrastructure
             ContentApprovalRequests = new ContentApprovalRequestRepository(_context);
 
             ContentAiReviews = new ContentAiReviewRepository(_context);
+            ContentPassages = new GenericRepository<ContentPassage>(_context);
+            QuestionBankItems = new GenericRepository<QuestionBankItem>(_context);
         }
 
         public async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
@@ -219,21 +239,18 @@ namespace RikiPath.Infrastructure
                 }
                 catch
                 {
-                    // Rollback is cleanup, not part of the cancelled request. If the
-                    // browser/proxy aborts a long author request, reusing the already
-                    // cancelled token here causes EF to log a second transaction
-                    // failure and can hide the original cancellation.
+                    // Cleanup must still run when the request token has been cancelled.
+                    // Keep it bounded so a broken connection cannot delay the original error indefinitely.
+                    using var rollbackTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
                     try
                     {
-                        await transaction.RollbackAsync(CancellationToken.None);
+                        await transaction.RollbackAsync(rollbackTimeout.Token);
                     }
                     catch
                     {
-                        // Preserve the original operation exception. The connection is
-                        // disposed immediately after this block, so a failed rollback
-                        // must not replace the useful root cause.
+                        // Preserve the operation failure; disposing the transaction closes cleanup.
                     }
-
+                    _context.ChangeTracker.Clear();
                     throw;
                 }
             });
@@ -256,7 +273,7 @@ namespace RikiPath.Infrastructure
             if (!_context.Database.IsNpgsql())
                 return operation(cancellationToken);
 
-            return ExecuteInTransactionAsync(async token =>
+            async Task ExecuteWithTopicLockAsync(CancellationToken token)
             {
                 try
                 {
@@ -269,7 +286,12 @@ namespace RikiPath.Infrastructure
                     _context.ChangeTracker.Clear();
                     throw;
                 }
-            }, cancellationToken);
+            }
+
+            // Review endpoints already own a transaction; reuse it to avoid nested transactions.
+            return _context.Database.CurrentTransaction is not null
+                ? ExecuteWithTopicLockAsync(cancellationToken)
+                : ExecuteInTransactionAsync(ExecuteWithTopicLockAsync, cancellationToken);
         }
     }
 }

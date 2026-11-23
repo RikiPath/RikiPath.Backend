@@ -31,6 +31,14 @@ namespace RikiPath.Infrastructure.Configuration
 
             // Index tối ưu tốc độ tìm kiếm theo tiêu đề mẫu ngữ pháp
             builder.HasIndex(x => x.Title);
+            builder.Property(x => x.Status)
+                .HasConversion<string>()
+                .HasMaxLength(20)
+                .HasDefaultValue(RikiPath.Domain.Enums.ContentStatus.Published)
+                .HasSentinel((RikiPath.Domain.Enums.ContentStatus)(-1));
+            builder.Property(x => x.Version).HasDefaultValue(1).HasSentinel(-1);
+            builder.Property(x => x.UnpublishedReason).HasMaxLength(500);
+            builder.HasIndex(x => x.Status);
         }
     }
 }

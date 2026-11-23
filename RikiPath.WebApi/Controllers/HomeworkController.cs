@@ -95,17 +95,10 @@ public sealed class HomeworkController(HomeworkService homework, IPracticeQuizSe
     public async Task<IActionResult> Create(CreateHomeworkRequest request, CancellationToken ct)
         => Send(await homework.CreateAsync(request, ct));
 
-    //<<<<<<< HEAD
-    //    [HttpPost("group")]
-    //    [Authorize(Roles = "Mentor")]
-    //    public async Task<IActionResult> CreateGroup(CreateHomeworkGroupRequest request, CancellationToken ct)
-    //        => Send(await homework.CreateGroupAsync(request, ct));
-    //=======
-    //    [HttpPost("cohorts/{cohortId:int}")]
-    //    [Authorize(Roles = "Mentor")]
-    //    public async Task<IActionResult> CreateForCohort(int cohortId, CreateHomeworkRequest request, CancellationToken ct)
-    //        => Send(await homework.CreateCohortAssignmentsAsync(cohortId, request, ct));
-    //>>>>>>> 1100de53db4b59c055c72a80440c60150d9e694a
+    [HttpPost("cohorts/{cohortId:int}")]
+    [Authorize(Roles = "Mentor")]
+    public async Task<IActionResult> CreateForCohort(int cohortId, CreateHomeworkRequest request, CancellationToken ct)
+        => Send(await homework.CreateCohortAssignmentsAsync(cohortId, request, ct));
 
     [HttpGet("{assignmentId:int}/lessons/{lessonId:int}")]
     [Authorize(Roles = "Learner")]

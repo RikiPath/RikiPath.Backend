@@ -12,8 +12,10 @@ namespace RikiPath.Application.IServices
         Task<ApiResponse> ForgotPasswordAsync(ForgotPasswordRequest request, CancellationToken cancellationToken);
         Task<ApiResponse> ResetPasswordAsync(ResetPasswordRequest request, CancellationToken cancellationToken);
         Task<ApiResponse> VerifyEmailAsync(VerifyEmailRequest request, CancellationToken cancellationToken);
+        Task<ApiResponse> VerifyEmailByLinkAsync(VerifyEmailLinkRequest request, CancellationToken cancellationToken);
         Task<ApiResponse<RegisterResponse>> ChangeUnverifiedEmailAsync(ChangeUnverifiedEmailRequest request, CancellationToken cancellationToken);
         Task<ApiResponse<LoginResponse>> LoginAsync(LoginRequest request, CancellationToken cancellationToken);
+        ApiResponse<GoogleAuthConfigResponse> GetGoogleAuthConfig();
         Task<ApiResponse<LoginResponse>> ContinueWithGoogleAsync(GoogleAuthRequest request, CancellationToken cancellationToken);
         Task<ApiResponse<LoginResponse>> LoginWithFirebasePhoneAsync(FirebasePhoneAuthRequest request, CancellationToken cancellationToken);
         Task<ApiResponse<LoginResponse>> GetMeAsync(CancellationToken cancellationToken);

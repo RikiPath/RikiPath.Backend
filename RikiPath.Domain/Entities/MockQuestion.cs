@@ -20,6 +20,15 @@ public class MockQuestion : Base
     public int SortOrder { get; set; }
     public int MockTestSectionId { get; set; }
     public MockTestSection MockTestSection { get; set; } = null!;
+    public int? QuestionBankItemId { get; set; }
+    public QuestionBankItem? QuestionBankItem { get; set; }
+    public int QuestionVersion { get; set; } = 1;
+    public int? PassageId { get; set; }
+    public ContentPassage? Passage { get; set; }
+    public string? TemplateKind { get; set; }
+    public string? QuestionGroupTitle { get; set; }
+    public string? PlaybackPolicyJson { get; set; }
+    public string? SkillMetadataJson { get; set; }
     public List<MockQuestionOption>? Options { get; set; }
     public List<MockTestAnswer>? Answers { get; set; }
 }

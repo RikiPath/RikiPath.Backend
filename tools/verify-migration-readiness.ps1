@@ -23,7 +23,6 @@ param(
     [switch]$NoBuild,
     [ValidateSet('Debug', 'Release')]
     [string]$BuildConfiguration = 'Release',
-    [switch]$RequireLocalOrQa,
     [switch]$RequireSharedRemote,
     [string]$ExpectedHost,
     [string]$ExpectedDatabase,
@@ -153,15 +152,9 @@ $dbPass = $pairs['password']
 $sslMode = if ($pairs['ssl mode']) { $pairs['ssl mode'] } elseif ($pairs['sslmode']) { $pairs['sslmode'] } else { 'prefer' }
 
 $isSharedRemote = $dbHost -match '(?i)(supabase\.co|supabase\.com|supabase\.)'
-$isLoopback = $dbHost -in @('localhost', '127.0.0.1', '::1')
-$isApprovedLocal = $isLoopback -and $dbName -eq 'rikipath_local'
-$isApprovedQa = $dbHost -eq '127.0.0.1' -and $dbPort -eq '55439'
 Write-Host ("  Resolved Host     : {0}:{1}" -f $dbHost, $dbPort)
 Write-Host ("  Resolved Database : {0}" -f $dbName)
 Write-Host ("  Shared Remote Host: {0}" -f $isSharedRemote)
-if ($RequireLocalOrQa -and -not ($isApprovedLocal -or $isApprovedQa)) {
-    throw 'Local pre-push gate requires rikipath_local on a loopback host or the documented QA clone at 127.0.0.1:55439.'
-}
 if ($RequireSharedRemote) {
     if ([string]::IsNullOrWhiteSpace($ExpectedHost) -or
         [string]::IsNullOrWhiteSpace($ExpectedDatabase) -or

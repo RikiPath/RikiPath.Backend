@@ -1,3 +1,4 @@
+using RikiPath.Application.EmailTemplates;
 using RikiPath.Domain.Entities;
 using RikiPath.Domain.Enums;
 using Microsoft.IdentityModel.Tokens;
@@ -24,13 +25,18 @@ namespace RikiPath.Application.Services
         IFirebaseAuthService firebaseAuthService,
         IMemoryCache memoryCache,
         IClaimService claimService,
-        ILogger<AuthService>? logger = null) : IAuthService
+        ILogger<AuthService>? logger = null,
+        IEmailTemplateService? emailTemplates = null) : IAuthService
     {
+        private IEmailTemplateService Templates => emailTemplates ?? new EmailTemplateService(appSettings);
         private int VerificationCodeLifetimeMinutes => Math.Clamp(appSettings.EmailVerification?.CodeLifetimeMinutes ?? 30, 5, 60);
         private int ResendCooldownSeconds => Math.Clamp(appSettings.EmailVerification?.ResendCooldownSeconds ?? 60, 30, 300);
         private int MaxResendsPerHour => Math.Clamp(appSettings.EmailVerification?.MaxResendsPerHour ?? 5, 1, 20);
         private const string RegistrationVerificationPurpose = "registration-email-v1";
         private const string ChangeEmailVerificationPurpose = "change-email-v1";
+        private const string VerifyLinkIssuer = "RikiPath.EmailVerification";
+        private const string VerifyLinkAudience = "RikiPath.Web";
+        private const string VerifyLinkPurpose = "email-verify-link-v1";
         // Fixed-size lock stripes avoid an unbounded per-address lock dictionary. The
         // A distributed limiter is still required for multi-instance deployments.
         private static readonly SemaphoreSlim[] ResendLocks = Enumerable.Range(0, 256)
@@ -68,20 +74,25 @@ namespace RikiPath.Application.Services
                 await unitOfWork.SaveChangesAsync(cancellationToken);
 
                 var verificationCode = GenerateVerificationCode();
-                await unitOfWork.EmailVerifications.AddAsync(new EmailVerification
+                var verificationRecord = new EmailVerification
                 {
                     UserId = user.Id,
                     VerificationCode = ProtectVerificationCode(user.Id, verificationCode, RegistrationVerificationPurpose),
                     ExpiresAt = DateTime.UtcNow.AddMinutes(VerificationCodeLifetimeMinutes),
                     IsUsed = false,
-                }, cancellationToken);
+                };
+                await unitOfWork.EmailVerifications.AddAsync(verificationRecord, cancellationToken);
                 await unitOfWork.SaveChangesAsync(cancellationToken);
 
-                var greetingName = System.Net.WebUtility.HtmlEncode(string.IsNullOrEmpty(fullName) ? "bạn" : fullName);
-                var emailContent = $"Xin chào {greetingName},<br/>Mã xác thực email của bạn là: " +
-                                    $"<strong>{verificationCode}</strong>.<br/>Mã có hiệu lực trong {VerificationCodeLifetimeMinutes} phút.";
+                var emailContent = Templates.BuildAccountVerificationOtp(new AccountVerificationOtpEmailData(
+                    fullName,
+                    user.Email,
+                    verificationCode,
+                    VerificationCodeLifetimeMinutes,
+                    IsResend: false,
+                    VerificationUrl: CreateEmailVerificationUrl(user, verificationRecord, user.Email, RegistrationVerificationPurpose)));
 
-                var emailResult = await emailService.SendValidationEmailAsync(user.Email, emailContent, cancellationToken);
+                var emailResult = await emailService.SendEmailAsync(user.Email, emailContent, cancellationToken);
                 if (!emailResult.IsSuccess)
                     return ApiResponse<RegisterResponse>.Created(new RegisterResponse
                     {
@@ -195,10 +206,14 @@ namespace RikiPath.Application.Services
                 await unitOfWork.EmailVerifications.AddAsync(newVerification, cancellationToken);
                 await unitOfWork.SaveChangesAsync(cancellationToken);
 
-                var greetingName = System.Net.WebUtility.HtmlEncode(UserNameHelper.FormatFullName(user.FirstName, user.LastName));
-                var emailContent = $"Xin chào {(string.IsNullOrEmpty(greetingName) ? "bạn" : greetingName)},<br/>Mã xác thực email của bạn là: " +
-                                   $"<strong>{verificationCode}</strong>.<br/>Mã có hiệu lực trong {VerificationCodeLifetimeMinutes} phút.";
-                var emailResult = await emailService.SendValidationEmailAsync(
+                var emailContent = Templates.BuildAccountVerificationOtp(new AccountVerificationOtpEmailData(
+                    UserNameHelper.FormatFullName(user.FirstName, user.LastName),
+                    user.Email!,
+                    verificationCode,
+                    VerificationCodeLifetimeMinutes,
+                    IsResend: true,
+                    VerificationUrl: CreateEmailVerificationUrl(user, newVerification, user.Email!, RegistrationVerificationPurpose)));
+                var emailResult = await emailService.SendEmailAsync(
                     user.Email!,
                     emailContent,
                     cancellationToken);
@@ -311,50 +326,9 @@ namespace RikiPath.Application.Services
                         return;
                     }
 
-                    var pendingNormalized = lockedUser.PendingEmail?.Trim().ToLowerInvariant();
-                    if (pendingEmailMatch && pendingNormalized is not null)
-                    {
-                        var emailTaken = await unitOfWork.UserAccounts.AnyAsync(
-                            u => u.Id != lockedUser.Id && !u.IsDeleted && u.Email != null && u.Email.ToLower() == pendingNormalized,
-                            token);
-                        if (emailTaken)
-                        {
-                            outcome = ApiResponse.Fail("Email mới đã được sử dụng bởi tài khoản khác.");
-                            return;
-                        }
-
-                        var previousEmail = lockedUser.Email;
-                        lockedUser.Email = pendingNormalized;
-                        lockedUser.PendingEmail = null;
-                        lockedUser.PendingEmailRequestedAtUtc = null;
-                        lockedUser.IsEmailVerified = true;
-                        lockedUser.ModifiedDate = DateTime.UtcNow;
-                        lockedUser.TokenVersion++;
-                        await DeactivateUserDeviceTokensAsync(lockedUser.Id, token);
-
-                        await unitOfWork.AdminAuditLogs.AddAsync(new AdminAuditLog
-                        {
-                            ActorUserId = lockedUser.Id,
-                            EntityType = "UserAccount",
-                            EntityId = lockedUser.Id,
-                            Action = "EmailChangedVerified",
-                            BeforeJson = System.Text.Json.JsonSerializer.Serialize(new { Email = previousEmail }),
-                            AfterJson = System.Text.Json.JsonSerializer.Serialize(new { Email = pendingNormalized }),
-                            CreatedAtUtc = DateTime.UtcNow,
-                        }, token);
-                    }
-                    else
-                    {
-                        lockedUser.IsEmailVerified = true;
-                        lockedUser.ModifiedDate = DateTime.UtcNow;
-                    }
-
-                    record.IsUsed = true;
-                    unitOfWork.EmailVerifications.Update(record);
-                    unitOfWork.UserAccounts.Update(lockedUser);
-                    await unitOfWork.SaveChangesAsync(token);
-                    memoryCache.Remove(verifyAttemptKey);
-                    outcome = ApiResponse.Success();
+                    var failureResponse = await CompleteEmailVerificationAsync(
+                        lockedUser, record, pendingEmailMatch, verifyAttemptKey, token);
+                    outcome = failureResponse ?? ApiResponse.Success();
                 }, cancellationToken);
 
                 return outcome ?? ApiResponse.Fail("Xác thực email thất bại.", System.Net.HttpStatusCode.InternalServerError);
@@ -365,6 +339,194 @@ namespace RikiPath.Application.Services
                 return ApiResponse.Fail(
                     "Xác thực email thất bại.", System.Net.HttpStatusCode.InternalServerError);
             }
+        }
+
+        public async Task<ApiResponse> VerifyEmailByLinkAsync(VerifyEmailLinkRequest request, CancellationToken cancellationToken)
+        {
+            ClaimsPrincipal principal;
+            try
+            {
+                if (string.IsNullOrWhiteSpace(request.Token) || request.Token.Length > 4096)
+                    return ApiResponse.Fail("Liên kết xác thực không hợp lệ hoặc đã hết hạn.");
+
+                principal = new JwtSecurityTokenHandler { MapInboundClaims = false }.ValidateToken(
+                    request.Token,
+                    new TokenValidationParameters
+                    {
+                        ValidateIssuerSigningKey = true,
+                        IssuerSigningKey = VerificationLinkSigningKey(),
+                        ValidAlgorithms = [SecurityAlgorithms.HmacSha256],
+                        ValidateIssuer = true,
+                        ValidIssuer = VerifyLinkIssuer,
+                        ValidateAudience = true,
+                        ValidAudience = VerifyLinkAudience,
+                        ValidateLifetime = true,
+                        RequireExpirationTime = true,
+                        ClockSkew = TimeSpan.Zero,
+                    }, out _);
+            }
+            catch (Exception ex) when (ex is SecurityTokenException or ArgumentException or InvalidOperationException)
+            {
+                return ApiResponse.Fail("Liên kết xác thực không hợp lệ hoặc đã hết hạn.");
+            }
+
+            var purpose = principal.FindFirst("purpose")?.Value;
+            var flow = principal.FindFirst("flow")?.Value;
+            var tokenEmail = principal.FindFirst("email")?.Value?.Trim().ToLowerInvariant();
+            var binding = principal.FindFirst("bind")?.Value;
+
+            if (purpose != VerifyLinkPurpose
+                || flow is not (RegistrationVerificationPurpose or ChangeEmailVerificationPurpose)
+                || string.IsNullOrWhiteSpace(tokenEmail)
+                || string.IsNullOrWhiteSpace(binding)
+                || !int.TryParse(principal.FindFirst("uid")?.Value, out var userId) || userId <= 0
+                || !int.TryParse(principal.FindFirst("evid")?.Value, out var verificationId) || verificationId <= 0)
+            {
+                return ApiResponse.Fail("Liên kết xác thực không hợp lệ hoặc đã hết hạn.");
+            }
+
+            var verifyAttemptKey = $"verify-email-fail:{userId}";
+            if (memoryCache.TryGetValue<int>(verifyAttemptKey, out var failCount) && failCount >= 5)
+            {
+                logger?.LogWarning("Email verification link temporarily locked for userId={UserId} after repeated invalid attempts.", userId);
+                return ApiResponse.Fail(
+                    "Bạn đã thử xác thực quá nhiều lần. Vui lòng thử lại sau 15 phút.",
+                    System.Net.HttpStatusCode.TooManyRequests);
+            }
+
+            ApiResponse? outcome = null;
+            try
+            {
+                await unitOfWork.ExecuteInTransactionAsync(async token =>
+                {
+                    var lockedUser = await unitOfWork.UserAccounts.GetByIdForUpdateAsync(userId, token);
+                    if (lockedUser is null || lockedUser.IsDeleted)
+                    {
+                        outcome = ApiResponse.Fail("Liên kết xác thực không hợp lệ hoặc đã hết hạn.");
+                        return;
+                    }
+
+                    bool pendingEmailMatch;
+                    if (flow == ChangeEmailVerificationPurpose)
+                    {
+                        var pendingMatches = !string.IsNullOrWhiteSpace(lockedUser.PendingEmail)
+                            && string.Equals(lockedUser.PendingEmail, tokenEmail, StringComparison.OrdinalIgnoreCase);
+                        var adminOverrideMatches = !lockedUser.IsEmailVerified
+                            && string.Equals(lockedUser.Email, tokenEmail, StringComparison.OrdinalIgnoreCase);
+
+                        if (!pendingMatches && !adminOverrideMatches)
+                        {
+                            if (lockedUser.IsEmailVerified && string.Equals(lockedUser.Email, tokenEmail, StringComparison.OrdinalIgnoreCase))
+                            {
+                                outcome = ApiResponse.Fail("Email này đã được xác thực trước đó.");
+                                return;
+                            }
+                            outcome = ApiResponse.Fail("Liên kết xác thực không còn khớp với địa chỉ email hiện tại.");
+                            return;
+                        }
+
+                        pendingEmailMatch = pendingMatches;
+                    }
+                    else
+                    {
+                        if (!string.Equals(lockedUser.Email, tokenEmail, StringComparison.OrdinalIgnoreCase))
+                        {
+                            outcome = ApiResponse.Fail("Liên kết xác thực không còn khớp với địa chỉ email hiện tại.");
+                            return;
+                        }
+
+                        if (lockedUser.IsEmailVerified)
+                        {
+                            outcome = ApiResponse.Fail("Email này đã được xác thực trước đó.");
+                            return;
+                        }
+
+                        pendingEmailMatch = false;
+                    }
+
+                    var record = await unitOfWork.EmailVerifications.GetByIdAsync(verificationId, token);
+                    if (record is null || record.UserId != lockedUser.Id ||
+                        !MatchesVerificationLinkBinding(record, lockedUser.Id, tokenEmail, binding))
+                    {
+                        memoryCache.Set(verifyAttemptKey, failCount + 1, TimeSpan.FromMinutes(15));
+                        outcome = ApiResponse.Fail("Liên kết xác thực không hợp lệ hoặc đã hết hạn.");
+                        return;
+                    }
+
+                    if (record.IsUsed)
+                    {
+                        outcome = ApiResponse.Fail("Liên kết xác thực đã được sử dụng hoặc đã bị thay thế bởi mã mới.");
+                        return;
+                    }
+
+                    if (record.ExpiresAt < DateTime.UtcNow)
+                    {
+                        outcome = ApiResponse.Fail("Liên kết xác thực đã hết hạn.");
+                        return;
+                    }
+
+                    var failureResponse = await CompleteEmailVerificationAsync(
+                        lockedUser, record, pendingEmailMatch, verifyAttemptKey, token);
+                    outcome = failureResponse ?? ApiResponse.Success();
+                }, cancellationToken);
+
+                return outcome ?? ApiResponse.Fail("Xác thực email thất bại.", System.Net.HttpStatusCode.InternalServerError);
+            }
+            catch (Exception ex)
+            {
+                logger?.LogError("Email verification link failed with {FailureType}.", ex.GetType().Name);
+                return ApiResponse.Fail("Xác thực email thất bại.", System.Net.HttpStatusCode.InternalServerError);
+            }
+        }
+
+        private async Task<ApiResponse?> CompleteEmailVerificationAsync(
+            UserAccount lockedUser,
+            EmailVerification record,
+            bool pendingEmailMatch,
+            string verifyAttemptKey,
+            CancellationToken token)
+        {
+            var pendingNormalized = lockedUser.PendingEmail?.Trim().ToLowerInvariant();
+            if (pendingEmailMatch && pendingNormalized is not null)
+            {
+                var emailTaken = await unitOfWork.UserAccounts.AnyAsync(
+                    u => u.Id != lockedUser.Id && !u.IsDeleted && u.Email != null && u.Email.ToLower() == pendingNormalized,
+                    token);
+                if (emailTaken)
+                    return ApiResponse.Fail("Email mới đã được sử dụng bởi tài khoản khác.");
+
+                var previousEmail = lockedUser.Email;
+                lockedUser.Email = pendingNormalized;
+                lockedUser.PendingEmail = null;
+                lockedUser.PendingEmailRequestedAtUtc = null;
+                lockedUser.IsEmailVerified = true;
+                lockedUser.ModifiedDate = DateTime.UtcNow;
+                lockedUser.TokenVersion++;
+                await DeactivateUserDeviceTokensAsync(lockedUser.Id, token);
+
+                await unitOfWork.AdminAuditLogs.AddAsync(new AdminAuditLog
+                {
+                    ActorUserId = lockedUser.Id,
+                    EntityType = "UserAccount",
+                    EntityId = lockedUser.Id,
+                    Action = "EmailChangedVerified",
+                    BeforeJson = System.Text.Json.JsonSerializer.Serialize(new { Email = previousEmail }),
+                    AfterJson = System.Text.Json.JsonSerializer.Serialize(new { Email = pendingNormalized }),
+                    CreatedAtUtc = DateTime.UtcNow,
+                }, token);
+            }
+            else
+            {
+                lockedUser.IsEmailVerified = true;
+                lockedUser.ModifiedDate = DateTime.UtcNow;
+            }
+
+            record.IsUsed = true;
+            unitOfWork.EmailVerifications.Update(record);
+            unitOfWork.UserAccounts.Update(lockedUser);
+            await unitOfWork.SaveChangesAsync(token);
+            memoryCache.Remove(verifyAttemptKey);
+            return null;
         }
 
         private sealed record ResendAttemptState(DateTime NextAllowedAt, List<DateTime> Attempts);
@@ -479,24 +641,31 @@ namespace RikiPath.Application.Services
                 user.Email = newEmail;
                 unitOfWork.UserAccounts.Update(user);
                 var verificationCode = GenerateVerificationCode();
-                await unitOfWork.EmailVerifications.AddAsync(new EmailVerification
+                var verificationRecord = new EmailVerification
                 {
                     UserId = user.Id,
                     VerificationCode = ProtectVerificationCode(user.Id, verificationCode, RegistrationVerificationPurpose),
                     ExpiresAt = DateTime.UtcNow.AddMinutes(VerificationCodeLifetimeMinutes),
                     IsUsed = false,
-                }, cancellationToken);
+                };
+                await unitOfWork.EmailVerifications.AddAsync(verificationRecord, cancellationToken);
                 await unitOfWork.SaveChangesAsync(cancellationToken);
                 memoryCache.Remove(failureKey);
 
-                var emailContent = $"Mã xác thực email của bạn là: <strong>{verificationCode}</strong>." +
-                    $"<br/>Mã có hiệu lực trong {VerificationCodeLifetimeMinutes} phút.";
-                var sendResult = await emailService.SendValidationEmailAsync(newEmail, emailContent, cancellationToken);
+                var fullName = UserNameHelper.FormatFullName(user.FirstName, user.LastName);
+                var emailContent = Templates.BuildAccountVerificationOtp(new AccountVerificationOtpEmailData(
+                    fullName,
+                    newEmail,
+                    verificationCode,
+                    VerificationCodeLifetimeMinutes,
+                    IsResend: false,
+                    VerificationUrl: CreateEmailVerificationUrl(user, verificationRecord, newEmail, RegistrationVerificationPurpose)));
+                var sendResult = await emailService.SendEmailAsync(newEmail, emailContent, cancellationToken);
                 return ApiResponse<RegisterResponse>.Success(new RegisterResponse
                 {
                     UserId = user.Id,
                     Email = newEmail,
-                    FullName = UserNameHelper.FormatFullName(user.FirstName, user.LastName),
+                    FullName = fullName,
                     VerificationEmailSent = sendResult.IsSuccess,
                 });
             }
@@ -650,9 +819,14 @@ namespace RikiPath.Application.Services
                     await unitOfWork.SaveChangesAsync(cancellationToken);
                 }
 
-                var emailContent = $"Mã xác thực email mới của bạn là: <strong>{verificationCode}</strong>." +
-                                    $"<br/>Mã có hiệu lực trong {VerificationCodeLifetimeMinutes} phút.";
-                var emailResult = await emailService.SendValidationEmailAsync(newEmail, emailContent, cancellationToken);
+                var emailContent = Templates.BuildEmailChangeOtp(new EmailChangeOtpEmailData(
+                    UserNameHelper.FormatFullName(user.FirstName, user.LastName),
+                    newEmail,
+                    verificationCode,
+                    VerificationCodeLifetimeMinutes,
+                    InitiatedByAdmin: isAdminOverride,
+                    VerificationUrl: CreateEmailVerificationUrl(user, verificationRecord, newEmail, ChangeEmailVerificationPurpose)));
+                var emailResult = await emailService.SendEmailAsync(newEmail, emailContent, cancellationToken);
                 if (!emailResult.IsSuccess)
                 {
                     if (!isAdminOverride)
@@ -711,9 +885,14 @@ namespace RikiPath.Application.Services
                 await unitOfWork.EmailVerifications.AddAsync(newCode, cancellationToken);
                 await unitOfWork.SaveChangesAsync(cancellationToken);
 
-                var emailContent = $"Mã xác thực email mới của bạn là: <strong>{verificationCode}</strong>." +
-                                    $"<br/>Mã có hiệu lực trong {VerificationCodeLifetimeMinutes} phút.";
-                var emailResult = await emailService.SendValidationEmailAsync(pendingEmail, emailContent, cancellationToken);
+                var emailContent = Templates.BuildEmailChangeOtp(new EmailChangeOtpEmailData(
+                    UserNameHelper.FormatFullName(user.FirstName, user.LastName),
+                    pendingEmail,
+                    verificationCode,
+                    VerificationCodeLifetimeMinutes,
+                    InitiatedByAdmin: false,
+                    VerificationUrl: CreateEmailVerificationUrl(user, newCode, pendingEmail, ChangeEmailVerificationPurpose)));
+                var emailResult = await emailService.SendEmailAsync(pendingEmail, emailContent, cancellationToken);
                 if (!emailResult.IsSuccess)
                 {
                     newCode.IsUsed = true;
@@ -813,6 +992,12 @@ namespace RikiPath.Application.Services
                 if (staleOrMissing)
                     return ApiResponse.Fail("Mật khẩu hiện tại không đúng hoặc vừa được thay đổi.", System.Net.HttpStatusCode.Conflict);
 
+                await SendPasswordSecurityNoticeBestEffortAsync(
+                    user,
+                    "Đổi mật khẩu",
+                    "Mật khẩu tài khoản RikiPath của bạn vừa được thay đổi thành công.",
+                    cancellationToken);
+
                 return ApiResponse.Success();
             }
             catch (Exception ex)
@@ -874,6 +1059,12 @@ namespace RikiPath.Application.Services
 
                 if (concurrentConflict)
                     return ApiResponse.Fail("Tài khoản đã thiết lập mật khẩu ở phiên khác.", System.Net.HttpStatusCode.Conflict);
+
+                await SendPasswordSecurityNoticeBestEffortAsync(
+                    user,
+                    "Thiết lập mật khẩu",
+                    "Mật khẩu đăng nhập nội bộ cho tài khoản RikiPath của bạn vừa được thiết lập thành công.",
+                    cancellationToken);
 
                 return ApiResponse.Success();
             }
@@ -979,6 +1170,89 @@ namespace RikiPath.Application.Services
         }
 
         private static string GenerateVerificationCode() => RandomNumberGenerator.GetInt32(100000, 1000000).ToString();
+
+        private string? CreateEmailVerificationUrl(
+            UserAccount user,
+            EmailVerification verificationRecord,
+            string targetEmail,
+            string flowPurpose)
+        {
+            if (!Uri.TryCreate(appSettings.FrontendBaseUrl?.TrimEnd('/'), UriKind.Absolute, out var frontend) ||
+                frontend.Scheme is not ("http" or "https") ||
+                string.IsNullOrWhiteSpace(appSettings.SecretToken?.Value) ||
+                verificationRecord.Id <= 0)
+            {
+                return null;
+            }
+
+            var normalizedTarget = targetEmail.Trim().ToLowerInvariant();
+            var signingKey = VerificationLinkSigningKey();
+            var binding = ComputeVerificationLinkBinding(signingKey.Key, verificationRecord.Id, user.Id, normalizedTarget, verificationRecord.VerificationCode);
+
+            var claims = new[]
+            {
+                new Claim("purpose", VerifyLinkPurpose),
+                new Claim("flow", flowPurpose),
+                new Claim("uid", user.Id.ToString(System.Globalization.CultureInfo.InvariantCulture)),
+                new Claim("email", normalizedTarget),
+                new Claim("evid", verificationRecord.Id.ToString(System.Globalization.CultureInfo.InvariantCulture)),
+                new Claim("bind", binding),
+                new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString("N")),
+            };
+
+            var nowUtc = DateTime.UtcNow;
+            var expiresAt = verificationRecord.ExpiresAt > nowUtc
+                ? verificationRecord.ExpiresAt
+                : nowUtc.AddMinutes(VerificationCodeLifetimeMinutes);
+
+            var jwt = new JwtSecurityToken(
+                issuer: VerifyLinkIssuer,
+                audience: VerifyLinkAudience,
+                claims: claims,
+                notBefore: nowUtc,
+                expires: expiresAt,
+                signingCredentials: new SigningCredentials(signingKey, SecurityAlgorithms.HmacSha256));
+
+            var token = new JwtSecurityTokenHandler().WriteToken(jwt);
+            return $"{frontend.AbsoluteUri.TrimEnd('/')}/verify-email?token={Uri.EscapeDataString(token)}";
+        }
+
+        private SymmetricSecurityKey VerificationLinkSigningKey()
+        {
+            var secret = appSettings.SecretToken?.Value;
+            if (string.IsNullOrWhiteSpace(secret))
+                throw new InvalidOperationException("Verification link signing key is not configured.");
+
+            return new SymmetricSecurityKey(HMACSHA256.HashData(
+                Encoding.UTF8.GetBytes(secret),
+                Encoding.UTF8.GetBytes("rikipath-email-verification-link-v1")));
+        }
+
+        private static string ComputeVerificationLinkBinding(
+            byte[] key,
+            int verificationId,
+            int userId,
+            string normalizedEmail,
+            string storedVerificationCode)
+        {
+            var payload = $"{verificationId}:{userId}:{normalizedEmail}:{storedVerificationCode}";
+            return Base64UrlEncoder.Encode(HMACSHA256.HashData(key, Encoding.UTF8.GetBytes(payload)));
+        }
+
+        private bool MatchesVerificationLinkBinding(
+            EmailVerification record,
+            int userId,
+            string normalizedEmail,
+            string binding)
+        {
+            if (string.IsNullOrWhiteSpace(binding))
+                return false;
+
+            var expected = Encoding.ASCII.GetBytes(ComputeVerificationLinkBinding(
+                VerificationLinkSigningKey().Key, record.Id, userId, normalizedEmail, record.VerificationCode));
+            var actual = Encoding.ASCII.GetBytes(binding);
+            return expected.Length == actual.Length && CryptographicOperations.FixedTimeEquals(expected, actual);
+        }
 
         private string ProtectVerificationCode(int userId, string code, string purpose)
         {

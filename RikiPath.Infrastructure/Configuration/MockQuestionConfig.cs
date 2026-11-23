@@ -15,6 +15,20 @@ namespace RikiPath.Infrastructure.Configuration
             builder.Property(x => x.QuestionType).IsRequired().HasMaxLength(40).HasDefaultValue("SingleChoice");
             builder.Property(x => x.InteractionDataJson).HasColumnType("jsonb");
             builder.Property(x => x.AnswerKeyJson).HasColumnType("jsonb");
+            builder.Property(x => x.TemplateKind).HasMaxLength(60);
+            builder.Property(x => x.QuestionGroupTitle).HasMaxLength(200);
+            builder.Property(x => x.PlaybackPolicyJson).HasColumnType("jsonb");
+            builder.Property(x => x.SkillMetadataJson).HasColumnType("jsonb");
+
+            builder.HasOne(x => x.QuestionBankItem)
+                .WithMany()
+                .HasForeignKey(x => x.QuestionBankItemId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            builder.HasOne(x => x.Passage)
+                .WithMany()
+                .HasForeignKey(x => x.PassageId)
+                .OnDelete(DeleteBehavior.SetNull);
 
             builder.HasOne(x => x.MockTestSection)
                 .WithMany(x => x.Questions)

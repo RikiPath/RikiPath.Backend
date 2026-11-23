@@ -1,24 +1,16 @@
+using System.Globalization;
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using RikiPath.Application.Helpers;
 using RikiPath.Application.IServices;
 using RikiPath.Application.Responses.Content;
 using RikiPath.Domain.Enums;
-using System.Text.Json;
 
 namespace RikiPath.Application.Handlers
 {
     /// <summary>
-    /// Sheet "Practice Exercise" dạng phẳng (mỗi dòng 1 câu hỏi). Handler GỘP các dòng cùng "Exercise Title" thành 1 bài tập
-    /// (bài tập -> câu hỏi -> đáp án) nên 1 kết quả diff = 1 bài tập = 1 ContentApprovalRequest.
-    ///
-    /// Quy ước:
-    ///  - "Exercise Title" phải khác nhau trong 1 file. Exercise Description / Lesson Title / Language Skill / Exercise Sort Order
-    ///    có thể chỉ ghi ở dòng đầu; các dòng sau để trống hoặc phải trùng (lệch nhau là lỗi - thường do gõ nhầm tên bài học).
-    ///  - Bài tập gắn với 1 Lesson (tra theo "Lesson Title"): Lesson phải đã có trong hệ thống HOẶC đang có bản nháp chờ duyệt.
-    ///    Nếu trùng tên ở nhiều level thì thêm cột tùy chọn "Certificate Level Code" để phân biệt.
-    ///  - Cột "Language Skill Code" thực chất chứa TÊN kỹ năng (khớp LanguageSkill.Name, không phân biệt hoa/thường).
-    ///  - Số thứ tự câu ("Question Sort Order") không được trùng trong 1 bài tập.
-    ///  - Khóa so khớp với DB: Lesson + Title.
+    /// Sheet "Practice Exercise" dạng phẳng (mỗi dòng 1 câu hỏi). Hỗ trợ cả 3 tầng:
+    /// LessonQuickCheck (gắn Lesson), GroupQuiz (gắn Topic/Stage) và StageAssessment (gắn CertificateLevel).
     /// </summary>
     public sealed class PracticeExerciseImportHandler(IUnitOfWork unitOfWork, IClaimService? claims = null) : IWorkbookLessonAwareImportHandler
     {
@@ -38,40 +30,62 @@ namespace RikiPath.Application.Handlers
             var titles = rows.Select(r => ImportHandlerSupport.Clean(r.Get("Exercise Title")))
                 .Where(t => t is not null).Select(t => t!).Distinct().ToList();
 
-            // Bài tập đã có (chỉ những bài có tên xuất hiện trong file), kèm câu hỏi + đáp án để so sánh.
             var existingExercises = await unitOfWork.PracticeExercises.Query()
                 .Include(e => e.Questions).ThenInclude(q => q.Options)
                 .Where(e => !e.IsDeleted && titles.Contains(e.Title))
                 .ToListAsync(cancellationToken);
-            var (existingByKey, ambiguousKeys) = ImportHandlerSupport.IndexByKey(
-                existingExercises, e => NaturalKey(e.LessonId, e.Title));
 
+            var (existingByKey, ambiguousKeys) = ImportHandlerSupport.IndexByKey(
+                existingExercises,
+                e => ExistingKey(e.Scope, e.LessonId, e.TopicId, e.CertificateLevelId ?? 0, e.Title));
+
+            var (levelsByCode, _) = await ImportHandlerSupport.LoadLevelsAsync(unitOfWork, cancellationToken);
             var skills = await unitOfWork.LanguageSkills.Query().Where(s => !s.IsDeleted).ToListAsync(cancellationToken);
             var (skillsByName, ambiguousSkillNames) = ImportHandlerSupport.IndexByKey(
                 skills, s => s.Name, StringComparer.OrdinalIgnoreCase);
 
             var lessonsByTitle = await LoadLessonCandidatesAsync(workbookLessons, cancellationToken);
+            var topicsByTitle = await LoadTopicCandidatesAsync(workbookLessons, cancellationToken);
             var openRowKeys = await ImportHandlerSupport.LoadOpenRowKeysAsync(unitOfWork, EntityType, cancellationToken);
 
-            var ctx = new DiffContext(existingByKey, ambiguousKeys, skillsByName, ambiguousSkillNames, lessonsByTitle, openRowKeys);
+            var ctx = new DiffContext(
+                existingByKey,
+                ambiguousKeys,
+                levelsByCode,
+                skillsByName,
+                ambiguousSkillNames,
+                lessonsByTitle,
+                topicsByTitle,
+                openRowKeys);
 
-            // Gộp dòng theo Exercise Title (giữ thứ tự xuất hiện). Dòng thiếu tên bài tập -> 1 nhóm riêng để báo lỗi.
             var groups = new List<List<ExcelRow>>();
-            var byTitleAndLesson = new Dictionary<string, List<ExcelRow>>(StringComparer.Ordinal);
-            var lastLessonByExerciseTitle = new Dictionary<string, string>(StringComparer.Ordinal);
+            var byCompositeKey = new Dictionary<string, List<ExcelRow>>(StringComparer.Ordinal);
+            var lastTargetByTitle = new Dictionary<string, (string? Lesson, string? Topic, string? Level, string? Scope)>(StringComparer.Ordinal);
+
             foreach (var row in rows)
             {
                 var title = ImportHandlerSupport.Clean(row.Get("Exercise Title"));
                 if (title is null) { groups.Add([row]); continue; }
+
                 var lessonTitle = ImportHandlerSupport.Clean(row.Get("Lesson Title"));
-                if (lessonTitle is not null) lastLessonByExerciseTitle[title] = lessonTitle;
-                else lessonTitle = lastLessonByExerciseTitle.GetValueOrDefault(title);
-                var groupKey = $"{title}\u001f{lessonTitle}";
-                if (!byTitleAndLesson.TryGetValue(groupKey, out var list)) { byTitleAndLesson[groupKey] = list = []; groups.Add(list); }
+                var topicTitle = ImportHandlerSupport.Clean(row.Get("Topic Title") ?? row.Get("Chapter Title"));
+                var levelCode = ImportHandlerSupport.Clean(row.Get("Certificate Level Code"));
+                var scope = ImportHandlerSupport.Clean(row.Get("Exercise Scope"));
+
+                if (lessonTitle is not null || topicTitle is not null || levelCode is not null || scope is not null)
+                    lastTargetByTitle[title] = (lessonTitle, topicTitle, levelCode, scope);
+                else if (lastTargetByTitle.TryGetValue(title, out var prev))
+                    (lessonTitle, topicTitle, levelCode, scope) = prev;
+
+                var groupKey = $"{title}\u001f{PracticeExerciseScopes.Normalize(scope)}\u001f{lessonTitle}\u001f{topicTitle}\u001f{levelCode}";
+                if (!byCompositeKey.TryGetValue(groupKey, out var list))
+                {
+                    byCompositeKey[groupKey] = list = [];
+                    groups.Add(list);
+                }
                 list.Add(row);
             }
 
-            // TotalRows = số dòng Excel; các bộ đếm New/Modified/... tính theo BÀI TẬP (mỗi bài gồm nhiều dòng).
             var result = new SheetImportResponse { EntityType = EntityType, SheetName = SheetName, TotalRows = rows.Count };
             foreach (var group in groups)
             {
@@ -83,19 +97,27 @@ namespace RikiPath.Application.Handlers
             return result;
         }
 
-        private static string NaturalKey(int lessonId, string title) => $"{lessonId}|{title}";
+        private static string ExistingKey(string scope, int? lessonId, int? topicId, int levelId, string title) =>
+            PracticeExerciseScopes.Normalize(scope) switch
+            {
+                PracticeExerciseScopes.GroupQuiz => $"G|{topicId ?? 0}|{title}",
+                PracticeExerciseScopes.StageAssessment => $"S|{levelId}|{title}",
+                _ => $"L|{lessonId ?? 0}|{title}",
+            };
 
         private sealed record LessonRef(int? Id, string Title, int CertificateLevelId, string CertificateLevelCode);
+        private sealed record TopicRef(int? Id, string Title, int CertificateLevelId, string CertificateLevelCode);
 
         private sealed record DiffContext(
             Dictionary<string, Domain.Entities.PracticeExercise> ExistingByKey,
             HashSet<string> AmbiguousKeys,
+            Dictionary<string, int> LevelsByCode,
             Dictionary<string, Domain.Entities.LanguageSkill> SkillsByName,
             HashSet<string> AmbiguousSkillNames,
             Dictionary<string, List<LessonRef>> LessonsByTitle,
+            Dictionary<string, List<TopicRef>> TopicsByTitle,
             HashSet<string> OpenRowKeys);
 
-        /// <summary>Lesson đã duyệt (có Id) + Lesson đang có bản nháp chờ duyệt (chưa có Id), nhóm theo tên.</summary>
         private async Task<Dictionary<string, List<LessonRef>>> LoadLessonCandidatesAsync(
             IReadOnlyList<LessonImportPayloadResponse> workbookLessons,
             CancellationToken cancellationToken)
@@ -137,6 +159,34 @@ namespace RikiPath.Application.Handlers
             return candidates.GroupBy(c => c.Title).ToDictionary(g => g.Key, g => g.ToList(), StringComparer.Ordinal);
         }
 
+        private async Task<Dictionary<string, List<TopicRef>>> LoadTopicCandidatesAsync(
+            IReadOnlyList<LessonImportPayloadResponse> workbookLessons,
+            CancellationToken cancellationToken)
+        {
+            var dbTopics = await unitOfWork.Topics.Query()
+                .Include(t => t.CertificateLevel)
+                .Where(t => !t.IsDeleted)
+                .ToListAsync(cancellationToken);
+
+            var candidates = dbTopics
+                .Select(t => new TopicRef(
+                    t.Id,
+                    t.Title,
+                    t.CertificateLevelId ?? 0,
+                    t.CertificateLevel?.Code ?? string.Empty))
+                .ToList();
+
+            foreach (var lesson in workbookLessons)
+            {
+                if (string.IsNullOrWhiteSpace(lesson.TopicTitle) || lesson.CertificateLevelId <= 0) continue;
+                var tt = lesson.TopicTitle.Trim();
+                if (candidates.Any(c => c.Title == tt && c.CertificateLevelId == lesson.CertificateLevelId)) continue;
+                candidates.Add(new TopicRef(null, tt, lesson.CertificateLevelId, lesson.CertificateLevelCode));
+            }
+
+            return candidates.GroupBy(t => t.Title).ToDictionary(g => g.Key, g => g.ToList(), StringComparer.OrdinalIgnoreCase);
+        }
+
         private static ImportRowDiffResponse BuildGroupDiff(List<ExcelRow> group, DiffContext ctx)
         {
             var first = group[0];
@@ -145,44 +195,94 @@ namespace RikiPath.Application.Handlers
             var exerciseImage = ImportHandlerSupport.CheckUrl(ImportHandlerSupport.Consistent(group, "ExerciseImageUrl", errors), "ExerciseImageUrl", "", errors);
             static string P(ExcelRow r) => $"Dòng {r.RowNumber}: ";
 
-            // ---- Thuộc tính cấp bài tập ----
             var title = ImportHandlerSupport.Clean(first.Get("Exercise Title"));
             if (title is null) errors.Add($"{P(first)}Thiếu cột Exercise Title.");
 
             var description = ImportHandlerSupport.Consistent(group, "Exercise Description", errors);
+            var scopeRaw = ImportHandlerSupport.Consistent(group, "Exercise Scope", errors);
+            var scope = PracticeExerciseScopes.Normalize(scopeRaw);
             var lessonTitle = ImportHandlerSupport.Consistent(group, "Lesson Title", errors);
+            var topicTitle = ImportHandlerSupport.Consistent(group, "Topic Title",
+                r => r.Get("Topic Title") ?? r.Get("Chapter Title"), errors);
             var levelCode = ImportHandlerSupport.Consistent(group, "Certificate Level Code", errors);
             var skillName = ImportHandlerSupport.Consistent(group, "Language Skill Code",
                 r => r.Get("Language Skill Code") ?? r.Get("Language Skill Name"), errors);
             var sortRaw = ImportHandlerSupport.Consistent(group, "Exercise Sort Order", errors);
+            var passRaw = ImportHandlerSupport.Consistent(group, "Passing Score Percent", errors);
 
-            // Lesson
             LessonRef? lesson = null;
-            if (lessonTitle is null)
-                errors.Add($"{P(first)}Thiếu cột Lesson Title.");
-            else
-            {
-                var candidates = ctx.LessonsByTitle.GetValueOrDefault(lessonTitle) ?? [];
-                if (levelCode is not null) candidates = candidates.Where(c => c.CertificateLevelCode == levelCode).ToList();
+            TopicRef? topic = null;
+            var resolvedLevelId = 0;
+            string? resolvedLevelCode = levelCode;
 
-                if (candidates.Count == 0)
-                    errors.Add($"{P(first)}Không tìm thấy Lesson '{lessonTitle}' (chưa có trong hệ thống và cũng chưa có bản nháp chờ duyệt). Hãy import Lesson trước hoặc kiểm tra lại tên bài học.");
-                else if (candidates.Count > 1)
-                    errors.Add($"{P(first)}Có nhiều Lesson tên '{lessonTitle}' ở các level khác nhau, thêm cột 'Certificate Level Code' để chỉ rõ.");
+            if (scope == PracticeExerciseScopes.LessonQuickCheck)
+            {
+                if (lessonTitle is null)
+                    errors.Add($"{P(first)}Thiếu cột Lesson Title.");
                 else
-                    lesson = candidates[0];
+                {
+                    var candidates = ctx.LessonsByTitle.GetValueOrDefault(lessonTitle) ?? [];
+                    if (levelCode is not null) candidates = candidates.Where(c => string.Equals(c.CertificateLevelCode, levelCode, StringComparison.OrdinalIgnoreCase)).ToList();
+
+                    if (candidates.Count == 0)
+                        errors.Add($"{P(first)}Không tìm thấy Lesson '{lessonTitle}'. Hãy import Lesson trước hoặc kiểm tra lại tên bài học.");
+                    else if (candidates.Count > 1)
+                        errors.Add($"{P(first)}Có nhiều Lesson tên '{lessonTitle}' ở các level khác nhau, thêm cột 'Certificate Level Code' để chỉ rõ.");
+                    else
+                    {
+                        lesson = candidates[0];
+                        resolvedLevelId = lesson.CertificateLevelId;
+                        resolvedLevelCode = lesson.CertificateLevelCode;
+                    }
+                }
+            }
+            else if (scope == PracticeExerciseScopes.GroupQuiz)
+            {
+                if (topicTitle is null)
+                    errors.Add($"{P(first)}Bài kiểm tra GroupQuiz cần cột 'Topic Title'.");
+                else
+                {
+                    var candidates = ctx.TopicsByTitle.GetValueOrDefault(topicTitle) ?? [];
+                    if (levelCode is not null)
+                    {
+                        candidates = candidates.Where(c =>
+                            string.IsNullOrEmpty(c.CertificateLevelCode) ||
+                            string.Equals(c.CertificateLevelCode, levelCode, StringComparison.OrdinalIgnoreCase)).ToList();
+                    }
+
+                    if (candidates.Count == 0)
+                        errors.Add($"{P(first)}Không tìm thấy Topic/Chặng '{topicTitle}' cho GroupQuiz.");
+                    else if (candidates.Count > 1)
+                        errors.Add($"{P(first)}Có nhiều Topic tên '{topicTitle}', hãy bổ sung 'Certificate Level Code'.");
+                    else
+                    {
+                        topic = candidates[0];
+                        if (topic.CertificateLevelId > 0)
+                        {
+                            resolvedLevelId = topic.CertificateLevelId;
+                            resolvedLevelCode = topic.CertificateLevelCode;
+                        }
+                        else if (levelCode is not null && ctx.LevelsByCode.TryGetValue(levelCode, out var mappedLid))
+                        {
+                            resolvedLevelId = mappedLid;
+                        }
+                    }
+                }
+            }
+            else // StageAssessment
+            {
+                if (levelCode is null || !ctx.LevelsByCode.TryGetValue(levelCode, out resolvedLevelId))
+                    errors.Add($"{P(first)}StageAssessment cần cột 'Certificate Level Code' hợp lệ (N5–N2).");
             }
 
-            // Kỹ năng
             Domain.Entities.LanguageSkill? skill = null;
             if (skillName is null)
                 errors.Add($"{P(first)}Thiếu cột Language Skill Code.");
             else if (ctx.AmbiguousSkillNames.Contains(skillName))
-                errors.Add($"{P(first)}Language Skill '{skillName}' bị trùng tên trong hệ thống, không xác định được kỹ năng.");
+                errors.Add($"{P(first)}Language Skill '{skillName}' bị trùng tên trong hệ thống.");
             else if (!ctx.SkillsByName.TryGetValue(skillName, out skill))
                 errors.Add($"{P(first)}Language Skill '{skillName}' không tồn tại trong hệ thống.");
 
-            // Sort order của bài tập (tùy chọn)
             int? exerciseSort = null;
             if (sortRaw is not null)
             {
@@ -190,9 +290,19 @@ namespace RikiPath.Application.Handlers
                 else errors.Add($"{P(first)}Exercise Sort Order phải là số nguyên không âm.");
             }
 
-            var rowKey = title is not null && lessonTitle is not null ? $"{title} / {lessonTitle}" : title ?? $"(dòng {first.RowNumber})";
-            if (title is not null && lessonTitle is not null && ctx.OpenRowKeys.Contains(rowKey))
-                errors.Add($"{P(first)}Bài tập '{title}' của bài '{lessonTitle}' đang có bản nháp chờ Admin duyệt, chưa thể import lại.");
+            double passingScore = 70;
+            if (passRaw is not null)
+            {
+                if (double.TryParse(passRaw, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsedPass) && parsedPass is >= 1 and <= 100)
+                    passingScore = parsedPass;
+                else
+                    errors.Add($"{P(first)}Passing Score Percent phải từ 1 đến 100.");
+            }
+
+            var targetLabel = lessonTitle ?? topicTitle ?? resolvedLevelCode ?? string.Empty;
+            var rowKey = title is not null && !string.IsNullOrEmpty(targetLabel) ? $"{title} / {targetLabel}" : title ?? $"(dòng {first.RowNumber})";
+            if (title is not null && !string.IsNullOrEmpty(targetLabel) && ctx.OpenRowKeys.Contains(rowKey))
+                errors.Add($"{P(first)}Bài tập '{title}' ({targetLabel}) đang có bản nháp chờ Admin duyệt.");
 
             var diff = new ImportRowDiffResponse
             {
@@ -201,16 +311,17 @@ namespace RikiPath.Application.Handlers
                 ParsedFields = new Dictionary<string, string?>
                 {
                     ["exerciseTitle"] = title,
+                    ["exerciseScope"] = scope,
                     ["exerciseDescription"] = description,
                     ["lessonTitle"] = lessonTitle,
-                    ["certificateLevelCode"] = levelCode,
+                    ["topicTitle"] = topicTitle,
+                    ["certificateLevelCode"] = resolvedLevelCode,
                     ["languageSkillCode"] = skillName,
                     ["exerciseSortOrder"] = sortRaw,
                     ["rows"] = $"{group.Min(r => r.RowNumber)}–{group.Max(r => r.RowNumber)} ({group.Count} dòng)",
                 },
             };
 
-            // ---- Câu hỏi ----
             var questions = new List<PracticeQuestionPayloadResponse>();
             var seenSortOrders = new Dictionary<int, int>();
 
@@ -253,36 +364,35 @@ namespace RikiPath.Application.Handlers
                 return diff;
             }
 
-            // Tra bài tập đã có theo Lesson (chỉ Lesson đã duyệt mới có Id).
             Domain.Entities.PracticeExercise? existing = null;
-            if (lesson!.Id is int lessonId)
+            var key = ExistingKey(scope, lesson?.Id, topic?.Id, resolvedLevelId, title!);
+            if (ctx.AmbiguousKeys.Contains(key))
             {
-                var key = NaturalKey(lessonId, title!);
-                if (ctx.AmbiguousKeys.Contains(key))
-                {
-                    diff.Errors.Add($"Có nhiều bài tập '{title}' trong bài '{lessonTitle}' trùng nhau trong hệ thống, cần dọn dữ liệu trước khi import.");
-                    diff.Action = ImportRowAction.Error;
-                    return diff;
-                }
-                ctx.ExistingByKey.TryGetValue(key, out existing);
+                diff.Errors.Add($"Có nhiều bài tập '{title}' trùng nhau trong hệ thống.");
+                diff.Action = ImportRowAction.Error;
+                return diff;
             }
+            ctx.ExistingByKey.TryGetValue(key, out existing);
 
             var payload = new PracticeExerciseImportPayloadResponse
             {
                 ImageUrl = exerciseImage,
                 Title = title!,
                 Description = description,
-                // Không có cột Exercise Sort Order: giữ thứ tự cũ nếu bài đã có, bài mới lấy số dòng đầu của nhóm.
+                Scope = scope,
+                PassingScorePercent = passingScore,
                 SortOrder = exerciseSort ?? existing?.SortOrder ?? first.RowNumber,
-                LessonTitle = lessonTitle!,
-                LessonId = lesson.Id,
-                CertificateLevelId = lesson.CertificateLevelId,
+                LessonTitle = lessonTitle ?? string.Empty,
+                LessonId = lesson?.Id,
+                TopicId = topic?.Id,
+                TopicTitle = topic?.Title ?? topicTitle,
+                CertificateLevelId = resolvedLevelId,
+                CertificateLevelCode = resolvedLevelCode,
                 LanguageSkillId = skill!.Id,
                 LanguageSkillName = skill.Name,
                 Questions = questions.OrderBy(q => q.SortOrder).ToList(),
             };
 
-            // ---- Diff với DB ----
             if (existing is null)
             {
                 diff.Action = ImportRowAction.New;
@@ -298,6 +408,8 @@ namespace RikiPath.Application.Handlers
             if (existing.LanguageSkillId != skill.Id)
                 changed["languageSkill"] = $"{existing.LanguageSkillId} → {skill.Name}";
             ImportHandlerSupport.CompareField(changed, "exerciseSortOrder", existing.SortOrder.ToString(), payload.SortOrder.ToString());
+            if (Math.Abs(existing.PassingScorePercent - passingScore) > 0.01)
+                changed["passingScorePercent"] = $"{existing.PassingScorePercent} → {passingScore}";
 
             var oldQuestions = new Dictionary<int, string>();
             foreach (var q in (existing.Questions ?? []).Where(q => !q.IsDeleted))

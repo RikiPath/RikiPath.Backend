@@ -6,6 +6,7 @@ using System.Text;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 using Microsoft.IdentityModel.Tokens;
+using RikiPath.Application.EmailTemplates;
 using RikiPath.Application.Helpers;
 using RikiPath.Application.Requests.Auth;
 using RikiPath.Application.Responses;
@@ -61,10 +62,11 @@ public partial class AuthService
 
             var token = CreatePasswordResetToken(user);
             var url = $"{frontend.AbsoluteUri.TrimEnd('/')}/reset-password?token={Uri.EscapeDataString(token)}";
-            var safeUrl = WebUtility.HtmlEncode(url);
-            var content = $"Để đặt lại mật khẩu RikiPath, mở liên kết sau (có hiệu lực {ResetLifetimeMinutes} phút): " +
-                $"<a href=\"{safeUrl}\">Đặt lại mật khẩu</a>. Nếu bạn không yêu cầu, hãy bỏ qua email này.";
-            var delivery = await emailService.SendEmailAsync(user.Email!, "Đặt lại mật khẩu RikiPath", content, cancellationToken);
+            var content = Templates.BuildPasswordResetRequest(new PasswordResetRequestEmailData(
+                UserNameHelper.FormatFullName(user.FirstName, user.LastName),
+                url,
+                ResetLifetimeMinutes));
+            var delivery = await emailService.SendEmailAsync(user.Email!, content, cancellationToken);
             if (delivery.IsSuccess)
             {
                 attempts.Add(now);
@@ -125,6 +127,7 @@ public partial class AuthService
             return ApiResponse.Fail(policyError);
 
         var result = ApiResponse.Fail("Liên kết không hợp lệ hoặc đã hết hạn.");
+        UserAccount? resetUser = null;
         try
         {
             await unitOfWork.ExecuteInTransactionAsync(async token =>
@@ -144,6 +147,7 @@ public partial class AuthService
                 unitOfWork.UserAccounts.Update(user);
                 await DeactivateUserDeviceTokensAsync(user.Id, token);
                 await unitOfWork.SaveChangesAsync(token);
+                resetUser = user;
                 result = ApiResponse.Success();
             }, cancellationToken);
         }
@@ -152,7 +156,44 @@ public partial class AuthService
             logger?.LogError("Password reset failed with {FailureType}.", ex.GetType().Name);
             return ApiResponse.Fail("Chưa đặt lại được mật khẩu lúc này.", HttpStatusCode.InternalServerError);
         }
+
+        if (result.IsSuccess && resetUser is not null)
+        {
+            await SendPasswordSecurityNoticeBestEffortAsync(
+                resetUser,
+                "Đặt lại mật khẩu",
+                "Mật khẩu tài khoản RikiPath của bạn vừa được đặt lại thành công.",
+                cancellationToken);
+        }
+
         return result;
+    }
+
+    private async Task SendPasswordSecurityNoticeBestEffortAsync(
+        UserAccount user,
+        string actionTitle,
+        string actionDescription,
+        CancellationToken cancellationToken)
+    {
+        if (!user.IsEmailVerified || string.IsNullOrWhiteSpace(user.Email))
+            return;
+
+        try
+        {
+            var content = Templates.BuildPasswordSecurityNotice(new PasswordSecurityNoticeEmailData(
+                UserNameHelper.FormatFullName(user.FirstName, user.LastName),
+                user.Email,
+                DateTime.UtcNow,
+                actionTitle,
+                actionDescription));
+            var delivery = await emailService.SendEmailAsync(user.Email, content, cancellationToken);
+            if (!delivery.IsSuccess)
+                logger?.LogWarning("Password security notice email could not be delivered.");
+        }
+        catch (Exception ex)
+        {
+            logger?.LogWarning("Password security notice email failed with {FailureType}.", ex.GetType().Name);
+        }
     }
 
     private string CreatePasswordResetToken(UserAccount user)

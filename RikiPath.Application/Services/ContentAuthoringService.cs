@@ -1453,32 +1453,17 @@ namespace RikiPath.Application.Services
                 if (skill is null || skill.IsDeleted)
                     return ApiResponse<SubmitContentApprovalResponse>.NotFound("Không tìm thấy kỹ năng.");
 
-                var payload = new PracticeExerciseImportPayloadResponse
-                {
-                    Title = request.Title.Trim(),
-                    Description = request.Description?.Trim(),
-                    SortOrder = 1,
-                    LessonId = lesson.Id,
-                    LessonTitle = lesson.Title,
-                    CertificateLevelId = lesson.CertificateLevelId,
-                    LanguageSkillId = skill.Id,
-                    LanguageSkillName = skill.Name,
-                    Questions = request.Questions.Select((question, questionIndex) => new PracticeQuestionPayloadResponse
-                    {
-                        QuestionText = question.QuestionText.Trim(),
-                        Explanation = question.Explanation?.Trim(),
-                        SortOrder = questionIndex + 1,
-                        Options = question.Options.Select((option, optionIndex) => new ImportOptionPayloadResponse
-                        {
-                            OptionText = option.Text.Trim(),
-                            IsCorrect = option.IsCorrect,
-                            SortOrder = optionIndex + 1
-                        }).ToList()
-                    }).ToList()
-                };
+                var canonicalPractice = ContentAuthoring.AuthoringPayloadConverter.ToPracticeExerciseImportPayload(
+                    request.Title,
+                    request.Description,
+                    lesson.Title,
+                    lesson.Id,
+                    lesson.CertificateLevelId,
+                    skill,
+                    request.Questions);
 
                 return await SubmitForApprovalAsync(ImportEntityType.PracticeExercise,
-                    new List<ApprovalDraft> { new(payload.Title, payload, false, null) }, cancellationToken);
+                    new List<ApprovalDraft> { new(request.Title.Trim(), canonicalPractice, false, null) }, cancellationToken);
             }
             catch (OperationCanceledException) { throw; }
             catch (Exception ex)
@@ -1617,7 +1602,7 @@ namespace RikiPath.Application.Services
                 if (level is null)
                     return ContextError<SubmitContentApprovalResponse>(levelError, levelStatus);
 
-                var sections = new List<MockTestSectionPayloadResponse>(request.Sections.Count);
+                var mappedSections = new List<(string SectionTitle, int SortOrder, Domain.Entities.LanguageSkill Skill, Domain.Entities.CertificateSection CertSection, List<ChoiceQuestionDraft> Questions)>();
                 foreach (var section in request.Sections)
                 {
                     var certSection = await unitOfWork.CertificateSections.GetByIdAsync(section.CertificateSectionId, cancellationToken);
@@ -1629,29 +1614,18 @@ namespace RikiPath.Application.Services
                     if (skill is null || skill.IsDeleted)
                         return ApiResponse<SubmitContentApprovalResponse>.Fail($"Phần thi \"{section.Title}\": không tìm thấy kỹ năng.");
 
-                    sections.Add(new MockTestSectionPayloadResponse
-                    {
-                        Title = section.Title.Trim(),
-                        SortOrder = section.SortOrder,
-                        CertificateSectionCode = certSection.Code,
-                        LanguageSkillId = skill.Id,
-                        LanguageSkillName = skill.Name,
-                        Questions = section.Questions.Select((question, questionIndex) => ToMockQuestionPayload(question, questionIndex + 1)).ToList()
-                    });
+                    mappedSections.Add((section.Title, section.SortOrder, skill, certSection, section.Questions));
                 }
 
-                var payload = new MockTestImportPayloadResponse
-                {
-                    Title = request.Title.Trim(),
-                    Description = null,
-                    TimeLimitMinutes = request.TimeLimitMinutes,
-                    CertificateLevelId = level.Id,
-                    CertificateLevelCode = level.Code,
-                    Sections = sections
-                };
+                var canonicalMock = ContentAuthoring.AuthoringPayloadConverter.ToMockTestImportPayload(
+                    request.Title,
+                    null,
+                    request.TimeLimitMinutes,
+                    level,
+                    mappedSections);
 
                 return await SubmitForApprovalAsync(ImportEntityType.MockTest,
-                    new List<ApprovalDraft> { new(payload.Title, payload, false, null) }, cancellationToken);
+                    new List<ApprovalDraft> { new(request.Title.Trim(), canonicalMock, false, null) }, cancellationToken);
             }
             catch (OperationCanceledException) { throw; }
             catch (Exception ex)

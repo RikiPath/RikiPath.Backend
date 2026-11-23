@@ -19,7 +19,7 @@ public sealed record GrantCohortEntitlementRequest(int LearnerId, string SourceT
     string? EntitlementReference = null, string? Note = null, DateTime? ExpiresAtUtc = null);
 public sealed record RevokeCohortEntitlementRequest(string Reason);
 public sealed record SaveStudyCohort(int PlanId, string Name, int MentorId, int Capacity,
-    List<int> AvailabilityIds, bool Publish, int Revision = 1);
+    List<int> AvailabilityIds, bool Publish, int Revision = 1, int? SourceProposalId = null);
 // Xem trước xung đột lịch dạy khi Admin chọn khung giờ cho lớp (chỉ tham khảo; lưu lớp vẫn kiểm tra lại).
 public sealed record CohortSchedulePreviewRequest(int MentorId, List<int> AvailabilityIds, int? CohortId = null);
 // Bộ lọc tìm lớp nhóm: Mentor, cấp độ JLPT, cường độ (Light/Standard/Advanced), thứ (0=Chủ nhật..6, giờ Việt Nam)
