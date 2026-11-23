@@ -878,6 +878,47 @@ namespace RikiPath.Application.Services
             JsonSerializer.Deserialize<LessonImportPayloadResponse>(request.PayloadJson, JsonOptions)
                 ?? throw new InvalidOperationException("Payload Lesson rỗng.");
 
+        private async Task<Dictionary<int, string>> GetLanguageSkillNamesAsync(CancellationToken ct)
+        {
+            if (_languageSkillNames is not null) return _languageSkillNames;
+
+            _languageSkillNames = (await unitOfWork.LanguageSkills.Query()
+                    .AsNoTracking()
+                    .Where(skill => !skill.IsDeleted)
+                    .Select(skill => new { skill.Id, skill.Name })
+                    .ToListAsync(ct))
+                .ToDictionary(skill => skill.Id, skill => skill.Name);
+            return _languageSkillNames;
+        }
+
+        private async Task<Dictionary<int, (string Code, bool IsDeleted)>> GetCertificateLevelsAsync(CancellationToken ct)
+        {
+            if (_certificateLevels is not null) return _certificateLevels;
+
+            _certificateLevels = (await unitOfWork.CertificateLevels.Query()
+                    .AsNoTracking()
+                    .Select(level => new { level.Id, level.Code, level.IsDeleted })
+                    .ToListAsync(ct))
+                .ToDictionary(level => level.Id, level => (level.Code, level.IsDeleted));
+            return _certificateLevels;
+        }
+
+        private async Task<Dictionary<string, List<int>>> GetCertificateSectionIdsByCodeAsync(CancellationToken ct)
+        {
+            if (_certificateSectionIdsByCode is not null) return _certificateSectionIdsByCode;
+
+            var sections = await unitOfWork.CertificateSections.Query()
+                .AsNoTracking()
+                .Where(section => !section.IsDeleted)
+                .Select(section => new { section.Id, section.Code })
+                .ToListAsync(ct);
+            _certificateSectionIdsByCode = sections
+                .GroupBy(section => section.Code, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(group => group.Key, group => group.Select(section => section.Id).ToList(),
+                    StringComparer.OrdinalIgnoreCase);
+            return _certificateSectionIdsByCode;
+        }
+
         private async Task ApplyLessonTopicApprovalAsync(ContentApprovalRequest request, string? reviewNote, CancellationToken ct)
         {
             // In batch review, earlier items may have staged changes before this separate transaction.
@@ -1280,47 +1321,6 @@ namespace RikiPath.Application.Services
             }
         }
 
-        private async Task<Dictionary<int, string>> GetLanguageSkillNamesAsync(CancellationToken ct)
-        {
-            if (_languageSkillNames is not null) return _languageSkillNames;
-
-            _languageSkillNames = (await unitOfWork.LanguageSkills.Query()
-                    .AsNoTracking()
-                    .Where(skill => !skill.IsDeleted)
-                    .Select(skill => new { skill.Id, skill.Name })
-                    .ToListAsync(ct))
-                .ToDictionary(skill => skill.Id, skill => skill.Name);
-            return _languageSkillNames;
-        }
-
-        private async Task<Dictionary<int, (string Code, bool IsDeleted)>> GetCertificateLevelsAsync(CancellationToken ct)
-        {
-            if (_certificateLevels is not null) return _certificateLevels;
-
-            _certificateLevels = (await unitOfWork.CertificateLevels.Query()
-                    .AsNoTracking()
-                    .Select(level => new { level.Id, level.Code, level.IsDeleted })
-                    .ToListAsync(ct))
-                .ToDictionary(level => level.Id, level => (level.Code, level.IsDeleted));
-            return _certificateLevels;
-        }
-
-        private async Task<Dictionary<string, List<int>>> GetCertificateSectionIdsByCodeAsync(CancellationToken ct)
-        {
-            if (_certificateSectionIdsByCode is not null) return _certificateSectionIdsByCode;
-
-            var sections = await unitOfWork.CertificateSections.Query()
-                .AsNoTracking()
-                .Where(section => !section.IsDeleted)
-                .Select(section => new { section.Id, section.Code })
-                .ToListAsync(ct);
-            _certificateSectionIdsByCode = sections
-                .GroupBy(section => section.Code, StringComparer.OrdinalIgnoreCase)
-                .ToDictionary(group => group.Key, group => group.Select(section => section.Id).ToList(),
-                    StringComparer.OrdinalIgnoreCase);
-            return _certificateSectionIdsByCode;
-        }
-
         private async Task ApplyMockTestApprovalAsync(ContentApprovalRequest req, CancellationToken cancellationToken)
         {
             _ = audioTranscriptions;
@@ -1418,7 +1418,9 @@ namespace RikiPath.Application.Services
                     }).ToList()
                 };
 
-                // Transcription is asynchronous; do not enqueue/write ContentAudioTranscriptions inside approval tx.
+                // Transcription is asynchronous. Do not enqueue/read audio inside
+                // the admin approval transaction; the transcription worker will
+                // synchronize completed transcripts after this content commit.
                 await unitOfWork.MockTests.AddAsync(test, cancellationToken);
                 await unitOfWork.SaveChangesAsync(cancellationToken);
                 req.TargetEntityId = test.Id;

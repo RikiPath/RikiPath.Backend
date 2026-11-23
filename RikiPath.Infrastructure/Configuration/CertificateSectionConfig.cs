@@ -39,7 +39,9 @@ namespace RikiPath.Infrastructure.Configuration
                 .IsUnique()
                 .HasFilter("\"IsDeleted\" = false");
 
-            // Seed data mẫu cho các phần thi JLPT (N5 và N4) với Id là int
+            // Seed data mẫu cho các phần thi JLPT (N5 tới N2) với Id là int.
+            // N5 dùng một section gộp Ngữ pháp & Đọc hiểu theo cấu trúc JLPT N5;
+            // N4-N2 tách riêng hai kỹ năng này để khớp file import mock test.
             builder.HasData(
                 // ==================== CẤP ĐỘ N5 (Giả sử CertificateLevel Id của N5 là 1) ====================
                 new CertificateSection
@@ -106,6 +108,82 @@ namespace RikiPath.Infrastructure.Configuration
                     Name = "Nghe hiểu",
                     Code = "N4_LISTENING",
                     Description = "Phần thi nghe hiểu hội thoại và tình huống thực tế cấp độ N4"
+                },
+
+                // ==================== CẤP ĐỘ N3 (CertificateLevel Id = 3) ====================
+                new CertificateSection
+                {
+                    Id = 8,
+                    CreatedDate = SeedCreatedDate.AddTicks(5300),
+                    CertificateLevelId = 3,
+                    Name = "Kiến thức ngôn ngữ (Từ vựng)",
+                    Code = "N3_VOCAB",
+                    Description = "Phần thi kiểm tra chữ Hán, cách đọc và từ vựng cấp độ N3"
+                },
+                new CertificateSection
+                {
+                    Id = 9,
+                    CreatedDate = SeedCreatedDate.AddTicks(5301),
+                    CertificateLevelId = 3,
+                    Name = "Kiến thức ngôn ngữ (Ngữ pháp)",
+                    Code = "N3_GRAMMAR",
+                    Description = "Phần thi kiểm tra cấu trúc ngữ pháp và sắp xếp câu cấp độ N3"
+                },
+                new CertificateSection
+                {
+                    Id = 10,
+                    CreatedDate = SeedCreatedDate.AddTicks(5302),
+                    CertificateLevelId = 3,
+                    Name = "Đọc hiểu",
+                    Code = "N3_READING",
+                    Description = "Phần thi đọc hiểu văn bản, thông báo và biểu mẫu cấp độ N3"
+                },
+                new CertificateSection
+                {
+                    Id = 11,
+                    CreatedDate = SeedCreatedDate.AddTicks(5303),
+                    CertificateLevelId = 3,
+                    Name = "Nghe hiểu",
+                    Code = "N3_LISTENING",
+                    Description = "Phần thi nghe hiểu hội thoại và tình huống thực tế cấp độ N3"
+                },
+
+                // ==================== CẤP ĐỘ N2 (CertificateLevel Id = 4) ====================
+                new CertificateSection
+                {
+                    Id = 12,
+                    CreatedDate = SeedCreatedDate.AddTicks(5304),
+                    CertificateLevelId = 4,
+                    Name = "Kiến thức ngôn ngữ (Từ vựng)",
+                    Code = "N2_VOCAB",
+                    Description = "Phần thi kiểm tra chữ Hán, cách đọc và từ vựng cấp độ N2"
+                },
+                new CertificateSection
+                {
+                    Id = 13,
+                    CreatedDate = SeedCreatedDate.AddTicks(5305),
+                    CertificateLevelId = 4,
+                    Name = "Kiến thức ngôn ngữ (Ngữ pháp)",
+                    Code = "N2_GRAMMAR",
+                    Description = "Phần thi kiểm tra cấu trúc ngữ pháp và sắp xếp câu cấp độ N2"
+                },
+                new CertificateSection
+                {
+                    Id = 14,
+                    CreatedDate = SeedCreatedDate.AddTicks(5306),
+                    CertificateLevelId = 4,
+                    Name = "Đọc hiểu",
+                    Code = "N2_READING",
+                    Description = "Phần thi đọc hiểu văn bản, thông báo và biểu mẫu cấp độ N2"
+                },
+                new CertificateSection
+                {
+                    Id = 15,
+                    CreatedDate = SeedCreatedDate.AddTicks(5307),
+                    CertificateLevelId = 4,
+                    Name = "Nghe hiểu",
+                    Code = "N2_LISTENING",
+                    Description = "Phần thi nghe hiểu hội thoại và tình huống thực tế cấp độ N2"
                 }
             );
         }

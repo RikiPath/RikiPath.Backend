@@ -172,6 +172,10 @@ namespace RikiPath.Application.Handlers
                     }
                     else if (!ctx.CertSectionsByCode.TryGetValue(code, out var cs))
                     {
+                        // Một số file cũ dùng mã RPK_N5_GRAMMAR/RPK_N5_READING,
+                        // trong khi master data chuẩn đã gộp hai phần này thành
+                        // N5_GRAMMAR_READING. Chỉ nhận alias khi tìm được đúng một
+                        // section cùng level để không gắn nhầm dữ liệu sang level khác.
                         if (TryResolveSectionAlias(code, levelIdForSectionAlias, ctx.CertificateSections, out var alias))
                             certByCode[code] = alias;
                         else
@@ -445,6 +449,9 @@ namespace RikiPath.Application.Handlers
                     candidate.CertificateLevelId == certificateLevelId.Value &&
                     candidates.Contains(candidate.Code))
                 .ToList();
+            // Nếu tồn tại mã sau khi bỏ tiền tố RPK_ thì ưu tiên mã đó; chỉ dùng
+            // mã gộp GRAMMAR_READING/VOCAB làm fallback. Trường hợp có nhiều bản
+            // ghi trùng mã vẫn bị từ chối như lookup chính.
             var exactMatches = matches
                 .Where(candidate => string.Equals(candidate.Code, withoutRikiPrefix, StringComparison.OrdinalIgnoreCase))
                 .ToList();

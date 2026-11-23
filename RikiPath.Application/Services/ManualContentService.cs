@@ -266,6 +266,9 @@ public sealed class ManualContentService(IUnitOfWork uow, IClaimService claims, 
         {
             try
             {
+                // Newly created Excel rows have already passed the import validator before they
+                // are persisted as Drafts, except PracticeExercises which still validate
+                // batch/DB Lesson or Topic references below before submission.
                 if (IsExcelImportDraft(item) && item.Action == ImportRowAction.New && item.EntityType != ImportEntityType.PracticeExercise)
                 {
                     ValidateStoredImportPayload(item);
@@ -317,7 +320,10 @@ public sealed class ManualContentService(IUnitOfWork uow, IClaimService claims, 
             }
         }
 
-        // Batch large Excel draft submissions into one atomic SQL statement while preserving concurrency safety.
+        // The batch can contain thousands of Excel rows. A tracked SaveChanges
+        // would issue one UPDATE per row and commonly exceed the browser/proxy
+        // timeout. Keep the operation atomic, but update all draft statuses with
+        // one parameterized SQL statement.
         var now = DateTime.UtcNow;
         var draftIds = drafts.Select(item => item.Id).ToArray();
         var updatedCount = await uow.ContentApprovalRequests.Query()

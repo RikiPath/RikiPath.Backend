@@ -285,12 +285,13 @@ public sealed class ContentAudioTranscriptionService(
         if (transaction is null) return;
         try
         {
-            // Cleanup must not reuse an already-cancelled request/worker token.
+            // Cleanup must not reuse a request/worker token that was already
+            // cancelled; otherwise EF can mask the original failure with 20205.
             await transaction.RollbackAsync(CancellationToken.None);
         }
         catch
         {
-            // Disposed by caller's finally block.
+            // The connection is disposed in the caller's finally block.
         }
     }
 
