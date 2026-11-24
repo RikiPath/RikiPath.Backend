@@ -11,7 +11,9 @@ using RikiPath.Domain.Enums;
 namespace RikiPath.Application.Services.ContentAuthoring;
 
 /// <summary>Kiểm duyệt, yêu cầu chỉnh sửa, phê duyệt, xuất bản có xác nhận bản quyền và ngừng xuất bản (lưu AdminAuditLog).</summary>
-public sealed class ContentModerationV2Service(IUnitOfWork unitOfWork) : IContentModerationV2Service
+public sealed class ContentModerationV2Service(
+    IUnitOfWork unitOfWork,
+    ISidebarCounterNotifier? sidebarNotifier = null) : IContentModerationV2Service
 {
     private static readonly JsonSerializerOptions JsonOpts = new(JsonSerializerDefaults.Web)
     {
@@ -443,9 +445,18 @@ public sealed class ContentModerationV2Service(IUnitOfWork unitOfWork) : IConten
             await unitOfWork.SaveChangesAsync(token);
         }, ct);
 
-        return blockedFailure is not null
-            ? blockedFailure
-            : await GetDetailAsync(requestId, ct);
+        if (blockedFailure is not null)
+            return blockedFailure;
+
+        var detail = await GetDetailAsync(requestId, ct);
+        if (detail.IsSuccess && detail.Result is not null && sidebarNotifier is not null)
+        {
+            var authorId = detail.Result.Summary.AuthorUserId;
+            if (authorId > 0)
+                await sidebarNotifier.NotifyUsersAsync([authorId], "content_moderated", ct);
+            await sidebarNotifier.NotifyAdminsAsync("content_moderated", ct);
+        }
+        return detail;
     }
 
     public async Task<ApiResponse> UnpublishAsync(

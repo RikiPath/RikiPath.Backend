@@ -12,7 +12,8 @@ namespace RikiPath.Application.Services.ContentAuthoring;
 
 /// <summary>Dịch vụ ngân hàng câu hỏi & nhóm đoạn đọc/nghe thống nhất (hỗ trợ version, dò trùng, nháp và gửi duyệt).</summary>
 public sealed class QuestionBankService(
-    IUnitOfWork unitOfWork) : IQuestionBankService
+    IUnitOfWork unitOfWork,
+    ISidebarCounterNotifier? sidebarNotifier = null) : IQuestionBankService
 {
     internal static readonly JsonSerializerOptions JsonOpts = new(JsonSerializerDefaults.Web);
 
@@ -286,6 +287,8 @@ public sealed class QuestionBankService(
 
         await unitOfWork.ContentApprovalRequests.AddAsync(approval, ct);
         await unitOfWork.SaveChangesAsync(ct);
+        if (sidebarNotifier is not null)
+            await sidebarNotifier.NotifyAdminsAsync("question_submitted", ct);
 
         return await GetDetailAsync(item.Id, actorUserId, isAdmin: false, ct);
     }
@@ -610,6 +613,8 @@ public sealed class QuestionBankService(
 
         await unitOfWork.ContentApprovalRequests.AddAsync(approval, ct);
         await unitOfWork.SaveChangesAsync(ct);
+        if (sidebarNotifier is not null)
+            await sidebarNotifier.NotifyAdminsAsync("passage_submitted", ct);
 
         return await GetPassageGroupDetailAsync(passage.Id, actorUserId, isAdmin: false, ct);
     }

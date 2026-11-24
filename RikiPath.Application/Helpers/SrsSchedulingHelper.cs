@@ -114,6 +114,13 @@ public static partial class SrsSchedulingHelper
         return TimeZoneInfo.ConvertTimeFromUtc(utc, tz).Date;
     }
 
+    public static DateTime GetNextStudyDayStartUtc(DateTime utcNow, string? timezoneId = null)
+    {
+        var tz = ResolveTimeZoneOrDefault(timezoneId);
+        var nextLocalMidnight = GetStudyDateInZone(utcNow, timezoneId).AddDays(1);
+        return TimeZoneInfo.ConvertTimeToUtc(DateTime.SpecifyKind(nextLocalMidnight, DateTimeKind.Unspecified), tz);
+    }
+
     public static string? NormalizeSupportedJlptLevel(string? level)
     {
         if (string.IsNullOrWhiteSpace(level)) return null;
@@ -278,6 +285,22 @@ public static partial class SrsSchedulingHelper
         }
 
         return selected;
+    }
+
+    /// <summary>
+    /// Computes the exact actionable due count matching <see cref="SelectActionableDueCards"/>
+    /// without materializing full <see cref="ReviewCard"/> entities.
+    /// </summary>
+    public static int ComputeActionableDueCount(
+        int dueNonNewCount,
+        int dueNewCount,
+        int dailyNewLimit,
+        int reviewedNewToday)
+    {
+        var safeNonNew = Math.Max(0, dueNonNewCount);
+        var safeNew = Math.Max(0, dueNewCount);
+        var remainingNewBudget = Math.Max(0, dailyNewLimit - Math.Max(0, reviewedNewToday));
+        return safeNonNew + Math.Min(safeNew, remainingNewBudget);
     }
 
     private static SrsLearningState ResolvePositiveLearningState(int reps, int intervalDays, double easeFactor)

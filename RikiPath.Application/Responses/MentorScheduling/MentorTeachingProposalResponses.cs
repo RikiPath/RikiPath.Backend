@@ -22,6 +22,8 @@ public sealed class TeachingProposalPolicyResponse
     public List<int> AllowedGridSteps { get; set; } = [15, 30];
     public int OperatingStartMinute { get; set; } = 7 * 60;
     public int OperatingEndMinute { get; set; } = 22 * 60;
+    public int MinimumProposalLeadDays { get; set; } = 7;
+    public int MinimumPublishedEnrollmentDays { get; set; } = 3;
 }
 
 public sealed class QualifiedJlptLevelItem
@@ -31,6 +33,14 @@ public sealed class QualifiedJlptLevelItem
     public string Name { get; set; } = string.Empty;
     public DateTime? VerifiedAtUtc { get; set; }
     public bool IsRecommendedByProfile { get; set; }
+    public bool IsQualified { get; set; } = true;
+    public string? QualificationReason { get; set; }
+    public bool IsAvailableForNewProposal { get; set; } = true;
+    public string? UnavailableReason { get; set; }
+    public string? BlockingStatus { get; set; }
+    public int? BlockingProposalId { get; set; }
+    public int? BlockingCohortId { get; set; }
+    public string? BlockingTitle { get; set; }
 }
 
 public sealed class EligibleCoursePlanItem
@@ -51,6 +61,7 @@ public sealed class MentorWorkloadSummaryResponse
 {
     public int ActiveCohortsCount { get; set; }
     public int PendingProposalsCount { get; set; }
+    public int ChangesRequestedProposalsCount { get; set; }
     public int ApprovedProposalsCount { get; set; }
     public int DraftProposalsCount { get; set; }
     public int WeeklyCommittedSessions { get; set; }
@@ -71,6 +82,14 @@ public sealed class ProposalValidationIssue
     public DateTime? OccurrenceStartUtc { get; set; }
     public DateTime? OccurrenceEndUtc { get; set; }
     public string? ConflictSource { get; set; }
+    public string? ConflictDate { get; set; }
+    public string? ConflictLocalStart { get; set; }
+    public string? ConflictLocalEnd { get; set; }
+    public string? ConflictJlptLevel { get; set; }
+    public string? ConflictStatus { get; set; }
+    public string? ConflictEntityType { get; set; }
+    public int? ConflictProposalId { get; set; }
+    public int? ConflictCohortId { get; set; }
 }
 
 public sealed class GeneratedSessionOccurrenceResponse
@@ -173,6 +192,7 @@ public sealed class MentorTeachingProposalContextResponse
     public bool MentorVerified { get; set; }
     public string? MentorVerificationStatus { get; set; }
     public string? MentorDeclaredJlptLevel { get; set; }
+    public string? MentorVerifiedJlptLevel { get; set; }
     public TeachingProposalPolicyResponse Policy { get; set; } = new();
     public List<QualifiedJlptLevelItem> AvailableLevels { get; set; } = [];
     public List<QualifiedJlptLevelItem> QualifiedLevels { get; set; } = [];
