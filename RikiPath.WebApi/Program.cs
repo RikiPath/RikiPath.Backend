@@ -69,6 +69,10 @@ internal class Program
         if (disableQaBackgroundWorkers && !builder.Environment.IsEnvironment("MentorQA"))
             throw new InvalidOperationException("Background workers may only be disabled for isolated MentorQA verification.");
 
+        // The transcription worker is event-driven and waits without polling when no
+        // upload/retry has requested an AWS transcription.
+        builder.Services.AddSingleton<ContentAudioTranscriptionWakeup>();
+
         builder.Services.Configure<PayOsSettings>(payOsSection);
         builder.Services.Configure<AiSettings>(configuration.GetSection("Ai"));
         builder.Services.AddOptions<AmazonTranscribeSettings>()

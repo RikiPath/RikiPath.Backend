@@ -2,8 +2,10 @@ using System.Collections.Concurrent;
 using System.Net;
 using System.Text.Encodings.Web;
 using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
+using RikiPath.Application;
 using RikiPath.Application.Exceptions;
 using RikiPath.Application.IClients;
 using RikiPath.Application.IServices;
@@ -14,9 +16,11 @@ namespace RikiPath.Application.Services;
 
 public sealed class MockTestExplanationService(IMockTestService mockTests, IClaimService claims,
     IAiMockTestExplanationClient ai, SubscriptionAccessService subscriptions, IMemoryCache cache,
-    ILogger<MockTestExplanationService> logger, IContentAudioTranscriptionService? audioTranscriptions = null)
+    ILogger<MockTestExplanationService> logger, IUnitOfWork unitOfWork,
+    IContentAudioTranscriptionService? audioTranscriptions = null)
 {
     public const string CreditFeature = "mock_test_explanation";
+    private const int ExplanationVersion = 1;
     private const int MaxPromptCharacters = 24_000;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -41,9 +45,24 @@ public sealed class MockTestExplanationService(IMockTestService mockTests, IClai
             return ApiResponse<MockQuestionExplanationResponse>.Fail("Câu hỏi chưa có đáp án chuẩn để AI giải thích.",
                 HttpStatusCode.UnprocessableEntity, "MOCK_AI_ANSWER_KEY_MISSING");
 
-        var key = new ExplanationKey(claims.GetUserClaim().Id, attemptId, questionId);
+        var userId = claims.GetUserClaim().Id;
+        var answer = await unitOfWork.MockTestAnswers.Query()
+            .Include(item => item.MockTestAttempt)
+            .SingleOrDefaultAsync(item => item.MockTestAttemptId == attemptId && item.MockQuestionId == questionId &&
+                !item.IsDeleted && item.MockTestAttempt.UserId == userId && !item.MockTestAttempt.IsDeleted,
+                cancellationToken);
+        if (answer is null)
+            return ApiResponse<MockQuestionExplanationResponse>.NotFound("Không tìm thấy câu trả lời trong lượt thi này.");
+
+        var key = new ExplanationKey(userId, attemptId, questionId);
         if (cache.TryGetValue<MockQuestionExplanationResponse>(key, out var saved) && saved is not null)
             return ApiResponse<MockQuestionExplanationResponse>.Success(saved);
+        saved = ReadPersistedExplanation(answer.AiExplanationJson, questionId);
+        if (answer.AiExplanationVersion == ExplanationVersion && saved is not null)
+        {
+            cache.Set(key, saved, TimeSpan.FromHours(24));
+            return ApiResponse<MockQuestionExplanationResponse>.Success(saved);
+        }
         if (!InProgress.TryAdd(key, 0))
             return ApiResponse<MockQuestionExplanationResponse>.Fail("AI đang giải thích câu hỏi này.",
                 HttpStatusCode.Conflict, "MOCK_AI_IN_PROGRESS", retryable: true);
@@ -81,7 +100,15 @@ public sealed class MockTestExplanationService(IMockTestService mockTests, IClai
                 () => GenerateAsync(key, question, selectedIds, prompt, images, cancellationToken),
                 cancellationToken);
             if (result.IsSuccess && result.Result is not null)
+            {
+                answer.AiExplanationJson = JsonSerializer.Serialize(result.Result, JsonOptions);
+                answer.AiExplanationInputJson = prompt;
+                answer.AiExplanationGeneratedAtUtc = DateTime.UtcNow;
+                answer.AiExplanationVersion = ExplanationVersion;
+                unitOfWork.MockTestAnswers.Update(answer);
+                await unitOfWork.SaveChangesAsync(cancellationToken);
                 cache.Set(key, result.Result, TimeSpan.FromHours(24));
+            }
             return result;
         }
         finally
@@ -185,6 +212,21 @@ public sealed class MockTestExplanationService(IMockTestService mockTests, IClai
             draft.Explanation.Trim(), question.Options.Select(option => new MockOptionExplanation(
                 option.OptionId, selectedIds.Contains(option.OptionId), option.IsCorrect, reasons[option.OptionId])).ToList());
         return true;
+    }
+
+    private static MockQuestionExplanationResponse? ReadPersistedExplanation(string? json, int questionId)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return null;
+        try
+        {
+            var saved = JsonSerializer.Deserialize<MockQuestionExplanationResponse>(json, JsonOptions);
+            return saved?.QuestionId == questionId && !string.IsNullOrWhiteSpace(saved.Explanation) &&
+                saved.Options is not null ? saved : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     private sealed record ExplanationDraft(bool? EnoughEvidence, string? Explanation, List<OptionDraft?>? Options);

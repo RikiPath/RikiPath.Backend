@@ -15,5 +15,14 @@ namespace RikiPath.Domain.Entities
         public string? ResponseJson { get; set; }
 
         public bool IsCorrect { get; set; }
+
+        /// <summary>Persisted AI explanation for this learner's answer, including every option's reason.</summary>
+        public string? AiExplanationJson { get; set; }
+
+        /// <summary>Input snapshot used to generate the persisted explanation, retained for future training/export.</summary>
+        public string? AiExplanationInputJson { get; set; }
+
+        public DateTime? AiExplanationGeneratedAtUtc { get; set; }
+        public int AiExplanationVersion { get; set; }
     }
 }

@@ -6,7 +6,8 @@ using RikiPath.Application.IServices;
 namespace RikiPath.Infrastructure.Services;
 
 public sealed class ContentAudioTranscriptionWorker(
-    IServiceScopeFactory scopes, ILogger<ContentAudioTranscriptionWorker> logger) : BackgroundService
+    IServiceScopeFactory scopes, ContentAudioTranscriptionWakeup wakeup,
+    ILogger<ContentAudioTranscriptionWorker> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -14,17 +15,21 @@ public sealed class ContentAudioTranscriptionWorker(
         {
             try
             {
-                using var scope = scopes.CreateScope();
-                var service = scope.ServiceProvider.GetRequiredService<IContentAudioTranscriptionService>();
-                if (!await service.ProcessNextAsync(stoppingToken))
-                    await Task.Delay(TimeSpan.FromSeconds(3), stoppingToken);
+                // Stay idle without querying PostgreSQL. QueueAsync/RetryAsync signals
+                // this worker only when an explicit transcription request is made.
+                await wakeup.WaitAsync(stoppingToken);
+                while (!stoppingToken.IsCancellationRequested)
+                {
+                    using var scope = scopes.CreateScope();
+                    var service = scope.ServiceProvider.GetRequiredService<IContentAudioTranscriptionService>();
+                    if (!await service.ProcessNextAsync(stoppingToken)) break;
+                }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
-            catch
+            catch (Exception exception)
             {
-                logger.LogWarning("Content audio transcription storage is unavailable; processing will retry.");
-                try { await Task.Delay(TimeSpan.FromSeconds(30), stoppingToken); }
-                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
+                logger.LogError(exception,
+                    "Content audio transcription request failed; it will remain available for an explicit retry.");
             }
         }
     }
