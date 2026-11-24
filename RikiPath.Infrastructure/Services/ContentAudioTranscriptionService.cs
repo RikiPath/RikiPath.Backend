@@ -4,7 +4,6 @@ using System.Text;
 using System.Text.Json;
 using Amazon.Runtime;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Logging;
 using RikiPath.Application.IClients;
 using RikiPath.Application.IServices;
@@ -18,7 +17,8 @@ namespace RikiPath.Infrastructure.Services;
 
 public sealed class ContentAudioTranscriptionService(
     AppDbContext db, AppSettings settings, IFileStorageService files, IContentAudioTranscriber transcriber,
-    ILogger<ContentAudioTranscriptionService> logger, IAwsAudioFileStorageService? awsAudio = null) : IContentAudioTranscriptionService
+    ILogger<ContentAudioTranscriptionService> logger, ContentAudioTranscriptionWakeup wakeup,
+    IAwsAudioFileStorageService? awsAudio = null) : IContentAudioTranscriptionService
 {
     public async Task<ListeningAudioUploadResponse> UploadAsync(
         Stream audio, string fileName, int authorId, CancellationToken ct)
@@ -71,6 +71,7 @@ public sealed class ContentAudioTranscriptionService(
             VALUES ({id}, {normalized}, {hash}, {authorId}, 'Pending', 'ja-JP', 0, {now}, {now}, {now})
             ON CONFLICT ("AudioUrlHash") DO NOTHING;
             """, ct);
+        wakeup.Signal();
         return await GetAsync(normalized, ct);
     }
 
@@ -196,7 +197,8 @@ public sealed class ContentAudioTranscriptionService(
         var rows = await db.ContentAudioTranscriptions.FromSqlInterpolated($"""
             UPDATE "ContentAudioTranscriptions" SET "Status" = 'Processing',
                 "LeaseId" = {leaseId}, "LeaseExpiresAtUtc" = {expires},
-                "AttemptCount" = "AttemptCount" + 1, "UpdatedAtUtc" = {now}
+                "AttemptCount" = "AttemptCount" + 1, "ErrorCode" = NULL,
+                "ErrorMessage" = NULL, "UpdatedAtUtc" = {now}
             WHERE "Id" = (
                 SELECT "Id" FROM "ContentAudioTranscriptions"
                 WHERE ("Status" = 'Pending' AND "NextAttemptAtUtc" <= {now})
@@ -205,26 +207,18 @@ public sealed class ContentAudioTranscriptionService(
             ) RETURNING *;
             """).AsNoTracking().ToListAsync(ct);
         var item = rows.SingleOrDefault();
-        if (item is null)
-        {
-            // A draft may be approved while its transcription finishes. Catch questions published after that commit.
-            var completedAudio = await db.ContentAudioTranscriptions.AsNoTracking().Where(audio => audio.Status == "Completed" &&
-                    db.MockQuestions.Any(question => !question.IsDeleted && question.AudioUrl == audio.AudioUrl && question.AudioTranscript == null))
-                .OrderBy(audio => audio.CompletedAtUtc).FirstOrDefaultAsync(ct);
-            if (completedAudio is null) return false;
-            await SynchronizeQuestionsAsync(completedAudio.AudioUrl, Response(completedAudio), completedAudio.RawTranscriptJson, ct);
-            return true;
-        }
+        if (item is null) return false;
 
-        IDbContextTransaction? transaction = null;
         try
         {
             var result = await transcriber.TranscribeListeningAsync(item.AudioUrl, ct);
             if (string.IsNullOrWhiteSpace(result.TranscribedText))
                 throw new InvalidOperationException("No speech recognized.");
             now = DateTime.UtcNow;
-            transaction = await db.Database.BeginTransactionAsync(ct);
-            var completed = await db.ContentAudioTranscriptions.Where(x => x.Id == item.Id && x.LeaseId == leaseId)
+            // The transcript is returned to the author through this tracking row.
+            // Do not write it into MockQuestions automatically: the author copies
+            // the Japanese text into the Excel field manually.
+            await db.ContentAudioTranscriptions.Where(x => x.Id == item.Id && x.LeaseId == leaseId)
                 .ExecuteUpdateAsync(update => update.SetProperty(x => x.Status, "Completed")
                     .SetProperty(x => x.Transcript, result.TranscribedText)
                     .SetProperty(x => x.RawTranscriptJson, result.RawResponseJson)
@@ -232,16 +226,9 @@ public sealed class ContentAudioTranscriptionService(
                     .SetProperty(x => x.CompletedAtUtc, now).SetProperty(x => x.UpdatedAtUtc, now)
                     .SetProperty(x => x.LeaseId, (Guid?)null).SetProperty(x => x.LeaseExpiresAtUtc, (DateTime?)null)
                     .SetProperty(x => x.ErrorCode, (string?)null).SetProperty(x => x.ErrorMessage, (string?)null), ct);
-            if (completed == 1)
-            {
-                var response = Response(item) with { Status = "Completed", Transcript = result.TranscribedText };
-                await SynchronizeQuestionsAsync(item.AudioUrl, response, result.RawResponseJson, ct);
-            }
-            await transaction.CommitAsync(ct);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            await RollbackQuietlyAsync(transaction);
             using var release = new CancellationTokenSource(TimeSpan.FromSeconds(10));
             try
             {
@@ -255,58 +242,24 @@ public sealed class ContentAudioTranscriptionService(
         }
         catch (Exception exception)
         {
-            await RollbackQuietlyAsync(transaction);
             var code = exception is AmazonServiceException aws &&
                 aws.ErrorCode is "AccessDenied" or "AccessDeniedException" or "UnauthorizedException"
                 ? "AUDIO_TRANSCRIPTION_ACCESS_DENIED" : "AUDIO_TRANSCRIPTION_FAILED";
-            logger.LogWarning("Content audio transcription {TranscriptionId} failed on attempt {AttemptCount} ({ErrorCode}).",
+            logger.LogWarning(exception,
+                "Content audio transcription {TranscriptionId} failed on attempt {AttemptCount} ({ErrorCode}).",
                 item.Id, item.AttemptCount, code);
             now = DateTime.UtcNow;
             await db.ContentAudioTranscriptions.Where(x => x.Id == item.Id && x.LeaseId == leaseId)
-                .ExecuteUpdateAsync(update => update.SetProperty(x => x.Status, item.AttemptCount < 3 ? "Pending" : "Failed")
+                .ExecuteUpdateAsync(update => update.SetProperty(x => x.Status, "Failed")
                     .SetProperty(x => x.ErrorCode, code)
                     .SetProperty(x => x.ErrorMessage, code == "AUDIO_TRANSCRIPTION_ACCESS_DENIED"
                         ? "AWS chưa cấp đủ quyền đọc audio hoặc nhận dạng tiếng Nhật."
                         : "Chưa nhận dạng được audio. Kiểm tra file MP3 và cấu hình AWS rồi thử lại.")
-                    .SetProperty(x => x.NextAttemptAtUtc, now.AddSeconds(30 * item.AttemptCount))
+                    .SetProperty(x => x.NextAttemptAtUtc, now)
                     .SetProperty(x => x.UpdatedAtUtc, now).SetProperty(x => x.LeaseId, (Guid?)null)
                     .SetProperty(x => x.LeaseExpiresAtUtc, (DateTime?)null), ct);
         }
-        finally
-        {
-            if (transaction is not null)
-                await transaction.DisposeAsync();
-        }
         return true;
-    }
-
-    private static async Task RollbackQuietlyAsync(IDbContextTransaction? transaction)
-    {
-        if (transaction is null) return;
-        try
-        {
-            // Cleanup must not reuse a request/worker token that was already
-            // cancelled; otherwise EF can mask the original failure with 20205.
-            await transaction.RollbackAsync(CancellationToken.None);
-        }
-        catch
-        {
-            // The connection is disposed in the caller's finally block.
-        }
-    }
-
-    private async Task SynchronizeQuestionsAsync(string audioUrl, ContentAudioTranscriptionResponse response, string? raw, CancellationToken ct)
-    {
-        var questions = await db.MockQuestions.Where(question => !question.IsDeleted && question.AudioUrl == audioUrl && question.AudioTranscript == null)
-            .ToListAsync(ct);
-        foreach (var question in questions)
-        {
-            var data = string.IsNullOrWhiteSpace(question.InteractionDataJson) ? (JsonElement?)null
-                : JsonSerializer.Deserialize<JsonElement>(question.InteractionDataJson);
-            var selected = ForQuestion(response, data, raw);
-            question.AudioTranscript = selected.Status == "Completed" ? selected.Transcript : string.Empty;
-        }
-        await db.SaveChangesAsync(ct);
     }
 
     private ContentAudioTranscriptionResponse Response(ContentAudioTranscription item)

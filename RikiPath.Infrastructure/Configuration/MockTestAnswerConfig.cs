@@ -12,6 +12,9 @@ namespace RikiPath.Infrastructure.Configuration
             builder.Property(x => x.MockTestAttemptId).HasColumnName("PracticeTestAttemptId");
             builder.Property(x => x.MockQuestionId).HasColumnName("PracticeQuestionId");
             builder.Property(x => x.ResponseJson).HasColumnType("jsonb");
+            builder.Property(x => x.AiExplanationJson).HasColumnType("jsonb");
+            builder.Property(x => x.AiExplanationInputJson).HasColumnType("jsonb");
+            builder.Property(x => x.AiExplanationGeneratedAtUtc).HasColumnType("timestamp with time zone");
 
             builder.HasOne(x => x.MockTestAttempt)
                 .WithMany(x => x.Answers)
