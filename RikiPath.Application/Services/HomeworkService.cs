@@ -29,7 +29,8 @@ public sealed partial class HomeworkService(
     ISpeechRecognitionClient? speechRecognition = null,
     IEmailService? emailService = null,
     IEmailTemplateService? emailTemplates = null,
-    AppSettings? appSettings = null)
+    AppSettings? appSettings = null,
+    ISidebarCounterNotifier? sidebarNotifier = null)
 {
     private static readonly TimeSpan VietnamOffset = TimeSpan.FromHours(7);
     private static readonly string[] SupportedLevels = ["N5", "N4", "N3", "N2", "N1"];
@@ -152,6 +153,8 @@ public sealed partial class HomeworkService(
             created.Add(assignment);
         }
         await unit.SaveChangesAsync(ct);
+        if (sidebarNotifier is not null && created.Count > 0)
+            await sidebarNotifier.NotifyUsersAsync(recipients.Select(r => r.LearnerId), "homework_assigned", ct);
         return ApiResponse<List<int>>.Created(created.Select(a => a.Id).ToList());
     }
 
@@ -290,6 +293,7 @@ public sealed partial class HomeworkService(
     {
         var userId = claims.GetUserClaim().Id;
         var response = ApiResponse<HomeworkSubmissionDetail>.NotFound("Không tìm thấy bài tập được giao.");
+        int? notifyMentorId = null;
         var text = request.TextContent?.Trim();
         var link = request.FileUrl?.Trim();
         if (!string.IsNullOrEmpty(link) &&
@@ -373,6 +377,7 @@ public sealed partial class HomeworkService(
                 assignment.AiDraftUnavailableReason = null;
                 assignment.Status = "Submitted";
                 await unit.SaveChangesAsync(token);
+                notifyMentorId = assignment.MentorId;
                 response = ApiResponse<HomeworkSubmissionDetail>.Success(ToSubmission(existing), HttpStatusCode.OK, "Cập nhật bài nộp thành công.");
                 return;
             }
@@ -394,8 +399,11 @@ public sealed partial class HomeworkService(
             await unit.HomeworkSubmissions.AddAsync(submission, token);
             assignment.Status = "Submitted";
             await unit.SaveChangesAsync(token);
+            notifyMentorId = assignment.MentorId;
             response = ApiResponse<HomeworkSubmissionDetail>.Created(ToSubmission(submission));
         }, ct);
+        if (response.IsSuccess && notifyMentorId.HasValue && sidebarNotifier is not null)
+            await sidebarNotifier.NotifyUsersAsync([notifyMentorId.Value], "homework_submitted", ct);
         return response;
     }
 

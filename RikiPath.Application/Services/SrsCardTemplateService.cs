@@ -10,7 +10,9 @@ using RikiPath.Domain.Enums;
 
 namespace RikiPath.Application.Services;
 
-public class SrsCardTemplateService(IUnitOfWork unitOfWork) : ISrsCardTemplateService
+public class SrsCardTemplateService(
+    IUnitOfWork unitOfWork,
+    ISidebarCounterNotifier? sidebarNotifier = null) : ISrsCardTemplateService
 {
     public async Task<ApiResponse<List<SrsCardTemplateResponse>>> GetPublishedForLearnerAsync(
         int userId,
@@ -241,6 +243,8 @@ public class SrsCardTemplateService(IUnitOfWork unitOfWork) : ISrsCardTemplateSe
 
         unitOfWork.SrsCardTemplates.Update(entity);
         await unitOfWork.SaveChangesAsync(cancellationToken);
+        if (sidebarNotifier is not null)
+            await sidebarNotifier.NotifyAdminsAsync("srs_template_submitted", cancellationToken);
         return ApiResponse<SrsCardTemplateResponse>.Success(Map(entity));
     }
 
@@ -322,7 +326,13 @@ public class SrsCardTemplateService(IUnitOfWork unitOfWork) : ISrsCardTemplateSe
             updated = await unitOfWork.SrsCardTemplates.GetDetailedByIdAsync(entity.Id, token) ?? entity;
         }, cancellationToken);
 
-        return error ?? ApiResponse<SrsCardTemplateResponse>.Success(Map(updated!));
+        if (error is not null)
+            return error;
+        if (updated?.SubmittedByUserId is int submitterId && sidebarNotifier is not null)
+            await sidebarNotifier.NotifyUsersAsync([submitterId], "srs_template_reviewed", cancellationToken);
+        if (sidebarNotifier is not null)
+            await sidebarNotifier.NotifyAdminsAsync("srs_template_reviewed", cancellationToken);
+        return ApiResponse<SrsCardTemplateResponse>.Success(Map(updated!));
     }
 
     public async Task<ApiResponse<SrsCardTemplateResponse>> TogglePublishAsync(
@@ -394,7 +404,13 @@ public class SrsCardTemplateService(IUnitOfWork unitOfWork) : ISrsCardTemplateSe
             updated = await unitOfWork.SrsCardTemplates.GetDetailedByIdAsync(entity.Id, token) ?? entity;
         }, cancellationToken);
 
-        return error ?? ApiResponse<SrsCardTemplateResponse>.Success(Map(updated!));
+        if (error is not null)
+            return error;
+        if (updated?.SubmittedByUserId is int submitterId && sidebarNotifier is not null)
+            await sidebarNotifier.NotifyUsersAsync([submitterId], "srs_template_reviewed", cancellationToken);
+        if (sidebarNotifier is not null)
+            await sidebarNotifier.NotifyAdminsAsync("srs_template_reviewed", cancellationToken);
+        return ApiResponse<SrsCardTemplateResponse>.Success(Map(updated!));
     }
 
     private sealed record ResolvedTemplateFields(

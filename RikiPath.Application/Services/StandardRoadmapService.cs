@@ -492,6 +492,11 @@ public sealed class StandardRoadmapService(
             var flatLessons = stages.SelectMany(s => s.Lessons).ToList();
             for (var i = 0; i < flatLessons.Count; i++) flatLessons[i].SortOrder = i + 1;
 
+            // Pass 4: the recommended roadmap is strictly sequential (no skipping). Runs before ranking so the
+            // recommended next lesson is always the first open step, and CheckAssessmentLessonAsync (lesson detail,
+            // completion, Quick Check) rejects any later step with SELF_STUDY_LESSON_LOCKED.
+            ApplySequentialLocks(stages);
+
             foreach (var skill in skillAssessmentsByCode.Values)
             {
                 skill.Assessment.SuggestedStudySharePercent = flatLessons.Count == 0
@@ -565,6 +570,39 @@ public sealed class StandardRoadmapService(
             logger?.LogError(exception, "Failed to load the adaptive self-study roadmap.");
             return ApiResponse<StandardRoadmapResponse>.Fail(
                 "Không thể tải lộ trình tự học thích ứng.", HttpStatusCode.InternalServerError);
+        }
+    }
+
+    /// <summary>
+    /// Sequential gate over the ordered roadmap: once a step is not cleared, every later unfinished lesson is locked
+    /// and every later checkpoint stays closed. Lessons clear by passing their Quick Check (or by being studied when
+    /// they have none); a Group Quiz / Stage Assessment gates the following steps only when it has questions, so an
+    /// empty checkpoint never deadlocks the roadmap. Completed lessons stay open for review; explicit prerequisites
+    /// from Pass 2 are kept.
+    /// </summary>
+    private static void ApplySequentialLocks(List<StandardRoadmapStageResponse> stages)
+    {
+        const string checkpointLockReason = "Hoàn thành các bước trước trong lộ trình để mở bài kiểm tra này.";
+        var blocked = false;
+        foreach (var stage in stages.OrderBy(s => s.SortOrder))
+        {
+            foreach (var lesson in stage.Lessons.OrderBy(l => l.SortOrder))
+            {
+                if (blocked && !lesson.IsCompleted) lesson.IsLocked = true;
+                if (!lesson.IsCompleted) blocked = true;
+            }
+
+            foreach (var checkpoint in new[] { stage.GroupQuiz, stage.StageAssessment })
+            {
+                if (checkpoint is null || checkpoint.QuestionCount <= 0) continue;
+                if (blocked && !checkpoint.IsPassed && checkpoint.IsUnlocked)
+                {
+                    checkpoint.IsUnlocked = false;
+                    checkpoint.Status = "Locked";
+                    checkpoint.LockReason = checkpointLockReason;
+                }
+                if (!checkpoint.IsPassed) blocked = true;
+            }
         }
     }
 

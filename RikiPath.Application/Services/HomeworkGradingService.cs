@@ -406,7 +406,11 @@ public sealed partial class HomeworkService
         }, ct);
 
         if (emailPayload is { } graded)
+        {
             await SendHomeworkGradedEmailBestEffortAsync(graded.LearnerId, graded.Title, graded.CohortId, graded.Score, graded.Feedback, graded.Passed, ct);
+            if (sidebarNotifier is not null)
+                await sidebarNotifier.NotifyUsersAsync([graded.LearnerId, actor.Id], "homework_graded", ct);
+        }
 
         return response;
     }
