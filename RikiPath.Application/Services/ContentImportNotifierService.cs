@@ -9,7 +9,8 @@ namespace RikiPath.Application.Services
 {
     public sealed class ContentApprovalNotifierService(
         IUnitOfWork unitOfWork,
-        ILogger<ContentApprovalNotifierService> logger) : IContentApprovalNotifierService
+        ILogger<ContentApprovalNotifierService> logger,
+        ISidebarCounterNotifier? sidebarNotifier = null) : IContentApprovalNotifierService
     {
         public async Task NotifyAdminsOnRequestCreatedAsync(int requestCount, string batchName, CancellationToken cancellationToken)
         {
@@ -36,6 +37,8 @@ namespace RikiPath.Application.Services
 
                 await unitOfWork.Notifications.AddRangeAsync(notifications, cancellationToken);
                 await unitOfWork.SaveChangesAsync(cancellationToken);
+                if (sidebarNotifier is not null)
+                    await sidebarNotifier.NotifyUsersAsync(adminUserIds, "content_approval_submitted", cancellationToken);
             }
             catch (Exception ex)
             {
@@ -100,6 +103,11 @@ namespace RikiPath.Application.Services
 
                 await unitOfWork.Notifications.AddAsync(notification, cancellationToken);
                 await unitOfWork.SaveChangesAsync(cancellationToken);
+                if (sidebarNotifier is not null)
+                {
+                    await sidebarNotifier.NotifyUsersAsync([authorId], "content_approval_reviewed", cancellationToken);
+                    await sidebarNotifier.NotifyAdminsAsync("content_approval_reviewed", cancellationToken);
+                }
             }
             catch (Exception ex)
             {

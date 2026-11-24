@@ -8,6 +8,8 @@ public sealed record TeachingConflictOptions
 {
     /// <summary>Bỏ qua các buổi của lớp này (lớp đang được sửa/thay Mentor).</summary>
     public int? ExcludeCohortId { get; init; }
+    /// <summary>Bỏ qua đề xuất mở lớp này khi kiểm tra (tránh tự xung đột khi chỉnh sửa/gửi lại).</summary>
+    public int? ExcludeProposalId { get; init; }
     /// <summary>Bỏ qua các khung giờ này (ví dụ buổi đang được dời đi).</summary>
     public IReadOnlyCollection<int>? ExcludeAvailabilityIds { get; init; }
     public int? RestMinutes { get; init; }
@@ -29,7 +31,10 @@ public sealed record TeachingConflict(
     string? CohortName,
     DateTime? CommitmentStartUtc,
     DateTime? CommitmentEndUtc,
-    string Message);
+    string Message,
+    string? JlptLevelCode = null,
+    string? CommitmentStatus = null,
+    int? ProposalId = null);
 
 public sealed record TeachingConflictReport(bool IsValid, IReadOnlyList<TeachingConflict> Conflicts)
 {

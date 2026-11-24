@@ -20,6 +20,98 @@ public sealed class MentorSlotPolicy
     public const int MinimumBookingLeadHours = 2;
     public const int DefaultDailyBookingCap = 4;
 
+    /// <summary>Số ngày tối thiểu giữa thời điểm gửi đề xuất mở lớp và ngày khai giảng buổi đầu tiên (giờ Việt Nam).</summary>
+    public const int MinimumProposalLeadDays = 7;
+
+    /// <summary>Số ngày tối thiểu giữa thời điểm duyệt/công bố lớp và ngày diễn ra buổi học đầu tiên để tuyển sinh.</summary>
+    public const int MinimumPublishedEnrollmentDays = 3;
+
+    /// <summary>
+    /// Bậc trình độ JLPT chuẩn để so sánh điều kiện giảng dạy (không so sánh chuỗi máy móc):
+    /// N5 = 1, N4 = 2, N3 = 3, N2 = 4, N1 = 5; không hợp lệ = 0.
+    /// </summary>
+    public static int GetJlptRank(string? code) => (code?.Trim().ToUpperInvariant()) switch
+    {
+        "N5" => 1,
+        "N4" => 2,
+        "N3" => 3,
+        "N2" => 4,
+        "N1" => 5,
+        _ => 0,
+    };
+
+    public static string? GetJlptCodeFromRank(int rank) => rank switch
+    {
+        1 => "N5",
+        2 => "N4",
+        3 => "N3",
+        4 => "N2",
+        5 => "N1",
+        _ => null,
+    };
+
+    /// <summary>Phạm vi mở lớp nhóm của hệ thống là N5–N2 (rank 1..4).</summary>
+    public static bool IsSupportedClassLevel(string? code) => GetJlptRank(code) is >= 1 and <= 4;
+
+    /// <summary>
+    /// Giáo viên chỉ được đăng ký giảng dạy cấp độ N5–N2 có bậc bằng hoặc thấp hơn trình độ chuyên môn đã xác minh.
+    /// N1/N2 -> N5..N2; N3 -> N5..N3; N4 -> N5..N4; N5 -> N5; chưa xác minh (0) -> không được mở lớp.
+    /// </summary>
+    public static bool CanMentorTeachLevel(int verifiedMentorRank, string? targetLevelCode)
+    {
+        var targetRank = GetJlptRank(targetLevelCode);
+        return verifiedMentorRank > 0 && targetRank is >= 1 and <= 4 && targetRank <= verifiedMentorRank;
+    }
+
+    /// <summary>
+    /// Chuẩn hóa sinh lịch định kỳ theo đúng <paramref name="durationWeeks"/> chu kỳ 7 ngày liên tiếp
+    /// neo tại <paramref name="expectedStartDate"/> (mỗi thứ đã chọn xuất hiện đúng 1 lần trong mỗi chu kỳ 7 ngày,
+    /// giữ đủ nhiều ca cùng ngày, buổi 1 luôn khớp <paramref name="expectedStartDate"/> khi thứ trùng lịch đã chọn).
+    /// </summary>
+    public static List<(int SessionNumber, int WeekNumber, int Weekday, DateOnly LocalDate, int StartMinute, DateTime StartUtc, DateTime EndUtc)>
+        ExpandRecurringSchedule(
+            DateOnly expectedStartDate,
+            IReadOnlyList<(int Weekday, int StartMinute)> weeklySessions,
+            int durationWeeks,
+            int sessionMinutes,
+            TimeZoneInfo? businessZone = null)
+    {
+        if (weeklySessions is null || weeklySessions.Count == 0 || durationWeeks <= 0 || durationWeeks > 52 || sessionMinutes <= 0)
+            return [];
+
+        var tz = businessZone ?? TimeZoneInfo.FindSystemTimeZoneById(BusinessTimeZoneId);
+        var startWeekday = (int)expectedStartDate.DayOfWeek;
+
+        // Khử trùng (Weekday, StartMinute) và sắp xếp theo khoảng cách từ ngày khai giảng trong chu kỳ 7 ngày (0..6), rồi theo giờ bắt đầu.
+        var ordered = weeklySessions
+            .Distinct()
+            .Select(s => (s.Weekday, s.StartMinute, Offset: ((s.Weekday - startWeekday) % 7 + 7) % 7))
+            .OrderBy(x => x.Offset)
+            .ThenBy(x => x.StartMinute)
+            .ToList();
+
+        var result = new List<(int, int, int, DateOnly, int, DateTime, DateTime)>(durationWeeks * ordered.Count);
+        var sessionNum = 0;
+
+        for (var cycle = 0; cycle < durationWeeks; cycle++)
+        {
+            var cycleAnchor = expectedStartDate.AddDays(cycle * 7);
+            foreach (var item in ordered)
+            {
+                var localDate = cycleAnchor.AddDays(item.Offset);
+                var localDt = DateTime.SpecifyKind(
+                    localDate.ToDateTime(TimeOnly.MinValue).AddMinutes(item.StartMinute),
+                    DateTimeKind.Unspecified);
+                var startUtc = TimeZoneInfo.ConvertTimeToUtc(localDt, tz);
+                var endUtc = startUtc.AddMinutes(sessionMinutes);
+                sessionNum++;
+                result.Add((sessionNum, cycle + 1, item.Weekday, localDate, item.StartMinute, startUtc, endUtc));
+            }
+        }
+
+        return result;
+    }
+
     private static readonly MentorDaypartWindow[] DefaultWindows =
     [
         new(MentorDaypart.Morning, new TimeOnly(7, 0), new TimeOnly(11, 0)),

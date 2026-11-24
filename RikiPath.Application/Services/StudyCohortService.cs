@@ -195,7 +195,7 @@ public sealed partial class StudyCourseService
                 && (x.EndTime - x.StartTime).TotalMinutes == p.SessionMinutes
                 && x.MaxLearners == x.GroupPolicy.MaxLearners
                 && x.BookedCount == 0),
-                "Lịch lớp phải theo chính sách Admin, cùng thời lượng gói và chưa có người đặt.");
+                "Lịch lớp phải theo chính sách quản trị viên, cùng thời lượng gói và chưa có người đặt.");
             // Lớp nhóm: 1 Mentor chính, 1..sức chứa chính sách học viên (không chờ đủ sĩ số để mở lớp).
             var cohortPolicy = slots[0].GroupPolicy!;
             Rule(r.Capacity >= 1 && slots.All(x => r.Capacity <= x.GroupPolicy!.MaxLearners), "COURSE_PLAN_INVALID_CAPACITY",
@@ -234,8 +234,22 @@ public sealed partial class StudyCourseService
                 c.SourceProposalId = srcProposal!.Id;
             }
             c.StartsAt = slots[0].StartTime; c.EndsAt = slots[^1].EndTime;
+            var isPublishingNow = r.Publish && (!id.HasValue || c.Status != "Published");
             c.Status = r.Publish ? "Published" : "Draft";
             if (r.Publish) Require(p.IsPublished, "Gói cần được mở bán trước khi công bố lớp.");
+            if (isPublishingNow)
+            {
+                var nowUtc = DateTime.UtcNow;
+                Rule(MentorTeachingConflictService.Utc(slots[0].StartTime) > nowUtc,
+                    "SESSION_ALREADY_STARTED",
+                    "Buổi học đầu tiên đã trôi qua hoặc đã bắt đầu. Vui lòng cập nhật lịch trước khi công bố lớp.");
+                var todayVn = DateOnly.FromDateTime(LocalTime(nowUtc));
+                var firstSessionDate = DateOnly.FromDateTime(LocalTime(slots[0].StartTime));
+                var minEnrollDays = RikiPath.Domain.MentorScheduling.MentorSlotPolicy.MinimumPublishedEnrollmentDays;
+                Rule(firstSessionDate >= todayVn.AddDays(minEnrollDays),
+                    "INSUFFICIENT_ENROLLMENT_LEAD_TIME",
+                    "Chưa đủ thời gian tuyển sinh trước buổi học đầu tiên.");
+            }
             var old = c.Sessions.ToDictionary(x => x.AvailabilityId);
             c.Sessions.RemoveAll(x => !r.AvailabilityIds.Contains(x.AvailabilityId));
             for (var i = 0; i < slots.Count; i++)
@@ -271,8 +285,8 @@ public sealed partial class StudyCourseService
         return d.AddDays(-(((int)d.DayOfWeek + 6) % 7));
     }
 
-    // Lịch toàn khóa (gói chuẩn): đúng {weeks} tuần liên tiếp (giờ Việt Nam, tuần bắt đầu thứ 2), mỗi tuần đúng {perWeek} buổi,
-    // mỗi buổi đúng {minutes} phút. Báo rõ tuần sai đầu tiên.
+    // Lịch toàn khóa (gói chuẩn): đúng {weeks} chu kỳ 7 ngày liên tiếp neo tại buổi học đầu tiên (giờ Việt Nam),
+    // mỗi chu kỳ đúng {perWeek} buổi, mỗi buổi đúng {minutes} phút. Báo rõ chu kỳ sai đầu tiên.
     private static void EnsureWholeCourseSchedule(IReadOnlyList<MentorAvailability> slots, int weeks, int perWeek, int minutes)
     {
         const string code = "COHORT_SCHEDULE_INCOMPLETE";
@@ -280,19 +294,23 @@ public sealed partial class StudyCourseService
             .FirstOrDefault(x => (x.Slot.EndTime - x.Slot.StartTime).TotalMinutes != minutes);
         Rule(wrongLength.Slot is null, code,
             $"Buổi {wrongLength.Number} không đúng thời lượng {minutes} phút của gói.");
-        var firstWeek = LocalWeekStartOf(slots[0].StartTime);
-        var byWeek = slots.GroupBy(s => (LocalWeekStartOf(s.StartTime).DayNumber - firstWeek.DayNumber) / 7)
+        var firstLocalDate = DateOnly.FromDateTime(LocalTime(slots[0].StartTime));
+        var byCycle = slots.GroupBy(s =>
+            {
+                var dayDelta = DateOnly.FromDateTime(LocalTime(s.StartTime)).DayNumber - firstLocalDate.DayNumber;
+                return dayDelta >= 0 ? dayDelta / 7 : -1;
+            })
             .ToDictionary(g => g.Key, g => g.Count());
-        string Label(int index) => firstWeek.AddDays(7 * index).ToString("dd/MM/yyyy", System.Globalization.CultureInfo.InvariantCulture);
-        for (var week = 0; week < weeks; week++)
+        string Label(int index) => firstLocalDate.AddDays(7 * index).ToString("dd/MM/yyyy", System.Globalization.CultureInfo.InvariantCulture);
+        for (var cycle = 0; cycle < weeks; cycle++)
         {
-            var count = byWeek.GetValueOrDefault(week);
+            var count = byCycle.GetValueOrDefault(cycle);
             Rule(count == perWeek, code,
-                $"Tuần {week + 1} (bắt đầu thứ 2 {Label(week)}) có {count} buổi; khóa học cần đúng {perWeek} buổi mỗi tuần trong {weeks} tuần liên tiếp.");
+                $"Tuần {cycle + 1} (từ {Label(cycle)}) có {count} buổi; khóa học cần đúng {perWeek} buổi mỗi tuần trong {weeks} tuần liên tiếp.");
         }
-        var beyond = byWeek.Keys.Where(k => k >= weeks).OrderBy(k => k).Cast<int?>().FirstOrDefault();
+        var beyond = byCycle.Keys.Where(k => k < 0 || k >= weeks).OrderBy(k => k).Cast<int?>().FirstOrDefault();
         Rule(beyond is null, code,
-            $"Tuần {beyond + 1} (bắt đầu thứ 2 {Label(beyond ?? 0)}) nằm ngoài {weeks} tuần của khóa học; khóa học cần đúng {perWeek} buổi mỗi tuần trong {weeks} tuần liên tiếp.");
+            $"Buổi học rơi ngoài {weeks} tuần liên tiếp của khóa học; khóa học cần đúng {perWeek} buổi mỗi tuần trong {weeks} tuần liên tiếp.");
     }
 
     // Mẫu lịch học theo giờ Việt Nam: các cặp (thứ, giờ bắt đầu, giờ kết thúc) khác nhau.

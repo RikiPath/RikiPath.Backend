@@ -11,7 +11,9 @@ using RikiPath.Domain.Enums;
 namespace RikiPath.Application.Services.ContentAuthoring;
 
 /// <summary>Dịch vụ lắp ráp Bộ đề luyện tập, Luyện tập hỗn hợp và Đề thi thử JLPT từ Ngân hàng câu hỏi thống nhất.</summary>
-public sealed class ExamBuilderService(IUnitOfWork unitOfWork) : IExamBuilderService
+public sealed class ExamBuilderService(
+    IUnitOfWork unitOfWork,
+    ISidebarCounterNotifier? sidebarNotifier = null) : IExamBuilderService
 {
     private static readonly JsonSerializerOptions JsonOpts = new(JsonSerializerDefaults.Web)
     {
@@ -432,6 +434,8 @@ public sealed class ExamBuilderService(IUnitOfWork unitOfWork) : IExamBuilderSer
 
         await unitOfWork.ContentApprovalRequests.AddAsync(approval, ct);
         await unitOfWork.SaveChangesAsync(ct);
+        if (sidebarNotifier is not null)
+            await sidebarNotifier.NotifyAdminsAsync("exam_submitted", ct);
 
         return await GetDetailAsync(test.Id, actorUserId, isAdmin: false, ct);
     }

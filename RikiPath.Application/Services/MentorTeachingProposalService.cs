@@ -16,13 +16,16 @@ public sealed class MentorTeachingProposalService(
     IUnitOfWork unitOfWork,
     IClaimService claimService,
     IMentorGroupPolicyService groupPolicyService,
-    IMentorTeachingConflictService teachingConflictService)
+    IMentorTeachingConflictService teachingConflictService,
+    ISidebarCounterNotifier? sidebarNotifier = null)
     : IMentorTeachingProposalService
 {
     private const int DefaultOperatingStartMinute = 7 * 60;   // 07:00 VN
     private const int DefaultOperatingEndMinute = 22 * 60;    // 22:00 VN
     private const int DefaultGridStepMinutes = 15;
     private const int MaxOptionalAttachments = 5;
+    private static readonly HashSet<string> SupportedClassJlptCodes =
+        new(["N5", "N4", "N3", "N2"], StringComparer.OrdinalIgnoreCase);
 
     private static readonly JsonSerializerOptions JsonOpts = new(JsonSerializerDefaults.Web);
 
@@ -48,11 +51,20 @@ public sealed class MentorTeachingProposalService(
         if (mentor is null)
             return ApiResponse<MentorTeachingProposalContextResponse>.NotFound("Không tìm thấy tài khoản Giáo viên.");
 
-        var existingQualMap = await unitOfWork.MentorTeachingQualifications.Query().AsNoTracking()
+        var existingQualRows = await unitOfWork.MentorTeachingQualifications.Query().AsNoTracking()
+            .Include(q => q.CertificateLevel)
             .Where(q => q.MentorUserId == claims.Id && q.IsActive && q.RevokedAtUtc == null)
-            .ToDictionaryAsync(q => q.CertificateLevelId, q => (DateTime?)q.VerifiedAtUtc, ct);
+            .Select(q => new { q.CertificateLevelId, Code = q.CertificateLevel.Code, q.VerifiedAtUtc })
+            .ToListAsync(ct);
+        var existingQualMap = existingQualRows.ToDictionary(q => q.CertificateLevelId, q => (DateTime?)q.VerifiedAtUtc);
 
+        var mentorVerified = mentor.MentorProfile?.VerificationStatus == MentorVerificationStatus.Approved;
         var profileJlptCode = mentor.MentorProfile?.JlptLevel?.Trim();
+        var highestVerifiedRank = ResolveHighestVerifiedRank(
+            mentor.MentorProfile,
+            existingQualRows.Select(q => q.Code));
+        var highestVerifiedCode = MentorSlotPolicy.GetJlptCodeFromRank(highestVerifiedRank);
+
         var activeLevelsRaw = await unitOfWork.CertificateLevels.Query().AsNoTracking()
             .Include(l => l.CertificateType)
             .Where(l => !l.IsDeleted && l.CertificateType != null && !l.CertificateType.IsDeleted && l.CertificateType.IsActive)
@@ -62,15 +74,48 @@ public sealed class MentorTeachingProposalService(
             .Select(l => new { l.Id, l.Code, l.Description })
             .ToListAsync(ct);
 
+        var levelBlockingMap = await BuildLevelBlockingMapAsync(claims.Id, excludeProposalId: null, nowUtc, ct);
+
         var availableLevels = activeLevelsRaw
-            .Select(l => new QualifiedJlptLevelItem
+            .Where(l => SupportedClassJlptCodes.Contains((l.Code ?? string.Empty).Trim()))
+            .Select(l =>
             {
-                CertificateLevelId = l.Id,
-                Code = l.Code,
-                Name = string.IsNullOrWhiteSpace(l.Description) ? $"JLPT {l.Code}" : l.Description,
-                VerifiedAtUtc = existingQualMap.GetValueOrDefault(l.Id),
-                IsRecommendedByProfile = !string.IsNullOrWhiteSpace(profileJlptCode)
-                    && string.Equals(l.Code, profileJlptCode, StringComparison.OrdinalIgnoreCase),
+                levelBlockingMap.TryGetValue(l.Id, out var block);
+                var isQualified = mentorVerified && MentorSlotPolicy.CanMentorTeachLevel(highestVerifiedRank, l.Code);
+                string? qualificationReason = null;
+                if (!mentorVerified || highestVerifiedRank <= 0)
+                {
+                    qualificationReason = "Chưa có chứng chỉ chuyên môn được xác minh.";
+                }
+                else if (!isQualified)
+                {
+                    qualificationReason = "Không đủ trình độ chuyên môn.";
+                }
+
+                var isAvailable = isQualified && block is null;
+                var unavailableReason = !isQualified
+                    ? qualificationReason
+                    : FormatLevelBlockingReason(l.Code, block);
+
+                return new QualifiedJlptLevelItem
+                {
+                    CertificateLevelId = l.Id,
+                    Code = l.Code,
+                    Name = string.IsNullOrWhiteSpace(l.Description) ? $"JLPT {l.Code}" : l.Description,
+                    VerifiedAtUtc = existingQualMap.GetValueOrDefault(l.Id),
+                    IsRecommendedByProfile = !string.IsNullOrWhiteSpace(highestVerifiedCode)
+                        && string.Equals(l.Code, highestVerifiedCode, StringComparison.OrdinalIgnoreCase),
+                    IsQualified = isQualified,
+                    QualificationReason = qualificationReason,
+                    IsAvailableForNewProposal = isAvailable,
+                    UnavailableReason = unavailableReason,
+                    BlockingStatus = !isQualified
+                        ? (mentorVerified && highestVerifiedRank > 0 ? "InsufficientQualification" : "UnverifiedQualification")
+                        : block?.Status,
+                    BlockingProposalId = isQualified ? block?.ProposalId : null,
+                    BlockingCohortId = isQualified ? block?.CohortId : null,
+                    BlockingTitle = isQualified ? block?.Title : null,
+                };
             })
             .ToList();
 
@@ -97,10 +142,24 @@ public sealed class MentorTeachingProposalService(
             })
             .ToListAsync(ct);
 
-        var proposals = await QueryProposalsWithIncludes()
-            .Where(p => p.MentorId == claims.Id)
+        var allProposals = await QueryProposalsWithIncludes()
+            .Where(p => p.MentorId == claims.Id && p.Status != MentorTeachingProposalStatus.Withdrawn)
             .OrderByDescending(p => p.UpdatedAtUtc)
             .ToListAsync(ct);
+
+        // Mỗi thời điểm chỉ giữ tối đa 1 lịch Đang chọn (Draft) có ít nhất 1 buổi/tuần cho Giáo viên
+        var draftSeen = false;
+        var proposals = new List<MentorTeachingProposal>(allProposals.Count);
+        foreach (var item in allProposals)
+        {
+            if (item.Status == MentorTeachingProposalStatus.Draft)
+            {
+                if (DeserializeSessions(item.WeeklySessionsJson).Count == 0) continue;
+                if (draftSeen) continue;
+                draftSeen = true;
+            }
+            proposals.Add(item);
+        }
 
         var workload = await ComputeMentorWorkloadAsync(claims.Id, policy, nowUtc, ct);
         var linkedCohorts = await LoadLinkedCohortsMapAsync(proposals.Select(p => p.Id).ToList(), ct);
@@ -112,9 +171,10 @@ public sealed class MentorTeachingProposalService(
 
         return ApiResponse<MentorTeachingProposalContextResponse>.Success(new MentorTeachingProposalContextResponse
         {
-            MentorVerified = mentor.MentorProfile?.VerificationStatus == MentorVerificationStatus.Approved,
+            MentorVerified = mentorVerified,
             MentorVerificationStatus = mentor.MentorProfile?.VerificationStatus.ToString(),
             MentorDeclaredJlptLevel = profileJlptCode,
+            MentorVerifiedJlptLevel = highestVerifiedCode,
             Policy = policyDto,
             AvailableLevels = availableLevels,
             QualifiedLevels = availableLevels,
@@ -170,7 +230,7 @@ public sealed class MentorTeachingProposalService(
     {
         var claims = claimService.GetUserClaim();
         if (claims.Role != Role.Mentor)
-            return ApiResponse<TeachingProposalResponse>.Fail("Chỉ Giáo viên mới có thể tạo đề xuất mở lớp.", HttpStatusCode.Forbidden);
+            return ApiResponse<TeachingProposalResponse>.Fail("Chỉ Giáo viên mới có thể tạo phiên đăng ký mở lớp.", HttpStatusCode.Forbidden);
 
         request ??= new SaveTeachingProposalDraftRequest();
         var nowUtc = DateTime.UtcNow;
@@ -180,44 +240,122 @@ public sealed class MentorTeachingProposalService(
         if (sanitizeErr.HasValue)
             return ApiResponse<TeachingProposalResponse>.Fail(sanitizeErr.Value.Message, HttpStatusCode.BadRequest, sanitizeErr.Value.Code);
 
-        var proposal = new MentorTeachingProposal
+        var isCompletelyEmpty = normalizedSessions.Count == 0
+            && !request.CertificateLevelId.HasValue
+            && !request.ExpectedStartDate.HasValue
+            && string.IsNullOrWhiteSpace(request.CourseTitle)
+            && string.IsNullOrWhiteSpace(request.CourseObjective)
+            && string.IsNullOrWhiteSpace(request.OptionalNotes)
+            && normalizedAttachments.Count == 0;
+        if (isCompletelyEmpty)
         {
-            MentorId = claims.Id,
-            CertificateLevelId = request.CertificateLevelId,
-            ProgramType = normalizedProgram,
-            CoursePlanId = request.CoursePlanId,
-            CourseTitle = TrimOrNull(request.CourseTitle, 200),
-            CourseObjective = TrimOrNull(request.CourseObjective, 1500),
-            ExpectedStartDate = request.ExpectedStartDate,
-            CourseDurationWeeks = request.CourseDurationWeeks ?? policy.CourseDurationWeeks,
-            SessionDurationMinutes = request.SessionDurationMinutes ?? policy.SessionMinutes,
-            WeeklySessionsJson = JsonSerializer.Serialize(normalizedSessions, JsonOpts),
-            OptionalNotes = TrimOrNull(request.OptionalNotes, 2000),
-            OptionalAttachmentsJson = JsonSerializer.Serialize(normalizedAttachments, JsonOpts),
-            Status = MentorTeachingProposalStatus.Draft,
-            Revision = 1,
-            GroupPolicyId = policy.Id,
-            PolicyVersionSnapshot = policy.Version,
-            CreatedAtUtc = nowUtc,
-            UpdatedAtUtc = nowUtc,
-            LastSavedAtUtc = nowUtc,
-        };
+            return ApiResponse<TeachingProposalResponse>.Fail(
+                "Vui lòng chọn ít nhất một khung giờ hoặc nhập thông tin trước khi lưu phiên đăng ký.",
+                HttpStatusCode.BadRequest,
+                "PROPOSAL_EMPTY_SELECTION");
+        }
 
-        proposal.Events.Add(new MentorTeachingProposalEvent
+        if (normalizedSessions.Count == 0)
         {
-            ActorUserId = claims.Id,
-            ActorRole = Role.Mentor.ToString(),
-            Action = "DraftCreated",
-            FromStatus = null,
-            ToStatus = MentorTeachingProposalStatus.Draft,
-            RevisionAfter = 1,
-            CreatedAtUtc = nowUtc,
-        });
+            return ApiResponse<TeachingProposalResponse>.Fail(
+                "Vui lòng chọn ít nhất 1 buổi dạy để lưu lịch đang chọn.",
+                HttpStatusCode.BadRequest,
+                "EMPTY_SELECTION_NOT_ALLOWED");
+        }
 
-        await unitOfWork.MentorTeachingProposals.AddAsync(proposal, ct);
-        await unitOfWork.SaveChangesAsync(ct);
+        int createdId = 0;
 
-        var loaded = await QueryProposalsWithIncludes(includeEvents: true).FirstAsync(p => p.Id == proposal.Id, ct);
+        try
+        {
+            await unitOfWork.ExecuteInTransactionAsync(async token =>
+            {
+                await unitOfWork.StudyCourses.LockScheduleAsync(claims.Id, claims.Id, token);
+
+                var existingDrafts = await unitOfWork.MentorTeachingProposals.Query()
+                    .Where(p => p.MentorId == claims.Id && p.Status == MentorTeachingProposalStatus.Draft)
+                    .OrderByDescending(p => p.UpdatedAtUtc)
+                    .ToListAsync(token);
+
+                if (existingDrafts.Count > 0)
+                {
+                    // Tái sử dụng duy nhất 1 phiên Draft hiện hành và dọn dẹp các bản Draft thừa nếu có
+                    var activeDraft = existingDrafts[0];
+                    activeDraft.CertificateLevelId = request.CertificateLevelId;
+                    activeDraft.ProgramType = normalizedProgram;
+                    activeDraft.CoursePlanId = request.CoursePlanId;
+                    activeDraft.CourseTitle = TrimOrNull(request.CourseTitle, 200);
+                    activeDraft.CourseObjective = TrimOrNull(request.CourseObjective, 1500);
+                    activeDraft.ExpectedStartDate = request.ExpectedStartDate;
+                    activeDraft.CourseDurationWeeks = request.CourseDurationWeeks ?? policy.CourseDurationWeeks;
+                    activeDraft.SessionDurationMinutes = request.SessionDurationMinutes ?? policy.SessionMinutes;
+                    activeDraft.WeeklySessionsJson = JsonSerializer.Serialize(normalizedSessions, JsonOpts);
+                    activeDraft.OptionalNotes = TrimOrNull(request.OptionalNotes, 2000);
+                    activeDraft.OptionalAttachmentsJson = JsonSerializer.Serialize(normalizedAttachments, JsonOpts);
+                    activeDraft.GroupPolicyId = policy.Id;
+                    activeDraft.PolicyVersionSnapshot = policy.Version;
+                    activeDraft.Revision++;
+                    activeDraft.UpdatedAtUtc = nowUtc;
+                    activeDraft.LastSavedAtUtc = nowUtc;
+                    unitOfWork.MentorTeachingProposals.Update(activeDraft);
+
+                    for (var i = 1; i < existingDrafts.Count; i++)
+                    {
+                        unitOfWork.MentorTeachingProposals.Remove(existingDrafts[i]);
+                    }
+
+                    await unitOfWork.SaveChangesAsync(token);
+                    createdId = activeDraft.Id;
+                    return;
+                }
+
+                var proposal = new MentorTeachingProposal
+                {
+                    MentorId = claims.Id,
+                    CertificateLevelId = request.CertificateLevelId,
+                    ProgramType = normalizedProgram,
+                    CoursePlanId = request.CoursePlanId,
+                    CourseTitle = TrimOrNull(request.CourseTitle, 200),
+                    CourseObjective = TrimOrNull(request.CourseObjective, 1500),
+                    ExpectedStartDate = request.ExpectedStartDate,
+                    CourseDurationWeeks = request.CourseDurationWeeks ?? policy.CourseDurationWeeks,
+                    SessionDurationMinutes = request.SessionDurationMinutes ?? policy.SessionMinutes,
+                    WeeklySessionsJson = JsonSerializer.Serialize(normalizedSessions, JsonOpts),
+                    OptionalNotes = TrimOrNull(request.OptionalNotes, 2000),
+                    OptionalAttachmentsJson = JsonSerializer.Serialize(normalizedAttachments, JsonOpts),
+                    Status = MentorTeachingProposalStatus.Draft,
+                    Revision = 1,
+                    GroupPolicyId = policy.Id,
+                    PolicyVersionSnapshot = policy.Version,
+                    CreatedAtUtc = nowUtc,
+                    UpdatedAtUtc = nowUtc,
+                    LastSavedAtUtc = nowUtc,
+                };
+
+                proposal.Events.Add(new MentorTeachingProposalEvent
+                {
+                    ActorUserId = claims.Id,
+                    ActorRole = Role.Mentor.ToString(),
+                    Action = "DraftCreated",
+                    FromStatus = null,
+                    ToStatus = MentorTeachingProposalStatus.Draft,
+                    RevisionAfter = 1,
+                    CreatedAtUtc = nowUtc,
+                });
+
+                await unitOfWork.MentorTeachingProposals.AddAsync(proposal, token);
+                await unitOfWork.SaveChangesAsync(token);
+                createdId = proposal.Id;
+            }, ct);
+        }
+        catch (DbUpdateException ex) when (IsPgConflict(ex))
+        {
+            return ApiResponse<TeachingProposalResponse>.Fail(
+                "Không thể tạo phiên đăng ký do xung đột dữ liệu đồng thời. Vui lòng thử lại.",
+                HttpStatusCode.Conflict,
+                "PROPOSAL_CONFLICT_CONCURRENT_SUBMISSION");
+        }
+
+        var loaded = await QueryProposalsWithIncludes(includeEvents: true).FirstAsync(p => p.Id == createdId, ct);
         var qualCodes = await LoadMentorQualifiedLevelCodesAsync(claims.Id, ct);
         return ApiResponse<TeachingProposalResponse>.Created(MapProposal(loaded, policy, qualCodes, null, includeHistory: true));
     }
@@ -226,10 +364,10 @@ public sealed class MentorTeachingProposalService(
     {
         var claims = claimService.GetUserClaim();
         if (claims.Role != Role.Mentor)
-            return ApiResponse<TeachingProposalResponse>.Fail("Chỉ Giáo viên mới có thể lưu bản nháp đề xuất.", HttpStatusCode.Forbidden);
+            return ApiResponse<TeachingProposalResponse>.Fail("Chỉ Giáo viên mới có thể lưu phiên đang chọn.", HttpStatusCode.Forbidden);
 
         if (request is null)
-            return ApiResponse<TeachingProposalResponse>.Fail("Dữ liệu bản nháp không hợp lệ.");
+            return ApiResponse<TeachingProposalResponse>.Fail("Dữ liệu đăng ký không hợp lệ.");
 
         var nowUtc = DateTime.UtcNow;
         var policy = await groupPolicyService.GetEffectiveAsync(nowUtc, ct);
@@ -237,54 +375,102 @@ public sealed class MentorTeachingProposalService(
         if (sanitizeErr.HasValue)
             return ApiResponse<TeachingProposalResponse>.Fail(sanitizeErr.Value.Message, HttpStatusCode.BadRequest, sanitizeErr.Value.Code);
 
-        var proposal = await unitOfWork.MentorTeachingProposals.Query()
-            .FirstOrDefaultAsync(p => p.Id == id && p.MentorId == claims.Id, ct);
-        if (proposal is null)
-            return ApiResponse<TeachingProposalResponse>.NotFound("Không tìm thấy đề xuất mở lớp.", "PROPOSAL_NOT_FOUND");
-
-        if (proposal.Status != MentorTeachingProposalStatus.Draft && proposal.Status != MentorTeachingProposalStatus.ChangesRequested)
-            return ApiResponse<TeachingProposalResponse>.Fail(
-                "Đề xuất đã gửi duyệt hoặc đã đóng không thể chỉnh sửa trực tiếp.",
-                HttpStatusCode.Conflict,
-                "PROPOSAL_IMMUTABLE_STATUS");
-
-        if (request.ExpectedRevision.HasValue && request.ExpectedRevision.Value != proposal.Revision)
-            return ApiResponse<TeachingProposalResponse>.Fail(
-                "Bản nháp đã được cập nhật ở phiên làm việc hoặc thiết bị khác. Vui lòng tải lại bản mới nhất trước khi tiếp tục.",
-                HttpStatusCode.Conflict,
-                "PROPOSAL_REVISION_CONFLICT");
-
-        proposal.CertificateLevelId = request.CertificateLevelId;
-        proposal.ProgramType = normalizedProgram;
-        proposal.CoursePlanId = request.CoursePlanId;
-        proposal.CourseTitle = TrimOrNull(request.CourseTitle, 200);
-        proposal.CourseObjective = TrimOrNull(request.CourseObjective, 1500);
-        proposal.ExpectedStartDate = request.ExpectedStartDate;
-        proposal.CourseDurationWeeks = request.CourseDurationWeeks ?? policy.CourseDurationWeeks;
-        proposal.SessionDurationMinutes = request.SessionDurationMinutes ?? policy.SessionMinutes;
-        proposal.WeeklySessionsJson = JsonSerializer.Serialize(normalizedSessions, JsonOpts);
-        proposal.OptionalNotes = TrimOrNull(request.OptionalNotes, 2000);
-        proposal.OptionalAttachmentsJson = JsonSerializer.Serialize(normalizedAttachments, JsonOpts);
-        proposal.GroupPolicyId = policy.Id;
-        proposal.PolicyVersionSnapshot = policy.Version;
-        proposal.Revision++;
-        proposal.UpdatedAtUtc = nowUtc;
-        proposal.LastSavedAtUtc = nowUtc;
+        ApiResponse<TeachingProposalResponse>? failure = null;
+        var deletedEmptyDraft = false;
 
         try
         {
-            unitOfWork.MentorTeachingProposals.Update(proposal);
-            await unitOfWork.SaveChangesAsync(ct);
+            await unitOfWork.ExecuteInTransactionAsync(async token =>
+            {
+                await unitOfWork.StudyCourses.LockScheduleAsync(claims.Id, claims.Id, token);
+
+                var proposal = await unitOfWork.MentorTeachingProposals.Query()
+                    .FirstOrDefaultAsync(p => p.Id == id && p.MentorId == claims.Id, token);
+                if (proposal is null)
+                {
+                    failure = ApiResponse<TeachingProposalResponse>.NotFound("Không tìm thấy lịch đang chọn.", "PROPOSAL_NOT_FOUND");
+                    return;
+                }
+
+                if (proposal.Status != MentorTeachingProposalStatus.Draft && proposal.Status != MentorTeachingProposalStatus.ChangesRequested)
+                {
+                    failure = ApiResponse<TeachingProposalResponse>.Fail(
+                        "Đề xuất đã gửi duyệt hoặc đã đóng không thể chỉnh sửa trực tiếp.",
+                        HttpStatusCode.Conflict,
+                        "PROPOSAL_IMMUTABLE_STATUS");
+                    return;
+                }
+
+                if (request.ExpectedRevision.HasValue && request.ExpectedRevision.Value != proposal.Revision)
+                {
+                    failure = ApiResponse<TeachingProposalResponse>.Fail(
+                        "Lịch đang chọn đã được cập nhật ở tab hoặc thiết bị khác. Vui lòng đồng bộ dữ liệu mới nhất trước khi tiếp tục.",
+                        HttpStatusCode.Conflict,
+                        "PROPOSAL_REVISION_CONFLICT");
+                    return;
+                }
+
+                // Zero Selection Invariant: không bao giờ duy trì bản ghi Draft 0 buổi/tuần trong DB
+                if (proposal.Status == MentorTeachingProposalStatus.Draft && normalizedSessions.Count == 0)
+                {
+                    unitOfWork.MentorTeachingProposals.Remove(proposal);
+                    await unitOfWork.SaveChangesAsync(token);
+                    deletedEmptyDraft = true;
+                    return;
+                }
+
+                proposal.CertificateLevelId = request.CertificateLevelId;
+                proposal.ProgramType = normalizedProgram;
+                proposal.CoursePlanId = request.CoursePlanId;
+                proposal.CourseTitle = TrimOrNull(request.CourseTitle, 200);
+                proposal.CourseObjective = TrimOrNull(request.CourseObjective, 1500);
+                proposal.ExpectedStartDate = request.ExpectedStartDate;
+                proposal.CourseDurationWeeks = request.CourseDurationWeeks ?? policy.CourseDurationWeeks;
+                proposal.SessionDurationMinutes = request.SessionDurationMinutes ?? policy.SessionMinutes;
+                proposal.WeeklySessionsJson = JsonSerializer.Serialize(normalizedSessions, JsonOpts);
+                proposal.OptionalNotes = TrimOrNull(request.OptionalNotes, 2000);
+                proposal.OptionalAttachmentsJson = JsonSerializer.Serialize(normalizedAttachments, JsonOpts);
+                proposal.GroupPolicyId = policy.Id;
+                proposal.PolicyVersionSnapshot = policy.Version;
+                proposal.Revision++;
+                proposal.UpdatedAtUtc = nowUtc;
+                proposal.LastSavedAtUtc = nowUtc;
+
+                unitOfWork.MentorTeachingProposals.Update(proposal);
+                await unitOfWork.SaveChangesAsync(token);
+            }, ct);
         }
         catch (DbUpdateConcurrencyException)
         {
             return ApiResponse<TeachingProposalResponse>.Fail(
-                "Phát hiện xung đột cập nhật đồng thời. Vui lòng tải lại bản nháp mới nhất.",
+                "Phát hiện xung đột cập nhật đồng thời. Vui lòng đồng bộ dữ liệu mới nhất.",
+                HttpStatusCode.Conflict,
+                "PROPOSAL_REVISION_CONFLICT");
+        }
+        catch (DbUpdateException ex) when (IsPgConflict(ex))
+        {
+            return ApiResponse<TeachingProposalResponse>.Fail(
+                "Dữ liệu đề xuất vừa thay đổi đồng thời. Vui lòng thử lại.",
                 HttpStatusCode.Conflict,
                 "PROPOSAL_REVISION_CONFLICT");
         }
 
-        var loaded = await QueryProposalsWithIncludes(includeEvents: true).FirstAsync(p => p.Id == proposal.Id, ct);
+        if (failure is not null)
+            return failure;
+
+        if (deletedEmptyDraft)
+        {
+            return ApiResponse<TeachingProposalResponse>.Success(new TeachingProposalResponse
+            {
+                Id = 0,
+                Status = MentorTeachingProposalStatus.Draft,
+                CourseDurationWeeks = policy.CourseDurationWeeks,
+                SessionDurationMinutes = policy.SessionMinutes,
+                WeeklySessions = [],
+            });
+        }
+
+        var loaded = await QueryProposalsWithIncludes(includeEvents: true).FirstAsync(p => p.Id == id, ct);
         var qualCodes = await LoadMentorQualifiedLevelCodesAsync(claims.Id, ct);
         return ApiResponse<TeachingProposalResponse>.Success(MapProposal(loaded, policy, qualCodes, null, includeHistory: true));
     }
@@ -293,22 +479,42 @@ public sealed class MentorTeachingProposalService(
     {
         var claims = claimService.GetUserClaim();
         if (claims.Role != Role.Mentor)
-            return ApiResponse<bool>.Fail("Chỉ Giáo viên mới có thể xóa bản nháp.", HttpStatusCode.Forbidden);
+            return ApiResponse<bool>.Fail("Chỉ Giáo viên mới có thể xóa phiên đang chọn.", HttpStatusCode.Forbidden);
 
-        var proposal = await unitOfWork.MentorTeachingProposals.Query()
-            .FirstOrDefaultAsync(p => p.Id == id && p.MentorId == claims.Id, ct);
-        if (proposal is null)
-            return ApiResponse<bool>.NotFound("Không tìm thấy bản nháp.", "PROPOSAL_NOT_FOUND");
+        ApiResponse<bool>? failure = null;
+        try
+        {
+            await unitOfWork.ExecuteInTransactionAsync(async token =>
+            {
+                await unitOfWork.StudyCourses.LockScheduleAsync(claims.Id, claims.Id, token);
 
-        if (proposal.Status != MentorTeachingProposalStatus.Draft)
-            return ApiResponse<bool>.Fail(
-                "Chỉ có thể xóa bản nháp chưa từng gửi duyệt. Với đề xuất đang chờ duyệt, hãy chọn Rút đề xuất.",
-                HttpStatusCode.Conflict,
-                "PROPOSAL_IMMUTABLE_STATUS");
+                var proposal = await unitOfWork.MentorTeachingProposals.Query()
+                    .FirstOrDefaultAsync(p => p.Id == id && p.MentorId == claims.Id, token);
+                if (proposal is null)
+                {
+                    // Idempotent cleanup: đã bị xóa trước đó hoặc ở tab khác
+                    return;
+                }
 
-        unitOfWork.MentorTeachingProposals.Remove(proposal);
-        await unitOfWork.SaveChangesAsync(ct);
-        return ApiResponse<bool>.Success(true);
+                if (proposal.Status != MentorTeachingProposalStatus.Draft)
+                {
+                    failure = ApiResponse<bool>.Fail(
+                        "Chỉ có thể xóa lịch đang chọn chưa gửi duyệt. Với đề xuất đang chờ duyệt, hãy chọn Hủy đề xuất.",
+                        HttpStatusCode.Conflict,
+                        "PROPOSAL_IMMUTABLE_STATUS");
+                    return;
+                }
+
+                unitOfWork.MentorTeachingProposals.Remove(proposal);
+                await unitOfWork.SaveChangesAsync(token);
+            }, ct);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return ApiResponse<bool>.Fail("Phiên đang chọn vừa thay đổi. Vui lòng tải lại.", HttpStatusCode.Conflict, "PROPOSAL_REVISION_CONFLICT");
+        }
+
+        return failure ?? ApiResponse<bool>.Success(true);
     }
 
     public async Task<ApiResponse<TeachingProposalValidationResponse>> ValidateDraftAsync(
@@ -362,100 +568,121 @@ public sealed class MentorTeachingProposalService(
         ApiResponse<TeachingProposalResponse>? failure = null;
         int? resultId = null;
 
-        await unitOfWork.ExecuteInTransactionAsync(async token =>
+        try
         {
-            await unitOfWork.StudyCourses.LockScheduleAsync(claims.Id, claims.Id, token);
-
-            // Kiểm tra idempotency trước tiên để ngăn double-submit khi mạng chậm/retry
-            var existingByKey = await unitOfWork.MentorTeachingProposals.Query().AsNoTracking()
-                .FirstOrDefaultAsync(p => p.MentorId == claims.Id && p.SubmissionIdempotencyKey == idempotencyKey, token);
-            if (existingByKey is not null)
+            await unitOfWork.ExecuteInTransactionAsync(async token =>
             {
-                if (existingByKey.Id == id)
+                await unitOfWork.StudyCourses.LockScheduleAsync(claims.Id, claims.Id, token);
+
+                // Kiểm tra idempotency trước tiên để ngăn double-submit khi mạng chậm/retry
+                var existingByKey = await unitOfWork.MentorTeachingProposals.Query().AsNoTracking()
+                    .FirstOrDefaultAsync(p => p.MentorId == claims.Id && p.SubmissionIdempotencyKey == idempotencyKey, token);
+                if (existingByKey is not null)
                 {
-                    resultId = existingByKey.Id;
+                    if (existingByKey.Id == id)
+                    {
+                        resultId = existingByKey.Id;
+                        return;
+                    }
+                    failure = ApiResponse<TeachingProposalResponse>.Fail(
+                        "Khóa gửi duyệt đã được sử dụng cho một đề xuất khác.",
+                        HttpStatusCode.Conflict,
+                        "PROPOSAL_IDEMPOTENCY_CONFLICT");
                     return;
                 }
-                failure = ApiResponse<TeachingProposalResponse>.Fail(
-                    "Khóa gửi duyệt đã được sử dụng cho một đề xuất khác.",
-                    HttpStatusCode.Conflict,
-                    "PROPOSAL_IDEMPOTENCY_CONFLICT");
-                return;
-            }
 
-            var proposal = await unitOfWork.MentorTeachingProposals.Query()
-                .FirstOrDefaultAsync(p => p.Id == id && p.MentorId == claims.Id, token);
-            if (proposal is null)
-            {
-                failure = ApiResponse<TeachingProposalResponse>.NotFound("Không tìm thấy đề xuất mở lớp.", "PROPOSAL_NOT_FOUND");
-                return;
-            }
+                var proposal = await unitOfWork.MentorTeachingProposals.Query()
+                    .FirstOrDefaultAsync(p => p.Id == id && p.MentorId == claims.Id, token);
+                if (proposal is null)
+                {
+                    failure = ApiResponse<TeachingProposalResponse>.NotFound("Không tìm thấy đề xuất mở lớp.", "PROPOSAL_NOT_FOUND");
+                    return;
+                }
 
-            if (proposal.Status != MentorTeachingProposalStatus.Draft && proposal.Status != MentorTeachingProposalStatus.ChangesRequested)
-            {
-                failure = ApiResponse<TeachingProposalResponse>.Fail(
-                    "Chỉ có thể gửi duyệt đề xuất đang ở trạng thái Nháp hoặc Cần bổ sung.",
-                    HttpStatusCode.Conflict,
-                    "PROPOSAL_IMMUTABLE_STATUS");
-                return;
-            }
+                if (proposal.Status is MentorTeachingProposalStatus.PendingReview or MentorTeachingProposalStatus.Approved)
+                {
+                    failure = ApiResponse<TeachingProposalResponse>.Fail(
+                        "Đề xuất này đã được gửi duyệt hoặc đã được phê duyệt.",
+                        HttpStatusCode.Conflict,
+                        "PROPOSAL_ALREADY_SUBMITTED");
+                    return;
+                }
 
-            if (proposal.Revision != request.ExpectedRevision)
-            {
-                failure = ApiResponse<TeachingProposalResponse>.Fail(
-                    "Bản nháp đã thay đổi trên phiên làm việc khác. Vui lòng đồng bộ bản mới nhất trước khi gửi duyệt.",
-                    HttpStatusCode.Conflict,
-                    "PROPOSAL_REVISION_CONFLICT");
-                return;
-            }
+                if (proposal.Status != MentorTeachingProposalStatus.Draft && proposal.Status != MentorTeachingProposalStatus.ChangesRequested)
+                {
+                    failure = ApiResponse<TeachingProposalResponse>.Fail(
+                        "Chỉ có thể gửi duyệt phiên đang chọn hoặc đề xuất cần bổ sung.",
+                        HttpStatusCode.Conflict,
+                        "PROPOSAL_IMMUTABLE_STATUS");
+                    return;
+                }
 
-            var candidate = CandidateFromEntity(proposal);
-            var validation = await EvaluateProposalAsync(candidate, policy, nowUtc, token);
-            if (!validation.CanSubmit)
-            {
-                var firstErr = validation.Issues.FirstOrDefault(i => i.Severity == "Error");
-                failure = ApiResponse<TeachingProposalResponse>.Fail(
-                    firstErr?.Message ?? "Đề xuất chưa đáp ứng đủ quy định lịch dạy.",
-                    HttpStatusCode.UnprocessableEntity,
-                    firstErr?.Code ?? "PROPOSAL_VALIDATION_FAILED",
-                    errors: validation.Issues.Where(i => i.Severity == "Error").Select(i => i.Message).ToList());
-                return;
-            }
+                if (proposal.Revision != request.ExpectedRevision)
+                {
+                    failure = ApiResponse<TeachingProposalResponse>.Fail(
+                        "Dữ liệu đang chọn đã thay đổi trên phiên làm việc khác. Vui lòng đồng bộ bản mới nhất trước khi gửi duyệt.",
+                        HttpStatusCode.Conflict,
+                        "STALE_PROPOSAL_DATA");
+                    return;
+                }
 
-            var fromStatus = proposal.Status;
-            proposal.Status = MentorTeachingProposalStatus.PendingReview;
-            proposal.SubmissionIdempotencyKey = idempotencyKey;
-            proposal.SubmittedAtUtc = nowUtc;
-            proposal.ReviewedAtUtc = null;
-            proposal.ReviewedByAdminId = null;
-            proposal.ReviewReason = null;
-            proposal.GroupPolicyId = policy.Id;
-            proposal.PolicyVersionSnapshot = policy.Version;
-            proposal.Revision++;
-            proposal.UpdatedAtUtc = nowUtc;
-            proposal.LastSavedAtUtc = nowUtc;
+                var candidate = CandidateFromEntity(proposal);
+                var validation = await EvaluateProposalAsync(candidate, policy, nowUtc, token);
+                if (!validation.CanSubmit)
+                {
+                    var blockingErrors = validation.Issues.Where(i => i.Severity == "Error").ToList();
+                    var firstConflict = blockingErrors.FirstOrDefault(i => IsConflictOrCapacityCode(i.Code));
+                    var chosen = firstConflict ?? blockingErrors.FirstOrDefault();
+                    var httpStatus = firstConflict is not null ? HttpStatusCode.Conflict : HttpStatusCode.UnprocessableEntity;
+                    failure = ApiResponse<TeachingProposalResponse>.Fail(
+                        chosen?.Message ?? "Đề xuất chưa đáp ứng đủ quy định lịch dạy.",
+                        httpStatus,
+                        chosen?.Code ?? "PROPOSAL_VALIDATION_FAILED",
+                        errors: blockingErrors.Select(i => i.Message).Distinct().ToList());
+                    return;
+                }
 
-            unitOfWork.MentorTeachingProposals.Update(proposal);
-            await unitOfWork.MentorTeachingProposalEvents.AddAsync(new MentorTeachingProposalEvent
-            {
-                ProposalId = proposal.Id,
-                ActorUserId = claims.Id,
-                ActorRole = Role.Mentor.ToString(),
-                Action = fromStatus == MentorTeachingProposalStatus.ChangesRequested ? "Resubmitted" : "Submitted",
-                FromStatus = fromStatus,
-                ToStatus = MentorTeachingProposalStatus.PendingReview,
-                RevisionAfter = proposal.Revision,
-                SnapshotJson = BuildSnapshotJson(proposal),
-                CreatedAtUtc = nowUtc,
-            }, token);
+                if (string.IsNullOrWhiteSpace(proposal.CourseTitle) && proposal.CertificateLevelId.HasValue)
+                {
+                    var lvlCode = await unitOfWork.CertificateLevels.Query().AsNoTracking()
+                        .Where(l => l.Id == proposal.CertificateLevelId.Value)
+                        .Select(l => l.Code)
+                        .FirstOrDefaultAsync(token);
+                    proposal.CourseTitle = $"JLPT {lvlCode ?? "Group"} ({candidate.WeeklySessions.Count} buổi/tuần)";
+                }
 
-            var adminIds = await unitOfWork.UserAccounts.Query().AsNoTracking()
-                .Where(u => u.Role == Role.Admin && !u.IsDeleted)
-                .Select(u => u.Id)
-                .ToListAsync(token);
+                var fromStatus = proposal.Status;
+                proposal.Status = MentorTeachingProposalStatus.PendingReview;
+                proposal.SubmissionIdempotencyKey = idempotencyKey;
+                proposal.SubmittedAtUtc = nowUtc;
+                proposal.ReviewedAtUtc = null;
+                proposal.ReviewedByAdminId = null;
+                proposal.ReviewReason = null;
+                proposal.GroupPolicyId = policy.Id;
+                proposal.PolicyVersionSnapshot = policy.Version;
+                proposal.Revision++;
+                proposal.UpdatedAtUtc = nowUtc;
+                proposal.LastSavedAtUtc = nowUtc;
 
-            if (adminIds.Count > 0)
-            {
+                unitOfWork.MentorTeachingProposals.Update(proposal);
+                await unitOfWork.MentorTeachingProposalEvents.AddAsync(new MentorTeachingProposalEvent
+                {
+                    ProposalId = proposal.Id,
+                    ActorUserId = claims.Id,
+                    ActorRole = Role.Mentor.ToString(),
+                    Action = fromStatus == MentorTeachingProposalStatus.ChangesRequested ? "Resubmitted" : "Submitted",
+                    FromStatus = fromStatus,
+                    ToStatus = MentorTeachingProposalStatus.PendingReview,
+                    RevisionAfter = proposal.Revision,
+                    SnapshotJson = BuildSnapshotJson(proposal),
+                    CreatedAtUtc = nowUtc,
+                }, token);
+
+                var adminIds = await unitOfWork.UserAccounts.Query().AsNoTracking()
+                    .Where(u => u.Role == Role.Admin && !u.IsDeleted)
+                    .Select(u => u.Id)
+                    .ToListAsync(token);
+
                 var mentorUser = await unitOfWork.UserAccounts.Query().AsNoTracking()
                     .Where(u => u.Id == claims.Id)
                     .Select(u => new { u.FirstName, u.LastName })
@@ -472,6 +699,16 @@ public sealed class MentorTeachingProposalService(
                     LinkUrl = $"/admin/mentor-schedules?tab=proposals&proposalId={proposal.Id}",
                 }).ToList();
 
+                // Gửi thông báo xác nhận ngay cho Giáo viên trong hệ thống thông báo
+                notifications.Add(new
+                {
+                    UserId = claims.Id,
+                    Title = "Đã gửi đề xuất mở lớp JLPT",
+                    Message = $"Đề xuất \"{titleLabel}\" ({candidate.WeeklySessions.Count} buổi/tuần × {proposal.CourseDurationWeeks} tuần) đã được gửi tới quản trị viên và đang chờ phê duyệt.",
+                    Type = "MentorSchedule",
+                    LinkUrl = $"/mentor-shift-schedule/?proposalId={proposal.Id}",
+                });
+
                 unitOfWork.AddMentorOutboxEvent(new MentorOutboxEvent
                 {
                     EventKey = $"proposal-submitted:{proposal.Id}:v{proposal.Revision}",
@@ -483,16 +720,35 @@ public sealed class MentorTeachingProposalService(
                     CreatedAtUtc = nowUtc,
                     AvailableAtUtc = nowUtc,
                 });
-            }
 
-            await unitOfWork.SaveChangesAsync(token);
-            resultId = proposal.Id;
-        }, ct);
+                await unitOfWork.SaveChangesAsync(token);
+                resultId = proposal.Id;
+            }, ct);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return ApiResponse<TeachingProposalResponse>.Fail(
+                "Phát hiện xung đột cập nhật đồng thời khi gửi đề xuất. Vui lòng đồng bộ lại và thử lại.",
+                HttpStatusCode.Conflict,
+                "STALE_PROPOSAL_DATA");
+        }
+        catch (DbUpdateException ex) when (IsPgConflict(ex))
+        {
+            return ApiResponse<TeachingProposalResponse>.Fail(
+                "Đề xuất đã được gửi hoặc bị xung đột đồng thời với đề xuất khác.",
+                HttpStatusCode.Conflict,
+                "PROPOSAL_CONFLICT_CONCURRENT_SUBMISSION");
+        }
 
         if (failure is not null)
             return failure;
 
         var loaded = await QueryProposalsWithIncludes(includeEvents: true).FirstAsync(p => p.Id == resultId!.Value, ct);
+        if (sidebarNotifier is not null)
+        {
+            await sidebarNotifier.NotifyAdminsAsync("proposal_submitted", ct);
+            await sidebarNotifier.NotifyUsersAsync([claims.Id], "proposal_submitted", ct);
+        }
         var qualCodes = await LoadMentorQualifiedLevelCodesAsync(claims.Id, ct);
         var dto = MapProposal(loaded, policy, qualCodes, null, includeHistory: true);
         dto.MentorWorkload = await ComputeMentorWorkloadAsync(claims.Id, policy, nowUtc, ct);
@@ -510,125 +766,166 @@ public sealed class MentorTeachingProposalService(
         var policy = await groupPolicyService.GetEffectiveAsync(nowUtc, ct);
         ApiResponse<TeachingProposalResponse>? failure = null;
 
-        await unitOfWork.ExecuteInTransactionAsync(async token =>
+        try
         {
-            await unitOfWork.StudyCourses.LockScheduleAsync(claims.Id, claims.Id, token);
-
-            var proposal = await unitOfWork.MentorTeachingProposals.Query()
-                .FirstOrDefaultAsync(p => p.Id == id && p.MentorId == claims.Id, token);
-            if (proposal is null)
+            await unitOfWork.ExecuteInTransactionAsync(async token =>
             {
-                failure = ApiResponse<TeachingProposalResponse>.NotFound("Không tìm thấy đề xuất mở lớp.", "PROPOSAL_NOT_FOUND");
-                return;
-            }
+                await unitOfWork.StudyCourses.LockScheduleAsync(claims.Id, claims.Id, token);
 
-            if (proposal.Status != MentorTeachingProposalStatus.PendingReview && proposal.Status != MentorTeachingProposalStatus.ChangesRequested)
-            {
-                failure = ApiResponse<TeachingProposalResponse>.Fail(
-                    "Chỉ có thể rút đề xuất đang ở trạng thái Chờ duyệt hoặc Cần bổ sung.",
-                    HttpStatusCode.Conflict,
-                    "PROPOSAL_IMMUTABLE_STATUS");
-                return;
-            }
+                var proposal = await unitOfWork.MentorTeachingProposals.Query()
+                    .FirstOrDefaultAsync(p => p.Id == id && p.MentorId == claims.Id, token);
+                if (proposal is null)
+                {
+                    failure = ApiResponse<TeachingProposalResponse>.NotFound("Không tìm thấy đề xuất mở lớp.", "PROPOSAL_NOT_FOUND");
+                    return;
+                }
 
-            if (request?.ExpectedRevision.HasValue == true && request.ExpectedRevision.Value != proposal.Revision)
-            {
-                failure = ApiResponse<TeachingProposalResponse>.Fail(
-                    "Đề xuất vừa được cập nhật. Vui lòng tải lại trước khi rút.",
-                    HttpStatusCode.Conflict,
-                    "PROPOSAL_REVISION_CONFLICT");
-                return;
-            }
+                if (proposal.Status == MentorTeachingProposalStatus.Withdrawn)
+                {
+                    // Idempotent retry: đã hủy trước đó, giữ nguyên audit history
+                    return;
+                }
 
-            var fromStatus = proposal.Status;
-            proposal.Status = MentorTeachingProposalStatus.Withdrawn;
-            proposal.Revision++;
-            proposal.UpdatedAtUtc = nowUtc;
-            unitOfWork.MentorTeachingProposals.Update(proposal);
+                if (proposal.Status != MentorTeachingProposalStatus.PendingReview && proposal.Status != MentorTeachingProposalStatus.ChangesRequested)
+                {
+                    failure = ApiResponse<TeachingProposalResponse>.Fail(
+                        "Chỉ có thể hủy đề xuất đang ở trạng thái Chờ duyệt hoặc Cần bổ sung.",
+                        HttpStatusCode.Conflict,
+                        "PROPOSAL_IMMUTABLE_STATUS");
+                    return;
+                }
 
-            await unitOfWork.MentorTeachingProposalEvents.AddAsync(new MentorTeachingProposalEvent
-            {
-                ProposalId = proposal.Id,
-                ActorUserId = claims.Id,
-                ActorRole = Role.Mentor.ToString(),
-                Action = "Withdrawn",
-                FromStatus = fromStatus,
-                ToStatus = MentorTeachingProposalStatus.Withdrawn,
-                RevisionAfter = proposal.Revision,
-                Reason = TrimOrNull(request?.Reason, 1000),
-                CreatedAtUtc = nowUtc,
-            }, token);
+                if (request?.ExpectedRevision.HasValue == true && request.ExpectedRevision.Value != proposal.Revision)
+                {
+                    failure = ApiResponse<TeachingProposalResponse>.Fail(
+                        "Đề xuất vừa được cập nhật. Vui lòng tải lại trước khi hủy.",
+                        HttpStatusCode.Conflict,
+                        "PROPOSAL_REVISION_CONFLICT");
+                    return;
+                }
 
-            await unitOfWork.SaveChangesAsync(token);
-        }, ct);
+                var fromStatus = proposal.Status;
+                var reason = TrimOrNull(request?.Reason, 1000);
+                proposal.Status = MentorTeachingProposalStatus.Withdrawn;
+                proposal.Revision++;
+                proposal.UpdatedAtUtc = nowUtc;
+                unitOfWork.MentorTeachingProposals.Update(proposal);
+
+                await unitOfWork.MentorTeachingProposalEvents.AddAsync(new MentorTeachingProposalEvent
+                {
+                    ProposalId = proposal.Id,
+                    ActorUserId = claims.Id,
+                    ActorRole = Role.Mentor.ToString(),
+                    Action = "Withdrawn",
+                    FromStatus = fromStatus,
+                    ToStatus = MentorTeachingProposalStatus.Withdrawn,
+                    RevisionAfter = proposal.Revision,
+                    Reason = reason,
+                    CreatedAtUtc = nowUtc,
+                }, token);
+
+                await unitOfWork.SaveChangesAsync(token);
+            }, ct);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return ApiResponse<TeachingProposalResponse>.Fail(
+                "Đề xuất vừa thay đổi đồng thời. Vui lòng tải lại trước khi hủy.",
+                HttpStatusCode.Conflict,
+                "PROPOSAL_REVISION_CONFLICT");
+        }
 
         if (failure is not null)
             return failure;
 
         var loaded = await QueryProposalsWithIncludes(includeEvents: true).FirstAsync(p => p.Id == id, ct);
+        if (sidebarNotifier is not null)
+        {
+            await sidebarNotifier.NotifyAdminsAsync("proposal_withdrawn", ct);
+            await sidebarNotifier.NotifyUsersAsync([claims.Id], "proposal_withdrawn", ct);
+        }
         var qualCodes = await LoadMentorQualifiedLevelCodesAsync(claims.Id, ct);
-        return ApiResponse<TeachingProposalResponse>.Success(MapProposal(loaded, policy, qualCodes, null, includeHistory: true));
+        var dto = MapProposal(loaded, policy, qualCodes, null, includeHistory: true);
+        dto.MentorWorkload = await ComputeMentorWorkloadAsync(claims.Id, policy, nowUtc, ct);
+        return ApiResponse<TeachingProposalResponse>.Success(dto);
     }
 
     public async Task<ApiResponse<TeachingProposalResponse>> ReopenForRevisionAsync(int id, CancellationToken ct = default)
     {
         var claims = claimService.GetUserClaim();
         if (claims.Role != Role.Mentor)
-            return ApiResponse<TeachingProposalResponse>.Fail("Chỉ Giáo viên mới có thể mở bản chỉnh sửa.", HttpStatusCode.Forbidden);
+            return ApiResponse<TeachingProposalResponse>.Fail("Chỉ Giáo viên mới có thể khôi phục phiên đăng ký.", HttpStatusCode.Forbidden);
 
         var nowUtc = DateTime.UtcNow;
         var policy = await groupPolicyService.GetEffectiveAsync(nowUtc, ct);
+        var createdId = 0;
+        ApiResponse<TeachingProposalResponse>? failure = null;
 
-        var source = await unitOfWork.MentorTeachingProposals.Query().AsNoTracking()
-            .FirstOrDefaultAsync(p => p.Id == id && p.MentorId == claims.Id, ct);
-        if (source is null)
-            return ApiResponse<TeachingProposalResponse>.NotFound("Không tìm thấy đề xuất gốc.", "PROPOSAL_NOT_FOUND");
-
-        if (source.Status != MentorTeachingProposalStatus.Rejected && source.Status != MentorTeachingProposalStatus.Withdrawn)
-            return ApiResponse<TeachingProposalResponse>.Fail(
-                "Đề xuất đang chờ duyệt hoặc đã duyệt không thể nhân bản chỉnh sửa theo thao tác này.",
-                HttpStatusCode.Conflict,
-                "PROPOSAL_IMMUTABLE_STATUS");
-
-        var clone = new MentorTeachingProposal
+        await unitOfWork.ExecuteInTransactionAsync(async token =>
         {
-            MentorId = claims.Id,
-            CertificateLevelId = source.CertificateLevelId,
-            ProgramType = source.ProgramType,
-            CoursePlanId = source.CoursePlanId,
-            CourseTitle = source.CourseTitle,
-            CourseObjective = source.CourseObjective,
-            ExpectedStartDate = source.ExpectedStartDate,
-            CourseDurationWeeks = policy.CourseDurationWeeks,
-            SessionDurationMinutes = policy.SessionMinutes,
-            WeeklySessionsJson = source.WeeklySessionsJson,
-            OptionalNotes = source.OptionalNotes,
-            OptionalAttachmentsJson = source.OptionalAttachmentsJson,
-            Status = MentorTeachingProposalStatus.Draft,
-            Revision = 1,
-            GroupPolicyId = policy.Id,
-            PolicyVersionSnapshot = policy.Version,
-            CreatedAtUtc = nowUtc,
-            UpdatedAtUtc = nowUtc,
-            LastSavedAtUtc = nowUtc,
-        };
+            await unitOfWork.StudyCourses.LockScheduleAsync(claims.Id, claims.Id, token);
 
-        clone.Events.Add(new MentorTeachingProposalEvent
-        {
-            ActorUserId = claims.Id,
-            ActorRole = Role.Mentor.ToString(),
-            Action = "ClonedFromProposal",
-            FromStatus = source.Status,
-            ToStatus = MentorTeachingProposalStatus.Draft,
-            RevisionAfter = 1,
-            Reason = $"Tạo bản nháp mới từ đề xuất #{source.Id}",
-            CreatedAtUtc = nowUtc,
-        });
+            var source = await unitOfWork.MentorTeachingProposals.Query().AsNoTracking()
+                .FirstOrDefaultAsync(p => p.Id == id && p.MentorId == claims.Id, token);
+            if (source is null)
+            {
+                failure = ApiResponse<TeachingProposalResponse>.NotFound("Không tìm thấy đề xuất gốc.", "PROPOSAL_NOT_FOUND");
+                return;
+            }
 
-        await unitOfWork.MentorTeachingProposals.AddAsync(clone, ct);
-        await unitOfWork.SaveChangesAsync(ct);
+            if (source.Status != MentorTeachingProposalStatus.Rejected && source.Status != MentorTeachingProposalStatus.Withdrawn)
+            {
+                failure = ApiResponse<TeachingProposalResponse>.Fail(
+                    "Đề xuất đang chờ duyệt hoặc đã duyệt không thể khôi phục phiên đăng ký mới.",
+                    HttpStatusCode.Conflict,
+                    "PROPOSAL_IMMUTABLE_STATUS");
+                return;
+            }
 
-        var loaded = await QueryProposalsWithIncludes(includeEvents: true).FirstAsync(p => p.Id == clone.Id, ct);
+            var clone = new MentorTeachingProposal
+            {
+                MentorId = claims.Id,
+                CertificateLevelId = source.CertificateLevelId,
+                ProgramType = source.ProgramType,
+                CoursePlanId = source.CoursePlanId,
+                CourseTitle = source.CourseTitle,
+                CourseObjective = source.CourseObjective,
+                ExpectedStartDate = source.ExpectedStartDate,
+                CourseDurationWeeks = policy.CourseDurationWeeks,
+                SessionDurationMinutes = policy.SessionMinutes,
+                WeeklySessionsJson = source.WeeklySessionsJson,
+                OptionalNotes = source.OptionalNotes,
+                OptionalAttachmentsJson = source.OptionalAttachmentsJson,
+                Status = MentorTeachingProposalStatus.Draft,
+                Revision = 1,
+                GroupPolicyId = policy.Id,
+                PolicyVersionSnapshot = policy.Version,
+                CreatedAtUtc = nowUtc,
+                UpdatedAtUtc = nowUtc,
+                LastSavedAtUtc = nowUtc,
+            };
+
+            clone.Events.Add(new MentorTeachingProposalEvent
+            {
+                ActorUserId = claims.Id,
+                ActorRole = Role.Mentor.ToString(),
+                Action = "ClonedFromProposal",
+                FromStatus = source.Status,
+                ToStatus = MentorTeachingProposalStatus.Draft,
+                RevisionAfter = 1,
+                Reason = $"Khôi phục phiên đăng ký mới từ đề xuất #{source.Id}",
+                CreatedAtUtc = nowUtc,
+            });
+
+            await unitOfWork.MentorTeachingProposals.AddAsync(clone, token);
+            await unitOfWork.SaveChangesAsync(token);
+            createdId = clone.Id;
+        }, ct);
+
+        if (failure is not null)
+            return failure;
+
+        var loaded = await QueryProposalsWithIncludes(includeEvents: true).FirstAsync(p => p.Id == createdId, ct);
         var qualCodes = await LoadMentorQualifiedLevelCodesAsync(claims.Id, ct);
         return ApiResponse<TeachingProposalResponse>.Created(MapProposal(loaded, policy, qualCodes, null, includeHistory: true));
     }
@@ -640,7 +937,7 @@ public sealed class MentorTeachingProposalService(
     {
         var claims = claimService.GetUserClaim();
         if (claims.Role != Role.Admin)
-            return ApiResponse<List<TeachingProposalResponse>>.Fail("Chỉ Admin mới có quyền xem hàng đợi đề xuất mở lớp.", HttpStatusCode.Forbidden);
+            return ApiResponse<List<TeachingProposalResponse>>.Fail("Chỉ quản trị viên mới có quyền xem hàng đợi đề xuất mở lớp.", HttpStatusCode.Forbidden);
 
         var nowUtc = DateTime.UtcNow;
         var policy = await groupPolicyService.GetEffectiveAsync(nowUtc, ct);
@@ -682,7 +979,7 @@ public sealed class MentorTeachingProposalService(
 
             if (row.Status == MentorTeachingProposalStatus.PendingReview)
             {
-                var check = await EvaluateProposalAsync(CandidateFromEntity(row), policy, nowUtc, ct);
+                var check = await EvaluateProposalAsync(CandidateFromEntity(row), policy, nowUtc, ct, isApprovalOrPublication: true);
                 dto.HasConflicts = !check.CanSubmit;
                 dto.ValidationIssues = check.Issues;
             }
@@ -697,7 +994,7 @@ public sealed class MentorTeachingProposalService(
     {
         var claims = claimService.GetUserClaim();
         if (claims.Role != Role.Admin)
-            return ApiResponse<TeachingProposalResponse>.Fail("Chỉ Admin mới có quyền xem chi tiết đề xuất này.", HttpStatusCode.Forbidden);
+            return ApiResponse<TeachingProposalResponse>.Fail("Chỉ quản trị viên mới có quyền xem chi tiết đề xuất này.", HttpStatusCode.Forbidden);
 
         var proposal = await QueryProposalsWithIncludes(includeEvents: true)
             .FirstOrDefaultAsync(p => p.Id == id, ct);
@@ -713,7 +1010,7 @@ public sealed class MentorTeachingProposalService(
 
         if (proposal.Status == MentorTeachingProposalStatus.PendingReview)
         {
-            var check = await EvaluateProposalAsync(CandidateFromEntity(proposal), policy, nowUtc, ct);
+            var check = await EvaluateProposalAsync(CandidateFromEntity(proposal), policy, nowUtc, ct, isApprovalOrPublication: true);
             dto.HasConflicts = !check.CanSubmit;
             dto.ValidationIssues = check.Issues;
             dto.OccurrencesPreview = check.OccurrencesPreview;
@@ -727,7 +1024,7 @@ public sealed class MentorTeachingProposalService(
     {
         var claims = claimService.GetUserClaim();
         if (claims.Role != Role.Admin)
-            return ApiResponse<TeachingProposalResponse>.Fail("Chỉ Admin mới có quyền phê duyệt đề xuất mở lớp.", HttpStatusCode.Forbidden);
+            return ApiResponse<TeachingProposalResponse>.Fail("Chỉ quản trị viên mới có quyền phê duyệt đề xuất mở lớp.", HttpStatusCode.Forbidden);
 
         if (request is null || string.IsNullOrWhiteSpace(request.Decision))
             return ApiResponse<TeachingProposalResponse>.Fail("Vui lòng chọn quyết định duyệt hợp lệ.");
@@ -760,198 +1057,231 @@ public sealed class MentorTeachingProposalService(
 
         ApiResponse<TeachingProposalResponse>? failure = null;
 
-        await unitOfWork.ExecuteInTransactionAsync(async token =>
+        try
         {
-            var proposal = await unitOfWork.MentorTeachingProposals.Query()
-                .FirstOrDefaultAsync(p => p.Id == id, token);
-            if (proposal is null)
+            await unitOfWork.ExecuteInTransactionAsync(async token =>
             {
-                failure = ApiResponse<TeachingProposalResponse>.NotFound("Không tìm thấy đề xuất mở lớp.", "PROPOSAL_NOT_FOUND");
-                return;
-            }
-
-            await unitOfWork.StudyCourses.LockScheduleAsync(proposal.MentorId, proposal.MentorId, token);
-
-            if (proposal.Status != MentorTeachingProposalStatus.PendingReview)
-            {
-                failure = ApiResponse<TeachingProposalResponse>.Fail(
-                    "Đề xuất này không còn ở trạng thái Chờ duyệt.",
-                    HttpStatusCode.Conflict,
-                    "PROPOSAL_NOT_PENDING");
-                return;
-            }
-
-            if (proposal.Revision != request.ExpectedRevision)
-            {
-                failure = ApiResponse<TeachingProposalResponse>.Fail(
-                    "Đề xuất vừa được cập nhật bởi thao tác khác. Vui lòng tải lại trước khi quyết định.",
-                    HttpStatusCode.Conflict,
-                    "PROPOSAL_REVISION_CONFLICT");
-                return;
-            }
-
-            var fromStatus = proposal.Status;
-            var generatedSlotIds = new List<int>();
-
-            if (isApprove)
-            {
-                var candidate = CandidateFromEntity(proposal);
-                var validation = await EvaluateProposalAsync(candidate, policy, nowUtc, token);
-                if (!validation.CanSubmit)
+                var lookup = await unitOfWork.MentorTeachingProposals.Query().AsNoTracking()
+                    .Where(p => p.Id == id)
+                    .Select(p => new { p.Id, p.MentorId })
+                    .FirstOrDefaultAsync(token);
+                if (lookup is null)
                 {
-                    var firstErr = validation.Issues.FirstOrDefault(i => i.Severity == "Error");
-                    failure = ApiResponse<TeachingProposalResponse>.Fail(
-                        firstErr?.Message ?? "Không thể phê duyệt vì lịch dạy không còn hợp lệ tại thời điểm duyệt.",
-                        HttpStatusCode.Conflict,
-                        firstErr?.Code ?? "PROPOSAL_APPROVAL_CONFLICT",
-                        errors: validation.Issues.Where(i => i.Severity == "Error").Select(i => i.Message).ToList());
+                    failure = ApiResponse<TeachingProposalResponse>.NotFound("Không tìm thấy đề xuất mở lớp.", "PROPOSAL_NOT_FOUND");
                     return;
                 }
 
-                var nextRevision = proposal.Revision + 1;
-                var createdSlots = new List<MentorAvailability>(validation.OccurrencesPreview.Count);
-                foreach (var occ in validation.OccurrencesPreview)
+                // Khóa lịch Mentor trước khi load tracked entity để tránh read-before-lock race khi 2 Admin duyệt song song
+                await unitOfWork.StudyCourses.LockScheduleAsync(lookup.MentorId, lookup.MentorId, token);
+
+                var proposal = await unitOfWork.MentorTeachingProposals.Query()
+                    .FirstOrDefaultAsync(p => p.Id == id, token);
+                if (proposal is null)
                 {
-                    var localDate = DateOnly.ParseExact(occ.LocalDate, "yyyy-MM-dd", CultureInfo.InvariantCulture);
-                    var slot = new MentorAvailability
-                    {
-                        MentorId = proposal.MentorId,
-                        TeachingProposalId = proposal.Id,
-                        GenerationKey = $"proposal:{proposal.Id}:v{nextRevision}:s{occ.SessionNumber}",
-                        PolicyVersion = policy.Version,
-                        GroupPolicyId = policy.Id,
-                        SessionMinutesSnapshot = proposal.SessionDurationMinutes,
-                        RestMinutesSnapshot = policy.RestMinutes,
-                        LocalBusinessDate = localDate,
-                        MaxLearners = policy.MaxLearners,
-                        BookedCount = 0,
-                        StartTime = DateTime.SpecifyKind(occ.StartUtc, DateTimeKind.Unspecified),
-                        EndTime = DateTime.SpecifyKind(occ.EndUtc, DateTimeKind.Unspecified),
-                        RoomId = Guid.NewGuid(),
-                        AttendanceTrackingEnabled = true,
-                        IsApproved = true,
-                        PublishedAt = nowUtc,
-                        AdminName = adminName,
-                        IsDeleted = false,
-                        CreatedDate = nowUtc,
-                        ModifiedDate = nowUtc,
-                    };
-                    createdSlots.Add(slot);
-                    await unitOfWork.MentorAvailabilities.AddAsync(slot, token);
+                    failure = ApiResponse<TeachingProposalResponse>.NotFound("Không tìm thấy đề xuất mở lớp.", "PROPOSAL_NOT_FOUND");
+                    return;
                 }
 
-                proposal.Status = MentorTeachingProposalStatus.Approved;
-                proposal.ReviewedAtUtc = nowUtc;
-                proposal.ReviewedByAdminId = claims.Id;
-                proposal.ReviewReason = trimmedReason;
-                proposal.GroupPolicyId = policy.Id;
-                proposal.PolicyVersionSnapshot = policy.Version;
-                proposal.Revision = nextRevision;
-                proposal.UpdatedAtUtc = nowUtc;
-
-                unitOfWork.MentorTeachingProposals.Update(proposal);
-                await unitOfWork.SaveChangesAsync(token);
-                generatedSlotIds = createdSlots.Select(s => s.Id).ToList();
-            }
-            else if (isRequestChanges)
-            {
-                proposal.Status = MentorTeachingProposalStatus.ChangesRequested;
-                proposal.ReviewedAtUtc = nowUtc;
-                proposal.ReviewedByAdminId = claims.Id;
-                proposal.ReviewReason = trimmedReason;
-                proposal.SubmissionIdempotencyKey = null; // Cho phép gửi lại sau khi chỉnh sửa
-                proposal.Revision++;
-                proposal.UpdatedAtUtc = nowUtc;
-                unitOfWork.MentorTeachingProposals.Update(proposal);
-            }
-            else
-            {
-                proposal.Status = MentorTeachingProposalStatus.Rejected;
-                proposal.ReviewedAtUtc = nowUtc;
-                proposal.ReviewedByAdminId = claims.Id;
-                proposal.ReviewReason = trimmedReason;
-                proposal.Revision++;
-                proposal.UpdatedAtUtc = nowUtc;
-                unitOfWork.MentorTeachingProposals.Update(proposal);
-            }
-
-            await unitOfWork.MentorTeachingProposalEvents.AddAsync(new MentorTeachingProposalEvent
-            {
-                ProposalId = proposal.Id,
-                ActorUserId = claims.Id,
-                ActorRole = Role.Admin.ToString(),
-                Action = isApprove ? "Approved" : isRequestChanges ? "ChangesRequested" : "Rejected",
-                FromStatus = fromStatus,
-                ToStatus = proposal.Status,
-                RevisionAfter = proposal.Revision,
-                Reason = trimmedReason,
-                SnapshotJson = generatedSlotIds.Count > 0
-                    ? JsonSerializer.Serialize(new { GeneratedAvailabilityIds = generatedSlotIds }, JsonOpts)
-                    : null,
-                CreatedAtUtc = nowUtc,
-            }, token);
-
-            await unitOfWork.AdminAuditLogs.AddAsync(new AdminAuditLog
-            {
-                ActorUserId = claims.Id,
-                EntityType = "MentorTeachingProposal",
-                EntityId = proposal.Id,
-                Action = isApprove ? "Approved" : isRequestChanges ? "ChangesRequested" : "Rejected",
-                BeforeJson = JsonSerializer.Serialize(new { Status = fromStatus, Revision = request.ExpectedRevision }),
-                AfterJson = JsonSerializer.Serialize(new
+                if (proposal.Status != MentorTeachingProposalStatus.PendingReview)
                 {
-                    proposal.Status,
-                    proposal.Revision,
-                    GeneratedSlotCount = generatedSlotIds.Count,
-                }),
-                Reason = trimmedReason,
-                CreatedAtUtc = nowUtc,
-            }, token);
+                    failure = ApiResponse<TeachingProposalResponse>.Fail(
+                        "Đề xuất này không còn ở trạng thái Chờ duyệt.",
+                        HttpStatusCode.Conflict,
+                        "PROPOSAL_NOT_PENDING");
+                    return;
+                }
 
-            var titleLabel = string.IsNullOrWhiteSpace(proposal.CourseTitle) ? $"Đề xuất #{proposal.Id}" : proposal.CourseTitle;
-            var notifTitle = isApprove
-                ? "Đề xuất mở lớp JLPT đã được phê duyệt"
-                : isRequestChanges
-                    ? "Đề xuất mở lớp JLPT cần chỉnh sửa bổ sung"
-                    : "Đề xuất mở lớp JLPT không được phê duyệt";
-            var notifMessage = isApprove
-                ? $"Admin đã phê duyệt \"{titleLabel}\" và ghi nhận {generatedSlotIds.Count} buổi dạy vào lịch sẵn sàng mở lớp."
-                : isRequestChanges
-                    ? $"Admin yêu cầu điều chỉnh \"{titleLabel}\": {trimmedReason}"
-                    : $"Admin đã từ chối \"{titleLabel}\": {trimmedReason}";
-
-            unitOfWork.AddMentorOutboxEvent(new MentorOutboxEvent
-            {
-                EventKey = $"proposal-reviewed:{proposal.Id}:v{proposal.Revision}",
-                AggregateType = "MentorTeachingProposal",
-                AggregateId = proposal.Id.ToString(CultureInfo.InvariantCulture),
-                EventType = "CohortLearningNotification",
-                EventVersion = 1,
-                PayloadJson = JsonSerializer.Serialize(new
+                if (proposal.Revision != request.ExpectedRevision)
                 {
-                    Notifications = new[]
+                    failure = ApiResponse<TeachingProposalResponse>.Fail(
+                        "Đề xuất vừa được cập nhật bởi thao tác khác. Vui lòng tải lại trước khi quyết định.",
+                        HttpStatusCode.Conflict,
+                        "PROPOSAL_REVISION_CONFLICT");
+                    return;
+                }
+
+                var fromStatus = proposal.Status;
+                var generatedSlotIds = new List<int>();
+
+                if (isApprove)
+                {
+                    var candidate = CandidateFromEntity(proposal);
+                    var validation = await EvaluateProposalAsync(candidate, policy, nowUtc, token, isApprovalOrPublication: true);
+                    if (!validation.CanSubmit)
                     {
-                        new
-                        {
-                            UserId = proposal.MentorId,
-                            Title = notifTitle,
-                            Message = notifMessage,
-                            Type = "MentorSchedule",
-                            LinkUrl = $"/mentor-shift-schedule?proposalId={proposal.Id}",
-                        },
-                    },
-                }),
-                CreatedAtUtc = nowUtc,
-                AvailableAtUtc = nowUtc,
-            });
+                        var firstErr = validation.Issues.FirstOrDefault(i => i.Severity == "Error");
+                        failure = ApiResponse<TeachingProposalResponse>.Fail(
+                            firstErr?.Message ?? "Không thể phê duyệt vì lịch dạy không còn hợp lệ tại thời điểm duyệt.",
+                            HttpStatusCode.Conflict,
+                            firstErr?.Code ?? "PROPOSAL_APPROVAL_CONFLICT",
+                            errors: validation.Issues.Where(i => i.Severity == "Error").Select(i => i.Message).ToList());
+                        return;
+                    }
 
-            await unitOfWork.SaveChangesAsync(token);
-        }, ct);
+                    var nextRevision = proposal.Revision + 1;
+                    var createdSlots = new List<MentorAvailability>(validation.OccurrencesPreview.Count);
+                    foreach (var occ in validation.OccurrencesPreview)
+                    {
+                        var localDate = DateOnly.ParseExact(occ.LocalDate, "yyyy-MM-dd", CultureInfo.InvariantCulture);
+                        var slot = new MentorAvailability
+                        {
+                            MentorId = proposal.MentorId,
+                            TeachingProposalId = proposal.Id,
+                            GenerationKey = $"proposal:{proposal.Id}:v{nextRevision}:s{occ.SessionNumber}",
+                            PolicyVersion = policy.Version,
+                            GroupPolicyId = policy.Id,
+                            SessionMinutesSnapshot = proposal.SessionDurationMinutes,
+                            RestMinutesSnapshot = policy.RestMinutes,
+                            LocalBusinessDate = localDate,
+                            MaxLearners = policy.MaxLearners,
+                            BookedCount = 0,
+                            StartTime = DateTime.SpecifyKind(occ.StartUtc, DateTimeKind.Unspecified),
+                            EndTime = DateTime.SpecifyKind(occ.EndUtc, DateTimeKind.Unspecified),
+                            RoomId = Guid.NewGuid(),
+                            AttendanceTrackingEnabled = true,
+                            IsApproved = true,
+                            PublishedAt = nowUtc,
+                            AdminName = adminName,
+                            IsDeleted = false,
+                            CreatedDate = nowUtc,
+                            ModifiedDate = nowUtc,
+                        };
+                        createdSlots.Add(slot);
+                        await unitOfWork.MentorAvailabilities.AddAsync(slot, token);
+                    }
+
+                    proposal.Status = MentorTeachingProposalStatus.Approved;
+                    proposal.ReviewedAtUtc = nowUtc;
+                    proposal.ReviewedByAdminId = claims.Id;
+                    proposal.ReviewReason = trimmedReason;
+                    proposal.GroupPolicyId = policy.Id;
+                    proposal.PolicyVersionSnapshot = policy.Version;
+                    proposal.Revision = nextRevision;
+                    proposal.UpdatedAtUtc = nowUtc;
+
+                    unitOfWork.MentorTeachingProposals.Update(proposal);
+                    await unitOfWork.SaveChangesAsync(token);
+                    generatedSlotIds = createdSlots.Select(s => s.Id).ToList();
+                }
+                else if (isRequestChanges)
+                {
+                    proposal.Status = MentorTeachingProposalStatus.ChangesRequested;
+                    proposal.ReviewedAtUtc = nowUtc;
+                    proposal.ReviewedByAdminId = claims.Id;
+                    proposal.ReviewReason = trimmedReason;
+                    proposal.SubmissionIdempotencyKey = null; // Cho phép gửi lại sau khi chỉnh sửa
+                    proposal.Revision++;
+                    proposal.UpdatedAtUtc = nowUtc;
+                    unitOfWork.MentorTeachingProposals.Update(proposal);
+                }
+                else
+                {
+                    proposal.Status = MentorTeachingProposalStatus.Rejected;
+                    proposal.ReviewedAtUtc = nowUtc;
+                    proposal.ReviewedByAdminId = claims.Id;
+                    proposal.ReviewReason = trimmedReason;
+                    proposal.Revision++;
+                    proposal.UpdatedAtUtc = nowUtc;
+                    unitOfWork.MentorTeachingProposals.Update(proposal);
+                }
+
+                await unitOfWork.MentorTeachingProposalEvents.AddAsync(new MentorTeachingProposalEvent
+                {
+                    ProposalId = proposal.Id,
+                    ActorUserId = claims.Id,
+                    ActorRole = Role.Admin.ToString(),
+                    Action = isApprove ? "Approved" : isRequestChanges ? "ChangesRequested" : "Rejected",
+                    FromStatus = fromStatus,
+                    ToStatus = proposal.Status,
+                    RevisionAfter = proposal.Revision,
+                    Reason = trimmedReason,
+                    SnapshotJson = generatedSlotIds.Count > 0
+                        ? JsonSerializer.Serialize(new { GeneratedAvailabilityIds = generatedSlotIds }, JsonOpts)
+                        : null,
+                    CreatedAtUtc = nowUtc,
+                }, token);
+
+                await unitOfWork.AdminAuditLogs.AddAsync(new AdminAuditLog
+                {
+                    ActorUserId = claims.Id,
+                    EntityType = "MentorTeachingProposal",
+                    EntityId = proposal.Id,
+                    Action = isApprove ? "Approved" : isRequestChanges ? "ChangesRequested" : "Rejected",
+                    BeforeJson = JsonSerializer.Serialize(new { Status = fromStatus, Revision = request.ExpectedRevision }),
+                    AfterJson = JsonSerializer.Serialize(new
+                    {
+                        proposal.Status,
+                        proposal.Revision,
+                        GeneratedSlotCount = generatedSlotIds.Count,
+                    }),
+                    Reason = trimmedReason,
+                    CreatedAtUtc = nowUtc,
+                }, token);
+
+                var titleLabel = string.IsNullOrWhiteSpace(proposal.CourseTitle) ? $"Đề xuất #{proposal.Id}" : proposal.CourseTitle;
+                var notifTitle = isApprove
+                    ? "Đề xuất mở lớp JLPT đã được phê duyệt"
+                    : isRequestChanges
+                        ? "Đề xuất mở lớp JLPT cần chỉnh sửa bổ sung"
+                        : "Đề xuất mở lớp JLPT không được phê duyệt";
+                var notifMessage = isApprove
+                    ? $"Quản trị viên đã phê duyệt \"{titleLabel}\" và ghi nhận {generatedSlotIds.Count} buổi dạy vào lịch sẵn sàng mở lớp."
+                    : isRequestChanges
+                        ? $"Quản trị viên yêu cầu điều chỉnh \"{titleLabel}\": {trimmedReason}"
+                        : $"Quản trị viên đã từ chối \"{titleLabel}\": {trimmedReason}";
+
+                unitOfWork.AddMentorOutboxEvent(new MentorOutboxEvent
+                {
+                    EventKey = $"proposal-reviewed:{proposal.Id}:v{proposal.Revision}",
+                    AggregateType = "MentorTeachingProposal",
+                    AggregateId = proposal.Id.ToString(CultureInfo.InvariantCulture),
+                    EventType = "CohortLearningNotification",
+                    EventVersion = 1,
+                    PayloadJson = JsonSerializer.Serialize(new
+                    {
+                        Notifications = new[]
+                        {
+                            new
+                            {
+                                UserId = proposal.MentorId,
+                                Title = notifTitle,
+                                Message = notifMessage,
+                                Type = "MentorSchedule",
+                                LinkUrl = $"/mentor-shift-schedule?proposalId={proposal.Id}",
+                            },
+                        },
+                    }),
+                    CreatedAtUtc = nowUtc,
+                    AvailableAtUtc = nowUtc,
+                });
+
+                await unitOfWork.SaveChangesAsync(token);
+            }, ct);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return ApiResponse<TeachingProposalResponse>.Fail(
+                "Đề xuất đã được xử lý bởi thao tác khác. Vui lòng tải lại danh sách.",
+                HttpStatusCode.Conflict,
+                "PROPOSAL_REVISION_CONFLICT");
+        }
+        catch (DbUpdateException ex) when (IsPgConflict(ex))
+        {
+            return ApiResponse<TeachingProposalResponse>.Fail(
+                "Xung đột dữ liệu đồng thời khi phê duyệt đề xuất. Vui lòng tải lại.",
+                HttpStatusCode.Conflict,
+                "PROPOSAL_CONFLICT_CONCURRENT_SUBMISSION");
+        }
 
         if (failure is not null)
             return failure;
 
         var loaded = await QueryProposalsWithIncludes(includeEvents: true).FirstAsync(p => p.Id == id, ct);
+        if (sidebarNotifier is not null)
+        {
+            await sidebarNotifier.NotifyAdminsAsync("proposal_reviewed", ct);
+            await sidebarNotifier.NotifyUsersAsync([loaded.MentorId], "proposal_reviewed", ct);
+        }
         var qualCodes = await LoadMentorQualifiedLevelCodesAsync(loaded.MentorId, ct);
         var linkedCohorts = await LoadLinkedCohortsMapAsync([loaded.Id], ct);
         var dto = MapProposal(loaded, policy, qualCodes, linkedCohorts.GetValueOrDefault(loaded.Id), includeHistory: true);
@@ -964,7 +1294,7 @@ public sealed class MentorTeachingProposalService(
     {
         var claims = claimService.GetUserClaim();
         if (claims.Role != Role.Admin)
-            return ApiResponse<List<TeachingProposalResponse>>.Fail("Chỉ Admin mới có quyền xem đề xuất đã duyệt.", HttpStatusCode.Forbidden);
+            return ApiResponse<List<TeachingProposalResponse>>.Fail("Chỉ quản trị viên mới có quyền xem đề xuất đã duyệt.", HttpStatusCode.Forbidden);
 
         var nowUtc = DateTime.UtcNow;
         var policy = await groupPolicyService.GetEffectiveAsync(nowUtc, ct);
@@ -1010,7 +1340,8 @@ public sealed class MentorTeachingProposalService(
         ProposalCandidate candidate,
         MentorGroupPolicy policy,
         DateTime nowUtc,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool isApprovalOrPublication = false)
     {
         var issues = new List<ProposalValidationIssue>();
         var allowedCounts = ParseAllowedSessionsPerWeek(policy.AllowedSessionsPerWeekCsv);
@@ -1019,32 +1350,82 @@ public sealed class MentorTeachingProposalService(
         var restMinutes = Math.Max(0, policy.RestMinutes);
         var requiredSessionMinutes = policy.SessionMinutes;
         var requiredWeeks = policy.CourseDurationWeeks;
+        var minProposalLeadDays = MentorSlotPolicy.MinimumProposalLeadDays;
+        var minEnrollmentLeadDays = MentorSlotPolicy.MinimumPublishedEnrollmentDays;
 
-        // 1. Mentor verification & active check
+        // 1. Mentor verification, active account & verified teaching qualification check
         var mentor = await unitOfWork.UserAccounts.Query().AsNoTracking()
             .Include(u => u.MentorProfile)
             .FirstOrDefaultAsync(u => u.Id == candidate.MentorId && u.Role == Role.Mentor && !u.IsDeleted, ct);
-        if (mentor is null || mentor.MentorProfile?.VerificationStatus != MentorVerificationStatus.Approved)
+        var mentorVerified = mentor is not null && mentor.MentorProfile?.VerificationStatus == MentorVerificationStatus.Approved;
+        var verifiedQualCodes = await LoadMentorQualifiedLevelCodesAsync(candidate.MentorId, ct);
+        var highestVerifiedRank = ResolveHighestVerifiedRank(mentor?.MentorProfile, verifiedQualCodes);
+        var highestVerifiedCode = MentorSlotPolicy.GetJlptCodeFromRank(highestVerifiedRank);
+
+        if (!mentorVerified)
         {
-            issues.Add(Error("MENTOR_NOT_VERIFIED", "Hồ sơ Giáo viên cần được phê duyệt trước khi gửi đề xuất mở lớp."));
+            issues.Add(Error("MENTOR_QUALIFICATION_NOT_VERIFIED",
+                "Hồ sơ chuyên môn của Giáo viên cần được xác minh trước khi gửi đề xuất mở lớp."));
+        }
+        else if (highestVerifiedRank <= 0)
+        {
+            issues.Add(Error("MENTOR_QUALIFICATION_NOT_VERIFIED",
+                "Giáo viên chưa có chứng chỉ JLPT được xác minh hợp lệ để đăng ký mở lớp."));
         }
 
-        // 2. JLPT level existence check (Giáo viên tự chọn N5–N1; Admin xét duyệt năng lực khi duyệt đề xuất)
+        // 2. JLPT level existence, N5–N2 scope, qualification ranking & per-level active duplicate protection
         if (!candidate.CertificateLevelId.HasValue || candidate.CertificateLevelId.Value <= 0)
         {
             issues.Add(Error("PROPOSAL_LEVEL_REQUIRED", "Vui lòng chọn trình độ JLPT dự kiến giảng dạy."));
         }
         else
         {
-            var levelExists = await unitOfWork.CertificateLevels.Query().AsNoTracking()
-                .AnyAsync(l => l.Id == candidate.CertificateLevelId.Value
+            var levelRow = await unitOfWork.CertificateLevels.Query().AsNoTracking()
+                .Include(l => l.CertificateType)
+                .Where(l => l.Id == candidate.CertificateLevelId.Value
                     && !l.IsDeleted
                     && l.CertificateType != null
                     && !l.CertificateType.IsDeleted
-                    && l.CertificateType.IsActive, ct);
-            if (!levelExists)
+                    && l.CertificateType.IsActive)
+                .Select(l => new { l.Id, l.Code })
+                .FirstOrDefaultAsync(ct);
+
+            if (levelRow is null)
             {
                 issues.Add(Error("PROPOSAL_LEVEL_INVALID", "Trình độ JLPT đã chọn không tồn tại hoặc không còn hoạt động."));
+            }
+            else if (!MentorSlotPolicy.IsSupportedClassLevel(levelRow.Code))
+            {
+                issues.Add(Error(
+                    "PROPOSAL_LEVEL_NOT_SUPPORTED",
+                    $"Hiện tại hệ thống chỉ hỗ trợ đăng ký mở lớp nhóm ở các cấp độ N5–N2 (cấp độ {levelRow.Code} không thuộc phạm vi mở lớp)."));
+            }
+            else
+            {
+                if (mentorVerified && highestVerifiedRank > 0 && !MentorSlotPolicy.CanMentorTeachLevel(highestVerifiedRank, levelRow.Code))
+                {
+                    issues.Add(Error(
+                        "INSUFFICIENT_TEACHING_QUALIFICATION",
+                        $"Không đủ trình độ chuyên môn. Chứng chỉ đã xác minh ({highestVerifiedCode}) chỉ đủ điều kiện giảng dạy từ N5 đến {(highestVerifiedRank >= 4 ? "N2" : highestVerifiedCode)}."));
+                }
+
+                var blockingMap = await BuildLevelBlockingMapAsync(candidate.MentorId, candidate.ProposalId, nowUtc, ct);
+                if (blockingMap.TryGetValue(levelRow.Id, out var levelBlock))
+                {
+                    var formattedReason = FormatLevelBlockingReason(levelRow.Code, levelBlock);
+                    issues.Add(new ProposalValidationIssue
+                    {
+                        Code = "PROPOSAL_DUPLICATE_ACTIVE_LEVEL",
+                        Severity = "Error",
+                        Message = $"{formattedReason}{(string.IsNullOrWhiteSpace(levelBlock.Title) ? "" : $" ({levelBlock.Title})")}",
+                        ConflictSource = levelBlock.Title,
+                        ConflictJlptLevel = levelRow.Code,
+                        ConflictStatus = levelBlock.Status,
+                        ConflictEntityType = levelBlock.CohortId.HasValue ? "StudyCohort" : "TeachingProposal",
+                        ConflictProposalId = levelBlock.ProposalId,
+                        ConflictCohortId = levelBlock.CohortId,
+                    });
+                }
             }
         }
 
@@ -1070,9 +1451,10 @@ public sealed class MentorTeachingProposalService(
                     issues.Add(Error("PROPOSAL_PLAN_MISMATCH", $"Gói \"{plan.Name}\" yêu cầu đúng {plan.SessionsPerWeek} buổi/tuần (hiện chọn {candidate.WeeklySessions.Count} buổi/tuần)."));
             }
         }
-        else if (string.IsNullOrWhiteSpace(candidate.CourseObjective))
+
+        if (string.IsNullOrWhiteSpace(candidate.CourseObjective))
         {
-            issues.Add(Error("PROPOSAL_OBJECTIVE_REQUIRED", "Vui lòng nhập mục tiêu khóa học khi không chọn gói khóa học có sẵn."));
+            issues.Add(Error("PROPOSAL_OBJECTIVE_REQUIRED", "Vui lòng nhập mục tiêu khóa học."));
         }
 
         // 4. Duration & session length check
@@ -1087,7 +1469,7 @@ public sealed class MentorTeachingProposalService(
         if (sessions.Count < minPerWeek)
         {
             issues.Add(Error("PROPOSAL_MIN_SESSIONS_NOT_MET",
-                $"Mỗi đề xuất mở lớp cần tối thiểu {minPerWeek} buổi/tuần (hiện có {sessions.Count} buổi/tuần). Bạn có thể lưu nháp và bổ sung sau."));
+                $"Mỗi đề xuất mở lớp cần tối thiểu {minPerWeek} buổi/tuần (hiện có {sessions.Count} buổi/tuần)."));
         }
         else if (sessions.Count > maxPerWeek)
         {
@@ -1138,46 +1520,119 @@ public sealed class MentorTeachingProposalService(
             }
         }
 
-        // 7. Expected start date & 10-week schedule expansion
+        // 7. Expected start date, lead-time policy & 10-week schedule expansion (anchored strictly at expectedStartDate)
         var occurrences = new List<GeneratedSessionOccurrenceResponse>();
         DateOnly? projectedEndDate = null;
         var todayVn = DateOnly.FromDateTime(LocalTime(nowUtc));
+        var minProposalStartDate = todayVn.AddDays(minProposalLeadDays);
+        var minEnrollmentStartDate = todayVn.AddDays(minEnrollmentLeadDays);
+        var hasStructuralSlotError = issues.Any(i => i.Code is "PROPOSAL_INVALID_SESSION_SLOT" or "PROPOSAL_OWN_OVERLAP");
 
         if (!candidate.ExpectedStartDate.HasValue)
         {
             issues.Add(Error("PROPOSAL_START_DATE_REQUIRED", "Vui lòng chọn ngày khai giảng dự kiến."));
-        }
-        else if (candidate.ExpectedStartDate.Value < todayVn)
-        {
-            issues.Add(Error("PROPOSAL_START_DATE_PAST", "Ngày khai giảng dự kiến không được ở trong quá khứ."));
-        }
-        else if (sessions.Count > 0 && !issues.Any(i => i.Code is "PROPOSAL_INVALID_SESSION_SLOT" or "PROPOSAL_OWN_OVERLAP"))
-        {
-            occurrences = ExpandOccurrences(candidate.ExpectedStartDate.Value, sessions, candidate.CourseDurationWeeks, requiredSessionMinutes, nowUtc);
-            if (occurrences.Count > 0)
+
+            if (sessions.Count > 0 && !hasStructuralSlotError)
             {
-                projectedEndDate = DateOnly.ParseExact(occurrences[^1].LocalDate, "yyyy-MM-dd", CultureInfo.InvariantCulture);
-                if (occurrences[0].StartUtc <= nowUtc)
+                var prelimStart = FindEarliestValidStartDate(minProposalStartDate, sessions);
+                var prelimOccurrences = ExpandOccurrences(prelimStart, sessions, requiredWeeks, requiredSessionMinutes, DateTime.MinValue);
+                if (prelimOccurrences.Count > 0)
                 {
-                    issues.Add(Error("PROPOSAL_START_DATE_PAST",
-                        "Buổi học đầu tiên nằm trong quá khứ. Vui lòng chọn ngày khai giảng muộn hơn."));
+                    var prelimIntervals = prelimOccurrences
+                        .Select(o => new ProposedTeachingInterval(o.StartUtc, o.EndUtc, o.SessionNumber))
+                        .ToList();
+                    var prelimReport = await teachingConflictService.CheckAsync(
+                        candidate.MentorId,
+                        prelimIntervals,
+                        new TeachingConflictOptions
+                        {
+                            ExcludeProposalId = candidate.ProposalId,
+                            RestMinutes = restMinutes,
+                            DailyCap = policy.DailySessionCap,
+                            WeeklyCap = policy.WeeklySessionCap,
+                            IncludeOwnIntervals = false,
+                        },
+                        ct);
+
+                    foreach (var c in prelimReport.Conflicts.Take(25))
+                    {
+                        var warn = MapConflictIssue(c, isPreliminaryWarning: true);
+                        warn.Message = $"Cần kiểm tra theo ngày khai giảng: {c.Message}";
+                        issues.Add(warn);
+                    }
+                }
+            }
+        }
+        else
+        {
+            var startDate = candidate.ExpectedStartDate.Value;
+            if (startDate < todayVn)
+            {
+                issues.Add(Error("PAST_SCHEDULE_SLOT", "Ngày khai giảng dự kiến không được ở trong quá khứ."));
+            }
+            else if (!isApprovalOrPublication && startDate < minProposalStartDate)
+            {
+                issues.Add(Error(
+                    "INSUFFICIENT_PROPOSAL_LEAD_TIME",
+                    $"Ngày khai giảng cần cách thời điểm gửi đề xuất ít nhất {minProposalLeadDays} ngày."));
+            }
+            else if (isApprovalOrPublication && startDate < minEnrollmentStartDate)
+            {
+                issues.Add(Error(
+                    "INSUFFICIENT_ENROLLMENT_LEAD_TIME",
+                    "Chưa đủ thời gian tuyển sinh trước buổi học đầu tiên."));
+            }
+
+            var startMatchesWeekday = sessions.Count == 0 || sessions.Any(s => s.Weekday == (int)startDate.DayOfWeek);
+            if (!startMatchesWeekday)
+            {
+                issues.Add(Error(
+                    "COURSE_START_SESSION_MISMATCH",
+                    "Ngày khai giảng dự kiến phải trùng với một thứ đã đăng ký trong lịch dạy hàng tuần."));
+            }
+            else if (startDate >= todayVn && sessions.Count > 0 && !hasStructuralSlotError)
+            {
+                // Luôn dùng requiredWeeks từ chính sách máy chủ (không tin durationWeeks tự ý từ client).
+                occurrences = ExpandOccurrences(startDate, sessions, requiredWeeks, requiredSessionMinutes, nowUtc);
+                var expectedTotal = sessions.Count * requiredWeeks;
+                if (occurrences.Count != expectedTotal)
+                {
+                    issues.Add(Error("INVALID_RECURRENCE_SCHEDULE",
+                        $"Không thể sinh đủ {expectedTotal} buổi học trong {requiredWeeks} tuần liên tiếp."));
+                }
+                else if (occurrences.Count > 0)
+                {
+                    var expectedStartIso = startDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+                    if (!string.Equals(occurrences[0].LocalDate, expectedStartIso, StringComparison.Ordinal))
+                    {
+                        issues.Add(Error("COURSE_START_SESSION_MISMATCH",
+                            "Ngày khai giảng dự kiến không khớp với ngày diễn ra buổi học đầu tiên."));
+                    }
+
+                    projectedEndDate = DateOnly.ParseExact(occurrences[^1].LocalDate, "yyyy-MM-dd", CultureInfo.InvariantCulture);
+                    if (occurrences[0].StartUtc <= nowUtc)
+                    {
+                        issues.Add(Error("SESSION_ALREADY_STARTED",
+                            "Buổi học đầu tiên đã trôi qua hoặc đã bắt đầu. Vui lòng chọn ngày khai giảng muộn hơn."));
+                    }
                 }
             }
         }
 
-        // 8. Cross-schedule conflict & Mentor-wide workload check across full 10-week horizon
+        // 8. Authoritative cross-schedule conflict & Mentor-wide workload check across full 10-week horizon
         if (occurrences.Count > 0)
         {
             var proposedIntervals = occurrences
                 .Select(o => new ProposedTeachingInterval(o.StartUtc, o.EndUtc, o.SessionNumber))
                 .ToList();
 
-            // 8a. Authoritative cohort conflict check via MentorTeachingConflictService
-            var cohortReport = await teachingConflictService.CheckAsync(
+            // MentorTeachingConflictService kiểm tra đồng bộ: StudyCohorts đang mở/nháp, MentorAvailabilities đã duyệt từ proposal khác, PendingReview và ChangesRequested proposals (bỏ qua Cancelled cohorts).
+            var conflictReport = await teachingConflictService.CheckAsync(
                 candidate.MentorId,
                 proposedIntervals,
                 new TeachingConflictOptions
                 {
+                    ExcludeProposalId = candidate.ProposalId,
                     RestMinutes = restMinutes,
                     DailyCap = policy.DailySessionCap,
                     WeeklyCap = policy.WeeklySessionCap,
@@ -1185,198 +1640,9 @@ public sealed class MentorTeachingProposalService(
                 },
                 ct);
 
-            foreach (var c in cohortReport.Conflicts)
+            foreach (var c in conflictReport.Conflicts)
             {
-                var mappedCode = c.Code switch
-                {
-                    MentorTeachingConflictService.RestViolation => "PROPOSAL_REST_VIOLATION",
-                    MentorTeachingConflictService.DailyLimit => "PROPOSAL_DAILY_CAP_EXCEEDED",
-                    MentorTeachingConflictService.WeeklyLimit => "PROPOSAL_WEEKLY_CAP_EXCEEDED",
-                    _ => "PROPOSAL_CONFLICT_APPROVED_SCHEDULE",
-                };
-                var localStart = LocalTime(c.ProposedStartUtc);
-                issues.Add(new ProposalValidationIssue
-                {
-                    Code = mappedCode,
-                    Severity = "Error",
-                    Message = c.Message,
-                    Weekday = (int)localStart.DayOfWeek,
-                    StartMinute = localStart.Hour * 60 + localStart.Minute,
-                    OccurrenceStartUtc = c.ProposedStartUtc,
-                    OccurrenceEndUtc = c.ProposedEndUtc,
-                    ConflictSource = c.CohortName ?? c.CommitmentKind,
-                });
-            }
-
-            // 8b. Check against approved/pending non-deleted MentorAvailabilities + other PendingReview proposals
-            var minUtc = occurrences[0].StartUtc.AddDays(-1);
-            var maxUtc = occurrences[^1].EndUtc.AddDays(1);
-            var weekWindowStart = WeekStartUtc(occurrences[0].StartUtc);
-            var weekWindowEnd = WeekStartUtc(occurrences[^1].EndUtc).AddDays(7);
-            if (weekWindowStart < minUtc) minUtc = weekWindowStart;
-            if (weekWindowEnd > maxUtc) maxUtc = weekWindowEnd;
-
-            // Các slot đã thuộc Cohort (để tránh đếm trùng với bước 8a)
-            var cohortAvIds = await unitOfWork.StudyCohorts.Query().AsNoTracking()
-                .Where(g => g.MentorId == candidate.MentorId && (g.Status == "Published" || g.Status == "Draft"))
-                .SelectMany(g => g.Sessions.Select(s => s.AvailabilityId))
-                .ToListAsync(ct);
-            var cohortAvSet = cohortAvIds.ToHashSet();
-
-            var existingAvailabilities = await unitOfWork.MentorAvailabilities.Query().AsNoTracking()
-                .Where(a => a.MentorId == candidate.MentorId
-                    && !a.IsDeleted
-                    && a.RejectedAt == null
-                    && a.EndTime > minUtc
-                    && a.StartTime < maxUtc)
-                .Select(a => new { a.Id, a.StartTime, a.EndTime, a.IsApproved, a.TeachingProposalId })
-                .ToListAsync(ct);
-
-            // Other PendingReview proposals of the same Mentor (allowing multiple concurrent proposals when non-conflicting!)
-            var otherPendingProposals = await unitOfWork.MentorTeachingProposals.Query().AsNoTracking()
-                .Where(p => p.MentorId == candidate.MentorId
-                    && p.Status == MentorTeachingProposalStatus.PendingReview
-                    && (!candidate.ProposalId.HasValue || p.Id != candidate.ProposalId.Value))
-                .ToListAsync(ct);
-
-            // Duplicate proposal detection across PendingReview & Approved
-            var signature = BuildDuplicateSignature(candidate.CertificateLevelId, candidate.CoursePlanId, candidate.ExpectedStartDate, sessions);
-            var otherActiveOrPending = await unitOfWork.MentorTeachingProposals.Query().AsNoTracking()
-                .Where(p => p.MentorId == candidate.MentorId
-                    && (p.Status == MentorTeachingProposalStatus.PendingReview || p.Status == MentorTeachingProposalStatus.Approved)
-                    && (!candidate.ProposalId.HasValue || p.Id != candidate.ProposalId.Value))
-                .Select(p => new { p.Id, p.CertificateLevelId, p.CoursePlanId, p.ExpectedStartDate, p.WeeklySessionsJson, p.CourseTitle })
-                .ToListAsync(ct);
-
-            var duplicate = otherActiveOrPending.FirstOrDefault(p =>
-                BuildDuplicateSignature(p.CertificateLevelId, p.CoursePlanId, p.ExpectedStartDate, DeserializeSessions(p.WeeklySessionsJson)) == signature);
-            if (duplicate is not null)
-            {
-                issues.Add(Error("PROPOSAL_DUPLICATE_DETECTED",
-                    $"Bạn đã có đề xuất tương tự (#{duplicate.Id}{(string.IsNullOrWhiteSpace(duplicate.CourseTitle) ? "" : $" – {duplicate.CourseTitle}")}) cùng trình độ, ngày khai giảng và lịch tuần này."));
-            }
-
-            var combinedExternal = new List<(DateTime StartUtc, DateTime EndUtc, string Source, bool IsPendingProposal)>();
-            foreach (var av in existingAvailabilities)
-            {
-                if (cohortAvSet.Contains(av.Id)) continue; // Đã kiểm tra overlap ở bước 8a, vẫn cần tính workload bên dưới
-                combinedExternal.Add((
-                    MentorTeachingConflictService.Utc(av.StartTime),
-                    MentorTeachingConflictService.Utc(av.EndTime),
-                    av.IsApproved ? "Lịch dạy đã duyệt" : "Khung giờ đang chờ duyệt",
-                    false));
-            }
-
-            foreach (var other in otherPendingProposals)
-            {
-                if (!other.ExpectedStartDate.HasValue) continue;
-                var otherSessions = DeserializeSessions(other.WeeklySessionsJson);
-                if (otherSessions.Count == 0) continue;
-                var otherOccs = ExpandOccurrences(other.ExpectedStartDate.Value, otherSessions, other.CourseDurationWeeks, other.SessionDurationMinutes, DateTime.MinValue);
-                var label = string.IsNullOrWhiteSpace(other.CourseTitle) ? $"Đề xuất chờ duyệt #{other.Id}" : $"Đề xuất chờ duyệt \"{other.CourseTitle}\"";
-                foreach (var o in otherOccs)
-                {
-                    if (o.EndUtc <= minUtc || o.StartUtc >= maxUtc) continue;
-                    combinedExternal.Add((o.StartUtc, o.EndUtc, label, true));
-                }
-            }
-
-            // Overlap & Rest against non-cohort availabilities and other pending proposals
-            var conflictAdded = 0;
-            foreach (var occ in occurrences)
-            {
-                foreach (var ext in combinedExternal)
-                {
-                    if (conflictAdded >= 20) break;
-                    if (ext.StartUtc < occ.EndUtc && occ.StartUtc < ext.EndUtc)
-                    {
-                        issues.Add(new ProposalValidationIssue
-                        {
-                            Code = ext.IsPendingProposal ? "PROPOSAL_CONFLICT_PENDING_PROPOSAL" : "PROPOSAL_CONFLICT_APPROVED_SCHEDULE",
-                            Severity = "Error",
-                            Message = $"Buổi {occ.LocalDate} ({occ.LocalStart}–{occ.LocalEnd}) bị trùng giờ với {ext.Source}.",
-                            Weekday = occ.Weekday,
-                            StartMinute = ParseClockToMinute(occ.LocalStart),
-                            OccurrenceStartUtc = occ.StartUtc,
-                            OccurrenceEndUtc = occ.EndUtc,
-                            ConflictSource = ext.Source,
-                        });
-                        conflictAdded++;
-                    }
-                    else
-                    {
-                        var gap = occ.StartUtc >= ext.EndUtc ? occ.StartUtc - ext.EndUtc : ext.StartUtc - occ.EndUtc;
-                        if (gap < TimeSpan.FromMinutes(restMinutes))
-                        {
-                            issues.Add(new ProposalValidationIssue
-                            {
-                                Code = "PROPOSAL_REST_VIOLATION",
-                                Severity = "Error",
-                                Message = $"Buổi {occ.LocalDate} ({occ.LocalStart}–{occ.LocalEnd}) quá sát {ext.Source}; cần nghỉ tối thiểu {restMinutes} phút giữa hai buổi.",
-                                Weekday = occ.Weekday,
-                                StartMinute = ParseClockToMinute(occ.LocalStart),
-                                OccurrenceStartUtc = occ.StartUtc,
-                                OccurrenceEndUtc = occ.EndUtc,
-                                ConflictSource = ext.Source,
-                            });
-                            conflictAdded++;
-                        }
-                    }
-                }
-            }
-
-            // Combined Mentor-wide Daily & Weekly caps across [approved availabilities (incl. cohorts) + other pending proposals + this proposal]
-            var allExistingForCap = existingAvailabilities
-                .Select(a => MentorTeachingConflictService.Utc(a.StartTime))
-                .Concat(combinedExternal.Where(e => e.IsPendingProposal).Select(e => e.StartUtc))
-                .ToList();
-
-            if (policy.DailySessionCap > 0)
-            {
-                var existingByDay = allExistingForCap.GroupBy(u => DateOnly.FromDateTime(LocalTime(u)))
-                    .ToDictionary(g => g.Key, g => g.Count());
-                foreach (var dayGroup in occurrences.GroupBy(o => DateOnly.FromDateTime(LocalTime(o.StartUtc))))
-                {
-                    var total = dayGroup.Count() + existingByDay.GetValueOrDefault(dayGroup.Key);
-                    if (total > policy.DailySessionCap && !issues.Any(i => i.Code == "PROPOSAL_DAILY_CAP_EXCEEDED" && i.OccurrenceStartUtc.HasValue && DateOnly.FromDateTime(LocalTime(i.OccurrenceStartUtc.Value)) == dayGroup.Key))
-                    {
-                        var first = dayGroup.First();
-                        issues.Add(new ProposalValidationIssue
-                        {
-                            Code = "PROPOSAL_DAILY_CAP_EXCEEDED",
-                            Severity = "Error",
-                            Message = $"Tổng lịch dạy ngày {dayGroup.Key:dd/MM/yyyy} đạt {total} buổi (bao gồm lịch đã duyệt và đề xuất chờ duyệt khác), vượt giới hạn {policy.DailySessionCap} buổi/ngày theo chính sách.",
-                            Weekday = first.Weekday,
-                            StartMinute = ParseClockToMinute(first.LocalStart),
-                            OccurrenceStartUtc = first.StartUtc,
-                            OccurrenceEndUtc = first.EndUtc,
-                        });
-                    }
-                }
-            }
-
-            if (policy.WeeklySessionCap > 0)
-            {
-                var existingByWeek = allExistingForCap.GroupBy(u => LocalWeekStart(DateOnly.FromDateTime(LocalTime(u))))
-                    .ToDictionary(g => g.Key, g => g.Count());
-                foreach (var weekGroup in occurrences.GroupBy(o => LocalWeekStart(DateOnly.FromDateTime(LocalTime(o.StartUtc)))))
-                {
-                    var total = weekGroup.Count() + existingByWeek.GetValueOrDefault(weekGroup.Key);
-                    if (total > policy.WeeklySessionCap && !issues.Any(i => i.Code == "PROPOSAL_WEEKLY_CAP_EXCEEDED" && i.OccurrenceStartUtc.HasValue && LocalWeekStart(DateOnly.FromDateTime(LocalTime(i.OccurrenceStartUtc.Value))) == weekGroup.Key))
-                    {
-                        var first = weekGroup.First();
-                        issues.Add(new ProposalValidationIssue
-                        {
-                            Code = "PROPOSAL_WEEKLY_CAP_EXCEEDED",
-                            Severity = "Error",
-                            Message = $"Tổng lịch dạy tuần bắt đầu {weekGroup.Key:dd/MM/yyyy} đạt {total} buổi, vượt giới hạn {policy.WeeklySessionCap} buổi/tuần theo chính sách.",
-                            Weekday = first.Weekday,
-                            StartMinute = ParseClockToMinute(first.LocalStart),
-                            OccurrenceStartUtc = first.StartUtc,
-                            OccurrenceEndUtc = first.EndUtc,
-                        });
-                    }
-                }
+                issues.Add(MapConflictIssue(c, isPreliminaryWarning: false));
             }
         }
 
@@ -1421,39 +1687,67 @@ public sealed class MentorTeachingProposalService(
         var activeCohorts = await unitOfWork.StudyCohorts.Query().AsNoTracking()
             .Include(c => c.Plan)
             .Where(c => c.MentorId == mentorId && (c.Status == "Published" || c.Status == "Draft") && c.EndsAt > nowUtc)
-            .Select(c => new { c.Id, c.Plan.SessionsPerWeek })
+            .Select(c => new { c.Id, c.SourceProposalId, c.Plan.SessionsPerWeek })
             .ToListAsync(ct);
+
+        var linkedProposalIds = activeCohorts
+            .Where(c => c.SourceProposalId.HasValue)
+            .Select(c => c.SourceProposalId!.Value)
+            .ToHashSet();
+
+        var cancelledCohortAvIds = await unitOfWork.StudyCohorts.Query().AsNoTracking()
+            .Where(c => c.MentorId == mentorId && c.Status == "Cancelled")
+            .SelectMany(c => c.Sessions.Select(s => s.AvailabilityId))
+            .ToListAsync(ct);
+        var cancelledAvSet = cancelledCohortAvIds.ToHashSet();
 
         var proposals = await unitOfWork.MentorTeachingProposals.Query().AsNoTracking()
             .Where(p => p.MentorId == mentorId)
-            .Select(p => new { p.Status, p.WeeklySessionsJson })
+            .Select(p => new
+            {
+                p.Id,
+                p.Status,
+                p.WeeklySessionsJson,
+                HasFutureApprovedSlots = p.Status == MentorTeachingProposalStatus.Approved
+                    && p.GeneratedAvailabilities.Any(a => !a.IsDeleted && a.IsApproved && a.RejectedAt == null && a.EndTime > nowUtc && !cancelledCohortAvIds.Contains(a.Id)),
+            })
             .ToListAsync(ct);
 
         var pendingProps = proposals.Where(p => p.Status == MentorTeachingProposalStatus.PendingReview).ToList();
-        var pendingWeeklySessions = pendingProps.Sum(p => DeserializeSessions(p.WeeklySessionsJson).Count);
-        var approvedCount = proposals.Count(p => p.Status == MentorTeachingProposalStatus.Approved);
-        var draftCount = proposals.Count(p => p.Status is MentorTeachingProposalStatus.Draft or MentorTeachingProposalStatus.ChangesRequested);
+        var changesRequestedProps = proposals.Where(p => p.Status == MentorTeachingProposalStatus.ChangesRequested).ToList();
+        var activeApprovedUnlinkedProps = proposals.Where(p =>
+            p.Status == MentorTeachingProposalStatus.Approved
+            && !linkedProposalIds.Contains(p.Id)
+            && p.HasFutureApprovedSlots).ToList();
+
+        var pendingWeeklySessions = pendingProps.Sum(p => DeserializeSessions(p.WeeklySessionsJson).Count)
+            + changesRequestedProps.Sum(p => DeserializeSessions(p.WeeklySessionsJson).Count);
+        var approvedUnlinkedWeekly = activeApprovedUnlinkedProps.Sum(p => DeserializeSessions(p.WeeklySessionsJson).Count);
+        var approvedCount = activeApprovedUnlinkedProps.Count;
+        var draftCount = proposals.Any(p => p.Status == MentorTeachingProposalStatus.Draft && DeserializeSessions(p.WeeklySessionsJson).Count > 0) ? 1 : 0;
 
         var weekStart = WeekStartUtc(nowUtc);
         var horizonEnd = weekStart.AddDays(70);
         var upcomingSlots = await unitOfWork.MentorAvailabilities.Query().AsNoTracking()
             .Where(a => a.MentorId == mentorId && !a.IsDeleted && a.RejectedAt == null && a.IsApproved
                 && a.StartTime >= weekStart && a.StartTime < horizonEnd)
-            .Select(a => a.StartTime)
+            .Select(a => new { a.Id, a.StartTime })
             .ToListAsync(ct);
 
         var peakDay = upcomingSlots
-            .GroupBy(t => DateOnly.FromDateTime(LocalTime(MentorTeachingConflictService.Utc(t))))
+            .Where(a => !cancelledAvSet.Contains(a.Id))
+            .GroupBy(a => DateOnly.FromDateTime(LocalTime(MentorTeachingConflictService.Utc(a.StartTime))))
             .Select(g => g.Count())
             .DefaultIfEmpty(0)
             .Max();
 
-        var weeklyCommitted = activeCohorts.Sum(c => c.SessionsPerWeek);
+        var weeklyCommitted = activeCohorts.Sum(c => c.SessionsPerWeek) + approvedUnlinkedWeekly;
 
         return new MentorWorkloadSummaryResponse
         {
             ActiveCohortsCount = activeCohorts.Count,
             PendingProposalsCount = pendingProps.Count,
+            ChangesRequestedProposalsCount = changesRequestedProps.Count,
             ApprovedProposalsCount = approvedCount,
             DraftProposalsCount = draftCount,
             WeeklyCommittedSessions = weeklyCommitted,
@@ -1464,6 +1758,140 @@ public sealed class MentorTeachingProposalService(
             WeeklySessionCap = policy.WeeklySessionCap,
         };
     }
+
+    private sealed record LevelBlockInfo(string Status, string Reason, int? ProposalId, int? CohortId, string? Title);
+
+    private async Task<Dictionary<int, LevelBlockInfo>> BuildLevelBlockingMapAsync(
+        int mentorId, int? excludeProposalId, DateTime nowUtc, CancellationToken ct)
+    {
+        var map = new Dictionary<int, LevelBlockInfo>();
+
+        var activeProposals = await unitOfWork.MentorTeachingProposals.Query().AsNoTracking()
+            .Where(p => p.MentorId == mentorId
+                && (!excludeProposalId.HasValue || p.Id != excludeProposalId.Value)
+                && p.CertificateLevelId.HasValue
+                && (p.Status == MentorTeachingProposalStatus.PendingReview
+                    || p.Status == MentorTeachingProposalStatus.ChangesRequested
+                    || p.Status == MentorTeachingProposalStatus.Approved))
+            .Select(p => new
+            {
+                p.Id,
+                LevelId = p.CertificateLevelId!.Value,
+                p.Status,
+                p.CourseTitle,
+                HasFutureSlots = p.GeneratedAvailabilities.Any(a => !a.IsDeleted && a.IsApproved && a.RejectedAt == null && a.EndTime > nowUtc),
+            })
+            .ToListAsync(ct);
+
+        var activeCohorts = await unitOfWork.StudyCohorts.Query().AsNoTracking()
+            .Include(c => c.Plan)
+            .Where(c => c.MentorId == mentorId
+                && (c.Status == "Published" || c.Status == "Draft")
+                && c.EndsAt > nowUtc)
+            .Select(c => new
+            {
+                c.Id,
+                c.Name,
+                c.Status,
+                c.StartsAt,
+                c.SourceProposalId,
+                LevelId = c.Plan.CertificateLevelId,
+            })
+            .ToListAsync(ct);
+
+        var cohortByProposalId = activeCohorts
+            .Where(c => c.SourceProposalId.HasValue)
+            .ToDictionary(c => c.SourceProposalId!.Value, c => c);
+
+        // Ưu tiên đánh dấu lớp đang hoạt động / đang tuyển sinh trước
+        foreach (var c in activeCohorts)
+        {
+            if (map.ContainsKey(c.LevelId)) continue;
+            var status = c.Status == "Published" && c.StartsAt > nowUtc ? "RecruitingCohort" : "ActiveCohort";
+            var reason = status == "RecruitingCohort"
+                ? "Bạn đã có lớp đang tuyển sinh."
+                : "Bạn đã có lớp đang hoạt động.";
+            map[c.LevelId] = new LevelBlockInfo(status, reason, c.SourceProposalId, c.Id, c.Name);
+        }
+
+        // Sau đó đến các đề xuất còn hiệu lực (chờ duyệt / cần bổ sung / đã duyệt còn buổi tương lai hoặc gắn lớp)
+        foreach (var p in activeProposals)
+        {
+            if (map.ContainsKey(p.LevelId)) continue;
+            if (p.Status == MentorTeachingProposalStatus.PendingReview)
+            {
+                map[p.LevelId] = new LevelBlockInfo("PendingReview", "Bạn đã có đề xuất đang chờ duyệt.", p.Id, null, p.CourseTitle);
+            }
+            else if (p.Status == MentorTeachingProposalStatus.ChangesRequested)
+            {
+                map[p.LevelId] = new LevelBlockInfo("ChangesRequested", "Bạn đã có đề xuất cần chỉnh sửa bổ sung.", p.Id, null, p.CourseTitle);
+            }
+            else if (p.Status == MentorTeachingProposalStatus.Approved && (cohortByProposalId.ContainsKey(p.Id) || p.HasFutureSlots))
+            {
+                cohortByProposalId.TryGetValue(p.Id, out var linked);
+                map[p.LevelId] = new LevelBlockInfo(
+                    "Approved",
+                    "Bạn đã có đề xuất đã duyệt ở cấp độ này.",
+                    p.Id,
+                    linked?.Id,
+                    linked?.Name ?? p.CourseTitle);
+            }
+        }
+
+        return map;
+    }
+
+    private static ProposalValidationIssue MapConflictIssue(TeachingConflict c, bool isPreliminaryWarning)
+    {
+        var mappedCode = c.Code switch
+        {
+            MentorTeachingConflictService.RestViolation => "PROPOSAL_REST_VIOLATION",
+            MentorTeachingConflictService.DailyLimit => "PROPOSAL_DAILY_CAP_EXCEEDED",
+            MentorTeachingConflictService.WeeklyLimit => "PROPOSAL_WEEKLY_CAP_EXCEEDED",
+            _ when c.CommitmentStatus == MentorTeachingProposalStatus.PendingReview => "PROPOSAL_CONFLICT_PENDING_PROPOSAL",
+            _ when c.CommitmentStatus == MentorTeachingProposalStatus.ChangesRequested => "PROPOSAL_CONFLICT_PENDING_PROPOSAL",
+            _ => "PROPOSAL_CONFLICT_APPROVED_SCHEDULE",
+        };
+
+        var localStart = LocalTime(c.ProposedStartUtc);
+        var conflictStart = c.CommitmentStartUtc.HasValue ? LocalTime(c.CommitmentStartUtc.Value) : (DateTime?)null;
+        var conflictEnd = c.CommitmentEndUtc.HasValue ? LocalTime(c.CommitmentEndUtc.Value) : (DateTime?)null;
+
+        return new ProposalValidationIssue
+        {
+            Code = mappedCode,
+            Severity = isPreliminaryWarning ? "Warning" : "Error",
+            Message = c.Message,
+            Weekday = (int)localStart.DayOfWeek,
+            StartMinute = localStart.Hour * 60 + localStart.Minute,
+            OccurrenceStartUtc = c.ProposedStartUtc,
+            OccurrenceEndUtc = c.ProposedEndUtc,
+            ConflictSource = c.CohortName ?? c.CommitmentKind,
+            ConflictDate = conflictStart?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            ConflictLocalStart = conflictStart?.ToString("HH:mm", CultureInfo.InvariantCulture),
+            ConflictLocalEnd = conflictEnd?.ToString("HH:mm", CultureInfo.InvariantCulture),
+            ConflictJlptLevel = c.JlptLevelCode,
+            ConflictStatus = c.CommitmentStatus,
+            ConflictEntityType = c.CommitmentKind,
+            ConflictProposalId = c.ProposalId,
+            ConflictCohortId = c.CohortId,
+        };
+    }
+
+    private static bool IsConflictOrCapacityCode(string? code) => code is
+        "PROPOSAL_CONFLICT_APPROVED_SCHEDULE"
+        or "PROPOSAL_CONFLICT_PENDING_PROPOSAL"
+        or "PROPOSAL_REST_VIOLATION"
+        or "PROPOSAL_OWN_OVERLAP"
+        or "PROPOSAL_OWN_REST_VIOLATION"
+        or "PROPOSAL_DUPLICATE_ACTIVE_LEVEL"
+        or "PROPOSAL_DUPLICATE_DETECTED"
+        or "PROPOSAL_DAILY_CAP_EXCEEDED"
+        or "PROPOSAL_WEEKLY_CAP_EXCEEDED"
+        or "PROPOSAL_MAX_SESSIONS_EXCEEDED";
+
+    private static bool IsPgConflict(DbUpdateException ex)
+        => ex.InnerException is System.Data.Common.DbException dbEx && dbEx.SqlState is "23505" or "23P01";
 
     private async Task<List<string>> LoadMentorQualifiedLevelCodesAsync(int mentorId, CancellationToken ct)
         => await unitOfWork.MentorTeachingQualifications.Query().AsNoTracking()
@@ -1511,8 +1939,13 @@ public sealed class MentorTeachingProposalService(
     {
         var sessions = DeserializeSessions(p.WeeklySessionsJson);
         var attachments = DeserializeAttachments(p.OptionalAttachmentsJson);
-        var occurrences = p.ExpectedStartDate.HasValue && sessions.Count > 0
-            ? ExpandOccurrences(p.ExpectedStartDate.Value, sessions, p.CourseDurationWeeks, p.SessionDurationMinutes, DateTime.MinValue)
+        var resolvedWeeks = p.CourseDurationWeeks > 0 ? p.CourseDurationWeeks : policy.CourseDurationWeeks;
+        var resolvedMinutes = p.SessionDurationMinutes > 0 ? p.SessionDurationMinutes : policy.SessionMinutes;
+        var canExpand = p.ExpectedStartDate.HasValue
+            && sessions.Count > 0
+            && sessions.Any(s => s.Weekday == (int)p.ExpectedStartDate.Value.DayOfWeek);
+        var occurrences = canExpand
+            ? ExpandOccurrences(p.ExpectedStartDate!.Value, sessions, resolvedWeeks, resolvedMinutes, DateTime.MinValue)
             : [];
         DateOnly? projectedEnd = occurrences.Count > 0
             ? DateOnly.ParseExact(occurrences[^1].LocalDate, "yyyy-MM-dd", CultureInfo.InvariantCulture)
@@ -1609,6 +2042,8 @@ public sealed class MentorTeachingProposalService(
             AllowedGridSteps = [15, 30],
             OperatingStartMinute = DefaultOperatingStartMinute,
             OperatingEndMinute = DefaultOperatingEndMinute,
+            MinimumProposalLeadDays = MentorSlotPolicy.MinimumProposalLeadDays,
+            MinimumPublishedEnrollmentDays = MentorSlotPolicy.MinimumPublishedEnrollmentDays,
         };
     }
 
@@ -1620,14 +2055,66 @@ public sealed class MentorTeachingProposalService(
         out List<ProposalAttachmentDto> normalizedAttachments)
     {
         normalizedProgram = NormalizeProgramType(request.ProgramType);
-        normalizedSessions = NormalizeWeeklySessions(request.WeeklySessions);
+        normalizedSessions = [];
         normalizedAttachments = [];
+
+        var requiredSessionMinutes = policy.SessionMinutes > 0 ? policy.SessionMinutes : 90;
+        var restMinutes = Math.Max(0, policy.RestMinutes);
+        var rawSessions = (request.WeeklySessions ?? []).Where(s => s is not null).ToList();
+
+        var seenKeys = new HashSet<(int, int)>();
+        foreach (var raw in rawSessions)
+        {
+            var endMin = raw.EndMinute > 0 ? raw.EndMinute : raw.StartMinute + requiredSessionMinutes;
+            if (raw.Weekday is < 0 or > 6)
+                return ("PROPOSAL_INVALID_SESSION_SLOT", "Thứ trong tuần không hợp lệ.");
+            if (endMin - raw.StartMinute != requiredSessionMinutes)
+                return ("PROPOSAL_SESSION_MINUTES_MISMATCH", $"Mỗi buổi dạy phải có thời lượng đúng {requiredSessionMinutes} phút.");
+            if (raw.StartMinute < DefaultOperatingStartMinute || endMin > DefaultOperatingEndMinute)
+                return ("PROPOSAL_INVALID_SESSION_SLOT", $"Buổi {WeekdayLabel(raw.Weekday)} ({Clock(raw.StartMinute)}–{Clock(endMin)}) nằm ngoài khung giờ giảng dạy 07:00–22:00.");
+            if (raw.StartMinute % DefaultGridStepMinutes != 0)
+                return ("PROPOSAL_INVALID_SESSION_SLOT", $"Giờ bắt đầu {Clock(raw.StartMinute)} phải chẵn theo bước {DefaultGridStepMinutes} phút.");
+            if (!seenKeys.Add((raw.Weekday, raw.StartMinute)))
+                return ("PROPOSAL_OWN_OVERLAP", $"Trùng lặp khung giờ {WeekdayLabel(raw.Weekday)} {Clock(raw.StartMinute)}–{Clock(endMin)}.");
+
+            normalizedSessions.Add(new WeeklySessionSlotDto
+            {
+                Weekday = raw.Weekday,
+                StartMinute = raw.StartMinute,
+                EndMinute = endMin,
+            });
+        }
+
+        normalizedSessions = normalizedSessions
+            .OrderBy(s => (s.Weekday + 6) % 7)
+            .ThenBy(s => s.StartMinute)
+            .ToList();
 
         var maxPerWeek = ParseAllowedSessionsPerWeek(policy.AllowedSessionsPerWeekCsv).Max();
         if (normalizedSessions.Count > maxPerWeek)
         {
             return ("PROPOSAL_MAX_SESSIONS_EXCEEDED",
                 $"Mỗi đề xuất mở lớp chỉ được chọn tối đa {maxPerWeek} buổi/tuần.");
+        }
+
+        foreach (var dayGroup in normalizedSessions.GroupBy(s => s.Weekday))
+        {
+            var ordered = dayGroup.OrderBy(s => s.StartMinute).ToList();
+            for (var i = 1; i < ordered.Count; i++)
+            {
+                var prev = ordered[i - 1];
+                var curr = ordered[i];
+                if (curr.StartMinute < prev.EndMinute)
+                {
+                    return ("PROPOSAL_OWN_OVERLAP",
+                        $"Hai buổi trong {WeekdayLabel(dayGroup.Key)} bị chồng chéo ({Clock(prev.StartMinute)}–{Clock(prev.EndMinute)} và {Clock(curr.StartMinute)}–{Clock(curr.EndMinute)}).");
+                }
+                if (curr.StartMinute - prev.EndMinute < restMinutes)
+                {
+                    return ("PROPOSAL_OWN_REST_VIOLATION",
+                        $"Hai buổi trong {WeekdayLabel(dayGroup.Key)} cần nghỉ tối thiểu {restMinutes} phút.");
+                }
+            }
         }
 
         if (request.OptionalAttachments is not null)
@@ -1675,6 +2162,53 @@ public sealed class MentorTeachingProposalService(
             WeeklySessions: DeserializeSessions(p.WeeklySessionsJson),
             OptionalAttachments: DeserializeAttachments(p.OptionalAttachmentsJson));
 
+    private static int ResolveHighestVerifiedRank(MentorProfile? profile, IEnumerable<string>? verifiedQualificationCodes)
+    {
+        var maxRank = 0;
+        if (verifiedQualificationCodes is not null)
+        {
+            foreach (var code in verifiedQualificationCodes)
+            {
+                var r = MentorSlotPolicy.GetJlptRank(code);
+                if (r > maxRank) maxRank = r;
+            }
+        }
+        if (profile?.VerificationStatus == MentorVerificationStatus.Approved)
+        {
+            var profileRank = MentorSlotPolicy.GetJlptRank(profile.JlptLevel);
+            if (profileRank > maxRank) maxRank = profileRank;
+        }
+        return maxRank;
+    }
+
+    private static string? FormatLevelBlockingReason(string? levelCode, LevelBlockInfo? block)
+    {
+        if (block is null) return null;
+        var code = string.IsNullOrWhiteSpace(levelCode) ? string.Empty : $" {levelCode.Trim()}";
+        return block.Status switch
+        {
+            "PendingReview" => $"Bạn đã có lớp{code} đang chờ duyệt.",
+            "ChangesRequested" => $"Bạn đã có lớp{code} cần chỉnh sửa bổ sung.",
+            "Approved" => $"Bạn đã có lớp{code} đã duyệt.",
+            "RecruitingCohort" => $"Bạn đã có lớp{code} đang mở tuyển sinh.",
+            "ActiveCohort" => $"Bạn đã có lớp{code} đang mở.",
+            _ => block.Reason,
+        };
+    }
+
+    private static DateOnly FindEarliestValidStartDate(DateOnly minDate, List<WeeklySessionSlotDto> weeklySessions)
+    {
+        if (weeklySessions.Count == 0) return minDate;
+        var allowedWeekdays = weeklySessions.Select(s => s.Weekday).ToHashSet();
+        for (var i = 0; i < 7; i++)
+        {
+            var candidate = minDate.AddDays(i);
+            if (allowedWeekdays.Contains((int)candidate.DayOfWeek))
+                return candidate;
+        }
+        return minDate;
+    }
+
     private static List<GeneratedSessionOccurrenceResponse> ExpandOccurrences(
         DateOnly expectedStartDate,
         List<WeeklySessionSlotDto> weeklySessions,
@@ -1682,56 +2216,27 @@ public sealed class MentorTeachingProposalService(
         int sessionMinutes,
         DateTime nowUtc)
     {
+        _ = nowUtc;
         if (weeklySessions.Count == 0 || durationWeeks <= 0) return [];
+        var tuples = weeklySessions.Select(s => (s.Weekday, s.StartMinute)).ToList();
+        var expanded = MentorSlotPolicy.ExpandRecurringSchedule(
+            expectedStartDate,
+            tuples,
+            durationWeeks,
+            sessionMinutes,
+            BusinessZone.Value);
 
-        var sorted = weeklySessions
-            .OrderBy(s => ((s.Weekday + 6) % 7))
-            .ThenBy(s => s.StartMinute)
-            .ToList();
-
-        // Tìm thứ 2 đầu tiên sao cho tất cả các buổi tuần 1 đều >= expectedStartDate (và > nowUtc khi kiểm tra thực tế)
-        // Nhờ đó đảm bảo trọn vẹn `durationWeeks` tuần ISO liên tiếp khớp StudyCohortService.EnsureWholeCourseSchedule.
-        var startWeekMonday = LocalWeekStart(expectedStartDate);
-        var fitsFirstWeek = sorted.All(s =>
+        return expanded.Select(occ => new GeneratedSessionOccurrenceResponse
         {
-            var offset = (s.Weekday + 6) % 7;
-            var date = startWeekMonday.AddDays(offset);
-            if (date < expectedStartDate) return false;
-            if (nowUtc == DateTime.MinValue) return true;
-            var utcStart = LocalDateMinuteToUtc(date, s.StartMinute);
-            return utcStart > nowUtc;
-        });
-
-        var firstWeekMonday = fitsFirstWeek ? startWeekMonday : startWeekMonday.AddDays(7);
-        var result = new List<GeneratedSessionOccurrenceResponse>(durationWeeks * sorted.Count);
-        var sessionNum = 0;
-
-        for (var week = 0; week < durationWeeks; week++)
-        {
-            var weekMon = firstWeekMonday.AddDays(week * 7);
-            foreach (var slot in sorted)
-            {
-                var offset = (slot.Weekday + 6) % 7;
-                var localDate = weekMon.AddDays(offset);
-                var startUtc = LocalDateMinuteToUtc(localDate, slot.StartMinute);
-                var endUtc = startUtc.AddMinutes(sessionMinutes);
-                sessionNum++;
-
-                result.Add(new GeneratedSessionOccurrenceResponse
-                {
-                    SessionNumber = sessionNum,
-                    WeekNumber = week + 1,
-                    Weekday = slot.Weekday,
-                    LocalDate = localDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
-                    LocalStart = Clock(slot.StartMinute),
-                    LocalEnd = Clock(slot.StartMinute + sessionMinutes),
-                    StartUtc = startUtc,
-                    EndUtc = endUtc,
-                });
-            }
-        }
-
-        return result;
+            SessionNumber = occ.SessionNumber,
+            WeekNumber = occ.WeekNumber,
+            Weekday = occ.Weekday,
+            LocalDate = occ.LocalDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            LocalStart = Clock(occ.StartMinute),
+            LocalEnd = Clock(occ.StartMinute + sessionMinutes),
+            StartUtc = occ.StartUtc,
+            EndUtc = occ.EndUtc,
+        }).ToList();
     }
 
     private static List<WeeklySessionSlotDto> NormalizeWeeklySessions(List<WeeklySessionSlotDto>? raw)
@@ -1794,15 +2299,6 @@ public sealed class MentorTeachingProposalService(
             .OrderBy(n => n)
             .ToList();
         return parsed.Count > 0 ? parsed : [2, 3, 4];
-    }
-
-    private static string BuildDuplicateSignature(int? levelId, int? planId, DateOnly? startDate, List<WeeklySessionSlotDto> sessions)
-    {
-        var slotPart = string.Join("|", sessions
-            .OrderBy(s => (s.Weekday + 6) % 7)
-            .ThenBy(s => s.StartMinute)
-            .Select(s => $"{s.Weekday}:{s.StartMinute}-{s.EndMinute}"));
-        return $"{levelId ?? 0}:{planId ?? 0}:{startDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? ""}:{slotPart}";
     }
 
     private static string BuildSnapshotJson(MentorTeachingProposal p)
