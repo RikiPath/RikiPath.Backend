@@ -2,7 +2,11 @@ using System.Text.RegularExpressions;
 
 namespace RikiPath.Application.Helpers;
 
-/// <summary>Chính sách đường dẫn media an toàn (HTTPS Supabase/S3, đường dẫn local Dev/QA hoặc audio proxy đã cấu hình).</summary>
+/// <summary>
+/// Chính sách đường dẫn media an toàn (HTTPS external, Supabase/S3, đường dẫn local Dev/QA
+/// hoặc audio proxy đã cấu hình). External HTTPS được bật tạm thời để hỗ trợ nội dung nhập liệu
+/// đang lưu ở các CDN/proxy khác; HTTP thường vẫn bị từ chối.
+/// </summary>
 public static class AllowedMediaUrlPolicy
 {
     public static readonly HashSet<string> SupportedAudioExtensions = new(StringComparer.OrdinalIgnoreCase)
@@ -96,10 +100,12 @@ public static class AllowedMediaUrlPolicy
             return true;
         }
 
+        // Cho phép tạm thời mọi HTTPS public URL để Content Author có thể nhập media từ CDN,
+        // Cloudflare Tunnel hoặc storage ngoài Supabase/S3. Không cho HTTP và không mở localhost.
         if (uri.Scheme != Uri.UriSchemeHttps) return false;
+        if (isLoopbackOrLocalhost) return false;
         var host = uri.Host.TrimEnd('.').ToLowerInvariant();
-        return host == "supabase.co" || host.EndsWith(".supabase.co", StringComparison.Ordinal) ||
-               host == "amazonaws.com" || host.EndsWith(".amazonaws.com", StringComparison.Ordinal);
+        return !string.IsNullOrWhiteSpace(host);
     }
 
     public static bool HasSupportedAudioExtension(string? urlOrPath)

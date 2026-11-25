@@ -125,6 +125,8 @@ public sealed class SkillTemplateService : ISkillTemplateService
             ("Option1..Option4", "Conditional", "Ít nhất 2 lựa chọn khi trắc nghiệm"),
             ("CorrectAnswer", "Conditional", "1..4 hoặc chữ A..D khi trắc nghiệm"),
             ("AcceptedAnswers", "Conditional", "Phân tách bởi | khi FillBlank"),
+            ("AudioUrl", "Optional", "Chỉ điền khi nội dung có audio; URL phải trỏ tới file âm thanh đã upload."),
+            ("ImageUrl", "Optional", "Có thể để trống nếu nội dung không có hình ảnh."),
         ], ["SingleChoice", "MultipleChoice", "FillBlank"]);
         AddDataSheet(wb, "VocabularyQuestions", headers, [
             ["N5", "VocabReading", "SingleChoice", "図書館", "としょかん", "Thư viện", "毎日図書館で勉強します。", "「図書館」の読み方として最もよいものを1つ選びなさい。", "としょかん", "としょがん", "どしょかん", "とうしょかん", "1", "", "図書館 đọc là としょかん.", "", "", "Trường học", "N5,Từ vựng", "Giáo trình nội bộ"]
@@ -143,6 +145,7 @@ public sealed class SkillTemplateService : ISkillTemplateService
             ("Meaning", "Required", "Nghĩa tiếng Việt"),
             ("OnYomi / KunYomi", "Optional", "Không tự bịa cách đọc không chắc chắn"),
             ("QuestionPrompt", "Required", "Ngữ cảnh hoặc câu hỏi nhận diện"),
+            ("ImageUrl", "Optional", "Có thể để trống nếu nội dung không có hình ảnh."),
         ], ["SingleChoice"]);
         AddDataSheet(wb, "KanjiQuestions", headers, [
             ["N5", "KanjiReading", "SingleChoice", "休", "Nghỉ ngơi", "HƯU", "キュウ", "やす.む", "6", "日曜日は休みます。", "下線のことば「休みます」の漢字の意味に合うものを選びなさい。", "Ngủ", "Nghỉ", "Đi", "Đọc", "2", "休（HƯU）nghĩa là nghỉ ngơi (やすむ).", "Sinh hoạt", "Giáo trình N5"]
@@ -175,6 +178,7 @@ public sealed class SkillTemplateService : ISkillTemplateService
             ("Passages.PassageCode", "Required", "Mã định danh đoạn đọc duy nhất trong file (VD: P1)"),
             ("Passages.PassageText", "Required", "Toàn văn đoạn đọc tiếng Nhật (không copy lặp vào từng dòng câu hỏi)"),
             ("ReadingQuestions.PassageCode", "Required", "Tham chiếu Passages.PassageCode"),
+            ("Passages.ImageUrl", "Optional", "Có thể để trống nếu đoạn đọc không có hình ảnh."),
         ], ["SingleChoice", "MultipleChoice"]);
         AddDataSheet(wb, "Passages", ["PassageCode", "LevelCode", "Title", "Topic", "PassageText", "Instructions", "ImageUrl", "Source"], [
             ["R-N4-01", "N4", "Thông báo thư viện trường", "Trường học", "来週の月曜日は休館日です。本は火曜日までに返してください。", "Đọc đoạn văn sau và trả lời các câu hỏi.", "", "Tài liệu biên soạn N4"]
@@ -191,7 +195,7 @@ public sealed class SkillTemplateService : ISkillTemplateService
         var wb = new XLWorkbook();
         AddGuideSheet(wb, "Listening Group & Question Template", [
             ("ListeningGroups.GroupCode", "Required", "Mã nhóm nghe duy nhất (VD: L-N5-01)"),
-            ("ListeningGroups.AudioUrl", "RequiredForPublish", "URL file .mp3/.wav/.m4a đã upload (để trống chỉ lưu được Draft chưa hoàn chỉnh)"),
+            ("ListeningGroups.AudioUrl", "Required", "Bắt buộc trong file Excel: URL file .mp3/.wav/.m4a/.ogg đã upload."),
             ("ListeningGroups.MaxReplays", "Optional", "Số lần nghe tối đa (VD: 1 hoặc 2; bỏ trống = không giới hạn)"),
             ("ListeningQuestions.GroupCode", "Required", "Tham chiếu ListeningGroups.GroupCode"),
         ], ["SingleChoice", "VisualMultipleChoice"]);
@@ -226,8 +230,11 @@ public sealed class SkillTemplateService : ISkillTemplateService
         var wb = new XLWorkbook();
         AddGuideSheet(wb, "Full Mock Test Exam Blueprint Template", [
             ("ExamBlueprint", "Required", "Khai báo đề thi thử JLPT hoàn chỉnh (Version, LevelCode, tổng thời lượng, chính sách chấm/xem kết quả)"),
-            ("Sections", "Required", "Thứ tự phần thi, CertificateSectionCode chuẩn theo cấp độ và thời lượng từng phần"),
+            ("Sections", "Required", "Thứ tự phần thi và mã section theo cấp độ. Có thể dùng mã chuẩn (N5_VOCAB...) hoặc alias GOI/BUNPOU/DOKKAI/CHOUKAI và 語彙/文法/読解/聴解; hệ thống tự ánh xạ về section tiếng Việt trong DB."),
             ("Passages & Questions", "Optional/Required", "Nhóm đọc/nghe liên kết bằng PassageCode và danh sách câu hỏi"),
+            ("Passages.AudioUrl (Listening)", "Required", "Mọi nhóm/đoạn Listening trong file Excel phải có AudioUrl hợp lệ."),
+            ("Passages.ImageUrl", "Optional", "Có thể để trống nếu đoạn đọc/nghe không có hình ảnh."),
+            ("Questions.ImageUrl", "Optional", "Có thể để trống nếu câu hỏi không có hình ảnh."),
         ], ["SingleChoice", "MultipleChoice", "FillBlank", "Ordering", "VisualMultipleChoice"]);
         AddDataSheet(wb, "ExamBlueprint", ["Title", "LevelCode", "ExamVersion", "Description", "TotalTimeLimitMinutes", "PassingRule", "ShowAnswersAfterSubmit", "Source", "RightsStatus"], [
             ["JLPT N4 Mock Exam Blueprint #1", "N4", "1", "Đề thi thử chuẩn cấu trúc JLPT N4", "125", "SectionAndTotalScore", "TRUE", "Nội bộ", "Owned"]
