@@ -32,7 +32,8 @@ public static partial class CanonicalQuestionValidator
         CanonicalQuestionDto question,
         bool forSubmitOrPublish,
         IReadOnlySet<string>? dynamicAllowedLevels = null,
-        int? rowNumber = null)
+        int? rowNumber = null,
+        bool requireListeningAudio = false)
     {
         var result = new CanonicalValidationResult();
         var allowedLevels = dynamicAllowedLevels ?? SupportedJlptLevelCodes;
@@ -84,7 +85,7 @@ public static partial class CanonicalQuestionValidator
         }
 
         ValidateAnswerStructure(question, questionType, result, rowNumber);
-        ValidateSkillSpecificRules(question, skill, forSubmitOrPublish, result, rowNumber);
+        ValidateSkillSpecificRules(question, skill, forSubmitOrPublish, requireListeningAudio, result, rowNumber);
         ValidateMediaUrls(question, result, rowNumber);
 
         if (forSubmitOrPublish && JlptBlueprintPolicy.IsRightsBlocked(question.RightsStatus))
@@ -209,6 +210,7 @@ public static partial class CanonicalQuestionValidator
         CanonicalQuestionDto question,
         string skill,
         bool forSubmitOrPublish,
+        bool requireListeningAudio,
         CanonicalValidationResult result,
         int? rowNumber)
     {
@@ -269,10 +271,12 @@ public static partial class CanonicalQuestionValidator
                 if (string.IsNullOrWhiteSpace(effectiveAudio))
                 {
                     result.IncompleteMedia = true;
-                    if (forSubmitOrPublish)
+                    if (forSubmitOrPublish || requireListeningAudio)
                     {
                         result.Errors.Add(Issue("audioUrl", rowNumber, "Error", "LISTENING_AUDIO_REQUIRED",
-                            "Câu hỏi Nghe hiểu bắt buộc có tệp âm thanh hợp lệ trước khi gửi duyệt hoặc xuất bản."));
+                            requireListeningAudio && !forSubmitOrPublish
+                                ? "Câu hỏi Nghe hiểu trong file Excel bắt buộc phải có AudioUrl hợp lệ."
+                                : "Câu hỏi Nghe hiểu bắt buộc có tệp âm thanh hợp lệ trước khi gửi duyệt hoặc xuất bản."));
                     }
                     else
                     {
@@ -313,7 +317,10 @@ public static partial class CanonicalQuestionValidator
         }
     }
 
-    public static CanonicalValidationResult ValidatePassage(CanonicalPassageDto passage, bool forSubmitOrPublish)
+    public static CanonicalValidationResult ValidatePassage(
+        CanonicalPassageDto passage,
+        bool forSubmitOrPublish,
+        bool requireListeningAudio = false)
     {
         var result = new CanonicalValidationResult();
         if (string.IsNullOrWhiteSpace(passage.Title))
@@ -332,8 +339,15 @@ public static partial class CanonicalQuestionValidator
             if (string.IsNullOrWhiteSpace(passage.AudioUrl))
             {
                 result.IncompleteMedia = true;
-                if (forSubmitOrPublish)
-                    result.Errors.Add(Issue("audioUrl", null, "Error", "LISTENING_AUDIO_REQUIRED", "Nhóm Nghe hiểu cần file audio hợp lệ trước khi gửi duyệt hoặc xuất bản."));
+                if (forSubmitOrPublish || requireListeningAudio)
+                    result.Errors.Add(Issue(
+                        "audioUrl",
+                        null,
+                        "Error",
+                        "LISTENING_AUDIO_REQUIRED",
+                        requireListeningAudio && !forSubmitOrPublish
+                            ? "Nhóm Nghe hiểu trong file Excel bắt buộc phải có AudioUrl hợp lệ."
+                            : "Nhóm Nghe hiểu cần file audio hợp lệ trước khi gửi duyệt hoặc xuất bản."));
                 else
                     result.Warnings.Add(Issue("audioUrl", null, "Warning", "MISSING_LISTENING_AUDIO", "Nhóm Nghe hiểu chưa có audio — chỉ được lưu Nháp chưa hoàn chỉnh."));
             }

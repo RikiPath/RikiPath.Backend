@@ -169,6 +169,7 @@ public sealed partial class UnifiedImportService(
         var validationFailures = new List<string>();
         var result = new ConfirmUnifiedImportResponse { BatchId = batchId, ResultingStatus = ContentStatus.Draft };
         var idempotencyApplied = false;
+        var requireListeningAudio = IsExcelSource(request.SourceFormat);
 
         await unitOfWork.ExecuteInTransactionAsync(async token =>
         {
@@ -179,7 +180,10 @@ public sealed partial class UnifiedImportService(
                 var pDto = pRow.PassagePayload!;
                 RewriteMediaUrl(pDto, uploadedMediaMap);
                 ResolveLevelSkillOnPassage(pDto, levels, skills);
-                var pVal = CanonicalQuestionValidator.ValidatePassage(pDto, forSubmitOrPublish: false);
+                var pVal = CanonicalQuestionValidator.ValidatePassage(
+                    pDto,
+                    forSubmitOrPublish: false,
+                    requireListeningAudio: requireListeningAudio);
                 if (!pVal.CanSaveDraft)
                 {
                     validationFailures.Add($"Nhóm/Đoạn '{pDto.Title}': {string.Join(" ", pVal.Errors.Select(e => e.Message))}");
@@ -257,7 +261,12 @@ public sealed partial class UnifiedImportService(
                     passageId = linkedPassage.Id;
                 }
 
-                var qVal = CanonicalQuestionValidator.ValidateQuestion(qDto, forSubmitOrPublish: false, allowedLevels, qRow.RowNumber);
+                var qVal = CanonicalQuestionValidator.ValidateQuestion(
+                    qDto,
+                    forSubmitOrPublish: false,
+                    allowedLevels,
+                    qRow.RowNumber,
+                    requireListeningAudio: requireListeningAudio);
                 if (!qVal.CanSaveDraft)
                 {
                     validationFailures.Add($"Dòng {qRow.RowNumber}: {string.Join(" ", qVal.Errors.Select(e => e.Message))}");
@@ -1200,7 +1209,10 @@ public sealed partial class UnifiedImportService(
             if (row.PassagePayload is not null)
             {
                 ResolveLevelSkillOnPassage(row.PassagePayload, levels, skills);
-                var pVal = CanonicalQuestionValidator.ValidatePassage(row.PassagePayload, forSubmitOrPublish: false);
+                var pVal = CanonicalQuestionValidator.ValidatePassage(
+                    row.PassagePayload,
+                    forSubmitOrPublish: false,
+                    requireListeningAudio: IsExcelSource(preview.DetectedFormat));
                 row.Issues.AddRange(pVal.Errors);
                 row.Issues.AddRange(pVal.Warnings);
                 row.IncompleteMedia = pVal.IncompleteMedia;
@@ -1223,7 +1235,12 @@ public sealed partial class UnifiedImportService(
                     }
                 }
 
-                var qVal = CanonicalQuestionValidator.ValidateQuestion(q, forSubmitOrPublish: false, allowedCodes, row.RowNumber);
+                var qVal = CanonicalQuestionValidator.ValidateQuestion(
+                    q,
+                    forSubmitOrPublish: false,
+                    allowedCodes,
+                    row.RowNumber,
+                    requireListeningAudio: IsExcelSource(preview.DetectedFormat));
                 row.Issues.AddRange(qVal.Errors);
                 row.Issues.AddRange(qVal.Warnings);
                 row.IncompleteMedia = qVal.IncompleteMedia;
@@ -1667,6 +1684,12 @@ public sealed partial class UnifiedImportService(
         "pdf" => "ImportPdf",
         _ => "ImportExcel",
     };
+
+    private static bool IsExcelSource(string? format)
+        => string.IsNullOrWhiteSpace(format)
+           || format.Trim().Equals("Excel", StringComparison.OrdinalIgnoreCase)
+           || format.Trim().Equals("Xlsx", StringComparison.OrdinalIgnoreCase)
+           || format.Trim().Equals("ImportExcel", StringComparison.OrdinalIgnoreCase);
 
     private static string? EmptyToNull(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
     private static int ParseIntOrDefault(string? raw, int fallback) => int.TryParse(raw, out var n) ? n : fallback;
