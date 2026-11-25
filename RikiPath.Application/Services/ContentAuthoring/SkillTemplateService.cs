@@ -230,7 +230,7 @@ public sealed class SkillTemplateService : ISkillTemplateService
         var wb = new XLWorkbook();
         AddGuideSheet(wb, "Full Mock Test Exam Blueprint Template", [
             ("ExamBlueprint", "Required", "Khai báo đề thi thử JLPT hoàn chỉnh (Version, LevelCode, tổng thời lượng, chính sách chấm/xem kết quả)"),
-            ("Sections", "Required", "Thứ tự phần thi, CertificateSectionCode chuẩn theo cấp độ và thời lượng từng phần"),
+            ("Sections", "Required", "Thứ tự phần thi và mã section theo cấp độ. Có thể dùng mã chuẩn (N5_VOCAB...) hoặc alias GOI/BUNPOU/DOKKAI/CHOUKAI và 語彙/文法/読解/聴解; hệ thống tự ánh xạ về section tiếng Việt trong DB."),
             ("Passages & Questions", "Optional/Required", "Nhóm đọc/nghe liên kết bằng PassageCode và danh sách câu hỏi"),
             ("Passages.AudioUrl (Listening)", "Required", "Mọi nhóm/đoạn Listening trong file Excel phải có AudioUrl hợp lệ."),
             ("Passages.ImageUrl", "Optional", "Có thể để trống nếu đoạn đọc/nghe không có hình ảnh."),

@@ -176,7 +176,7 @@ namespace RikiPath.Application.Handlers
                         // trong khi master data chuẩn đã gộp hai phần này thành
                         // N5_GRAMMAR_READING. Chỉ nhận alias khi tìm được đúng một
                         // section cùng level để không gắn nhầm dữ liệu sang level khác.
-                        if (TryResolveSectionAlias(code, levelIdForSectionAlias, ctx.CertificateSections, out var alias))
+                        if (TryResolveSectionAlias(code, levelCode, levelIdForSectionAlias, ctx.CertificateSections, out var alias))
                             certByCode[code] = alias;
                         else
                         {
@@ -192,6 +192,14 @@ namespace RikiPath.Application.Handlers
                 if (sk is null) continue;
                 if (!explicitSkills.TryGetValue(code, out var set)) explicitSkills[code] = set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 set.Add(sk);
+                // Giữ kỹ năng explicit theo mã chuẩn của DB để các alias (GOI/BUNPOU/
+                // DOKKAI/CHOUKAI hoặc tiếng Nhật) vẫn được gom vào cùng một section.
+                if (certByCode.GetValueOrDefault(code) is { } resolvedSection)
+                {
+                    if (!explicitSkills.TryGetValue(resolvedSection.Code, out var canonicalSet))
+                        explicitSkills[resolvedSection.Code] = canonicalSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    canonicalSet.Add(sk);
+                }
             }
 
             // ---- Câu hỏi: validate từng dòng, gom vào phần ----
@@ -271,7 +279,10 @@ namespace RikiPath.Application.Handlers
 
                 if (certByCode.GetValueOrDefault(sectionCode) is not { } certSection) continue; // lỗi đã ghi ở bước trên
 
-                var sectionKey = combinedSkill is null ? sectionCode : sectionCode + "|" + combinedSkill;
+                // Dùng mã section chuẩn làm khóa gom nhóm để SectionCode tiếng Nhật/
+                // tiếng Việt/viết tắt không tạo ra các MockTestSection trùng nhau.
+                var sectionIdentity = certSection.Code;
+                var sectionKey = combinedSkill is null ? sectionIdentity : sectionIdentity + "|" + combinedSkill;
                 if (!sectionByCode.TryGetValue(sectionKey, out var section))
                 {
                     var sectionTitle = JlptSkillAssessmentPolicy.Classify(combinedSkill) is { } bucket
@@ -416,6 +427,7 @@ namespace RikiPath.Application.Handlers
 
         private static bool TryResolveSectionAlias(
             string code,
+            string? certificateLevelCode,
             int? certificateLevelId,
             IReadOnlyList<Domain.Entities.CertificateSection> sections,
             out Domain.Entities.CertificateSection section)
@@ -431,6 +443,18 @@ namespace RikiPath.Application.Handlers
             {
                 withoutRikiPrefix,
             };
+
+            // Excel có thể dùng mã viết tắt/romaji/tiếng Nhật, còn DB vẫn giữ
+            // CertificateSection.Code chuẩn và Name tiếng Việt. Mã viết tắt không
+            // chứa level nên luôn ghép với CertificateLevelCode của đề hiện tại.
+            var canonicalSuffix = ResolveSectionAliasSuffix(withoutRikiPrefix);
+            var normalizedLevel = certificateLevelCode?.Trim().ToUpperInvariant();
+            if (canonicalSuffix is not null && !string.IsNullOrWhiteSpace(normalizedLevel))
+            {
+                candidates.Add($"{normalizedLevel}_{canonicalSuffix}");
+                if (canonicalSuffix is "GRAMMAR" or "READING")
+                    candidates.Add($"{normalizedLevel}_GRAMMAR_READING");
+            }
 
             if (withoutRikiPrefix.EndsWith("_GRAMMAR", StringComparison.Ordinal) ||
                 withoutRikiPrefix.EndsWith("_READING", StringComparison.Ordinal))
@@ -461,6 +485,44 @@ namespace RikiPath.Application.Handlers
 
             section = matches[0];
             return true;
+        }
+
+        private static string? ResolveSectionAliasSuffix(string value)
+        {
+            var compact = value
+                .Replace("_", string.Empty, StringComparison.Ordinal)
+                .Replace("-", string.Empty, StringComparison.Ordinal)
+                .Replace(" ", string.Empty, StringComparison.Ordinal)
+                .Replace("・", string.Empty, StringComparison.Ordinal)
+                .Replace("/", string.Empty, StringComparison.Ordinal);
+
+            if (compact.Contains("VOCAB", StringComparison.Ordinal) ||
+                compact.Contains("GOI", StringComparison.Ordinal) ||
+                compact.Contains("語彙", StringComparison.Ordinal) ||
+                compact.Contains("文字語彙", StringComparison.Ordinal) ||
+                compact.Contains("TỪVỰNG", StringComparison.Ordinal))
+                return "VOCAB";
+
+            if (compact.Contains("GRAMMAR", StringComparison.Ordinal) ||
+                compact.Contains("BUNPO", StringComparison.Ordinal) ||
+                compact.Contains("文法", StringComparison.Ordinal) ||
+                compact.Contains("NGỮPHÁP", StringComparison.Ordinal))
+                return "GRAMMAR";
+
+            if (compact.Contains("READING", StringComparison.Ordinal) ||
+                compact.Contains("DOKKAI", StringComparison.Ordinal) ||
+                compact.Contains("読解", StringComparison.Ordinal) ||
+                compact.Contains("ĐỌCHIỂU", StringComparison.Ordinal))
+                return "READING";
+
+            if (compact.Contains("LISTENING", StringComparison.Ordinal) ||
+                compact.Contains("CHOUKAI", StringComparison.Ordinal) ||
+                compact.Contains("CHŌKAI", StringComparison.Ordinal) ||
+                compact.Contains("聴解", StringComparison.Ordinal) ||
+                compact.Contains("NGHEHIỂU", StringComparison.Ordinal))
+                return "LISTENING";
+
+            return null;
         }
 
         private static JsonElement? ReadFormatColumns(ExcelRow row, JsonElement? data, ref JsonElement? answerKey,
