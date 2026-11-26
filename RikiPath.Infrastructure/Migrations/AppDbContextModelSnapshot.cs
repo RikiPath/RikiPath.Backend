@@ -7846,6 +7846,18 @@ namespace RikiPath.Infrastructure.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
+                    b.Property<DateTime?>("AiExplanationGeneratedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("AiExplanationInputJson")
+                        .HasColumnType("jsonb");
+
+                    b.Property<string>("AiExplanationJson")
+                        .HasColumnType("jsonb");
+
+                    b.Property<int>("AiExplanationVersion")
+                        .HasColumnType("integer");
+
                     b.Property<Guid?>("CreatedBy")
                         .HasColumnType("uuid");
 
