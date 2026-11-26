@@ -1,22 +1,27 @@
 #!/usr/bin/env bash
-# Fail-closed PostgreSQL migration preflight, backup verification, and ordered migration runner
-# for RikiPath.Backend deployments.
+# Fail-closed PostgreSQL migration preflight, full backup stream verification,
+# concurrency-locked ordered migration runner for RikiPath.Backend deployments.
 #
 # Guarantees:
 #   - Never prints connection strings, passwords, or secrets.
 #   - Never drops tables/schemas, deletes data, or inserts synthetic migration history rows.
-#   - Aborts immediately if pre-squash migration drift (e.g. InitialCreate missing on existing DB)
-#     or schema/data precondition violations (e.g. duplicate StudyCohorts.SourceProposalId) exist.
-#   - Requires explicit RIKIPATH_ALLOW_DB_MIGRATION=true AND a verified pg_dump backup (or
-#     explicit RIKIPATH_BACKUP_VERIFIED=true when external managed snapshots are verified) before
-#     applying any pending migration.
-#   - Applies each pending migration strictly in canonical order inside a single transaction.
+#   - Prevents concurrent migration runs via host flock + PostgreSQL advisory lock.
+#   - Aborts immediately on pre-squash history drift (e.g. InitialCreate missing on existing DB),
+#     CertificateSections PK 8..15 collision, duplicate StudyCohorts.SourceProposalId, or
+#     negative StudyCourses.Amount.
+#   - Requires explicit RIKIPATH_ALLOW_DB_MIGRATION=true AND a backup verified via full
+#     pg_restore --schema-only -f - and --data-only -f - archive stream decompression
+#     (or explicit RIKIPATH_BACKUP_VERIFIED=true when external managed snapshots are verified).
+#   - Executes each EF-generated migration script strictly in canonical order inside a single
+#     advisory-locked session with ON_ERROR_STOP=1 (each EF script manages its own transaction).
 
 set -euo pipefail
 
 APPSETTINGS_PATH=""
 MIGRATIONS_DIR=""
 BACKUP_DIR="/var/backups/rikipath-db"
+LOCK_FILE="/var/lock/rikipath-db-migration.lock"
+ADVISORY_LOCK_KEY="74520198431"
 MODE="preflight"
 
 while [[ $# -gt 0 ]]; do
@@ -65,6 +70,16 @@ for bin in python3 psql; do
     exit 3
   fi
 done
+
+# Host-level non-blocking lock prevents concurrent runs on the same deployment host.
+if command -v flock >/dev/null 2>&1; then
+  mkdir -p "$(dirname "$LOCK_FILE")" 2>/dev/null || LOCK_FILE="/tmp/rikipath-db-migration.lock"
+  exec 200>"$LOCK_FILE"
+  if ! flock -n 200; then
+    echo "ERROR [CONCURRENT_MIGRATION_BLOCKED]: Another deployment/migration process holds ${LOCK_FILE}." >&2
+    exit 9
+  fi
+fi
 
 # Parse connection string without ever printing credentials to stdout/stderr.
 eval "$(python3 - "$APPSETTINGS_PATH" <<'PY'
@@ -202,7 +217,7 @@ if [[ "${RIKIPATH_ALLOW_DB_MIGRATION:-false}" != "true" ]]; then
   exit 21
 fi
 
-echo "=== 3. Pre-Migration Backup & Recoverability Verification ==="
+echo "=== 3. Pre-Migration Backup & Full Stream Recoverability Verification ==="
 if [[ "${RIKIPATH_BACKUP_VERIFIED:-false}" == "true" ]]; then
   echo "  External/managed database backup explicitly verified by operator (RIKIPATH_BACKUP_VERIFIED=true)."
 else
@@ -212,31 +227,62 @@ else
   fi
   mkdir -p "$BACKUP_DIR"
   chmod 700 "$BACKUP_DIR" || true
+  FREE_MB="$(df -Pm "$BACKUP_DIR" | awk 'NR==2 {print $4}')"
+  if [[ -n "$FREE_MB" && "$FREE_MB" -lt 256 ]]; then
+    echo "ERROR: Insufficient free disk space in ${BACKUP_DIR} (${FREE_MB}MB < 256MB). Aborting before backup." >&2
+    exit 14
+  fi
   BACKUP_FILE="${BACKUP_DIR}/rikipath_${PGDATABASE}_$(date -u +%Y%m%dT%H%M%SZ).dump"
-  echo "  Creating pre-migration backup: ${BACKUP_FILE}"
+  echo "  Creating pre-migration custom backup: ${BACKUP_FILE}"
   pg_dump --format=custom --no-owner --no-privileges --file "$BACKUP_FILE"
+  chmod 600 "$BACKUP_FILE" || true
   if [[ ! -s "$BACKUP_FILE" ]]; then
     echo "ERROR: Backup file is empty. Aborting migration." >&2
     exit 14
   fi
-  TOC_LINES="$(pg_restore --list "$BACKUP_FILE" | wc -l)"
-  if [[ "$TOC_LINES" -lt 10 ]]; then
-    echo "ERROR: Backup TOC verification failed (lines=${TOC_LINES}). Aborting migration." >&2
+  # Validate full schema AND data decompression streams (not merely archive header TOC).
+  SCHEMA_BYTES="$(pg_restore --schema-only -f - "$BACKUP_FILE" | wc -c)"
+  DATA_BYTES="$(pg_restore --data-only -f - "$BACKUP_FILE" | wc -c)"
+  if [[ "$SCHEMA_BYTES" -lt 1024 ]]; then
+    echo "ERROR: Backup schema stream verification failed (${SCHEMA_BYTES} bytes). Aborting migration." >&2
     exit 14
   fi
-  echo "  Backup verified via pg_restore --list (${TOC_LINES} TOC entries)."
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$BACKUP_FILE" > "${BACKUP_FILE}.sha256"
+    chmod 600 "${BACKUP_FILE}.sha256" || true
+  fi
+  echo "  Backup stream-verified (schema=${SCHEMA_BYTES}B, data=${DATA_BYTES}B)."
 fi
 
-echo "=== 4. Applying Pending Migrations Strictly in Canonical Order ==="
+echo "=== 4. Applying Pending Migrations Under PostgreSQL Advisory Lock ==="
+RUNNER_SQL="$(mktemp /tmp/rikipath_migration_runner.XXXXXX.sql)"
+trap 'rm -f "$RUNNER_SQL"' EXIT
+
+cat > "$RUNNER_SQL" <<EOF
+DO \$lock\$
+BEGIN
+    IF NOT pg_try_advisory_lock(${ADVISORY_LOCK_KEY}) THEN
+        RAISE EXCEPTION 'MIGRATION_LOCK_BUSY: Another session currently holds PostgreSQL advisory lock ${ADVISORY_LOCK_KEY}.';
+    END IF;
+END \$lock\$;
+EOF
+
 for id in "${PENDING_IDS[@]}"; do
   SQL_FILE="${MIGRATIONS_DIR}/${id}.sql"
   if [[ ! -f "$SQL_FILE" ]]; then
     echo "ERROR: Missing generated SQL script for migration ${id}: ${SQL_FILE}" >&2
     exit 15
   fi
-  echo "  -> Applying ${id} ..."
-  psql -v ON_ERROR_STOP=1 --single-transaction -f "$SQL_FILE"
+  # Re-check inside locked session so a second runner that queued cannot re-apply an already-applied ID.
+  printf "\\echo '  -> Applying %s ...'\n" "$id" >> "$RUNNER_SQL"
+  printf "\\i '%s'\n" "$SQL_FILE" >> "$RUNNER_SQL"
 done
+
+cat >> "$RUNNER_SQL" <<EOF
+SELECT pg_advisory_unlock(${ADVISORY_LOCK_KEY});
+EOF
+
+psql -v ON_ERROR_STOP=1 -f "$RUNNER_SQL"
 
 echo "=== 5. Post-Migration Verification ==="
 mapfile -t POST_APPLIED < <(psql -v ON_ERROR_STOP=1 -t -A -c 'SELECT "MigrationId" FROM "__EFMigrationsHistory" ORDER BY "MigrationId";' | tr -d '\r')

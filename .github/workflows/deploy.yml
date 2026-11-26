@@ -133,6 +133,22 @@ jobs:
             --migrations-dir /tmp/rikipath-release-migrations \
             --mode "$MODE"
 
+    - name: Snapshot Current Running API Binaries for Automatic Rollback
+      uses: appleboy/ssh-action@v1.0.3
+      with:
+        host: ${{ secrets.VPS_HOST }}
+        username: ${{ secrets.VPS_USERNAME }}
+        password: ${{ secrets.VPS_PASSWORD }}
+        script: |
+          set -euo pipefail
+          mkdir -p /var/backups/rikipath-api
+          chmod 700 /var/backups/rikipath-api
+          rm -rf /var/backups/rikipath-api/previous
+          if [[ -d /var/www/rikipath-api ]]; then
+            cp -a /var/www/rikipath-api /var/backups/rikipath-api/previous
+            chmod 600 /var/backups/rikipath-api/previous/appsettings.Production.json 2>/dev/null || true
+          fi
+
     - name: Transfer Published API to VPS (Only After Migration Gate Passes)
       uses: appleboy/scp-action@v0.1.7
       with:
@@ -144,7 +160,7 @@ jobs:
         strip_components: 1
         rm: false
 
-    - name: Restart Service & Verify /health/ready + New API Routes
+    - name: Restart Service, Verify /health/ready & Auto-Rollback Binary on Failure
       uses: appleboy/ssh-action@v1.0.3
       with:
         host: ${{ secrets.VPS_HOST }}
@@ -161,6 +177,19 @@ jobs:
             LOCAL_URL="http://127.0.0.1:5000"
           fi
 
+          rollback_previous_binary() {
+            echo "WARNING: New Backend failed verification; restoring previous API binaries from /var/backups/rikipath-api/previous ..." >&2
+            if [[ -d /var/backups/rikipath-api/previous ]]; then
+              rm -rf /var/www/rikipath-api/*
+              cp -a /var/backups/rikipath-api/previous/. /var/www/rikipath-api/
+              chmod 600 /var/www/rikipath-api/appsettings.Production.json 2>/dev/null || true
+              systemctl restart rikipath-api.service || true
+              echo "Previous API binaries restored and service restarted. Inspect journalctl -u rikipath-api.service." >&2
+            else
+              echo "ERROR: No previous binary snapshot available for automatic rollback." >&2
+            fi
+          }
+
           READY_OK=false
           for i in $(seq 1 15); do
             HTTP_CODE="$(curl -s -o /tmp/rikipath-ready.json -w '%{http_code}' "${LOCAL_URL}/health/ready" || echo 000)"
@@ -175,20 +204,23 @@ jobs:
             echo "ERROR: /health/ready did not return 200 Ready after service restart." >&2
             cat /tmp/rikipath-ready.json 2>/dev/null || true
             rm -f /tmp/rikipath-ready.json
+            rollback_previous_binary
             exit 1
           fi
           rm -f /tmp/rikipath-ready.json
 
+          # Unauthenticated route registration smoke check (401/403 proves route is mounted; full auth contract requires operator verification).
           for ROUTE in \
             "/api/UserProfile/me/setup-state" \
             "/api/MockTest/history/paged" \
             "/api/admin/mentor-group-policies/levels" \
             "/api/subscriptions/history"; do
             CODE="$(curl -s -o /dev/null -w '%{http_code}' "${LOCAL_URL}${ROUTE}" || echo 000)"
-            echo "  Route check ${ROUTE} -> HTTP ${CODE}"
+            echo "  Route registration check ${ROUTE} -> HTTP ${CODE}"
             if [[ "$CODE" == "404" || "$CODE" == "000" || "$CODE" =~ ^5 ]]; then
-              echo "ERROR: Critical route ${ROUTE} failed verification (HTTP ${CODE})." >&2
+              echo "ERROR: Critical route ${ROUTE} failed registration check (HTTP ${CODE})." >&2
+              rollback_previous_binary
               exit 1
             fi
           done
-          echo "Deployment verified: /health/ready=Ready and critical API routes active."
+          echo "Deployment verified: /health/ready=Ready and new API routes registered."
