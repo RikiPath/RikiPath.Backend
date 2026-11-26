@@ -586,7 +586,10 @@ public class PracticeQuizService(
             };
             if (stage is null) return null;
 
-            static bool StageDone(StandardRoadmapStageResponse s) => s.Status is "Completed" or "Mastered";
+            // A stage is done only when every required check on it is passed (group quiz and, on the last stage of a
+            // level, the level assessment) — the same rule the server uses to open the next stage.
+            static bool StageDone(StandardRoadmapStageResponse s) => s.Status is "Completed" or "Mastered"
+                && s.GroupQuiz is not { IsPassed: false } && s.StageAssessment is not { IsPassed: false };
             var stageIndex = stages.IndexOf(stage);
             var nextStage = stageIndex >= 0 && stageIndex + 1 < stages.Count ? stages[stageIndex + 1] : null;
             var lesson = exercise.LessonId is int lid ? stage.Lessons.FirstOrDefault(l => l.LessonId == lid) : null;
@@ -624,7 +627,8 @@ public class PracticeQuizService(
 
             if (!passed)
             {
-                progression.Milestone = "NOT_PASSED";
+                // A lower retake never re-locks or "un-completes" a step: the best passing attempt still counts.
+                progression.Milestone = wasAlreadyPassed ? "NONE" : "NOT_PASSED";
                 return progression;
             }
             if (wasAlreadyPassed)
@@ -650,6 +654,11 @@ public class PracticeQuizService(
                 progression.MomentOccurrenceKey = exercise.Scope == PracticeExerciseScopes.StageAssessment
                     ? $"moment:stage-assessment:{userId}:{exercise.Id}"
                     : $"moment:group-quiz:{userId}:{exercise.Id}";
+            }
+            else if (checkpoint is { IsUnlocked: true } && checkpoint.ExerciseId != exercise.Id)
+            {
+                // Group quiz passed and the level assessment on this stage is now the next required check.
+                progression.Milestone = "STAGE_CHECKPOINT_UNLOCKED";
             }
             else
             {
