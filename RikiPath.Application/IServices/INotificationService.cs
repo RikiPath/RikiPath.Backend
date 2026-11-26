@@ -1,6 +1,7 @@
 using RikiPath.Application.Common;
 using RikiPath.Application.Responses;
 using RikiPath.Application.Responses.Notifications;
+using RikiPath.Domain.Entities;
 
 namespace RikiPath.Application.IServices
 {
@@ -12,10 +13,14 @@ namespace RikiPath.Application.IServices
 
         Task<ApiResponse> MarkAsReadAsync(int notificationId, CancellationToken cancellationToken);
 
+        Task<ApiResponse> MarkAsUnreadAsync(int notificationId, CancellationToken cancellationToken);
+
         Task<ApiResponse> MarkAllAsReadAsync(CancellationToken cancellationToken);
 
         Task CreateNotificationAsync(string title, string message, string type, CancellationToken cancellationToken);
 
         Task<ApiResponse<NotificationResponse>> SendNotificationToUserAsync(int targetUserId, string title, string message, string type, string? linkUrl, CancellationToken cancellationToken, string? idempotencyKey = null);
+
+        Task BroadcastPersistedNotificationAsync(Notification notification, CancellationToken cancellationToken = default);
     }
 }

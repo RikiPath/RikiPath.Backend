@@ -31,7 +31,7 @@ public sealed class MentorMeetingHub(
     {
         // 1. Xác thực quyền truy cập phòng tư vấn từ Backend
         var meeting = await meetingAccessService.GetMeetingAsync(roomId, Context.ConnectionAborted)
-            ?? throw new HubException("Không tìm thấy phòng meeting đã thanh toán hoặc đã hết hạn.");
+            ?? throw new HubException("Không tìm thấy phòng học trực tuyến hợp lệ hoặc buổi học đã hết hạn.");
 
         var userId = GetUserId();
         var isMentor = meeting.Mentor.UserId == userId;
@@ -298,7 +298,7 @@ public sealed class MentorMeetingHub(
     public async Task MuteParticipant(Guid roomId, string targetConnectionId)
     {
         var me = GetJoined(roomId);
-        if (!me.IsMentor) throw new HubException("Chỉ mentor mới được tắt mic người khác.");
+        if (!me.IsMentor) throw new HubException("Chỉ Giáo viên mới có quyền tắt micro của người khác.");
         if (IsPeerInRoom(roomId, targetConnectionId))
             await Clients.Client(targetConnectionId).SendAsync("ForceMuted");
     }
@@ -338,7 +338,7 @@ public sealed class MentorMeetingHub(
     private Joined GetJoined(Guid roomId)
         => JoinedRooms.TryGetValue(Context.ConnectionId, out var j) && j.RoomId == roomId
             ? j
-            : throw new HubException("Bạn chưa tham gia phòng meeting này.");
+            : throw new HubException("Bạn chưa tham gia phòng học trực tuyến này.");
 
     private static bool IsPeerInRoom(Guid roomId, string connectionId)
         => JoinedRooms.TryGetValue(connectionId, out var t) && t.RoomId == roomId;

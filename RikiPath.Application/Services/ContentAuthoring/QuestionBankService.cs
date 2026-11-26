@@ -164,7 +164,7 @@ public sealed class QuestionBankService(
                     "Câu hỏi đã xuất bản không được sửa đè trực tiếp để bảo toàn lịch sử bài làm. Hãy tạo phiên bản mới.");
             if (existing.PublishStatus == ContentStatus.PendingReview)
                 return ApiResponse<CanonicalQuestionDto>.Conflict(
-                    "Câu hỏi đang chờ Admin xét duyệt. Vui lòng chờ kết quả trước khi chỉnh sửa.");
+                    "Câu hỏi đang chờ Quản trị viên xét duyệt. Vui lòng chờ kết quả trước khi chỉnh sửa.");
 
             entity = existing;
             ApplyQuestionDtoToEntity(entity, request, validation.ContentFingerprint, passage?.Id);
@@ -302,7 +302,7 @@ public sealed class QuestionBankService(
         if (!isAdmin && item.AuthorUserId != actorUserId)
             return ApiResponse.Forbidden("Không có quyền xóa câu hỏi này.");
         if (item.PublishStatus == ContentStatus.Published)
-            return ApiResponse.Conflict("Không được xóa câu hỏi đã xuất bản. Admin có thể Ngừng xuất bản.");
+            return ApiResponse.Conflict("Không thể xóa câu hỏi đã xuất bản. Quản trị viên có thể chuyển sang trạng thái Ngừng xuất bản.");
 
         item.IsDeleted = true;
         unitOfWork.QuestionBankItems.Update(item);

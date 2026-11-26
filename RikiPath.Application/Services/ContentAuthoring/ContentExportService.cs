@@ -20,7 +20,8 @@ namespace RikiPath.Application.Services.ContentAuthoring;
 public sealed class ContentExportService(
     IUnitOfWork unitOfWork,
     IUnifiedImportService unifiedImportService,
-    IQuestionBankService questionBankService) : IContentExportService
+    IQuestionBankService questionBankService,
+    SubscriptionAccessService? subscriptionAccess = null) : IContentExportService
 {
     private const string SchemaVersion = "2.0";
 
@@ -37,6 +38,23 @@ public sealed class ContentExportService(
     {
         if (includeAnswers && !isAuthorOrAdmin)
             return ApiResponse<ExportFileResult>.Forbidden("Chỉ Tác giả nội dung hoặc Quản trị viên mới được xuất kèm Đáp án và Giải thích.");
+
+        var normalizedFmt = (format ?? "json").Trim().ToLowerInvariant();
+        if (!isAuthorOrAdmin)
+        {
+            if (normalizedFmt != "pdf")
+                return ApiResponse<ExportFileResult>.Forbidden("Học viên chỉ được phép tải đề dạng PDF.");
+
+            if (subscriptionAccess is not null)
+            {
+                var decision = await subscriptionAccess.EvaluateFeatureAsync(FeatureCodes.MockTests, ct);
+                if (!decision.Allowed)
+                    return ApiResponse<ExportFileResult>.Fail(
+                        decision.Message ?? "Bạn chưa có quyền truy cập tính năng này.",
+                        decision.StatusCode,
+                        errorCode: decision.ErrorCode ?? "FEATURE_ACCESS_DENIED");
+            }
+        }
 
         var test = await unitOfWork.MockTests.Query()
             .AsNoTracking()
@@ -62,11 +80,34 @@ public sealed class ContentExportService(
         if (test is null)
             return ApiResponse<ExportFileResult>.NotFound("Không tìm thấy bộ đề hoặc đề thi.");
 
-        if (!isAuthorOrAdmin && test.PublishStatus != ContentStatus.Published)
-            return ApiResponse<ExportFileResult>.Forbidden("Đề thi chưa xuất bản.");
+        if (!isAuthorOrAdmin)
+        {
+            if (test.PublishStatus != ContentStatus.Published || test.IsArchivedVersion ||
+                JlptBlueprintPolicy.IsRightsBlockedForLegacyOrManaged(test.RightsStatus, test.IsManagedWorkflow))
+                return ApiResponse<ExportFileResult>.Forbidden("Đề thi chưa xuất bản hoặc đã bị thu hồi.");
+
+            if (test.ExamKind is not (ExamKind.PracticeSet or ExamKind.MixedPractice or ExamKind.FullMockTest))
+                return ApiResponse<ExportFileResult>.Forbidden("Không được phép xuất đề đánh giá năng lực.");
+
+            if (test.ExamKind == ExamKind.FullMockTest)
+            {
+                var hasCompletedMock = await unitOfWork.MockTestAttempts.Query().AsNoTracking()
+                    .AnyAsync(a => a.UserId == actorUserId &&
+                                   !a.IsDeleted &&
+                                   a.AttemptKind == AttemptKind.MockTest &&
+                                   a.IsCompleted &&
+                                   (a.SectionResults!.Any(sr => sr.MockTestSection.MockTestId == examId) ||
+                                    a.Answers!.Any(ans => ans.MockQuestion.MockTestSection.MockTestId == examId)),
+                        ct);
+                if (!hasCompletedMock)
+                    return ApiResponse<ExportFileResult>.Fail(
+                        "Không thể tải PDF đề thi thử trước khi hoàn thành ít nhất một lượt thi.",
+                        HttpStatusCode.Forbidden,
+                        errorCode: "MOCK_TEST_PDF_REQUIRES_ATTEMPT");
+            }
+        }
 
         var slug = SanitizeFileName(test.Title);
-        var normalizedFmt = (format ?? "json").Trim().ToLowerInvariant();
 
         return normalizedFmt switch
         {
@@ -94,7 +135,7 @@ public sealed class ContentExportService(
         QuestionBankQueryFilter filter, string format, bool includeAnswers, int actorUserId, bool isAuthorOrAdmin, CancellationToken ct)
     {
         if (!isAuthorOrAdmin)
-            return ApiResponse<ExportFileResult>.Forbidden("Chỉ ContentAuthor hoặc Admin được phép xuất Ngân hàng câu hỏi.");
+            return ApiResponse<ExportFileResult>.Forbidden("Chỉ Quản lý nội dung hoặc Quản trị viên mới được phép xuất Ngân hàng câu hỏi.");
 
         filter.Page = 1;
         filter.PageSize = 200;

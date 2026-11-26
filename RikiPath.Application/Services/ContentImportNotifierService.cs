@@ -10,13 +10,14 @@ namespace RikiPath.Application.Services
     public sealed class ContentApprovalNotifierService(
         IUnitOfWork unitOfWork,
         ILogger<ContentApprovalNotifierService> logger,
-        ISidebarCounterNotifier? sidebarNotifier = null) : IContentApprovalNotifierService
+        ISidebarCounterNotifier? sidebarNotifier = null,
+        INotificationService? notificationService = null) : IContentApprovalNotifierService
     {
         public async Task NotifyAdminsOnRequestCreatedAsync(int requestCount, string batchName, CancellationToken cancellationToken)
         {
             try
             {
-                // Lấy ID các Admin đang bật nhận thông báo
+                // Lấy ID các Quản trị viên đang bật nhận thông báo
                 var adminUserIds = await unitOfWork.UserAccounts.Query()
                     .Where(u => !u.IsDeleted && u.Role == Role.Admin && u.SystemNotificationsEnabled)
                     .Select(u => u.Id)
@@ -37,12 +38,19 @@ namespace RikiPath.Application.Services
 
                 await unitOfWork.Notifications.AddRangeAsync(notifications, cancellationToken);
                 await unitOfWork.SaveChangesAsync(cancellationToken);
+                if (notificationService is not null)
+                {
+                    foreach (var n in notifications)
+                    {
+                        await notificationService.BroadcastPersistedNotificationAsync(n, cancellationToken);
+                    }
+                }
                 if (sidebarNotifier is not null)
                     await sidebarNotifier.NotifyUsersAsync(adminUserIds, "content_approval_submitted", cancellationToken);
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Lỗi khi gửi thông báo cho Admin về lô nội dung {BatchName}.", batchName);
+                logger.LogError(ex, "Lỗi khi gửi thông báo cho quản trị viên về lô nội dung {BatchName}.", batchName);
             }
         }
 
@@ -62,8 +70,8 @@ namespace RikiPath.Application.Services
                     notification = new Notification
                     {
                         UserId = authorId,
-                        Title = "🎉 Nội dung đã được duyệt",
-                        Message = $"Tuyệt vời! Toàn bộ {totalRequested} nội dung của bạn đã được duyệt thành công và lưu vào hệ thống.",
+                        Title = "Nội dung đã được phê duyệt",
+                        Message = $"Toàn bộ {totalRequested} nội dung của bạn đã được phê duyệt và lưu vào hệ thống.",
                         Type = "CONTENT_APPROVED_ALL",
                         IsRead = false,
                         LinkUrl = "/author-dashboard",
@@ -92,7 +100,7 @@ namespace RikiPath.Application.Services
                     notification = new Notification
                     {
                         UserId = authorId,
-                        Title = "⚠️ Kết quả kiểm duyệt nội dung",
+                        Title = "Kết quả kiểm duyệt nội dung",
                         Message = sb.ToString().TrimEnd(),
                         Type = "CONTENT_REJECTED_PARTIAL",
                         IsRead = false,
@@ -103,6 +111,8 @@ namespace RikiPath.Application.Services
 
                 await unitOfWork.Notifications.AddAsync(notification, cancellationToken);
                 await unitOfWork.SaveChangesAsync(cancellationToken);
+                if (notificationService is not null)
+                    await notificationService.BroadcastPersistedNotificationAsync(notification, cancellationToken);
                 if (sidebarNotifier is not null)
                 {
                     await sidebarNotifier.NotifyUsersAsync([authorId], "content_approval_reviewed", cancellationToken);

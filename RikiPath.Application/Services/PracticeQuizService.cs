@@ -3,6 +3,7 @@ using RikiPath.Application;
 using RikiPath.Application.IServices;
 using RikiPath.Application.Requests.PracticeExercises;
 using RikiPath.Application.Responses;
+using RikiPath.Application.Responses.LearningPaths;
 using RikiPath.Application.Responses.PracticeExercises;
 using RikiPath.Domain.Entities;
 using RikiPath.Domain.Enums;
@@ -156,7 +157,9 @@ public class PracticeQuizService(
 
     public Task<ApiResponse<PracticeExerciseAttemptResultResponse>> SubmitCheckpointAttemptAsync(
         int attemptId, SubmitPracticeExerciseAttemptRequest request, CancellationToken cancellationToken)
-        => SubmitAsync(attemptId, null, request, cancellationToken, fromAssessmentRoadmap: false, isCheckpoint: true);
+        => WithLearnerLockAsync(
+            token => SubmitAsync(attemptId, null, request, token, fromAssessmentRoadmap: false, isCheckpoint: true),
+            cancellationToken);
 
     private async Task<ApiResponse<IReadOnlyList<PracticeExerciseSummaryResponse>>> LoadLessonExercisesAsync(
         int lessonId, CancellationToken cancellationToken, bool fromAssessmentRoadmap = false)
@@ -364,11 +367,13 @@ public class PracticeQuizService(
 
     public Task<ApiResponse<PracticeExerciseAttemptResultResponse>> SubmitAttemptAsync(
         int attemptId, SubmitPracticeExerciseAttemptRequest request, CancellationToken cancellationToken)
-        => SubmitAsync(attemptId, null, request, cancellationToken);
+        => WithLearnerLockAsync(token => SubmitAsync(attemptId, null, request, token), cancellationToken);
 
     public Task<ApiResponse<PracticeExerciseAttemptResultResponse>> SubmitAssessmentRoadmapAttemptAsync(
         int attemptId, SubmitPracticeExerciseAttemptRequest request, CancellationToken cancellationToken)
-        => SubmitAsync(attemptId, null, request, cancellationToken, fromAssessmentRoadmap: true);
+        => WithLearnerLockAsync(
+            token => SubmitAsync(attemptId, null, request, token, fromAssessmentRoadmap: true),
+            cancellationToken);
 
     public Task<ApiResponse<PracticeExerciseAttemptResultResponse>> SubmitHomeworkAttemptAsync(
         int assignmentId, int attemptId, SubmitPracticeExerciseAttemptRequest request, CancellationToken cancellationToken)
@@ -405,6 +410,21 @@ public class PracticeQuizService(
                 if (!access.IsSuccess)
                     return ApiResponse<PracticeExerciseAttemptResultResponse>.Fail(
                         access.ErrorMessage!, (HttpStatusCode)access.StatusCode, access.ErrorCode);
+            }
+            else if (isCheckpoint)
+            {
+                var roadmapRes = await (standardRoadmapService ?? new StandardRoadmapService(unitOfWork, claimService))
+                    .GetAssessmentRoadmapAsync(cancellationToken);
+                if (roadmapRes.IsSuccess && roadmapRes.Result is { } gateRoadmap)
+                {
+                    var cpGate = gateRoadmap.Stages
+                        .SelectMany(s => new[] { s.GroupQuiz, s.StageAssessment })
+                        .FirstOrDefault(cp => cp is not null && cp.ExerciseId == exercise.Id);
+                    if (cpGate is { IsUnlocked: false })
+                        return ApiResponse<PracticeExerciseAttemptResultResponse>.Fail(
+                            cpGate.LockReason ?? "Hãy học xong các bài trong chặng trước khi làm bài kiểm tra.",
+                            HttpStatusCode.Conflict, "CHECKPOINT_LOCKED");
+                }
             }
 
             var questions = GetVisibleQuestions(exercise);
@@ -496,6 +516,10 @@ public class PracticeQuizService(
                 }
             }
 
+            var progression = fromAssessmentRoadmap || isCheckpoint
+                ? await BuildProgressionAsync(userId, attempt.Id, exercise, passingScore, passed, cancellationToken)
+                : null;
+
             var weakAreas = passed ? [] : new List<string> { exercise.Title };
             var nextRecommendation = passed
                 ? (exercise.Scope == PracticeExerciseScopes.StageAssessment
@@ -518,6 +542,7 @@ public class PracticeQuizService(
                 MinimumPassingScorePercent = passingScore,
                 Passed = passed,
                 UnlocksNextLearningPathDay = unlockedNextDay,
+                Progression = progression,
                 QuestionResults = questionResults,
                 WeakAreas = weakAreas,
                 NextRecommendation = nextRecommendation,
@@ -528,6 +553,129 @@ public class PracticeQuizService(
         {
             return ApiResponse<PracticeExerciseAttemptResultResponse>.Fail(
                 "Không thể nộp bài Practice Exercise.", HttpStatusCode.InternalServerError);
+        }
+    }
+
+    /// <summary>
+    /// Reads the roadmap back (same service the Stage Detail page uses) after the attempt is saved and reports the
+    /// transition this submission caused. A milestone is only reported on the first passing attempt, so retakes,
+    /// duplicate requests (rejected earlier as already submitted) and refreshes never produce a second celebration.
+    /// Never fails the submission: progression problems return null and the page simply refetches the roadmap.
+    /// </summary>
+    private async Task<RoadmapProgressionResponse?> BuildProgressionAsync(
+        int userId, int attemptId, PracticeExercise exercise, double passingScore, bool passed, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var wasAlreadyPassed = await unitOfWork.PracticeExerciseAttempts.Query().AsNoTracking()
+                .AnyAsync(a => a.UserId == userId && a.PracticeExerciseId == exercise.Id && a.Id != attemptId
+                    && !a.IsDeleted && a.HomeworkAssignmentId == null && a.IsCompleted
+                    && a.ScorePercent >= passingScore, cancellationToken);
+
+            var roadmapResult = await (standardRoadmapService ?? new StandardRoadmapService(unitOfWork, claimService))
+                .GetAssessmentRoadmapAsync(cancellationToken);
+            if (!roadmapResult.IsSuccess || roadmapResult.Result is not { } roadmap) return null;
+
+            var stages = roadmap.Stages.OrderBy(s => s.SortOrder).ToList();
+            var stage = exercise.Scope switch
+            {
+                PracticeExerciseScopes.LessonQuickCheck => stages.FirstOrDefault(s => s.Lessons.Any(l => l.LessonId == exercise.LessonId)),
+                PracticeExerciseScopes.GroupQuiz => stages.FirstOrDefault(s => s.GroupQuiz?.ExerciseId == exercise.Id),
+                PracticeExerciseScopes.StageAssessment => stages.FirstOrDefault(s => s.StageAssessment?.ExerciseId == exercise.Id),
+                _ => null,
+            };
+            if (stage is null) return null;
+
+            static bool StageDone(StandardRoadmapStageResponse s) => s.Status is "Completed" or "Mastered";
+            var stageIndex = stages.IndexOf(stage);
+            var nextStage = stageIndex >= 0 && stageIndex + 1 < stages.Count ? stages[stageIndex + 1] : null;
+            var lesson = exercise.LessonId is int lid ? stage.Lessons.FirstOrDefault(l => l.LessonId == lid) : null;
+            var nextLesson = stage.Lessons
+                .Where(l => !l.IsCompleted && !l.IsLocked)
+                .OrderBy(l => l.SortOrder)
+                .FirstOrDefault();
+            var checkpoint = stage.GroupQuiz is { IsPassed: false } gq ? gq
+                : stage.StageAssessment is { IsPassed: false } sa ? sa
+                : null;
+
+            var progression = new RoadmapProgressionResponse
+            {
+                WasAlreadyPassed = wasAlreadyPassed,
+                LessonId = lesson?.LessonId,
+                LessonTitle = lesson?.Title,
+                StageId = stage.StageId,
+                StageTitle = stage.Title,
+                StageNumber = stage.SortOrder,
+                StageCompletedLessons = stage.CompletedLessons,
+                StageTotalLessons = stage.TotalLessons,
+                StageStatus = stage.Status,
+                NextLessonId = nextLesson?.LessonId,
+                NextLessonTitle = nextLesson?.Title,
+                CheckpointExerciseId = checkpoint?.ExerciseId,
+                CheckpointTitle = checkpoint?.Title,
+                CheckpointScope = checkpoint?.Scope,
+                CheckpointUnlocked = checkpoint?.IsUnlocked ?? false,
+                RoadmapCompletedLessons = roadmap.CompletedLessons,
+                RoadmapTotalLessons = roadmap.TotalLessons,
+                RoadmapCompletedStages = stages.Count(StageDone),
+                RoadmapTotalStages = stages.Count,
+                TargetLevelCode = roadmap.TargetJlptLevelName,
+            };
+
+            if (!passed)
+            {
+                progression.Milestone = "NOT_PASSED";
+                return progression;
+            }
+            if (wasAlreadyPassed)
+            {
+                progression.Milestone = "NONE";
+                return progression;
+            }
+
+            if (exercise.Scope == PracticeExerciseScopes.LessonQuickCheck)
+            {
+                var stageLessonsDone = stage.Lessons.Count > 0 && stage.Lessons.All(l => l.IsCompleted);
+                progression.Milestone = stageLessonsDone && checkpoint is { IsUnlocked: true }
+                    ? "STAGE_CHECKPOINT_UNLOCKED"
+                    : stageLessonsDone && StageDone(stage)
+                        ? (stages.All(StageDone) ? "ROADMAP_COMPLETED" : "STAGE_COMPLETED")
+                        : "LESSON_COMPLETED";
+                if (lesson is not null && roadmap.CompletedLessons == 1)
+                    progression.MomentOccurrenceKey = $"moment:first-lesson:{userId}";
+            }
+            else if (StageDone(stage))
+            {
+                progression.Milestone = stages.All(StageDone) ? "ROADMAP_COMPLETED" : "STAGE_COMPLETED";
+                progression.MomentOccurrenceKey = exercise.Scope == PracticeExerciseScopes.StageAssessment
+                    ? $"moment:stage-assessment:{userId}:{exercise.Id}"
+                    : $"moment:group-quiz:{userId}:{exercise.Id}";
+            }
+            else
+            {
+                // Checkpoint passed but the stage still has open requirements (e.g. an unfinished lesson).
+                progression.Milestone = "NONE";
+            }
+
+            if (progression.Milestone is "STAGE_COMPLETED" or "ROADMAP_COMPLETED" && nextStage is not null)
+            {
+                var nextOpen = nextStage.Lessons.Any(l => !l.IsLocked) || nextStage.GroupQuiz is { IsUnlocked: true };
+                if (nextOpen)
+                {
+                    progression.NextStageId = nextStage.StageId;
+                    progression.NextStageTitle = nextStage.Title;
+                    progression.NextStageNumber = nextStage.SortOrder;
+                    var firstOpen = nextStage.Lessons.Where(l => !l.IsCompleted && !l.IsLocked).OrderBy(l => l.SortOrder).FirstOrDefault();
+                    progression.NextLessonId = firstOpen?.LessonId;
+                    progression.NextLessonTitle = firstOpen?.Title;
+                }
+            }
+            return progression;
+        }
+        catch (OperationCanceledException) { throw; }
+        catch
+        {
+            return null;
         }
     }
 

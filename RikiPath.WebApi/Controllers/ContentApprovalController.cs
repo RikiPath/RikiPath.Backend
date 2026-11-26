@@ -28,7 +28,7 @@ namespace RikiPath.Api.Controllers
         {
             return StatusCode(StatusCodes.Status410Gone,
                 ApiResponse<int>.Fail(
-                    "Luồng gửi diff trực tiếp đã đóng. Hãy lưu bản nháp bằng /api/content-import/confirm rồi gửi duyệt từ bản nháp.",
+                    "Luồng gửi trực tiếp đã ngừng hỗ trợ. Vui lòng lưu bản nháp trước khi gửi xét duyệt.",
                     System.Net.HttpStatusCode.Gone));
         }
 

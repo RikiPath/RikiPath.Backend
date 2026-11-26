@@ -105,6 +105,7 @@ namespace RikiPath.Infrastructure
         public IMentorScheduleRepository MentorSchedules { get; }
         public IMentorCreditLedgerRepository MentorCreditLedger { get; }
         public IGenericRepository<MentorTeachingQualification> MentorTeachingQualifications { get; }
+        public IGenericRepository<MentorAttendanceRecord> MentorAttendanceRecords { get; }
         public void AddMentorOutboxEvent(MentorOutboxEvent outboxEvent) => _context.MentorOutboxEvents.Add(outboxEvent);
         public IContentApprovalRequestRepository ContentApprovalRequests { get; }
 
@@ -201,6 +202,7 @@ namespace RikiPath.Infrastructure
             MentorSchedules = new MentorScheduleRepository(_context);
             MentorCreditLedger = new MentorCreditLedgerRepository(_context);
             MentorTeachingQualifications = new GenericRepository<MentorTeachingQualification>(_context);
+            MentorAttendanceRecords = new GenericRepository<MentorAttendanceRecord>(_context);
             ContentApprovalRequests = new ContentApprovalRequestRepository(_context);
 
             ContentAiReviews = new ContentAiReviewRepository(_context);

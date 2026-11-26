@@ -10,6 +10,11 @@ namespace RikiPath.Application.IServices
     {
         Task<ApiResponse<PlacementTestStatusResponse>> GetStatusAsync(CancellationToken cancellationToken = default);
 
+        Task<ApiResponse<PlacementTestStatusResponse>> GetStatusAsync(
+            int? assessmentLevelId,
+            string? assessmentMode,
+            CancellationToken cancellationToken = default);
+
         Task<ApiResponse<PlacementTestStatusResponse>> SkipPlacementAsync(CancellationToken cancellationToken = default);
 
         Task<ApiResponse<PlacementAttemptSnapshotResponse?>> GetActiveAttemptAsync(CancellationToken cancellationToken = default);

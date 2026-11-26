@@ -121,6 +121,10 @@ namespace RikiPath.Infrastructure.Repositories
                     // Khóa attempt trong transaction để hai request đồng thời không thể cùng chấm một bài.
                     .FromSqlInterpolated($"SELECT * FROM \"MockTestAttempts\" WHERE \"Id\" = {attemptId} FOR UPDATE")
                     .SingleOrDefaultAsync(cancellationToken);
+                if (attempt is not null)
+                {
+                    await _context.Entry(attempt).ReloadAsync(cancellationToken);
+                }
             }
             catch (InvalidOperationException)
             {

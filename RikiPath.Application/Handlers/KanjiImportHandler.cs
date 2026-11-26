@@ -101,7 +101,7 @@ namespace RikiPath.Application.Handlers
                 if (ambiguousCharacters.Contains(character))
                     diff.Errors.Add($"Có nhiều Kanji '{character}' trùng nhau trong hệ thống, cần dọn dữ liệu trước khi import.");
                 if (openRowKeys.Contains(character))
-                    diff.Errors.Add($"Kanji '{character}' đang có bản nháp chờ Admin duyệt, chưa thể import lại.");
+                    diff.Errors.Add($"Hán tự '{character}' đang có bản nháp chờ Quản trị viên duyệt, chưa thể nhập lại.");
             }
 
             if (diff.Errors.Count > 0)

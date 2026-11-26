@@ -137,6 +137,8 @@ namespace RikiPath.Application.Services
                     IsPhoneVerified = true,
                     Role = Role.Learner,
                     IsEmailVerified = false,
+                    PasswordHash = [],
+                    PasswordSalt = [],
                 };
 
                 await unitOfWork.UserAccounts.AddAsync(user, cancellationToken);

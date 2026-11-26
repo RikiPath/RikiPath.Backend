@@ -31,6 +31,15 @@ public sealed class StandardRoadmapController(
         return StatusCode(result.StatusCode, result);
     }
 
+    /// <summary>Khởi tạo / kích hoạt Lộ trình tiêu chuẩn một cách idempotent sau khi đã đủ điều kiện tiên quyết.</summary>
+    [HttpPost("activate")]
+    [RequireFeature(FeatureCodes.StandardRoadmap)]
+    public async Task<IActionResult> Activate(CancellationToken cancellationToken)
+    {
+        var result = await service.ActivateAsync(cancellationToken);
+        return StatusCode(result.StatusCode, result);
+    }
+
     [HttpGet("assessment/lessons/{lessonId:int}")]
     [RequireFeature(FeatureCodes.LessonsContent)]
     public async Task<IActionResult> GetAssessmentLesson(int lessonId, CancellationToken cancellationToken)

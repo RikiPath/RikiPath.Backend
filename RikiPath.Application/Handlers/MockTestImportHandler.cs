@@ -129,7 +129,7 @@ namespace RikiPath.Application.Handlers
 
             var rowKey = title is not null && levelCode is not null ? $"{title} / {levelCode}" : title ?? $"(dòng {first.RowNumber})";
             if (title is not null && levelCode is not null && ctx.OpenRowKeys.Contains(rowKey))
-                errors.Add($"{P(first)}Đề thi '{title}' ({levelCode}) đang có bản nháp chờ Admin duyệt, chưa thể import lại.");
+                errors.Add($"{P(first)}Đề thi '{title}' ({levelCode}) đang có bản nháp chờ Quản trị viên duyệt, chưa thể nhập lại.");
 
             var diff = new ImportRowDiffResponse
             {
@@ -180,7 +180,7 @@ namespace RikiPath.Application.Handlers
                             certByCode[code] = alias;
                         else
                         {
-                            errors.Add($"{rp0}SectionCode '{code}' không tồn tại trong hệ thống (Admin cần tạo sẵn CertificateSection).");
+                            errors.Add($"{rp0}Mã phần thi '{code}' không tồn tại trong hệ thống (Quản trị viên cần tạo sẵn phần thi chứng chỉ).");
                             certByCode[code] = null;
                         }
                     }

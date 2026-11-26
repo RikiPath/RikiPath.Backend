@@ -41,12 +41,12 @@ public static class CourseRetakePolicy
         var attendanceMet = true; // Absence is not an eligibility condition.
         var reasons = new List<string>();
         if (course.RetakeOfId.HasValue) reasons.Add("Khóa học lại không phát sinh quyền học lại tiếp.");
-        if (course.PaymentStatus != "Paid" || course.Status != "Completed") reasons.Add("Khóa phải đã thanh toán và hoàn thành.");
+        if (course.PaymentStatus is not ("Paid" or "PartiallyRefunded") || course.Status != "Completed") reasons.Add("Khóa phải đã thanh toán và hoàn thành.");
         if (alreadyRetaken) reasons.Add("Khóa gốc đã sử dụng quyền học lại.");
         if (!homeworkMet)
         {
             var op = strictGreater ? ">" : ">=";
-            reasons.Add($"Chưa có đủ dữ liệu xác nhận {op} {thresholdPercent:0.##}% BTVN nộp đúng hạn; chờ Admin kiểm tra minh chứng.");
+            reasons.Add($"Chưa có đủ dữ liệu xác nhận {op} {thresholdPercent:0.##}% bài tập về nhà nộp đúng hạn; chờ Quản trị viên kiểm tra minh chứng.");
         }
 
         if (logicalSessions.Count != course.TotalSessions || course.Sessions.Any(x => x.Status == "Scheduled"))

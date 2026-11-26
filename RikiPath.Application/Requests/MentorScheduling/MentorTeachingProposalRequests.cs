@@ -84,6 +84,47 @@ public sealed class SubmitTeachingProposalRequest
     public int ExpectedRevision { get; set; }
 }
 
+public sealed class ResubmitTeachingProposalRequest
+{
+    /// <summary>Khóa chống gửi trùng (idempotency) tạo từ phía client cho mỗi lần bấm gửi lại xét duyệt.</summary>
+    [Required]
+    [MaxLength(128)]
+    public string IdempotencyKey { get; set; } = string.Empty;
+
+    /// <summary>Phiên bản hiện tại của đề xuất Cần bổ sung nhằm kiểm soát ghi đè đồng thời.</summary>
+    [Range(1, int.MaxValue)]
+    public int ExpectedRevision { get; set; }
+
+    public int? CertificateLevelId { get; set; }
+
+    [MaxLength(32)]
+    public string? ProgramType { get; set; }
+
+    public int? CoursePlanId { get; set; }
+
+    [MaxLength(200)]
+    public string? CourseTitle { get; set; }
+
+    [MaxLength(1500)]
+    public string? CourseObjective { get; set; }
+
+    public DateOnly? ExpectedStartDate { get; set; }
+
+    [Range(1, 52)]
+    public int? CourseDurationWeeks { get; set; }
+
+    [Range(30, 240)]
+    public int? SessionDurationMinutes { get; set; }
+
+    [Required]
+    public List<WeeklySessionSlotDto> WeeklySessions { get; set; } = [];
+
+    [MaxLength(2000)]
+    public string? OptionalNotes { get; set; }
+
+    public List<ProposalAttachmentDto>? OptionalAttachments { get; set; }
+}
+
 public sealed class ValidateTeachingProposalRequest
 {
     public int? ProposalId { get; set; }
@@ -117,4 +158,25 @@ public sealed class ReviewTeachingProposalRequest
 
     [Range(1, int.MaxValue)]
     public int ExpectedRevision { get; set; }
+}
+
+public sealed class BulkApproveProposalItemRequest
+{
+    [Range(1, int.MaxValue)]
+    public int ProposalId { get; set; }
+
+    /// <summary>Phiên bản đề xuất để chống ghi đè / phê duyệt đồng thời (optimistic concurrency).</summary>
+    [Range(1, int.MaxValue)]
+    public int? ExpectedRevision { get; set; }
+}
+
+public sealed class BulkApproveTeachingProposalsRequest
+{
+    [Required]
+    [MinLength(1)]
+    [MaxLength(50)]
+    public List<BulkApproveProposalItemRequest> Items { get; set; } = [];
+
+    [MaxLength(1500)]
+    public string? Reason { get; set; }
 }

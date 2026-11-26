@@ -49,6 +49,7 @@ namespace RikiPath.Application.Responses.Analytics
 
     public class CompletionStatsResponse
     {
+        public bool HasValidRoadmap { get; set; }
         public int TotalLessons { get; set; }
         public int CompletedLessons { get; set; }
         public double CompletionPercent { get; set; }

@@ -18,6 +18,11 @@ public sealed class StudyCohort
     public int? PolicyVersionSnapshot { get; set; }
     public int? SourceProposalId { get; set; }
     public MentorTeachingProposal? SourceProposal { get; set; }
+    // Price snapshot chốt tại thời điểm phê duyệt/công bố lớp — không bị thay đổi khi bảng giá mới được ban hành.
+    public decimal? TuitionPerSessionSnapshot { get; set; }
+    public decimal? TotalTuitionSnapshot { get; set; }
+    public int? TuitionPolicyVersionSnapshot { get; set; }
+    public DateTime? TuitionSnapshotAtUtc { get; set; }
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
     public string Status { get; set; } = "Draft";
     public int Revision { get; set; } = 1;

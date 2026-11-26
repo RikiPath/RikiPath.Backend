@@ -2,10 +2,12 @@ using System.Data.Common;
 using System.Net;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using RikiPath.Application.Helpers;
 using RikiPath.Application.IRepositories;
 using RikiPath.Application.IServices;
 using RikiPath.Application.Responses;
 using RikiPath.Application.Responses.LearningPaths;
+using RikiPath.Application.Responses.Profile;
 using RikiPath.Domain.Entities;
 using RikiPath.Domain.Enums;
 
@@ -16,14 +18,57 @@ public sealed class StandardRoadmapService(
     IUnitOfWork unitOfWork,
     IClaimService claimService,
     ILogger<StandardRoadmapService>? logger = null,
-    AdaptiveSkillProfileService? skillProfileService = null)
+    AdaptiveSkillProfileService? skillProfileService = null,
+    ILearnerSetupStateService? setupStateService = null)
     : IStandardRoadmapService
 {
+    private async Task<ApiResponse<StandardRoadmapResponse>?> ValidateStandardEligibilityAsync(
+        int userId, CancellationToken cancellationToken)
+    {
+        var resolver = setupStateService ?? new LearnerSetupStateService(unitOfWork, claimService);
+        var state = await resolver.ResolveForUserAsync(userId, includeProgress: false, cancellationToken);
+        if (state is null)
+            return ApiResponse<StandardRoadmapResponse>.NotFound("Không tìm thấy người dùng.");
+
+        if (!state.HasConfirmedGoal)
+            return ApiResponse<StandardRoadmapResponse>.Fail(
+                "Vui lòng chọn chứng chỉ và mục tiêu JLPT (N5–N2) trước khi xem lộ trình học.",
+                HttpStatusCode.BadRequest, errorCode: "STUDY_LEVEL_REQUIRED");
+
+        if (!state.StandardRoadmapEligible)
+        {
+            if (state.HasActivePlacementAttempt)
+                return ApiResponse<StandardRoadmapResponse>.Fail(
+                    "Bạn đang có bài đánh giá năng lực chưa hoàn tất. Vui lòng tiếp tục làm bài hoặc chọn bỏ qua đánh giá năng lực.",
+                    HttpStatusCode.Conflict, errorCode: "PLACEMENT_IN_PROGRESS");
+
+            if (state.HasPendingPlacementSubmission)
+                return ApiResponse<StandardRoadmapResponse>.Fail(
+                    "Bạn có lượt đánh giá năng lực đã hết giờ cần nộp trước khi mở lộ trình.",
+                    HttpStatusCode.Conflict, errorCode: "PLACEMENT_PENDING_SUBMISSION");
+
+            if (state.PlacementCompatibilityStatus == "INSUFFICIENT_FOR_TARGET")
+                return ApiResponse<StandardRoadmapResponse>.Fail(
+                    state.PlacementCompatibilityReason ?? "Kết quả đánh giá hiện tại chưa bao phủ đủ cấp độ mục tiêu. Hãy đánh giá bổ sung hoặc chủ động chọn bỏ qua để mở lộ trình tiêu chuẩn.",
+                    HttpStatusCode.Conflict, errorCode: "PLACEMENT_INSUFFICIENT_FOR_TARGET");
+
+            return ApiResponse<StandardRoadmapResponse>.Fail(
+                "Vui lòng hoàn thành bài đánh giá năng lực hoặc chủ động chọn bỏ qua để sử dụng lộ trình tiêu chuẩn.",
+                HttpStatusCode.Conflict, errorCode: "STANDARD_ROADMAP_PLACEMENT_REQUIRED");
+        }
+
+        return null;
+    }
+
     public async Task<ApiResponse<StandardRoadmapResponse>> GetAsync(CancellationToken cancellationToken)
     {
         try
         {
             var userId = claimService.GetUserClaim().Id;
+            var gateFailure = await ValidateStandardEligibilityAsync(userId, cancellationToken);
+            if (gateFailure is not null)
+                return gateFailure;
+
             var user = await unitOfWork.UserAccounts.GetWithLearningGoalAsync(userId, cancellationToken);
             if (user is null)
                 return ApiResponse<StandardRoadmapResponse>.NotFound("Không tìm thấy người dùng.");
@@ -97,6 +142,10 @@ public sealed class StandardRoadmapService(
         try
         {
             var userId = claimService.GetUserClaim().Id;
+            var gateFailure = await ValidateStandardEligibilityAsync(userId, cancellationToken);
+            if (gateFailure is not null)
+                return gateFailure;
+
             var user = await unitOfWork.UserAccounts.GetWithLearningGoalAsync(userId, cancellationToken);
             if (user is null)
                 return ApiResponse<StandardRoadmapResponse>.NotFound("Không tìm thấy người dùng.");
@@ -302,8 +351,11 @@ public sealed class StandardRoadmapService(
             {
                 var progress = lesson.Progress;
                 var hasQc = quickCheckByLesson.TryGetValue(lesson.Id, out var qc);
+                var qcPassing = hasQc && qc is not null
+                    ? (qc.PassingScorePercent > 0 ? qc.PassingScorePercent : LessonPracticeProgress.PassingScore)
+                    : (double?)null;
                 var stat = hasQc && qc is not null && statsByExercise.TryGetValue(qc.Id, out var s) ? s : null;
-                var qcPassed = hasQc && qc is not null && stat is { HasAnyScore: true } && stat.BestScore >= qc.PassingScorePercent;
+                var qcPassed = hasQc && qcPassing.HasValue && stat is { HasAnyScore: true } && stat.BestScore >= qcPassing.Value;
                 var studied = (progress?.IsCompleted == true || progress?.ProgressPercent >= 100) || qcPassed;
 
                 // Lesson clears when its QuickCheck passes, OR (no QuickCheck exists and lesson is studied)
@@ -349,6 +401,7 @@ public sealed class StandardRoadmapService(
                     PracticeAttemptCount = stat?.Count ?? 0,
                     QuickCheckExerciseId = hasQc && qc is not null ? qc.Id : null,
                     QuickCheckQuestionCount = hasQc && qc is not null ? qc.QuestionCount : 0,
+                    QuickCheckPassingScorePercent = qcPassing,
                     ProgressPercent = cleared ? 100 : Math.Clamp(progress?.ProgressPercent ?? (studied ? 85 : 0), 0, 99),
                 };
 
@@ -396,7 +449,8 @@ public sealed class StandardRoadmapService(
                     if (gq is not null)
                     {
                         statsByExercise.TryGetValue(gq.Id, out var gStat);
-                        var isPassed = gStat is { HasAnyScore: true } && gStat.BestScore >= gq.PassingScorePercent;
+                        var gqPassing = gq.PassingScorePercent > 0 ? gq.PassingScorePercent : LessonPracticeProgress.PassingScore;
+                        var isPassed = gStat is { HasAnyScore: true } && gStat.BestScore >= gqPassing;
                         var unlocked = allCleared || allStudied;
                         groupQuiz = new RoadmapCheckpointResponse
                         {
@@ -406,7 +460,7 @@ public sealed class StandardRoadmapService(
                             Scope = gq.Scope,
                             SkillCode = JlptCurriculum.ResolveSkillCode(gq.LanguageSkillId, gq.SkillCode, gq.SkillName),
                             QuestionCount = gq.QuestionCount,
-                            PassingScorePercent = gq.PassingScorePercent,
+                            PassingScorePercent = gqPassing,
                             IsUnlocked = unlocked,
                             IsPassed = isPassed,
                             BestScorePercent = gStat is { HasAnyScore: true } ? Math.Round(gStat.BestScore, 1) : null,
@@ -466,7 +520,8 @@ public sealed class StandardRoadmapService(
                 var levelLessons = levelStages.SelectMany(s => s.Lessons).ToList();
                 var levelReady = levelLessons.Count > 0 && levelLessons.All(l => l.IsCompleted || l.IsStudied);
                 statsByExercise.TryGetValue(sa.Id, out var sStat);
-                var saPassed = sStat is { HasAnyScore: true } && sStat.BestScore >= sa.PassingScorePercent;
+                var saPassing = sa.PassingScorePercent > 0 ? sa.PassingScorePercent : LessonPracticeProgress.PassingScore;
+                var saPassed = sStat is { HasAnyScore: true } && sStat.BestScore >= saPassing;
 
                 anchorStage.StageAssessment = new RoadmapCheckpointResponse
                 {
@@ -476,7 +531,7 @@ public sealed class StandardRoadmapService(
                     Scope = sa.Scope,
                     SkillCode = JlptCurriculum.ResolveSkillCode(sa.LanguageSkillId, sa.SkillCode, sa.SkillName),
                     QuestionCount = sa.QuestionCount,
-                    PassingScorePercent = sa.PassingScorePercent,
+                    PassingScorePercent = saPassing,
                     IsUnlocked = levelReady,
                     IsPassed = saPassed,
                     BestScorePercent = sStat is { HasAnyScore: true } ? Math.Round(sStat.BestScore, 1) : null,
@@ -485,8 +540,21 @@ public sealed class StandardRoadmapService(
                     LockReason = levelReady ? null : $"Hoàn thành các bài học cấp {levelGroup.Key} để mở đánh giá cuối chặng.",
                 };
 
-                if (anchorStage.Status == "Completed" && saPassed)
-                    anchorStage.Status = "Mastered";
+                if (sa.QuestionCount > 0)
+                {
+                    if (anchorStage.Status == "Completed")
+                    {
+                        anchorStage.Status = saPassed
+                            ? "Mastered"
+                            : sStat is { Count: > 0 }
+                                ? "NeedsReview"
+                                : "InProgress";
+                    }
+                    else if (!saPassed && sStat is { Count: > 0 } && anchorStage.Status == "InProgress")
+                    {
+                        anchorStage.Status = "NeedsReview";
+                    }
+                }
             }
 
             var flatLessons = stages.SelectMany(s => s.Lessons).ToList();
@@ -619,5 +687,54 @@ public sealed class StandardRoadmapService(
         return lesson.IsLocked
             ? ApiResponse.Fail("Hãy hoàn thành bài tiên quyết trước khi mở bài học này.", HttpStatusCode.Conflict, "SELF_STUDY_LESSON_LOCKED")
             : ApiResponse.Success();
+    }
+
+    public async Task<ApiResponse<LearnerSetupStateResponse>> ActivateAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            var userId = claimService.GetUserClaim().Id;
+            var gateFailure = await ValidateStandardEligibilityAsync(userId, cancellationToken);
+            if (gateFailure is not null)
+                return ApiResponse<LearnerSetupStateResponse>.Fail(
+                    gateFailure.ErrorMessage ?? "Chưa đủ điều kiện mở lộ trình tiêu chuẩn.",
+                    (HttpStatusCode)gateFailure.StatusCode,
+                    gateFailure.ErrorCode);
+
+            var user = await unitOfWork.UserAccounts.GetByIdForUpdateAsync(userId, cancellationToken);
+            if (user is null)
+                return ApiResponse<LearnerSetupStateResponse>.NotFound("Không tìm thấy người dùng.");
+
+            var changed = false;
+            if (user.LearningMode != LearningMode.Standard)
+            {
+                user.LearningMode = LearningMode.Standard;
+                user.LearningGoalVersion++;
+                unitOfWork.UserAccounts.Update(user);
+                changed = true;
+            }
+
+            var recorded = await JourneyEventRecorder.RecordAsync(
+                unitOfWork, userId, JourneyEventRecorder.StandardRoadmapReady, user.LearningGoalVersion,
+                "Lộ trình học của bạn đã sẵn sàng!",
+                "Lộ trình tiêu chuẩn theo mục tiêu JLPT của bạn đã được mở.",
+                "/roadmap/", cancellationToken);
+
+            if (changed || recorded)
+                await unitOfWork.SaveChangesAsync(cancellationToken);
+
+            var resolver = setupStateService ?? new LearnerSetupStateService(unitOfWork, claimService);
+            var updatedState = await resolver.ResolveForUserAsync(userId, includeProgress: true, cancellationToken);
+            if (updatedState is null)
+                return ApiResponse<LearnerSetupStateResponse>.NotFound("Không tìm thấy người dùng.");
+
+            return ApiResponse<LearnerSetupStateResponse>.Success(updatedState);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception)
+        {
+            return ApiResponse<LearnerSetupStateResponse>.Fail(
+                "Không thể khởi tạo lộ trình tiêu chuẩn.", HttpStatusCode.InternalServerError);
+        }
     }
 }

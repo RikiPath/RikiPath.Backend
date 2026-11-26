@@ -12,6 +12,7 @@ public interface IAdminBusinessConfigService
     Task<ApiResponse<AdminEntitlementPreviewResponse>> GetEntitlementPreviewAsync(int? planId, CancellationToken ct = default);
     Task<ApiResponse<AdminPaymentListResponse>> GetPaymentsAsync(AdminPaymentQuery query, CancellationToken ct = default);
     Task<ApiResponse<AdminPaymentDetailDto>> GetPaymentDetailAsync(string stream, int id, CancellationToken ct = default);
+    Task<ApiResponse<AdminPaymentDetailDto>> RefundStudyCoursePaymentAsync(int studyCourseId, RefundStudyCoursePaymentRequest request, int adminUserId, CancellationToken ct = default);
     Task<ApiResponse<PayOsGatewayStatusDto>> GetPayOsStatusAsync(CancellationToken ct = default);
     Task<ApiResponse<IReadOnlyList<AdminAuditLogDto>>> GetAuditLogsAsync(string? entityType, int? entityId, int take = 50, CancellationToken ct = default);
 }

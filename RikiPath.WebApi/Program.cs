@@ -178,6 +178,7 @@ internal class Program
         {
             builder.Services.AddHostedService<ContentAudioTranscriptionWorker>();
             builder.Services.AddHostedService<RikiPath.Infrastructure.Services.SrsReminderWorker>();
+            builder.Services.AddHostedService<RikiPath.Infrastructure.Services.StudyCohortLifecycleWorker>();
         }
         builder.Services.AddMemoryCache();
 

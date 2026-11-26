@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Net;
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using RikiPath.Application.Helpers;
 using RikiPath.Application.IServices;
@@ -25,7 +26,8 @@ namespace RikiPath.Application.Services
         IUnitOfWork unitOfWork,
         IClaimService claimService,
         IReviewService reviewService,
-        IAnalyticsService analyticsService) : ILearningMomentService
+        IAnalyticsService analyticsService,
+        IStandardRoadmapService standardRoadmapService) : ILearningMomentService
     {
         private const string MomentNotificationType = "LearningMoment";
         private static readonly TimeSpan RecentWindow = TimeSpan.FromDays(3);
@@ -53,50 +55,179 @@ namespace RikiPath.Application.Services
                 .OrderByDescending(p => p.ConfirmedAt ?? p.GeneratedAt)
                 .FirstOrDefaultAsync(ct);
 
-            // 1) Onboarding completed: the learning goal is saved (server-validated write). There is no completion
-            //    timestamp, so only new accounts qualify — existing learners never get a retroactive welcome.
-            if (user.TargetCertificateLevelId.HasValue && user.LearningGoalVersion > 0 && utcNow - user.CreatedDate <= NewAccountWindow)
-            {
-                var next = user.PlacementDecision == PlacementDecision.NotTaken
-                    ? "/placement"
-                    : activePath is not null ? "/roadmap" : "/lessons";
-                candidates.Add(new MomentCandidate(new LearningMomentResponse
-                {
-                    OccurrenceKey = Key("onboarding", userId),
-                    Type = "ONBOARDING_COMPLETED",
-                    Level = "major",
-                    Priority = 10,
-                    AchievedAtUtc = user.CreatedDate,
-                    CtaHref = next,
-                    Data = new Dictionary<string, string>
-                    {
-                        ["targetLevel"] = user.TargetCertificateLevel?.Code ?? string.Empty,
-                        ["nextStep"] = user.PlacementDecision == PlacementDecision.NotTaken ? "placement" : activePath is not null ? "roadmap" : "lessons",
-                    },
-                }));
-            }
+            var hasConfirmedGoal = user.TargetCertificateLevelId.HasValue
+                && user.DailyStudyMinutes is > 0 and <= 1440
+                && user.TargetCertificateLevel is not null;
 
-            // 2) Placement completed: submitted + graded attempt (each real retake is its own occurrence).
-            var placement = await unitOfWork.MockTestAttempts.Query()
+            var placementAttempts = await unitOfWork.MockTestAttempts.Query()
                 .AsNoTracking()
                 .Where(a => a.UserId == userId && !a.IsDeleted
                     && (a.AttemptKind == AttemptKind.Placement || a.IsPlacementAssessment)
                     && a.IsCompleted && a.SubmittedAt != null && a.TotalScore != null)
                 .OrderByDescending(a => a.SubmittedAt)
+                .ThenByDescending(a => a.Id)
+                .ToListAsync(ct);
+
+            var compatibility = PracticeTestService.EvaluatePlacementCompatibility(
+                placementAttempts,
+                hasConfirmedGoal ? user.TargetCertificateLevelId : null,
+                hasConfirmedGoal ? user.TargetCertificateLevel?.Code : null);
+
+            var standardPrefix = JourneyEventRecorder.Prefix(JourneyEventRecorder.StandardRoadmapReady, userId);
+            var standardEvent = await unitOfWork.Notifications.Query()
+                .AsNoTracking()
+                .Where(n => n.UserId == userId && n.Type == JourneyEventRecorder.NotificationType
+                    && n.IdempotencyKey != null && n.IdempotencyKey.StartsWith(standardPrefix))
+                .OrderByDescending(n => n.CreatedDate)
+                .Select(n => new { n.IdempotencyKey, n.CreatedDate })
                 .FirstOrDefaultAsync(ct);
-            if (placement is not null && utcNow - placement.SubmittedAt!.Value <= RecentWindow)
+
+            var roadmapAlreadyInitialized = activePath is not null
+                || (hasConfirmedGoal && (user.PlacementDecision == PlacementDecision.Skipped || standardEvent is not null));
+
+            // 1) Goal confirmed: emitted once per LearningGoalVersion.
+            //    When user took placement BEFORE setting goal:
+            //    - Compatible -> Case 3 ("Mọi thứ đã sẵn sàng cho hành trình JLPT!")
+            //    - Insufficient -> compatibility guidance instead of premature "ready"
+            //    - No placement yet -> Case 1 ("Chúc mừng! Mục tiêu JLPT của bạn đã được thiết lập")
+            var goalPrefix = JourneyEventRecorder.Prefix(JourneyEventRecorder.GoalConfirmed, userId);
+            var goalEvent = await unitOfWork.Notifications.Query()
+                .AsNoTracking()
+                .Where(n => n.UserId == userId && n.Type == JourneyEventRecorder.NotificationType
+                    && n.IdempotencyKey != null && n.IdempotencyKey.StartsWith(goalPrefix))
+                .OrderByDescending(n => n.CreatedDate)
+                .Select(n => new { n.IdempotencyKey, n.CreatedDate })
+                .FirstOrDefaultAsync(ct);
+
+            DateTime? goalAtUtc = goalEvent?.CreatedDate is { } goalAt && hasConfirmedGoal
+                && utcNow - BusinessDateHelper.EnsureUtc(goalAt) <= RecentWindow
+                ? BusinessDateHelper.EnsureUtc(goalAt)
+                : null;
+
+            var latestPlacementSubmittedAt = placementAttempts
+                .Select(a => a.SubmittedAt)
+                .FirstOrDefault(s => s.HasValue);
+
+            var placementAfterGoal = goalAtUtc.HasValue && latestPlacementSubmittedAt is { } pAt
+                && BusinessDateHelper.EnsureUtc(pAt) > goalAtUtc.Value;
+
+            if (goalAtUtc.HasValue && !roadmapAlreadyInitialized && !placementAfterGoal)
             {
-                var data = new Dictionary<string, string> { ["attemptId"] = placement.Id.ToString(CultureInfo.InvariantCulture) };
-                if (!string.IsNullOrWhiteSpace(user.AssessedCertificateLevel?.Code))
-                    data["assessedLevel"] = user.AssessedCertificateLevel.Code;
+                var nextStep = compatibility.Status == "COMPATIBLE"
+                    ? "roadmap"
+                    : compatibility.Status == "INSUFFICIENT_FOR_TARGET"
+                        ? "supplement_placement"
+                        : user.PlacementDecision == PlacementDecision.Skipped
+                            ? "roadmap"
+                            : "placement";
+
+                var data = new Dictionary<string, string>
+                {
+                    ["targetLevel"] = user.TargetCertificateLevel?.Code ?? string.Empty,
+                    ["nextStep"] = nextStep,
+                    ["compatibilityStatus"] = compatibility.Status,
+                };
+                if (!string.IsNullOrWhiteSpace(compatibility.Reason))
+                    data["compatibilityReason"] = compatibility.Reason;
+                if (!string.IsNullOrWhiteSpace(compatibility.CoveredLevelName))
+                    data["coveredLevel"] = compatibility.CoveredLevelName;
+                if (user.DailyStudyMinutesMin is > 0 && user.DailyStudyMinutesMax > user.DailyStudyMinutesMin)
+                {
+                    data["dailyMinutesMin"] = user.DailyStudyMinutesMin.Value.ToString(CultureInfo.InvariantCulture);
+                    data["dailyMinutesMax"] = user.DailyStudyMinutesMax!.Value.ToString(CultureInfo.InvariantCulture);
+                }
+                else if (user.DailyStudyMinutes > 0)
+                {
+                    data["dailyMinutes"] = user.DailyStudyMinutes.ToString(CultureInfo.InvariantCulture);
+                }
+                if (user.TargetExamDate is { } examDate)
+                    data["examDate"] = examDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+
+                candidates.Add(new MomentCandidate(new LearningMomentResponse
+                {
+                    OccurrenceKey = Key("goal", userId, goalEvent!.IdempotencyKey![goalPrefix.Length..]),
+                    Type = "GOAL_CONFIRMED",
+                    Level = "major",
+                    Priority = 30,
+                    AchievedAtUtc = goalAtUtc,
+                    CtaHref = nextStep == "roadmap" ? "/roadmap/" : "/placement-test/",
+                    Data = data,
+                }));
+            }
+            // Legacy welcome for new accounts whose goal predates journey events (never alongside GOAL_CONFIRMED).
+            else if (goalEvent is null && hasConfirmedGoal && user.LearningGoalVersion > 0
+                && utcNow - user.CreatedDate <= NewAccountWindow && !roadmapAlreadyInitialized)
+            {
+                var next = compatibility.Status == "COMPATIBLE" || user.PlacementDecision == PlacementDecision.Skipped
+                    ? "/roadmap/"
+                    : "/placement-test/";
+                var nextStep = compatibility.Status == "COMPATIBLE" || user.PlacementDecision == PlacementDecision.Skipped
+                    ? "roadmap"
+                    : "placement";
+                candidates.Add(new MomentCandidate(new LearningMomentResponse
+                {
+                    OccurrenceKey = Key("onboarding", userId),
+                    Type = "ONBOARDING_COMPLETED",
+                    Level = "major",
+                    Priority = 30,
+                    AchievedAtUtc = user.CreatedDate,
+                    CtaHref = next,
+                    Data = new Dictionary<string, string>
+                    {
+                        ["targetLevel"] = user.TargetCertificateLevel?.Code ?? string.Empty,
+                        ["nextStep"] = nextStep,
+                        ["compatibilityStatus"] = compatibility.Status,
+                    },
+                }));
+            }
+
+            // 2) Placement completed: submitted + graded attempt.
+            //    Skip emitting a duplicate placement popup if GOAL_CONFIRMED happened AFTER this placement
+            //    (Case 3 on GOAL_CONFIRMED already celebrates completion of the final prerequisite).
+            var placement = placementAttempts.FirstOrDefault();
+            var goalConfirmedAfterPlacement = goalAtUtc.HasValue && placement?.SubmittedAt is { } subAt
+                && goalAtUtc.Value > BusinessDateHelper.EnsureUtc(subAt);
+            if (placement is not null
+                && utcNow - BusinessDateHelper.EnsureUtc(placement.SubmittedAt!.Value) <= RecentWindow
+                && !roadmapAlreadyInitialized
+                && !goalConfirmedAfterPlacement)
+            {
+                var assessedCode = user.AssessedCertificateLevel?.Code
+                    ?? compatibility.CompatibleResult?.AssessedJlptLevelName
+                    ?? compatibility.LatestResult?.AssessedJlptLevelName;
+                var nextStep = !hasConfirmedGoal
+                    ? "goal"
+                    : compatibility.Status == "COMPATIBLE"
+                        ? "roadmap"
+                        : "supplement_placement";
+                var data = new Dictionary<string, string>
+                {
+                    ["attemptId"] = placement.Id.ToString(CultureInfo.InvariantCulture),
+                    ["hasGoal"] = hasConfirmedGoal ? "true" : "false",
+                    ["nextStep"] = nextStep,
+                    ["compatibilityStatus"] = compatibility.Status,
+                };
+                if (!string.IsNullOrWhiteSpace(assessedCode))
+                    data["assessedLevel"] = assessedCode;
+                if (hasConfirmedGoal && !string.IsNullOrWhiteSpace(user.TargetCertificateLevel?.Code))
+                    data["targetLevel"] = user.TargetCertificateLevel.Code;
+                if (!string.IsNullOrWhiteSpace(compatibility.Reason))
+                    data["compatibilityReason"] = compatibility.Reason;
+                if (!string.IsNullOrWhiteSpace(compatibility.CoveredLevelName))
+                    data["coveredLevel"] = compatibility.CoveredLevelName;
+
                 candidates.Add(new MomentCandidate(new LearningMomentResponse
                 {
                     OccurrenceKey = Key("placement", userId, placement.Id.ToString(CultureInfo.InvariantCulture)),
                     Type = "PLACEMENT_COMPLETED",
                     Level = "major",
-                    Priority = 20,
-                    AchievedAtUtc = placement.SubmittedAt,
-                    CtaHref = $"/placement/result/{placement.Id}",
+                    Priority = 25,
+                    AchievedAtUtc = BusinessDateHelper.EnsureUtc(placement.SubmittedAt.Value),
+                    CtaHref = nextStep == "goal"
+                        ? "/onboarding/"
+                        : nextStep == "roadmap"
+                            ? "/roadmap/"
+                            : "/placement-test/",
                     Data = data,
                 }));
             }
@@ -118,7 +249,7 @@ namespace RikiPath.Application.Services
                     OccurrenceKey = Key("first-lesson", userId),
                     Type = "FIRST_LESSON_COMPLETED",
                     Level = "major",
-                    Priority = 30,
+                    Priority = 34,
                     AchievedAtUtc = firstLesson.CompletedAt,
                     CtaHref = hasPractice ? $"/lesson-practice?lessonId={firstLesson.LessonId}" : "/lessons",
                     Data = new Dictionary<string, string>
@@ -129,22 +260,52 @@ namespace RikiPath.Application.Services
                 }));
             }
 
-            // 4) Learning path ready (active + confirmed). An AI path is only claimed as AI when it is one.
-            if (activePath is not null)
+            // 4) Roadmap ready. AI: an active, confirmed personalised path (built from the goal + a real placement).
+            //    Standard: the learner explicitly chose the standard roadmap (journey event) AND the roadmap loads
+            //    with real lessons. Nothing is offered for a path that is still generating or failed.
+            if (activePath?.ConfirmedAt is { } pathConfirmedAt && utcNow - BusinessDateHelper.EnsureUtc(pathConfirmedAt) <= RecentWindow)
             {
-                var readyAt = activePath.ConfirmedAt ?? activePath.GeneratedAt;
-                if (activePath.ConfirmedAt is not null && utcNow - readyAt <= RecentWindow)
+                var data = new Dictionary<string, string> { ["kind"] = "ai" };
+                if (!string.IsNullOrWhiteSpace(user.TargetCertificateLevel?.Code))
+                    data["targetLevel"] = user.TargetCertificateLevel.Code;
+                AddAiPathFacts(activePath.SuggestionJson, data);
+                candidates.Add(new MomentCandidate(new LearningMomentResponse
                 {
-                    candidates.Add(new MomentCandidate(new LearningMomentResponse
+                    OccurrenceKey = Key("learning-path", userId, activePath.Id.ToString(CultureInfo.InvariantCulture)),
+                    Type = "LEARNING_PATH_CREATED",
+                    Level = "major",
+                    Priority = 20,
+                    AchievedAtUtc = BusinessDateHelper.EnsureUtc(pathConfirmedAt),
+                    CtaHref = "/roadmap/",
+                    Data = data,
+                }));
+            }
+            else if (activePath is null && hasConfirmedGoal &&
+                     (user.PlacementDecision == PlacementDecision.Skipped || standardEvent is not null))
+            {
+                if (standardEvent?.CreatedDate is { } standardAt && utcNow - BusinessDateHelper.EnsureUtc(standardAt) <= RecentWindow)
+                {
+                    var roadmap = await standardRoadmapService.GetAsync(ct);
+                    if (roadmap.IsSuccess && roadmap.Result is { } r && (r.TotalLessons > 0 || r.Lessons.Count > 0))
                     {
-                        OccurrenceKey = Key("learning-path", userId, activePath.Id.ToString(CultureInfo.InvariantCulture)),
-                        Type = "LEARNING_PATH_CREATED",
-                        Level = "milestone",
-                        Priority = 35,
-                        AchievedAtUtc = readyAt,
-                        CtaHref = "/roadmap",
-                        Data = new Dictionary<string, string> { ["kind"] = "personalized" },
-                    }));
+                        var data = new Dictionary<string, string> { ["kind"] = "standard" };
+                        var level = r.TargetJlptLevelName ?? user.TargetCertificateLevel?.Code;
+                        if (!string.IsNullOrWhiteSpace(level)) data["targetLevel"] = level;
+                        if (r.Stages.Count > 0) data["stages"] = r.Stages.Count.ToString(CultureInfo.InvariantCulture);
+                        var lessons = r.TotalLessons > 0 ? r.TotalLessons : r.Lessons.Count;
+                        data["lessons"] = lessons.ToString(CultureInfo.InvariantCulture);
+                        if (r.DailyStudyMinutes > 0) data["dailyMinutes"] = r.DailyStudyMinutes.ToString(CultureInfo.InvariantCulture);
+                        candidates.Add(new MomentCandidate(new LearningMomentResponse
+                        {
+                            OccurrenceKey = Key("standard-roadmap", userId, standardEvent.IdempotencyKey![standardPrefix.Length..]),
+                            Type = "LEARNING_PATH_CREATED",
+                            Level = "major",
+                            Priority = 20,
+                            AchievedAtUtc = BusinessDateHelper.EnsureUtc(standardAt),
+                            CtaHref = "/roadmap/",
+                            Data = data,
+                        }));
+                    }
                 }
             }
 
@@ -158,6 +319,26 @@ namespace RikiPath.Application.Services
                 .FirstOrDefaultAsync(ct);
             if (mock is not null && utcNow - mock.SubmittedAt!.Value <= RecentWindow)
             {
+                var scoreDisplay = $"{Math.Round(mock.TotalScore!.Value, 1).ToString(CultureInfo.InvariantCulture)}%";
+                if (!string.IsNullOrWhiteSpace(mock.QuestionSnapshotJson))
+                {
+                    try
+                    {
+                        using var snapDoc = System.Text.Json.JsonDocument.Parse(mock.QuestionSnapshotJson);
+                        if (snapDoc.RootElement.TryGetProperty("scoring", out var sc) &&
+                            sc.ValueKind == System.Text.Json.JsonValueKind.Object &&
+                            sc.TryGetProperty("normalizedScore", out var normProp) &&
+                            sc.TryGetProperty("normalizedMaxScore", out var maxProp) &&
+                            normProp.TryGetDouble(out var normVal) &&
+                            maxProp.TryGetInt32(out var maxVal) &&
+                            maxVal > 0)
+                        {
+                            scoreDisplay = $"{MockTestScoringPolicy.FormatScore(normVal)}/{maxVal} điểm";
+                        }
+                    }
+                    catch (System.Text.Json.JsonException) { }
+                }
+
                 candidates.Add(new MomentCandidate(new LearningMomentResponse
                 {
                     OccurrenceKey = Key("mock-test", userId, mock.Id.ToString(CultureInfo.InvariantCulture)),
@@ -168,7 +349,7 @@ namespace RikiPath.Application.Services
                     CtaHref = "/exam-result/",
                     Data = new Dictionary<string, string>
                     {
-                        ["score"] = Math.Round(mock.TotalScore!.Value, 1).ToString(CultureInfo.InvariantCulture),
+                        ["score"] = scoreDisplay,
                     },
                 }));
             }
@@ -251,6 +432,7 @@ namespace RikiPath.Application.Services
             var recentPurchases = await unitOfWork.UserSubscriptions.Query()
                 .AsNoTracking()
                 .Include(s => s.SubscriptionPlan)
+                    .ThenInclude(p => p!.Features)
                 .Where(s => s.UserId == userId && !s.IsDeleted
                     && s.PaymentStatus == PaymentStatus.Paid
                     && s.StartDate != null
@@ -269,28 +451,80 @@ namespace RikiPath.Application.Services
                     ["planName"] = order.PlanNameSnapshot ?? order.SubscriptionPlan?.Name ?? string.Empty,
                     ["kind"] = category,
                 };
-                if (order.EndDate is { } end)
+                if (order.EndDate is { } end && !SubscriptionAccessService.IsUnlimitedExpiry(end))
                     data["endDate"] = BusinessDateHelper.EnsureUtc(end).ToString("O", CultureInfo.InvariantCulture);
+                else if (order.EndDate is { } && SubscriptionAccessService.IsUnlimitedExpiry(order.EndDate))
+                    data["isUnlimited"] = "true";
                 if (order.DurationDaysSnapshot is > 0)
                     data["durationDays"] = order.DurationDaysSnapshot.Value.ToString(CultureInfo.InvariantCulture);
                 if (order.AiGradingQuota > 0)
                     data["aiUses"] = order.AiGradingQuota.ToString(CultureInfo.InvariantCulture);
+                // Renewal / top-up: another paid order was already active when this one activated, so the copy says
+                // "extended" / "credits added" and only features not already owned are marked as newly unlocked.
+                var earlierActive = await unitOfWork.UserSubscriptions.Query()
+                    .AsNoTracking()
+                    .Include(s => s.SubscriptionPlan)
+                        .ThenInclude(p => p!.Features)
+                    .Where(s => s.UserId == userId && s.Id != order.Id && !s.IsDeleted
+                        && s.PaymentStatus == PaymentStatus.Paid && s.StartDate != null && s.StartDate < order.StartDate
+                        && (s.EndDate == null || s.EndDate > order.StartDate)
+                        && s.MeetingSessionsIncluded == 0)
+                    .ToListAsync(ct);
+                var previouslyGranted = earlierActive
+                    .Where(s => s.EndDate != null)
+                    .SelectMany(s => s.SubscriptionPlan?.Features ?? [])
+                    .Select(f => f.Code)
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                var isCredit = SubscriptionAccessService.IsCreditCategory(category);
+                var hadSameCategory = earlierActive.Any(s =>
+                    string.Equals(SubscriptionAccessService.OrderCategoryPublic(s), category, StringComparison.OrdinalIgnoreCase)
+                    && (isCredit || s.EndDate != null));
+                data["mode"] = isCredit ? (hadSameCategory ? "topup" : "credit") : hadSameCategory ? "renewal" : "activation";
+                var benefits = (order.SubscriptionPlan?.Features ?? [])
+                    .Where(f => !f.IsDeleted)
+                    .OrderBy(f => f.SortOrder)
+                    .Select(f => new LearningMomentBenefitResponse
+                    {
+                        Code = f.Code,
+                        Name = f.Name,
+                        Description = f.Description,
+                        Category = f.Category,
+                        IsNew = !previouslyGranted.Contains(f.Code),
+                    })
+                    .Take(8)
+                    .ToList();
+                // The CTA leads to the first step the learner can really take: set a goal first, then the placement
+                // test for the AI roadmap — never to a page that would answer with an error.
+                var ctaHref = category switch
+                {
+                    SubscriptionAccessService.CategorySelfStudy or SubscriptionAccessService.CategoryCombo => "/lessons/",
+                    SubscriptionAccessService.CategoryLearningPath => "/roadmap/",
+                    SubscriptionAccessService.CategorySpeaking => "/riki/speaking/",
+                    SubscriptionAccessService.CategoryWriting => "/riki/essay/",
+                    _ => "/plans/",
+                };
+                var needsGoal = !user.TargetCertificateLevelId.HasValue;
+                if (needsGoal && category is SubscriptionAccessService.CategorySelfStudy or SubscriptionAccessService.CategoryCombo or SubscriptionAccessService.CategoryLearningPath)
+                {
+                    ctaHref = "/onboarding/";
+                    data["ctaStep"] = "goal";
+                }
+                else if (category == SubscriptionAccessService.CategoryLearningPath
+                    && user.PlacementDecision != PlacementDecision.Completed && activePath is null)
+                {
+                    ctaHref = "/placement-test/";
+                    data["ctaStep"] = "placement";
+                }
                 candidates.Add(new MomentCandidate(new LearningMomentResponse
                 {
+                    Benefits = benefits,
                     OccurrenceKey = Key("purchase", userId, order.Id.ToString(CultureInfo.InvariantCulture)),
                     Type = "PURCHASE_COMPLETED",
                     Level = "major",
                     // Tied to what the learner just did, so it goes before learning milestones in the queue.
                     Priority = 5,
                     AchievedAtUtc = activatedAt,
-                    CtaHref = category switch
-                    {
-                        SubscriptionAccessService.CategorySelfStudy => "/lessons/",
-                        SubscriptionAccessService.CategoryLearningPath => "/roadmap/",
-                        SubscriptionAccessService.CategorySpeaking => "/riki/speaking/",
-                        SubscriptionAccessService.CategoryWriting => "/riki/essay/",
-                        _ => "/plans/",
-                    },
+                    CtaHref = ctaHref,
                     Data = data,
                 }));
             }
@@ -383,8 +617,46 @@ namespace RikiPath.Application.Services
             }
         }
 
+        /// <summary>Copies display-only facts (phase count, plan length) from a stored AI path; ignores bad JSON.</summary>
+        private static void AddAiPathFacts(string? suggestionJson, Dictionary<string, string> data)
+        {
+            if (string.IsNullOrWhiteSpace(suggestionJson)) return;
+            try
+            {
+                using var doc = JsonDocument.Parse(suggestionJson);
+                var root = doc.RootElement;
+                if (root.ValueKind != JsonValueKind.Object) return;
+                if (TryGetProperty(root, "phases", out var phases) && phases.ValueKind == JsonValueKind.Array && phases.GetArrayLength() > 0)
+                    data["stages"] = phases.GetArrayLength().ToString(CultureInfo.InvariantCulture);
+                if (TryGetProperty(root, "planDurationDays", out var days) && days.ValueKind == JsonValueKind.Number && days.TryGetInt32(out var d) && d > 0)
+                    data["planDays"] = d.ToString(CultureInfo.InvariantCulture);
+                if (TryGetProperty(root, "dailyStudyMinutes", out var mins) && mins.ValueKind == JsonValueKind.Number && mins.TryGetInt32(out var m) && m > 0)
+                    data["dailyMinutes"] = m.ToString(CultureInfo.InvariantCulture);
+            }
+            catch (JsonException)
+            {
+                // A celebration never fails because of stored path formatting.
+            }
+        }
+
+        private static bool TryGetProperty(JsonElement element, string name, out JsonElement value)
+        {
+            foreach (var property in element.EnumerateObject())
+            {
+                if (string.Equals(property.Name, name, StringComparison.OrdinalIgnoreCase))
+                {
+                    value = property.Value;
+                    return true;
+                }
+            }
+            value = default;
+            return false;
+        }
+
         private static string TitleFor(LearningMomentResponse moment) => moment.Type switch
         {
+            "GOAL_CONFIRMED" => "Mục tiêu JLPT đã được thiết lập",
+            "PURCHASE_COMPLETED" => "Gói học của bạn đã được kích hoạt",
             "ONBOARDING_COMPLETED" => "Chào mừng bạn đến với hành trình tiếng Nhật!",
             "PLACEMENT_COMPLETED" => "Bạn đã hoàn thành bài đánh giá năng lực!",
             "FIRST_LESSON_COMPLETED" => "Bài học đầu tiên đã hoàn thành!",

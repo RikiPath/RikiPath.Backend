@@ -94,6 +94,9 @@ namespace RikiPath.WebApi.Controllers
         [AllowAnonymous]
         public IActionResult GetLocalMedia(string folder, string fileName)
         {
+            if (string.Equals(folder?.Trim(), "mentor-proposals", StringComparison.OrdinalIgnoreCase))
+                return NotFound();
+
             if (fileStorageService is not LocalDevMediaStorageService localDev ||
                 !localDev.TryOpenPublicMedia(folder, fileName, out var stream, out var contentType) ||
                 stream is null)

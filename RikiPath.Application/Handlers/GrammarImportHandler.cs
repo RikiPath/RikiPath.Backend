@@ -92,7 +92,7 @@ namespace RikiPath.Application.Handlers
                 if (ambiguousTitles.Contains(title))
                     diff.Errors.Add($"Có nhiều mẫu ngữ pháp '{title}' trùng nhau trong hệ thống, cần dọn dữ liệu trước khi import.");
                 if (openRowKeys.Contains(title))
-                    diff.Errors.Add($"Mẫu ngữ pháp '{title}' đang có bản nháp chờ Admin duyệt, chưa thể import lại.");
+                    diff.Errors.Add($"Mẫu ngữ pháp '{title}' đang có bản nháp chờ Quản trị viên duyệt, chưa thể nhập lại.");
             }
 
             if (diff.Errors.Count > 0)

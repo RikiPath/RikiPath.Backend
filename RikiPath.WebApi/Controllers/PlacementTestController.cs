@@ -12,12 +12,15 @@ namespace RikiPath.WebApi.Controllers
     public class PlacementTestController(IPracticeTestService placementTestService) : ControllerBase
     {
         /// <summary>
-        /// Kiểm tra trạng thái hoàn thành bài kiểm tra đánh giá năng lực đầu vào (Placement Test) và mức độ sẵn sàng tạo lộ trình.
+        /// Kiểm tra trạng thái hoàn thành bài kiểm tra đánh giá năng lực đầu vào (Placement Test), quota và mức độ sẵn sàng tạo lộ trình.
         /// </summary>
         [HttpGet("status")]
-        public async Task<IActionResult> GetStatus(CancellationToken cancellationToken)
+        public async Task<IActionResult> GetStatus(
+            [FromQuery] int? assessmentLevelId = null,
+            [FromQuery] string? assessmentMode = null,
+            CancellationToken cancellationToken = default)
         {
-            var result = await placementTestService.GetStatusAsync(cancellationToken);
+            var result = await placementTestService.GetStatusAsync(assessmentLevelId, assessmentMode, cancellationToken);
             return StatusCode((int)result.StatusCode, result);
         }
 

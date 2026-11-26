@@ -24,18 +24,18 @@ public sealed class StudyCoursesController(
     public async Task<IActionResult> RequestChange(int id, RequestCourseChange r, CancellationToken ct) => Result(await service.RequestChangeAsync(id, r, ct));
     [HttpPost("{id:int}/change-requests/{requestId:int}/review"), Authorize(Roles = "Admin")]
     public async Task<IActionResult> ReviewChange(int id, int requestId, ReviewCourseChange r, CancellationToken ct) => Result(await service.ReviewChangeAsync(id, requestId, r, ct));
-    /// <summary>Danh sách lớp nhóm; lọc tùy chọn theo Mentor, cấp độ, cường độ (Light/Standard/Advanced),
+    /// <summary>Danh sách lớp nhóm; lọc tùy chọn theo Mentor, cấp độ, tần suất học (số buổi/tuần hoặc cường độ),
     /// thứ (0=Chủ nhật..6) và giờ bắt đầu buổi học "HH:mm" (giờ Việt Nam).</summary>
     [HttpGet("cohorts")]
     public async Task<IActionResult> Cohorts([FromQuery] int? mentorId, [FromQuery] string? level, [FromQuery] string? intensity,
-        [FromQuery] int? weekday, [FromQuery] string? fromTime, [FromQuery] string? toTime, CancellationToken ct)
+        [FromQuery] int? weekday, [FromQuery] string? fromTime, [FromQuery] string? toTime, [FromQuery] int? sessionsPerWeek, CancellationToken ct)
     {
         if (mentorId is null && string.IsNullOrWhiteSpace(level) && string.IsNullOrWhiteSpace(intensity) && weekday is null
-            && string.IsNullOrWhiteSpace(fromTime) && string.IsNullOrWhiteSpace(toTime))
+            && sessionsPerWeek is null && string.IsNullOrWhiteSpace(fromTime) && string.IsNullOrWhiteSpace(toTime))
             return Result(await service.CohortsAsync(ct));
         if (!TryParseLocalTime(fromTime, out var from) || !TryParseLocalTime(toTime, out var to))
             return Result(ApiResponse<object>.Fail("Giờ lọc phải theo định dạng HH:mm.", System.Net.HttpStatusCode.BadRequest));
-        return Result(await service.CohortsAsync(new CohortDiscoveryFilter(mentorId, level, intensity, weekday, from, to), ct));
+        return Result(await service.CohortsAsync(new CohortDiscoveryFilter(mentorId, level, intensity, weekday, from, to, sessionsPerWeek), ct));
     }
 
     private static bool TryParseLocalTime(string? value, out TimeOnly? time)

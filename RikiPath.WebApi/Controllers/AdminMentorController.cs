@@ -131,7 +131,7 @@ namespace RikiPath.WebApi.Controllers
             }
             catch (ArgumentException)
             {
-                return UnprocessableEntity(new { Message = "Tài liệu cũ chưa thuộc kho lưu trữ bảo vệ. Vui lòng yêu cầu cố vấn gửi lại." });
+                return UnprocessableEntity(new { Message = "Tài liệu cũ chưa thuộc kho lưu trữ bảo mật. Vui lòng yêu cầu Giáo viên gửi lại." });
             }
             catch (InvalidOperationException)
             {

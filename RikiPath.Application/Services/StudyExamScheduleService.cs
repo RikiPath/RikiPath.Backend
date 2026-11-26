@@ -14,7 +14,7 @@ public sealed partial class StudyCourseService
 
     public async Task<ApiResponse<object>> ImportExamSchedulesAsync(CancellationToken ct)
     {
-        if (Actor.Role != Role.Admin) return ApiResponse<object>.Fail("Chỉ Admin được nhập lịch thi.", HttpStatusCode.Forbidden);
+        if (Actor.Role != Role.Admin) return ApiResponse<object>.Fail("Chỉ Quản trị viên được nhập lịch thi.", HttpStatusCode.Forbidden);
         if (examSource is null) return ApiResponse<object>.Fail("Chưa cấu hình nguồn lịch thi.", HttpStatusCode.ServiceUnavailable);
         try
         {

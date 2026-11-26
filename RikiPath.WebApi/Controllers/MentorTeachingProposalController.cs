@@ -4,13 +4,17 @@ using Microsoft.AspNetCore.RateLimiting;
 using RikiPath.Application.IServices;
 using RikiPath.Application.Requests.MentorScheduling;
 using RikiPath.Application.Responses;
+using RikiPath.WebApi.Services;
 
 namespace RikiPath.WebApi.Controllers;
 
 [ApiController]
 [Route("api/mentor/teaching-proposals")]
 [Authorize(Roles = "Mentor")]
-public sealed class MentorTeachingProposalController(IMentorTeachingProposalService service) : ControllerBase
+public sealed class MentorTeachingProposalController(
+    IMentorTeachingProposalService service,
+    IFileStorageService fileStorageService,
+    IHttpClientFactory httpClientFactory) : ControllerBase
 {
     [HttpGet("context")]
     public async Task<IActionResult> GetContext(CancellationToken ct)
@@ -23,6 +27,17 @@ public sealed class MentorTeachingProposalController(IMentorTeachingProposalServ
     [HttpGet("{id:int}")]
     public async Task<IActionResult> GetById(int id, CancellationToken ct)
         => ToActionResult(await service.GetMyProposalByIdAsync(id, ct));
+
+    [HttpGet("{id:int}/attachments/{index:int}")]
+    public async Task<IActionResult> GetAttachment(int id, int index, [FromQuery] bool download = false, CancellationToken ct = default)
+    {
+        var meta = await service.GetAuthorizedAttachmentAsync(id, index, isAdmin: false, ct);
+        if (!meta.IsSuccess || meta.Result is null)
+            return ToActionResult(meta);
+
+        return await ProposalAttachmentStreamHelper.StreamAttachmentAsync(
+            this, fileStorageService, httpClientFactory, meta.Result, download, ct);
+    }
 
     [HttpPost("drafts")]
     public async Task<IActionResult> CreateDraft([FromBody] SaveTeachingProposalDraftRequest request, CancellationToken ct)
@@ -44,6 +59,11 @@ public sealed class MentorTeachingProposalController(IMentorTeachingProposalServ
     [EnableRateLimiting("mentor-availability-submit")]
     public async Task<IActionResult> Submit(int id, [FromBody] SubmitTeachingProposalRequest request, CancellationToken ct)
         => ToActionResult(await service.SubmitProposalAsync(id, request, ct));
+
+    [HttpPost("{id:int}/resubmit")]
+    [EnableRateLimiting("mentor-availability-submit")]
+    public async Task<IActionResult> Resubmit(int id, [FromBody] ResubmitTeachingProposalRequest request, CancellationToken ct)
+        => ToActionResult(await service.ResubmitProposalAsync(id, request, ct));
 
     [HttpPost("{id:int}/withdraw")]
     public async Task<IActionResult> Withdraw(int id, [FromBody] WithdrawTeachingProposalRequest? request, CancellationToken ct)

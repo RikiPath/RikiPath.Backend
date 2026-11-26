@@ -15,7 +15,9 @@ namespace RikiPath.Application.Services;
 
 public sealed class MentorScheduleService(IUnitOfWork uow, IClaimService claims, IEmailService email,
     ILogger<MentorScheduleService> logger, IEmailTemplateService? emailTemplates = null,
-    AppSettings? appSettings = null) : IMentorScheduleService
+    AppSettings? appSettings = null,
+    INotificationService? notificationService = null,
+    ISidebarCounterNotifier? sidebarNotifier = null) : IMentorScheduleService
 {
     private bool IsAdmin => claims.GetUserClaim().Role == Role.Admin;
     private static ApiResponse<bool> Fail(string message) => ApiResponse<bool>.Fail(message);
@@ -37,23 +39,42 @@ public sealed class MentorScheduleService(IUnitOfWork uow, IClaimService claims,
     {
         var user = claims.GetUserClaim();
         var slot = await uow.MentorAvailabilities.GetByIdAsync(slotId, ct);
-        if (user.Role != Role.Mentor || slot is null || slot.IsDeleted || slot.MentorId != user.Id) return Fail("Không có quyền yêu cầu thay đổi tiết này.");
+        if (user.Role != Role.Mentor || slot is null || slot.IsDeleted || slot.MentorId != user.Id) return Fail("Bạn không có quyền yêu cầu điều chỉnh buổi dạy này.");
         if (string.IsNullOrWhiteSpace(reason) || reason.Trim().Length > 1000) return Fail("Nhập lý do từ 1 đến 1000 ký tự.");
-        if (slot.StartTime <= DateTime.UtcNow || slot.ChangeRequestedAt != null) return Fail("Tiết đã bắt đầu hoặc đã có yêu cầu chờ xử lý.");
+        if (slot.StartTime <= DateTime.UtcNow || slot.ChangeRequestedAt != null) return Fail("Buổi dạy đã bắt đầu hoặc đang có yêu cầu điều chỉnh chờ xử lý.");
         slot.ChangeRequestReason = reason.Trim(); slot.ChangeRequestedAt = DateTime.UtcNow; slot.ChangeResolution = null;
         var admins = await uow.UserAccounts.FindAsync(x => !x.IsDeleted && x.Role == Role.Admin, ct);
+        var adminNotifications = new List<Notification>();
         foreach (var admin in admins)
-            await uow.Notifications.AddAsync(new Notification { UserId = admin.Id,
-                Title = "Cố vấn yêu cầu điều chỉnh lịch", Message = $"Cố vấn đề nghị điều chỉnh một khung giờ: {reason.Trim()}",
-                Type = "MentorSchedule", LinkUrl = "/admin/mentor-schedules/" }, ct);
+        {
+            var notif = new Notification
+            {
+                UserId = admin.Id,
+                Title = "Giáo viên yêu cầu điều chỉnh lịch",
+                Message = $"Giáo viên đề nghị điều chỉnh một khung giờ: {reason.Trim()}",
+                Type = "MentorSchedule",
+                IsRead = false,
+                CreatedDate = DateTime.UtcNow,
+                LinkUrl = "/admin/mentor-requests/",
+            };
+            adminNotifications.Add(notif);
+            await uow.Notifications.AddAsync(notif, ct);
+        }
         await uow.SaveChangesAsync(ct);
+        if (notificationService is not null)
+        {
+            foreach (var notif in adminNotifications)
+                await notificationService.BroadcastPersistedNotificationAsync(notif, ct);
+        }
+        if (sidebarNotifier is not null)
+            await sidebarNotifier.NotifyAdminsAsync("slot_change_requested", ct);
         return ApiResponse<bool>.Success(true);
     }
 
     public async Task<ApiResponse<bool>> ResolveChangeAsync(int slotId, ResolveMentorSlotRequest request, CancellationToken ct)
     {
         if (!IsAdmin)
-            return ApiResponse<bool>.Fail("Chỉ Admin mới có quyền điều chỉnh lịch.", HttpStatusCode.Forbidden);
+            return ApiResponse<bool>.Fail("Chỉ quản trị viên mới có quyền điều chỉnh lịch.", HttpStatusCode.Forbidden);
         if (string.IsNullOrWhiteSpace(request.Reason) || request.Reason.Length > 1000)
             return Fail("Nhập lý do xử lý (tối đa 1000 ký tự).");
         if (request.CancelSlot)
@@ -66,12 +87,22 @@ public sealed class MentorScheduleService(IUnitOfWork uow, IClaimService claims,
             return ApiResponse<bool>.Fail("Không tìm thấy khung giờ tương lai.", HttpStatusCode.NotFound);
         var now = DateTime.UtcNow;
         var reason = request.Reason.Trim();
+        Notification? mentorNotification = null;
         await uow.ExecuteInTransactionAsync(async token => {
             slot.ChangeResolution = reason;
             slot.ChangeRequestedAt = null;
             slot.ModifiedDate = now;
-            await uow.Notifications.AddAsync(new Notification { UserId = slot.MentorId, Title = "Lịch dạy đã được xử lý",
-                Message = reason, Type = "MentorSchedule", LinkUrl = "/mentor-shift-schedule/" }, token);
+            mentorNotification = new Notification
+            {
+                UserId = slot.MentorId,
+                Title = "Lịch dạy đã được xử lý",
+                Message = reason,
+                Type = "MentorSchedule",
+                IsRead = false,
+                CreatedDate = now,
+                LinkUrl = "/mentor-shift-schedule/",
+            };
+            await uow.Notifications.AddAsync(mentorNotification, token);
             await uow.AdminAuditLogs.AddAsync(new AdminAuditLog
             {
                 ActorUserId = claims.GetUserClaim().Id,
@@ -84,6 +115,13 @@ public sealed class MentorScheduleService(IUnitOfWork uow, IClaimService claims,
             }, token);
             await uow.SaveChangesAsync(token);
         }, ct);
+        if (mentorNotification is not null && notificationService is not null)
+            await notificationService.BroadcastPersistedNotificationAsync(mentorNotification, ct);
+        if (sidebarNotifier is not null)
+        {
+            await sidebarNotifier.NotifyAdminsAsync("slot_change_resolved", ct);
+            await sidebarNotifier.NotifyUsersAsync([slot.MentorId], "slot_change_resolved", ct);
+        }
         if (slot.Mentor is not null && NotificationPreferenceHelper.ShouldDeliverEmail(slot.Mentor, "MentorSchedule"))
         {
             try

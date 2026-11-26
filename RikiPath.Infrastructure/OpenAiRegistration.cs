@@ -17,6 +17,22 @@ public static class OpenAiRegistration
             var key = configuration["OPENAI_API_KEY"];
             if (!string.IsNullOrWhiteSpace(key)) settings.ApiKey = key;
         });
+        services.Configure<OpenRouterSettings>(settings =>
+        {
+            configuration.GetSection("AppSettings:OpenRouter").Bind(settings);
+            configuration.GetSection("OpenRouter").Bind(settings);
+        });
+        services.Configure<GeminiSettings>(settings =>
+        {
+            configuration.GetSection("AppSettings:Gemini").Bind(settings);
+            configuration.GetSection("GeminiSettings").Bind(settings);
+        });
+        services.Configure<TranslationSettings>(settings =>
+        {
+            configuration.GetSection("AppSettings:Translation").Bind(settings);
+            configuration.GetSection("Translation").Bind(settings);
+        });
+        services.AddHttpClient("translation-provider", http => http.Timeout = Timeout.InfiniteTimeSpan);
         services.AddHttpClient<OpenAiClient>(http => http.Timeout = Timeout.InfiniteTimeSpan);
         services.AddScoped<IAiLearningPathClient, OpenAiLearningPathClient>();
         services.AddScoped<IAiGradingClient, OpenAiGradingClient>();

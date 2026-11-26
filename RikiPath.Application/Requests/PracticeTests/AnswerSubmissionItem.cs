@@ -8,5 +8,7 @@ namespace RikiPath.Application.Requests.MockTests
         public int? SelectedOptionId { get; set; }
         /// <summary>Structured response for non-choice questions; shape depends on question type.</summary>
         public System.Text.Json.JsonElement? Response { get; set; }
+        /// <summary>Monotonic client sequence per answer update to guard against stale out-of-order autosaves.</summary>
+        public long? ClientSequence { get; set; }
     }
 }

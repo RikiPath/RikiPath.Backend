@@ -13,30 +13,57 @@ namespace RikiPath.Infrastructure.Services
     // quota tổng vì mỗi instance cho phép hết hạn ngạch riêng nó). Nếu bạn scale-out, thay
     // IMemoryCache bằng IDistributedCache (Redis) hoặc một bảng DB (AiUsageDailyCounter) - interface
     // IAiUsageQuotaService giữ nguyên, chỉ đổi implementation này.
-    public class AiUsageQuotaService(IMemoryCache cache, IOptions<AppSettings> appSettings) : IAiUsageQuotaService
+    public class AiUsageQuotaService : IAiUsageQuotaService
     {
-        private readonly AiRateLimitSettings _limits = appSettings.Value.Ai.RateLimit;
+        private readonly IMemoryCache _cache;
+        private readonly AiRateLimitSettings _limits;
+        private readonly TranslationSettings _translationLimits;
         private static readonly TimeZoneInfo VietnamTimeZone = ResolveVietnamTimeZone();
         private static readonly object SyncRoot = new();
 
+        public AiUsageQuotaService(
+            IMemoryCache cache,
+            IOptions<AiSettings> aiSettings,
+            IOptions<AppSettings>? appSettings = null,
+            IOptions<TranslationSettings>? translationSettings = null)
+        {
+            _cache = cache;
+            var primary = aiSettings?.Value?.RateLimit;
+            var fallback = appSettings?.Value?.Ai?.RateLimit;
+            // Program.cs binds section "Ai" to IOptions<AiSettings>, whereas legacy deployments may nest under "AppSettings:Ai".
+            _limits = (primary is not null && (primary.MaxRequestsPerUserPerDay != 20 || primary.MaxTokensPerUserPerDay != 50000 || fallback is null))
+                ? primary
+                : (fallback ?? new AiRateLimitSettings());
+            _translationLimits = translationSettings?.Value ?? new TranslationSettings();
+        }
+
         public Task EnsureWithinQuotaAsync(int userId, AiFeature feature, CancellationToken cancellationToken)
         {
+            var maxRequests = feature == AiFeature.Translation
+                ? Math.Max(20, _translationLimits.DailyRequestsPerUser)
+                : _limits.MaxRequestsPerUserPerDay;
+            var maxTokens = feature == AiFeature.Translation
+                ? Math.Max(50000, _translationLimits.DailyTokensPerUser)
+                : _limits.MaxTokensPerUserPerDay;
+
             lock (SyncRoot)
             {
                 var usage = GetOrCreateUsage(userId, feature);
 
-                if (usage.RequestCount >= _limits.MaxRequestsPerUserPerDay)
+                if (usage.RequestCount >= maxRequests)
                 {
                     throw new AiQuotaExceededException(
-                        $"Bạn đã dùng hết {_limits.MaxRequestsPerUserPerDay} lượt {feature} AI hôm nay. " +
-                        "Vui lòng thử lại vào ngày mai.");
+                        feature == AiFeature.Translation
+                            ? $"Bạn đã đạt giới hạn {maxRequests} lượt dịch hôm nay. Vui lòng thử lại vào ngày mai."
+                            : $"Bạn đã dùng hết {maxRequests} lượt {feature} AI hôm nay. Vui lòng thử lại vào ngày mai.");
                 }
 
-                if (usage.TokensUsed >= _limits.MaxTokensPerUserPerDay)
+                if (usage.TokensUsed >= maxTokens)
                 {
                     throw new AiQuotaExceededException(
-                        $"Bạn đã dùng hết {_limits.MaxTokensPerUserPerDay} token AI ({feature}) hôm nay. " +
-                        "Vui lòng thử lại vào ngày mai.");
+                        feature == AiFeature.Translation
+                            ? "Bạn đã dùng hết hạn mức dịch hôm nay. Vui lòng thử lại vào ngày mai."
+                            : $"Bạn đã dùng hết {maxTokens} token AI ({feature}) hôm nay. Vui lòng thử lại vào ngày mai.");
                 }
             }
 
@@ -51,7 +78,7 @@ namespace RikiPath.Infrastructure.Services
                 var usage = GetOrCreateUsage(userId, feature);
                 usage.RequestCount += 1;
                 usage.TokensUsed += tokensUsed;
-                cache.Set(key, usage, NextMidnightVietnamTimeUtc());
+                _cache.Set(key, usage, NextMidnightVietnamTimeUtc());
             }
 
             return Task.CompletedTask;
@@ -60,7 +87,7 @@ namespace RikiPath.Infrastructure.Services
         private DailyUsage GetOrCreateUsage(int userId, AiFeature feature)
         {
             var key = BuildKey(userId, feature);
-            return cache.GetOrCreate(key, entry =>
+            return _cache.GetOrCreate(key, entry =>
             {
                 entry.AbsoluteExpiration = NextMidnightVietnamTimeUtc();
                 return new DailyUsage();

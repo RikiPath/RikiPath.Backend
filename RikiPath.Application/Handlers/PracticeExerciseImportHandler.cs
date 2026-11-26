@@ -302,7 +302,7 @@ namespace RikiPath.Application.Handlers
             var targetLabel = lessonTitle ?? topicTitle ?? resolvedLevelCode ?? string.Empty;
             var rowKey = title is not null && !string.IsNullOrEmpty(targetLabel) ? $"{title} / {targetLabel}" : title ?? $"(dòng {first.RowNumber})";
             if (title is not null && !string.IsNullOrEmpty(targetLabel) && ctx.OpenRowKeys.Contains(rowKey))
-                errors.Add($"{P(first)}Bài tập '{title}' ({targetLabel}) đang có bản nháp chờ Admin duyệt.");
+                errors.Add($"{P(first)}Bài luyện tập '{title}' ({targetLabel}) đang có bản nháp chờ Quản trị viên duyệt.");
 
             var diff = new ImportRowDiffResponse
             {

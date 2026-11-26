@@ -25,7 +25,7 @@ namespace RikiPath.Application.Services
             {
                 var claim = claimService.GetUserClaim();
                 if (claim.Role is not (Role.Mentor or Role.Learner))
-                    return ApiResponse<MentorProfileResponse>.Fail("Tài khoản không có quyền truy cập hồ sơ ứng tuyển cố vấn.", HttpStatusCode.Forbidden);
+                    return ApiResponse<MentorProfileResponse>.Fail("Tài khoản không có quyền truy cập hồ sơ Giáo viên.", HttpStatusCode.Forbidden);
 
                 var mentor = await unitOfWork.UserAccounts.Query()
                     .Include(u => u.MentorProfile)
@@ -57,7 +57,7 @@ namespace RikiPath.Application.Services
             catch (Exception ex)
             {
                 logger.LogError(ex, "Lỗi khi lấy thông tin hồ sơ chuyên gia.");
-                return ApiResponse<MentorProfileResponse>.Fail("Không thể tải hồ sơ cố vấn. Vui lòng thử lại.", HttpStatusCode.InternalServerError);
+                return ApiResponse<MentorProfileResponse>.Fail("Không thể tải hồ sơ Giáo viên. Vui lòng thử lại.", HttpStatusCode.InternalServerError);
             }
         }
 
@@ -68,7 +68,7 @@ namespace RikiPath.Application.Services
             {
                 var claim = claimService.GetUserClaim();
                 if (claim.Role is not (Role.Mentor or Role.Learner))
-                    return ApiResponse<MentorProfileResponse>.Fail("Tài khoản không có quyền cập nhật hồ sơ ứng tuyển cố vấn.", HttpStatusCode.Forbidden);
+                    return ApiResponse<MentorProfileResponse>.Fail("Tài khoản không có quyền cập nhật hồ sơ Giáo viên.", HttpStatusCode.Forbidden);
 
                 var mentor = await unitOfWork.UserAccounts.Query()
                     .Include(u => u.MentorProfile)
@@ -146,7 +146,7 @@ namespace RikiPath.Application.Services
             catch (Exception ex)
             {
                 logger.LogError(ex, "Lỗi khi cập nhật hồ sơ chuyên gia.");
-                return ApiResponse<MentorProfileResponse>.Fail("Không thể cập nhật hồ sơ cố vấn. Vui lòng thử lại.", HttpStatusCode.InternalServerError);
+                return ApiResponse<MentorProfileResponse>.Fail("Không thể cập nhật hồ sơ Giáo viên. Vui lòng thử lại.", HttpStatusCode.InternalServerError);
             }
         }
 
@@ -157,7 +157,7 @@ namespace RikiPath.Application.Services
             {
                 var claim = claimService.GetUserClaim();
                 if (claim.Role is not (Role.Mentor or Role.Learner))
-                    return ApiResponse<MentorProfileResponse>.Fail("Tài khoản không có quyền gửi hồ sơ ứng tuyển cố vấn.", HttpStatusCode.Forbidden);
+                    return ApiResponse<MentorProfileResponse>.Fail("Tài khoản không có quyền gửi xét duyệt hồ sơ Giáo viên.", HttpStatusCode.Forbidden);
 
                 var mentor = await unitOfWork.UserAccounts.Query()
                     .Include(u => u.MentorProfile)
@@ -275,7 +275,7 @@ namespace RikiPath.Application.Services
             {
                 var claim = claimService.GetUserClaim();
                 if (claim.Role is not (Role.Learner or Role.Mentor))
-                    return ApiResponse<MentorProfileResponse>.Fail("Tài khoản không có quyền nộp chứng chỉ cố vấn.", HttpStatusCode.Forbidden);
+                    return ApiResponse<MentorProfileResponse>.Fail("Tài khoản không có quyền nộp chứng chỉ Giáo viên.", HttpStatusCode.Forbidden);
                 if (fileStorageService is null)
                     return ApiResponse<MentorProfileResponse>.Fail("Kho tài liệu xác minh chưa sẵn sàng.", HttpStatusCode.ServiceUnavailable);
 
@@ -355,7 +355,7 @@ namespace RikiPath.Application.Services
             catch (Exception ex)
             {
                 logger.LogError(ex, "Lỗi khi lấy thông tin công khai của chuyên gia {MentorId}.", mentorId);
-                return ApiResponse<PublicMentorProfileResponse>.Fail("Không thể tải hồ sơ cố vấn. Vui lòng thử lại.", HttpStatusCode.InternalServerError);
+                return ApiResponse<PublicMentorProfileResponse>.Fail("Không thể tải hồ sơ Giáo viên. Vui lòng thử lại.", HttpStatusCode.InternalServerError);
             }
         }
 
@@ -398,10 +398,10 @@ namespace RikiPath.Application.Services
         private static string GetStatusDescription(MentorVerificationStatus status) => status switch
         {
             MentorVerificationStatus.Unverified => "Chưa nộp hồ sơ",
-            MentorVerificationStatus.Pending => "Đang chờ duyệt",
-            MentorVerificationStatus.Approved => "Đã phê duyệt",
-            MentorVerificationStatus.Rejected => "Đã bị từ chối",
-            MentorVerificationStatus.ChangesRequested => "Yêu cầu bổ sung thông tin",
+            MentorVerificationStatus.Pending => "Chờ duyệt",
+            MentorVerificationStatus.Approved => "Đã duyệt",
+            MentorVerificationStatus.Rejected => "Bị từ chối",
+            MentorVerificationStatus.ChangesRequested => "Cần bổ sung",
             _ => status.ToString()
         };
     }

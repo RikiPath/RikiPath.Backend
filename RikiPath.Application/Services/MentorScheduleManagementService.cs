@@ -32,7 +32,7 @@ namespace RikiPath.Application.Services
         {
             var claim = claimService.GetUserClaim();
             if (claim.Role != Role.Mentor)
-                return ApiResponse<TeachingConflictReport>.Fail("Chỉ cố vấn mới xem trước được lịch dạy của mình.", HttpStatusCode.Forbidden, "FORBIDDEN");
+                return ApiResponse<TeachingConflictReport>.Fail("Chỉ Giáo viên mới có thể xem trước lịch dạy của mình.", HttpStatusCode.Forbidden, "FORBIDDEN");
             if (request?.Intervals is not { Count: > 0 and <= 500 }
                 || request.Intervals.Any(i => i.EndUtc <= i.StartUtc || (i.EndUtc - i.StartUtc).TotalHours > 12))
                 return ApiResponse<TeachingConflictReport>.Fail("Danh sách khung giờ không hợp lệ (1–500 khung, giờ kết thúc sau giờ bắt đầu).",
@@ -53,7 +53,7 @@ namespace RikiPath.Application.Services
             {
                 var claim = claimService.GetUserClaim();
                 if (claim.Role != Role.Mentor)
-                    return ApiResponse<MentorScheduleResponse>.Fail("Chỉ cố vấn mới có quyền truy cập lịch tư vấn.", HttpStatusCode.Forbidden);
+                    return ApiResponse<MentorScheduleResponse>.Fail("Chỉ Giáo viên mới có quyền truy cập lịch dạy.", HttpStatusCode.Forbidden);
 
                 var policySummary = await BuildPolicySummaryAsync(cancellationToken);
                 var schedule = await unitOfWork.MentorSchedules.GetByMentorIdWithRulesAsync(claim.Id, DefaultPolicyVersion, cancellationToken);
@@ -94,7 +94,7 @@ namespace RikiPath.Application.Services
             {
                 var claim = claimService.GetUserClaim();
                 if (claim.Role != Role.Mentor)
-                    return ApiResponse<MentorScheduleResponse>.Fail("Chỉ cố vấn mới có quyền cấu hình lịch tư vấn.", HttpStatusCode.Forbidden);
+                    return ApiResponse<MentorScheduleResponse>.Fail("Chỉ Giáo viên mới có quyền thiết lập lịch dạy.", HttpStatusCode.Forbidden);
 
                 var timeZoneId = string.IsNullOrWhiteSpace(request.TimeZoneId)
                     ? MentorSlotPolicy.BusinessTimeZoneId
@@ -201,14 +201,14 @@ namespace RikiPath.Application.Services
             {
                 var claim = claimService.GetUserClaim();
                 if (claim.Role != Role.Mentor)
-                    return ApiResponse<SlotPreviewResponse>.Fail("Chỉ cố vấn mới có quyền xem trước khung giờ tư vấn.", HttpStatusCode.Forbidden);
+                    return ApiResponse<SlotPreviewResponse>.Fail("Chỉ Giáo viên mới có quyền xem trước khung giờ dạy.", HttpStatusCode.Forbidden);
 
                 // GATE BẢO MẬT: Chuyên gia phải ĐÃ ĐƯỢC PHÊ DUYỆT (Approved)
                 var isEligible = await mentorProfileService.IsMentorEligibleForSchedulingAsync(claim.Id, cancellationToken);
                 if (!isEligible)
                 {
                     return ApiResponse<SlotPreviewResponse>.Fail(
-                        "Hồ sơ của bạn chưa được Quản trị viên phê duyệt (Approved). Bạn không thể tạo hoặc xem trước lịch hẹn khả dụng.",
+                        "Hồ sơ của bạn chưa được Quản trị viên phê duyệt. Bạn chưa thể tạo hoặc xem trước khung giờ dạy.",
                         HttpStatusCode.Forbidden);
                 }
 
@@ -337,14 +337,14 @@ namespace RikiPath.Application.Services
             {
                 var claim = claimService.GetUserClaim();
                 if (claim.Role != Role.Mentor)
-                    return ApiResponse<PublishSlotsResponse>.Fail("Chỉ cố vấn mới có quyền công bố khung giờ tư vấn.", HttpStatusCode.Forbidden);
+                    return ApiResponse<PublishSlotsResponse>.Fail("Chỉ Giáo viên mới có quyền công bố khung giờ dạy.", HttpStatusCode.Forbidden);
 
                 // GATE BẢO MẬT: Chuyên gia phải ĐÃ ĐƯỢC PHÊ DUYỆT (Approved)
                 var isEligible = await mentorProfileService.IsMentorEligibleForSchedulingAsync(claim.Id, cancellationToken);
                 if (!isEligible)
                 {
                     return ApiResponse<PublishSlotsResponse>.Fail(
-                        "Hồ sơ của bạn chưa được Quản trị viên phê duyệt (Approved). Bạn không được phép công bố hoặc tạo khung giờ đặt lịch mới.",
+                        "Hồ sơ của bạn chưa được Quản trị viên phê duyệt. Bạn chưa được phép công bố hoặc tạo khung giờ dạy mới.",
                         HttpStatusCode.Forbidden);
                 }
 
@@ -724,6 +724,8 @@ namespace RikiPath.Application.Services
         private async Task<MentorSchedulePolicySummary> BuildPolicySummaryAsync(CancellationToken cancellationToken)
         {
             var groupPolicy = await GetGroupPolicyAsync(DateTime.UtcNow, cancellationToken);
+            if (groupPolicies is not null && groupPolicy is null)
+                throw new InvalidOperationException("Hệ thống chưa có chính sách lớp học đang áp dụng.");
             var opts = slotOptions?.Value ?? new MentorSlotGenerationOptions();
             var slotPolicy = opts.ToPolicy();
             var sessionMinutes = groupPolicy?.SessionMinutes ?? MentorSlotPolicy.AppointmentDurationMinutes;

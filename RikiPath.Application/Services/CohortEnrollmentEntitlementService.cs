@@ -13,7 +13,6 @@ public sealed class CohortEnrollmentEntitlementService(IUnitOfWork uow, IClaimSe
 {
     private static readonly HashSet<string> AllowedSourceTypes = new(StringComparer.Ordinal)
     {
-        "AdminManualGrant",
         "ScholarshipGrant",
         "RemediationApproved",
         "PartnerSponsor"
@@ -37,6 +36,12 @@ public sealed class CohortEnrollmentEntitlementService(IUnitOfWork uow, IClaimSe
             return ApiResponse<object>.Fail("Chỉ quản trị viên mới được cấp quyền ghi danh lớp nhóm.", HttpStatusCode.Forbidden);
 
         var sourceType = string.IsNullOrWhiteSpace(request.SourceType) ? "AdminManualGrant" : request.SourceType.Trim();
+        if (string.Equals(sourceType, "AdminManualGrant", StringComparison.OrdinalIgnoreCase))
+        {
+            return ApiResponse<object>.Fail(
+                "Cấp quyền ghi danh thủ công đã ngừng sử dụng. Học viên đăng ký và thanh toán trực tiếp theo luồng giữ chỗ — thanh toán tự động.",
+                HttpStatusCode.Conflict);
+        }
         if (ForbiddenCreditSources.Contains(sourceType))
         {
             return ApiResponse<object>.Fail(
@@ -46,7 +51,7 @@ public sealed class CohortEnrollmentEntitlementService(IUnitOfWork uow, IClaimSe
         if (!AllowedSourceTypes.Contains(sourceType))
         {
             return ApiResponse<object>.Fail(
-                "Loại nguồn quyền ghi danh không hợp lệ. Chỉ chấp nhận: AdminManualGrant, ScholarshipGrant, RemediationApproved, PartnerSponsor.",
+                "Loại nguồn quyền ghi danh không hợp lệ. Chỉ chấp nhận: ScholarshipGrant, RemediationApproved, PartnerSponsor.",
                 HttpStatusCode.BadRequest);
         }
         if (request.Note?.Trim().Length > 500)

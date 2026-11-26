@@ -30,6 +30,13 @@ namespace RikiPath.WebApi.Controllers
             return StatusCode((int)result.StatusCode, result);
         }
 
+        [HttpPatch("{notificationId:int}/unread")]
+        public async Task<IActionResult> MarkAsUnread(int notificationId, CancellationToken cancellationToken)
+        {
+            var result = await notificationService.MarkAsUnreadAsync(notificationId, cancellationToken);
+            return StatusCode((int)result.StatusCode, result);
+        }
+
         [HttpPatch("mark-all-read")]
         public async Task<IActionResult> MarkAllAsRead(CancellationToken cancellationToken)
         {

@@ -103,7 +103,7 @@ namespace RikiPath.Application.Handlers
                 if (ambiguousKeys.Contains(NaturalKey(word!, reading!)))
                     diff.Errors.Add($"Có nhiều từ '{word}' ({reading}) trùng nhau trong hệ thống, cần dọn dữ liệu trước khi import.");
                 if (openRowKeys.Contains(rowKey))
-                    diff.Errors.Add($"Từ '{word}' ({reading}) đang có bản nháp chờ Admin duyệt, chưa thể import lại.");
+                    diff.Errors.Add($"Từ '{word}' ({reading}) đang có bản nháp chờ Quản trị viên duyệt, chưa thể nhập lại.");
             }
 
             if (diff.Errors.Count > 0)
