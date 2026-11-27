@@ -20,14 +20,13 @@ public sealed class MentorAvailabilityReviewService(
     : IMentorAvailabilityReviewService
 {
     private const int MinAdvanceMonths = 1;
-    private const int MinCancelAdvanceDays = 7;
     private const int MaxBulkSlots = 50;
     private static readonly ConcurrentDictionary<string, (DateTime ExpiresUtc, List<int> SlotIds)> IdempotencyRecords = new(StringComparer.Ordinal);
 
     public async Task<ApiResponse<List<MentorAvailabilityResponse>>> SplitAsync(int id, int sessionMinutes, CancellationToken ct)
     {
         var actor = claimService.GetUserClaim();
-        if (actor.Role != Role.Admin) return ApiResponse<List<MentorAvailabilityResponse>>.Fail("Chỉ Admin được chia khung rảnh.", HttpStatusCode.Forbidden);
+        if (actor.Role != Role.Admin) return ApiResponse<List<MentorAvailabilityResponse>>.Fail("Chỉ Quản trị viên mới được chia khung giờ rảnh.", HttpStatusCode.Forbidden);
         if (sessionMinutes is < 15 or > 240) return ApiResponse<List<MentorAvailabilityResponse>>.Fail("Thời lượng mỗi buổi phải từ 15 đến 240 phút.");
         var source = await unitOfWork.MentorAvailabilities.GetByIdAsync(id, ct);
         if (source is null) return ApiResponse<List<MentorAvailabilityResponse>>.NotFound();
@@ -52,7 +51,7 @@ public sealed class MentorAvailabilityReviewService(
                     ChangeResolution = $"Chia từ khung #{id}; thời lượng cấu hình {sessionMinutes} phút. Phần lẻ giữ nguyên." });
             }
             source.IsDeleted = true; source.ModifiedDate = DateTime.UtcNow;
-            source.ChangeResolution = $"Admin #{actor.Id} chia thành {result.Count} khung; mỗi buổi {sessionMinutes} phút.";
+            source.ChangeResolution = $"Quản trị viên đã chia thành {result.Count} khung giờ; mỗi buổi {sessionMinutes} phút.";
             unitOfWork.MentorAvailabilities.Update(source);
             await unitOfWork.MentorAvailabilities.AddRangeAsync(result, token);
             await unitOfWork.SaveChangesAsync(token);
@@ -64,12 +63,12 @@ public sealed class MentorAvailabilityReviewService(
     public async Task<ApiResponse<List<AdminMentorScheduleResponse>>> GetScheduleAsync(int mentorId, DateTime from, DateTime to, CancellationToken ct)
     {
         if (claimService.GetUserClaim().Role != Role.Admin)
-            return ApiResponse<List<AdminMentorScheduleResponse>>.Fail("Chỉ quản trị viên được xem lịch tư vấn chi tiết của cố vấn.", HttpStatusCode.Forbidden);
+            return ApiResponse<List<AdminMentorScheduleResponse>>.Fail("Chỉ Quản trị viên mới được xem lịch dạy chi tiết của Giáo viên.", HttpStatusCode.Forbidden);
         if (mentorId <= 0 || to <= from || to - from > TimeSpan.FromDays(31))
-            return ApiResponse<List<AdminMentorScheduleResponse>>.Fail("Vui lòng chọn cố vấn và khoảng thời gian hợp lệ, tối đa 31 ngày.");
+            return ApiResponse<List<AdminMentorScheduleResponse>>.Fail("Vui lòng chọn Giáo viên và khoảng thời gian hợp lệ (tối đa 31 ngày).");
         var mentor = await unitOfWork.UserAccounts.GetByIdAsync(mentorId, ct);
         if (mentor is null || mentor.Role != Role.Mentor)
-            return ApiResponse<List<AdminMentorScheduleResponse>>.NotFound("Không tìm thấy cố vấn.");
+            return ApiResponse<List<AdminMentorScheduleResponse>>.NotFound("Không tìm thấy Giáo viên.");
         var slots = await unitOfWork.MentorAvailabilities.Query().AsNoTracking()
             .Where(s => s.MentorId == mentorId && s.StartTime >= from && s.StartTime < to)
             .OrderBy(s => s.StartTime).ToListAsync(ct);
@@ -91,7 +90,7 @@ public sealed class MentorAvailabilityReviewService(
     public async Task<ApiResponse<List<MentorAvailabilityResponse>>> GetSlotsAsync(CancellationToken cancellationToken)
     {
         if (claimService.GetUserClaim().Role != Role.Admin)
-            return ApiResponse<List<MentorAvailabilityResponse>>.Fail("Chỉ quản trị viên mới được duyệt lịch tư vấn của cố vấn.", HttpStatusCode.Forbidden);
+            return ApiResponse<List<MentorAvailabilityResponse>>.Fail("Chỉ Quản trị viên mới được phê duyệt lịch dạy của Giáo viên.", HttpStatusCode.Forbidden);
         var slots = await unitOfWork.MentorAvailabilities.FindAsync(x => !x.IsDeleted, cancellationToken);
         var slotIds = slots.Select(x => x.Id).ToList();
         var cohortMap = await LoadCohortSlotContextsAsync(slotIds, DateTime.UtcNow, cancellationToken);
@@ -99,7 +98,7 @@ public sealed class MentorAvailabilityReviewService(
         var names = mentors.ToDictionary(x => x.Id, x => $"{x.FirstName} {x.LastName}".Trim());
         return ApiResponse<List<MentorAvailabilityResponse>>.Success(slots
             .OrderBy(x => x.IsApproved || x.RejectedAt != null).ThenBy(x => x.StartTime)
-            .Select(x => Map(x, names.GetValueOrDefault(x.MentorId) ?? "Cố vấn chưa cập nhật tên",
+            .Select(x => Map(x, names.GetValueOrDefault(x.MentorId) ?? "Giáo viên chưa cập nhật tên",
                 cohortMap.GetValueOrDefault(x.Id))).ToList());
     }
 
@@ -221,7 +220,7 @@ public sealed class MentorAvailabilityReviewService(
     {
         var claims = claimService.GetUserClaim();
         if (claims.Role != Role.Mentor)
-            return ApiResponse<List<MentorAvailabilityResponse>>.Fail("Chỉ cố vấn mới có thể xem lịch tư vấn của mình.", HttpStatusCode.Forbidden);
+            return ApiResponse<List<MentorAvailabilityResponse>>.Fail("Chỉ Giáo viên mới có thể xem lịch dạy của mình.", HttpStatusCode.Forbidden);
         var nowUtc = DateTime.UtcNow;
         var slots = await unitOfWork.MentorAvailabilities.GetByMentorAsync(claims.Id);
         var slotIds = slots.Select(x => x.Id).ToList();
@@ -411,7 +410,7 @@ public sealed class MentorAvailabilityReviewService(
         CreateMentorAvailabilityRequest request, CancellationToken cancellationToken = default)
     {
         var actor = claimService.GetUserClaim();
-        if (actor.Role != Role.Mentor) return ApiResponse<List<MentorAvailabilityResponse>>.Fail("Chỉ Mentor được đăng ký lịch rảnh.", HttpStatusCode.Forbidden);
+        if (actor.Role != Role.Mentor) return ApiResponse<List<MentorAvailabilityResponse>>.Fail("Chỉ Giáo viên mới được đăng ký lịch rảnh.", HttpStatusCode.Forbidden);
         if (request is null || request.StartTime.Kind != DateTimeKind.Utc || request.EndTime.Kind != DateTimeKind.Utc
             || request.StartTime <= DateTime.UtcNow || request.EndTime <= request.StartTime
             || request.EndTime - request.StartTime > TimeSpan.FromHours(8)
@@ -615,7 +614,7 @@ public sealed class MentorAvailabilityReviewService(
                     if (currentPendingCount + rows.Count > maxPendingSlots)
                     {
                         throw new AvailabilityQuotaException(
-                            $"Bạn đang có {currentPendingCount} khung giờ chờ duyệt (tối đa {maxPendingSlots} khung chờ duyệt cùng lúc). Vui lòng chờ Admin duyệt hoặc rút bớt khung chờ duyệt trước khi gửi thêm.",
+                            $"Bạn đang có {currentPendingCount} khung giờ chờ duyệt (tối đa {maxPendingSlots} khung cùng lúc). Vui lòng chờ Quản trị viên duyệt hoặc rút bớt khung chờ duyệt trước khi gửi thêm.",
                             HttpStatusCode.Conflict);
                     }
                 }
@@ -749,10 +748,11 @@ public sealed class MentorAvailabilityReviewService(
 
         var claims = claimService.GetUserClaim();
         if (claims.Role != Role.Mentor)
-            return ApiResponse<List<MentorAvailabilityResponse>>.Fail("Chỉ cố vấn mới có thể hủy lịch tư vấn của mình.", HttpStatusCode.Forbidden);
+            return ApiResponse<List<MentorAvailabilityResponse>>.Fail("Chỉ Giáo viên mới có thể hủy lịch dạy của mình.", HttpStatusCode.Forbidden);
 
         var slots = await unitOfWork.MentorAvailabilities.Query()
             .Include(x => x.Mentor)
+            .Include(x => x.GroupPolicy)
             .Where(x => ids.Contains(x.Id) && !x.IsDeleted && x.MentorId == claims.Id)
             .ToListAsync(cancellationToken);
         if (slots.Count != ids.Count)
@@ -761,11 +761,18 @@ public sealed class MentorAvailabilityReviewService(
         if (await unitOfWork.StudyCohorts.AnyAsync(c => c.Sessions.Any(s => ids.Contains(s.AvailabilityId)), cancellationToken))
             return ApiResponse<List<MentorAvailabilityResponse>>.Fail("Lịch thuộc lớp nhóm; gửi yêu cầu trong hồ sơ khóa học để xử lý đúng phạm vi.", HttpStatusCode.Conflict);
         var now = DateTime.UtcNow;
+        var effectivePolicy = groupPolicies is not null ? await groupPolicies.GetEffectiveAsync(now, cancellationToken) : null;
         if (slots.Any(x => x.CancelRequestedAt is not null))
             return ApiResponse<List<MentorAvailabilityResponse>>.Fail("Có khung giờ đang chờ quản trị viên duyệt hủy.", HttpStatusCode.Conflict);
-        if (slots.Any(x => x.StartTime - now < TimeSpan.FromDays(MinCancelAdvanceDays)))
-            return ApiResponse<List<MentorAvailabilityResponse>>.Fail(
-                $"Chỉ được yêu cầu hủy trước giờ bắt đầu ít nhất {MinCancelAdvanceDays} ngày.", HttpStatusCode.Conflict);
+        foreach (var slot in slots)
+        {
+            var cancelLeadHours = Math.Max(0, slot.GroupPolicy?.CancellationLeadHours ?? effectivePolicy?.CancellationLeadHours ?? 24);
+            if (cancelLeadHours > 0 && slot.StartTime - now < TimeSpan.FromHours(cancelLeadHours))
+            {
+                return ApiResponse<List<MentorAvailabilityResponse>>.Fail(
+                    $"Chỉ được yêu cầu hủy trước giờ bắt đầu ít nhất {cancelLeadHours} giờ theo chính sách.", HttpStatusCode.Conflict);
+            }
+        }
         if (slots.Any(x => x.BookedCount > 0))
             return ApiResponse<List<MentorAvailabilityResponse>>.Fail("Có khung giờ đã được đặt nên không thể hủy.", HttpStatusCode.Conflict);
 
@@ -796,7 +803,7 @@ public sealed class MentorAvailabilityReviewService(
 
         var claims = claimService.GetUserClaim();
         if (claims.Role != Role.Admin)
-            return ApiResponse<bool>.Fail("Chỉ Admin mới được duyệt yêu cầu hủy.", HttpStatusCode.Forbidden);
+            return ApiResponse<bool>.Fail("Chỉ Quản trị viên mới được duyệt yêu cầu hủy lịch.", HttpStatusCode.Forbidden);
 
         ApiResponse<bool>? error = null;
         await unitOfWork.ExecuteInTransactionAsync(async token =>
@@ -853,7 +860,7 @@ public sealed class MentorAvailabilityReviewService(
     {
         var claims = claimService.GetUserClaim();
         if (claims.Role != Role.Admin)
-            return ApiResponse<List<MentorAvailabilityResponse>>.Fail("Chỉ Admin mới xem được danh sách chờ duyệt.", HttpStatusCode.Forbidden);
+            return ApiResponse<List<MentorAvailabilityResponse>>.Fail("Chỉ Quản trị viên mới được xem danh sách chờ duyệt.", HttpStatusCode.Forbidden);
 
         var slots = await unitOfWork.MentorAvailabilities.Query()
             .Include(x => x.Mentor)
@@ -877,7 +884,7 @@ public sealed class MentorAvailabilityReviewService(
 
         var claims = claimService.GetUserClaim();
         if (claims.Role != Role.Admin)
-            return ApiResponse<bool>.Fail("Chỉ Admin mới được duyệt lịch.", HttpStatusCode.Forbidden);
+            return ApiResponse<bool>.Fail("Chỉ Quản trị viên mới được phê duyệt lịch dạy.", HttpStatusCode.Forbidden);
 
         var user = await unitOfWork.UserAccounts.GetByIdAsync(claims.Id, cancellationToken);
         var adminName = user is not null ? $"{user.FirstName} {user.LastName}".Trim() : null;
@@ -1026,7 +1033,10 @@ public sealed class MentorAvailabilityReviewService(
         foreach (var cohort in cohorts)
         {
             var enrolledCount = cohort.Enrollments.Count(e =>
-                (e.PaymentStatus == "Paid" && e.Status != "PaymentReview" && e.Status != "Cancelled" && e.Status != "Transferred")
+                (e.PaymentStatus is "Paid" or "PartiallyRefunded"
+                    && e.Status != "PaymentReview"
+                    && e.Status != "Cancelled"
+                    && e.Status != "Transferred")
                 || (e.PaymentStatus == "Pending" && e.PaymentExpiresAt > nowUtc));
             var capacity = Math.Max(0, cohort.CapacitySnapshot ?? cohort.Capacity);
 

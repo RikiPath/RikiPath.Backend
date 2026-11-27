@@ -27,6 +27,7 @@ public sealed class SubscriptionAccessService(
     public const string CategoryWriting = "writing";
     public const string CategoryAiGrading = "ai_grading";
     public const string CategoryLearningPath = "learning_path";
+    public const string CategoryCombo = "combo";
     public const string CategoryMentorLegacy = "mentor_legacy";
 
     public static readonly IReadOnlySet<string> SellableCategories = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
@@ -36,7 +37,11 @@ public sealed class SubscriptionAccessService(
         CategoryWriting,
         CategoryAiGrading,
         CategoryLearningPath,
+        CategoryCombo,
     };
+
+    public static bool IsUnlimitedExpiry(DateTime? endDate)
+        => !endDate.HasValue || endDate.Value.Year >= 2099;
 
     public static string ResolveCategory(SubscriptionPlan? plan, int planId)
     {
@@ -120,7 +125,8 @@ public sealed class SubscriptionAccessService(
                         f.Description,
                         f.Category,
                         FeatureAccessModes.Normalize(f.AccessMode)))
-                    .ToList()))
+                    .ToList(),
+                p.SortOrder))
             .ToList();
     }
 
@@ -135,15 +141,18 @@ public sealed class SubscriptionAccessService(
             .OrderByDescending(s => s.Id).ToListAsync(ct);
         var now = DateTime.UtcNow;
         var active = purchases.Where(s => IsActive(s, now)).ToList();
-        var study = active.Where(s => OrderCategory(s) == CategorySelfStudy)
-            .OrderByDescending(s => s.EndDate is null).ThenByDescending(s => s.EndDate).FirstOrDefault();
+        var study = active.Where(s => OrderCategory(s) is CategorySelfStudy or CategoryCombo)
+            .OrderByDescending(s => IsUnlimitedExpiry(s.EndDate)).ThenByDescending(s => s.EndDate).FirstOrDefault();
         var studyExpiresAt = study?.EndDate is { } end ? DateTime.SpecifyKind(end, DateTimeKind.Utc) : (DateTime?)null;
-        int? studyDaysRemaining = studyExpiresAt is { } expiry
-            ? (int)Math.Ceiling((expiry - now).TotalDays)
-            : study is null ? 0 : null;
-        var grading = SaturatingSumRemainingAi(active.Where(s => OrderCategory(s) is CategoryAiGrading or CategorySelfStudy));
-        var speaking = active.Any(s => OrderCategory(s) == CategorySpeaking) || study is not null || grading > 0;
-        var writing = active.Any(s => OrderCategory(s) == CategoryWriting) || study is not null || grading > 0;
+        int? studyDaysRemaining = study is null
+            ? 0
+            : IsUnlimitedExpiry(studyExpiresAt)
+                ? null
+                : (int)Math.Ceiling((studyExpiresAt!.Value - now).TotalDays);
+        var grading = active.Where(s => OrderCategory(s) is CategoryAiGrading or CategorySelfStudy or CategoryCombo)
+            .Sum(RemainingAi);
+        var speaking = active.Any(s => OrderCategory(s) is CategorySpeaking or CategoryCombo) || study is not null || grading > 0;
+        var writing = active.Any(s => OrderCategory(s) is CategoryWriting or CategoryCombo) || study is not null || grading > 0;
         var allFeatures = await unitOfWork.Features.Query().AsNoTracking()
             .Where(f => !f.IsDeleted && f.Category != CategoryMentorLegacy)
             .OrderBy(f => f.SortOrder).ThenBy(f => f.Id)
@@ -157,27 +166,127 @@ public sealed class SubscriptionAccessService(
             speaking,
             writing,
             grading,
-            SaturatingSumRemainingAi(active.Where(s => OrderCategory(s) == CategorySpeaking)),
-            SaturatingSumRemainingAi(active.Where(s => OrderCategory(s) == CategoryWriting)),
-            SaturatingSumRemainingAi(active.Where(s => OrderCategory(s) == CategoryLearningPath)),
-            SaturatingSum(active
-                .Where(s => OrderCategory(s) == CategoryMentorLegacy)
-                .Select(s => Math.Max(0, s.MeetingSessionsIncluded - s.MeetingSessionsUsed))),
-            purchases.Select(s => new PurchasedStudyPlan(
-                s.Id,
-                s.SubscriptionPlanId,
-                s.PlanNameSnapshot ?? s.SubscriptionPlan?.Name ?? $"Gói #{s.SubscriptionPlanId}",
-                s.AmountPaid,
-                s.StartDate,
-                s.EndDate,
-                IsActive(s, now),
-                RemainingAi(s),
-                s.PurchasedAt,
-                OrderCategory(s),
-                s.PaymentStatus.ToString())).ToList(),
+            active.Where(s => OrderCategory(s) == CategorySpeaking).Sum(RemainingAi),
+            active.Where(s => OrderCategory(s) == CategoryWriting).Sum(RemainingAi),
+            active.Where(s => OrderCategory(s) == CategoryLearningPath).Sum(RemainingAi),
+            0,
+            purchases.Select(s => ToPurchasedStudyPlan(s, now)).ToList(),
             studyExpiresAt,
             studyDaysRemaining,
             evaluatedFeatures);
+    }
+
+    public async Task<PagedSubscriptionHistoryResponse> GetPurchaseHistoryAsync(
+        string? status,
+        string? category,
+        int? days,
+        int page,
+        int pageSize,
+        CancellationToken ct)
+    {
+        var userId = claims.GetUserClaim().Id;
+        await ReconcileRecentPendingAsync(userId, ct);
+
+        var safePage = Math.Max(1, page);
+        var safePageSize = Math.Clamp(pageSize, 1, 50);
+        var now = DateTime.UtcNow;
+
+        var query = unitOfWork.UserSubscriptions.Query().AsNoTracking()
+            .Include(s => s.SubscriptionPlan)
+                .ThenInclude(p => p!.Features)
+            .Where(s => s.UserId == userId
+                && !s.IsDeleted
+                && s.MeetingSessionsIncluded == 0
+                && (s.PlanCategorySnapshot == null || s.PlanCategorySnapshot != CategoryMentorLegacy));
+
+        if (days is > 0)
+        {
+            var cutoff = now.AddDays(-days.Value);
+            query = query.Where(s => s.PurchasedAt >= cutoff);
+        }
+
+        var allOrders = (await query
+            .OrderByDescending(s => s.PurchasedAt)
+            .ThenByDescending(s => s.Id)
+            .ToListAsync(ct))
+            .Where(s => OrderCategory(s) != CategoryMentorLegacy)
+            .ToList();
+
+        var availableCategories = allOrders
+            .Select(OrderCategory)
+            .Where(c => !string.IsNullOrWhiteSpace(c))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        IEnumerable<UserSubscription> filtered = allOrders;
+
+        if (!string.IsNullOrWhiteSpace(category) && !string.Equals(category, "all", StringComparison.OrdinalIgnoreCase))
+        {
+            var targetCategory = category.Trim().ToLowerInvariant();
+            filtered = filtered.Where(s => string.Equals(OrderCategory(s), targetCategory, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (!string.IsNullOrWhiteSpace(status) && !string.Equals(status, "all", StringComparison.OrdinalIgnoreCase))
+        {
+            var trimmedStatus = status.Trim();
+            if (string.Equals(trimmedStatus, "active", StringComparison.OrdinalIgnoreCase))
+                filtered = filtered.Where(s => s.PaymentStatus == PaymentStatus.Paid && IsActive(s, now));
+            else if (string.Equals(trimmedStatus, "ended", StringComparison.OrdinalIgnoreCase)
+                  || string.Equals(trimmedStatus, "plan_expired", StringComparison.OrdinalIgnoreCase))
+                filtered = filtered.Where(s => s.PaymentStatus == PaymentStatus.Paid && !IsActive(s, now));
+            else if (Enum.TryParse<PaymentStatus>(trimmedStatus, ignoreCase: true, out var parsedStatus))
+                filtered = filtered.Where(s => s.PaymentStatus == parsedStatus);
+        }
+
+        var matched = filtered.ToList();
+        var total = matched.Count;
+        var items = matched
+            .Skip((safePage - 1) * safePageSize)
+            .Take(safePageSize)
+            .Select(s => ToPurchasedStudyPlan(s, now))
+            .ToList();
+
+        return new PagedSubscriptionHistoryResponse(
+            items,
+            total,
+            safePage,
+            safePageSize,
+            safePage * safePageSize < total,
+            availableCategories);
+    }
+
+    private static PurchasedStudyPlan ToPurchasedStudyPlan(UserSubscription s, DateTime now)
+    {
+        var grantedFeatures = s.SubscriptionPlan?.Features?
+            .Where(f => !f.IsDeleted && !string.Equals(f.Category, CategoryMentorLegacy, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(f => f.SortOrder)
+            .ThenBy(f => f.Id)
+            .Select(f => new StudyPlanFeatureDto(
+                f.Id,
+                f.Code,
+                f.Name,
+                f.Description,
+                f.Category,
+                FeatureAccessModes.Normalize(f.AccessMode)))
+            .ToList();
+
+        return new PurchasedStudyPlan(
+            s.Id,
+            s.SubscriptionPlanId,
+            s.PlanNameSnapshot ?? s.SubscriptionPlan?.Name ?? $"Gói #{s.SubscriptionPlanId}",
+            s.AmountPaid,
+            s.StartDate,
+            s.EndDate,
+            s.PaymentStatus == PaymentStatus.Paid && IsActive(s, now),
+            RemainingAi(s),
+            s.PurchasedAt,
+            OrderCategory(s),
+            s.PaymentStatus.ToString(),
+            s.DurationDaysSnapshot ?? s.SubscriptionPlan?.DurationDays,
+            s.AiGradingQuota,
+            !string.IsNullOrWhiteSpace(s.PaymentTransactionId) ? s.PaymentTransactionId : $"RP-{s.Id:D6}",
+            s.AmountPaid <= 0 ? "Miễn phí" : "PayOS",
+            grantedFeatures);
     }
 
     public async Task<FeatureAccessDecision> EvaluateFeatureAsync(string featureCode, CancellationToken ct)
@@ -278,7 +387,7 @@ public sealed class SubscriptionAccessService(
 
         var matchingPlan = activeGrants.FirstOrDefault(grant =>
             grant.FeatureIds.Contains(feature.Id) ||
-            (feature.Code == FeatureCodes.LessonsContent && grant.Category == CategorySelfStudy));
+            (feature.Code == FeatureCodes.LessonsContent && grant.Category is CategorySelfStudy or CategoryCombo));
 
         var creditKey = feature.CreditFeatureKey?.Trim();
         var creditsRemaining = string.IsNullOrWhiteSpace(creditKey)
@@ -355,10 +464,10 @@ public sealed class SubscriptionAccessService(
 
     private static bool SupportsCredit(string category, string feature) => feature switch
     {
-        "learning_path" => category == CategoryLearningPath,
-        "speaking" => category is CategorySpeaking or CategoryAiGrading or CategorySelfStudy,
-        "writing" => category is CategoryWriting or CategoryAiGrading or CategorySelfStudy,
-        MockTestExplanationService.CreditFeature => category is CategoryAiGrading or CategorySelfStudy,
+        "learning_path" => category is CategoryLearningPath or CategoryCombo,
+        "speaking" => category is CategorySpeaking or CategoryAiGrading or CategorySelfStudy or CategoryCombo,
+        "writing" => category is CategoryWriting or CategoryAiGrading or CategorySelfStudy or CategoryCombo,
+        MockTestExplanationService.CreditFeature => category is CategoryAiGrading or CategorySelfStudy or CategoryCombo,
         _ => false
     };
 
@@ -629,7 +738,8 @@ public sealed class SubscriptionAccessService(
                 && !s.IsDeleted
                 && s.PaymentStatus == PaymentStatus.Paid
                 && s.EndDate != null
-                && s.EndDate > now)
+                && s.EndDate > now
+                && s.EndDate.Value.Year < 2099)
             .ToListAsync(ct);
 
         return activeExpiries
@@ -779,10 +889,32 @@ public sealed record FeatureAccessDecision(
     HttpStatusCode StatusCode);
 
 public sealed record StudyPlanOffer(int Id, string Name, string? Description, decimal Price, int DurationDays,
-    int AiUses, bool IsPopular, string Kind, IReadOnlyList<StudyPlanFeatureDto>? Features = null);
+    int AiUses, bool IsPopular, string Kind, IReadOnlyList<StudyPlanFeatureDto>? Features = null, int SortOrder = 0);
 public sealed record StudyCheckout(int PurchaseId, string CheckoutUrl, DateTime? ExpiresAt = null, bool Resumed = false);
-public sealed record PurchasedStudyPlan(int Id, int PlanId, string PlanName, decimal AmountPaid, DateTime? StartDate,
-    DateTime? EndDate, bool Active, int AiUsesRemaining, DateTime? PurchasedAt = null, string? Kind = null, string? PaymentStatus = null);
+public sealed record PurchasedStudyPlan(
+    int Id,
+    int PlanId,
+    string PlanName,
+    decimal AmountPaid,
+    DateTime? StartDate,
+    DateTime? EndDate,
+    bool Active,
+    int AiUsesRemaining,
+    DateTime? PurchasedAt = null,
+    string? Kind = null,
+    string? PaymentStatus = null,
+    int? DurationDays = null,
+    int? AiUsesGranted = null,
+    string? OrderCode = null,
+    string? PaymentMethod = null,
+    IReadOnlyList<StudyPlanFeatureDto>? GrantedFeatures = null);
+public sealed record PagedSubscriptionHistoryResponse(
+    IReadOnlyList<PurchasedStudyPlan> Items,
+    int Total,
+    int Page,
+    int PageSize,
+    bool HasMore,
+    IReadOnlyList<string> AvailableCategories);
 public sealed record StudyAccessResponse(bool Active, string? PlanName, bool Speaking, bool Writing,
     int AiGradingUsesRemaining, int SpeakingUsesRemaining, int WritingUsesRemaining, int LearningPathUsesRemaining,
     int MentorSessionsRemaining, IReadOnlyList<PurchasedStudyPlan> Purchases,

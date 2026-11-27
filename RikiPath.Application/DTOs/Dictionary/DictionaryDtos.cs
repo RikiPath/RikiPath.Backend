@@ -5,11 +5,13 @@ namespace RikiPath.Application.DTOs.Dictionary;
 public sealed class TranslateSelectionRequest
 {
     [Required]
-    [MaxLength(500)]
     public string Text { get; set; } = string.Empty;
 
     [MaxLength(1000)]
     public string? ContextSentence { get; set; }
+
+    [MaxLength(10)]
+    public string SourceLanguage { get; set; } = "ja";
 
     [MaxLength(10)]
     public string TargetLanguage { get; set; } = "vi";
@@ -57,4 +59,8 @@ public sealed class TranslateSelectionResponse
     public string? ExampleSentence { get; set; }
     public string? ExampleMeaning { get; set; }
     public List<TranslateBreakdownItem> Breakdown { get; set; } = [];
+    public string SourceLanguage { get; set; } = "ja";
+    public string TargetLanguage { get; set; } = "vi";
+    public string? AudioUrl { get; set; }
+    public string? Provider { get; set; }
 }

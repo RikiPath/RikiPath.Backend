@@ -9,7 +9,10 @@ using RikiPath.Domain.Entities;
 
 namespace RikiPath.Application.Services
 {
-    public class AnalyticsService(IUnitOfWork unitOfWork, IClaimService claimService) : IAnalyticsService
+    public class AnalyticsService(
+        IUnitOfWork unitOfWork,
+        IClaimService claimService,
+        ILearnerSetupStateService? setupStateService = null) : IAnalyticsService
     {
         private static DateTime StudyDate(DateTime utc) =>
             SrsSchedulingHelper.GetStudyDateInZone(utc);
@@ -253,11 +256,26 @@ namespace RikiPath.Application.Services
             try
             {
                 var userId = claimService.GetUserClaim().Id;
-                var (total, completed) = await unitOfWork.Lessons.GetCompletionStatsAsync(userId);
+                var resolver = setupStateService ?? new LearnerSetupStateService(unitOfWork, claimService);
+                var setupState = await resolver.ResolveForUserAsync(userId, includeProgress: true, cancellationToken);
+                if (setupState is null || !setupState.HasAnyValidRoadmap)
+                {
+                    return ApiResponse<CompletionStatsResponse>.Success(new CompletionStatsResponse
+                    {
+                        HasValidRoadmap = false,
+                        TotalLessons = 0,
+                        CompletedLessons = 0,
+                        CompletionPercent = 0d,
+                    });
+                }
+
+                var total = setupState.RoadmapTotalLessons ?? 0;
+                var completed = setupState.RoadmapCompletedLessons ?? 0;
                 var percent = total == 0 ? 0d : Math.Round(completed * 100d / total, 2);
 
                 return ApiResponse<CompletionStatsResponse>.Success(new CompletionStatsResponse
                 {
+                    HasValidRoadmap = setupState.HasValidRoadmapProgress,
                     TotalLessons = total,
                     CompletedLessons = completed,
                     CompletionPercent = percent,
@@ -404,7 +422,7 @@ namespace RikiPath.Application.Services
                       (strongest is not null && weakest is not null && strongest.LanguageSkillName != weakest.LanguageSkillName
                           ? $"Kỹ năng tốt nhất hiện tại: {strongest.LanguageSkillName} ({strongest.CurrentScorePercent:0.##}%). Cần ưu tiên: {weakest.LanguageSkillName} ({weakest.CurrentScorePercent:0.##}%)."
                           : $"Kỹ năng nổi bật hiện tại: {strongest?.LanguageSkillName ?? "chưa có dữ liệu"}.")
-                    : "Chưa có bài Placement Test hoặc Mock Test đã nộp trong khoảng thời gian này.";
+                    : "Chưa có bài đánh giá năng lực hoặc bài thi thử nào đã nộp trong khoảng thời gian này.";
 
                 return ApiResponse<SkillMonthlyAnalyticsResponse>.Success(new SkillMonthlyAnalyticsResponse
                 {

@@ -36,7 +36,7 @@ public class MentorOutboxDispatcherService : BackgroundService
                 var processedCount = await ProcessPendingOutboxEventsAsync(stoppingToken);
                 if (processedCount == 0)
                 {
-                    await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
+                    await Task.Delay(TimeSpan.FromSeconds(2), stoppingToken);
                 }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -145,11 +145,11 @@ public class MentorOutboxDispatcherService : BackgroundService
                     {
                         var mentorId = root.GetProperty("MentorId").GetInt32();
                         var title = evt.EventType == "MentorVerificationSubmitted"
-                            ? "Hồ sơ cố vấn chờ xét duyệt" : "Hồ sơ cố vấn đã gửi lại";
+                            ? "Hồ sơ Giáo viên chờ duyệt" : "Hồ sơ Giáo viên đã được gửi lại xét duyệt";
                         foreach (var adminId in root.GetProperty("AdminIds").EnumerateArray().Select(id => id.GetInt32()).Distinct())
                         {
                             await DispatchNotificationAsync(adminId, title,
-                                "Có hồ sơ cố vấn cần xem xét.", "MentorVerification",
+                                "Có hồ sơ Giáo viên mới đang chờ xét duyệt.", "MentorVerification",
                                 $"/admin/mentor-verifications?mentorId={mentorId}", cancellationToken);
                         }
                         break;
@@ -161,17 +161,17 @@ public class MentorOutboxDispatcherService : BackgroundService
                         var decision = root.GetProperty("Decision").GetString();
                         var message = decision switch
                         {
-                            "Approve" => "Hồ sơ cố vấn của bạn đã được phê duyệt. Vui lòng đăng nhập lại để kích hoạt quyền Cố vấn.",
-                            "Reject" => "Hồ sơ cố vấn của bạn chưa được phê duyệt. Vui lòng xem lý do trong hồ sơ.",
-                            "RequestChanges" => "Vui lòng bổ sung thông tin trong hồ sơ cố vấn.",
+                            "Approve" => "Hồ sơ Giáo viên của bạn đã được phê duyệt. Vui lòng đăng nhập lại để kích hoạt quyền Giáo viên.",
+                            "Reject" => "Hồ sơ Giáo viên của bạn chưa được chấp thuận. Vui lòng xem chi tiết lý do trong hồ sơ.",
+                            "RequestChanges" => "Quản trị viên yêu cầu bạn bổ sung thông tin cho hồ sơ Giáo viên.",
                             _ => throw new InvalidOperationException("Quyết định xét duyệt không hợp lệ.")
                         };
                         await DispatchNotificationAsync(mentorId, "Kết quả xét duyệt hồ sơ", message,
                             "MentorVerificationResult", "/mentor/profile", cancellationToken);
                         foreach (var adminId in root.GetProperty("AdminIds").EnumerateArray().Select(id => id.GetInt32()).Distinct())
                         {
-                            await DispatchNotificationAsync(adminId, "Hồ sơ cố vấn đã được xử lý",
-                                "Trạng thái hồ sơ cố vấn vừa thay đổi.", "MentorVerification",
+                            await DispatchNotificationAsync(adminId, "Hồ sơ Giáo viên đã được xét duyệt",
+                                "Trạng thái hồ sơ Giáo viên vừa được cập nhật.", "MentorVerification",
                                 $"/admin/mentor-verifications?mentorId={mentorId}", cancellationToken);
                         }
                         break;
@@ -278,8 +278,8 @@ public class MentorOutboxDispatcherService : BackgroundService
                         {
                             await DispatchNotificationAsync(
                                 learnerId,
-                                "Cố vấn đã hủy lịch tư vấn",
-                                "Cố vấn đã hủy buổi tư vấn. Vé tư vấn đã được hoàn vào tài khoản của bạn.",
+                                "Giáo viên đã hủy buổi học",
+                                "Giáo viên đã hủy buổi học. Quyền học đã được hoàn lại vào tài khoản của bạn.",
                                 "MentorBooking",
                                 $"/mentor/bookings/{bookingId}",
                                 cancellationToken);
@@ -329,8 +329,8 @@ public class MentorOutboxDispatcherService : BackgroundService
                         {
                             await DispatchNotificationAsync(
                                 mentorId,
-                                "Khiếu nại về buổi tư vấn",
-                                "Học viên đã gửi khiếu nại về một buổi tư vấn. Ban quản trị đang xử lý.",
+                                "Khiếu nại về buổi học",
+                                "Học viên đã gửi khiếu nại về một buổi học. Quản trị viên đang xem xét.",
                                 "MentorDispute",
                                 "/mentor/disputes",
                                 cancellationToken);
@@ -377,7 +377,7 @@ public class MentorOutboxDispatcherService : BackgroundService
                             await DispatchNotificationAsync(
                                 mentorId,
                                 "Kết quả xử lý khiếu nại",
-                                "Ban quản trị đã đưa ra quyết định về khiếu nại liên quan đến buổi tư vấn.",
+                                "Quản trị viên đã đưa ra quyết định cho khiếu nại liên quan đến buổi học.",
                                 "MentorDispute",
                                 "/mentor/disputes",
                                 cancellationToken);

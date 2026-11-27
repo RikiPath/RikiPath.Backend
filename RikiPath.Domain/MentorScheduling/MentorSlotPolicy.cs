@@ -21,10 +21,10 @@ public sealed class MentorSlotPolicy
     public const int DefaultDailyBookingCap = 4;
 
     /// <summary>Số ngày tối thiểu giữa thời điểm gửi đề xuất mở lớp và ngày khai giảng buổi đầu tiên (giờ Việt Nam).</summary>
-    public const int MinimumProposalLeadDays = 7;
+    public const int MinimumProposalLeadDays = 14;
 
     /// <summary>Số ngày tối thiểu giữa thời điểm duyệt/công bố lớp và ngày diễn ra buổi học đầu tiên để tuyển sinh.</summary>
-    public const int MinimumPublishedEnrollmentDays = 3;
+    public const int MinimumPublishedEnrollmentDays = 7;
 
     /// <summary>
     /// Bậc trình độ JLPT chuẩn để so sánh điều kiện giảng dạy (không so sánh chuỗi máy móc):

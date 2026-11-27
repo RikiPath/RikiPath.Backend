@@ -10,7 +10,7 @@ public sealed class LocalDevMediaStorageService : IFileStorageService
     private const long MaxFileBytes = 50 * 1024 * 1024;
     private static readonly Regex SafeFolderRegex = new(@"^[a-z0-9_-]{1,40}$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private static readonly Regex SafeStoredFileRegex = new(
-        @"^[a-f0-9]{32}\.(?:jpg|jpeg|png|webp|gif|pdf|mp3|wav|m4a|ogg|webm)$",
+        @"^[a-f0-9]{32}\.(?:jpg|jpeg|png|webp|gif|pdf|doc|docx|xls|xlsx|csv|txt|mp3|wav|m4a|ogg|webm)$",
         RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
 
     private readonly string _root;
@@ -179,6 +179,12 @@ public sealed class LocalDevMediaStorageService : IFileStorageService
         ".webp" => "image/webp",
         ".gif" => "image/gif",
         ".pdf" => "application/pdf",
+        ".doc" => "application/msword",
+        ".docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        ".xls" => "application/vnd.ms-excel",
+        ".xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        ".csv" => "text/csv; charset=utf-8",
+        ".txt" => "text/plain; charset=utf-8",
         ".mp3" => "audio/mpeg",
         ".wav" => "audio/wav",
         ".m4a" => "audio/mp4",

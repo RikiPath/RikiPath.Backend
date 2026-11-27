@@ -79,7 +79,7 @@ namespace RikiPath.Application.Services
             List<SheetImportResponse> sheetDiffs, CancellationToken cancellationToken)
         {
             return Task.FromResult(ApiResponse<int>.Fail(
-                "Luồng gửi diff trực tiếp đã đóng. Hãy lưu bản nháp bằng /api/content-import/confirm rồi gửi duyệt từ bản nháp.",
+                "Luồng gửi trực tiếp đã ngừng hỗ trợ. Vui lòng lưu bản nháp trước khi gửi xét duyệt.",
                 System.Net.HttpStatusCode.Gone));
         }
 
@@ -734,6 +734,7 @@ namespace RikiPath.Application.Services
                     await ApplyGrammarApprovalAsync(req, cancellationToken);
                     break;
                 case ImportEntityType.MockTest:
+                case ImportEntityType.PracticeSet:
                     await ApplyMockTestApprovalAsync(req, cancellationToken);
                     break;
                 default:
@@ -1376,12 +1377,18 @@ namespace RikiPath.Application.Services
                     .ToList();
                 if (missing.Count > 0)
                     throw new InvalidOperationException(
-                        $"Không tìm thấy CertificateSection có Code: {string.Join(", ", missing)}. Admin cần tạo sẵn trước khi duyệt.");
+                        $"Không tìm thấy mã phần thi chứng chỉ: {string.Join(", ", missing)}. Quản trị viên cần tạo sẵn trước khi phê duyệt.");
 
                 var sectionIdByCode = codes.ToDictionary(
                     code => code,
                     code => sectionIdsByCode[code][0],
                     StringComparer.OrdinalIgnoreCase);
+
+                var resolvedKind = p.IsPlacementAssessment
+                    ? ExamKind.Placement
+                    : req.EntityType == ImportEntityType.PracticeSet
+                        ? ExamKind.PracticeSet
+                        : ExamKind.FullMockTest;
 
                 var test = new MockTest
                 {
@@ -1389,6 +1396,7 @@ namespace RikiPath.Application.Services
                     Description = p.Description,
                     TimeLimitMinutes = p.TimeLimitMinutes,
                     CertificateLevelId = p.CertificateLevelId,
+                    ExamKind = resolvedKind,
                     PublishStatus = ContentStatus.Published,
                     PublishedAt = DateTime.UtcNow,
                     Sections = p.Sections!.Select(s => new MockTestSection
@@ -1404,6 +1412,7 @@ namespace RikiPath.Application.Services
                             InteractionDataJson = q.InteractionData?.GetRawText(),
                             AnswerKeyJson = q.AnswerKey?.GetRawText(),
                             AudioUrl = q.AudioUrl,
+                            AudioTranscript = q.AudioTranscript,
                             ImageUrl = q.ImageUrl,
                             Explanation = q.Explanation,
                             SortOrder = q.SortOrder,
@@ -1411,6 +1420,7 @@ namespace RikiPath.Application.Services
                             {
                                 OptionText = o.OptionText,
                                 ImageUrl = o.ImageUrl,
+                                Explanation = o.Explanation,
                                 IsCorrect = o.IsCorrect,
                                 SortOrder = o.SortOrder
                             }).ToList()
@@ -1434,6 +1444,10 @@ namespace RikiPath.Application.Services
                 test.Description = p.Description;
                 test.TimeLimitMinutes = p.TimeLimitMinutes;
                 test.CertificateLevelId = p.CertificateLevelId;
+                if (p.IsPlacementAssessment)
+                    test.ExamKind = ExamKind.Placement;
+                else if (req.EntityType == ImportEntityType.PracticeSet)
+                    test.ExamKind = ExamKind.PracticeSet;
                 test.PublishStatus = ContentStatus.Published;
                 test.PublishedAt ??= DateTime.UtcNow;
 
@@ -1474,6 +1488,7 @@ namespace RikiPath.Application.Services
                             InteractionDataJson = question.InteractionData?.GetRawText(),
                             AnswerKeyJson = question.AnswerKey?.GetRawText(),
                             AudioUrl = question.AudioUrl,
+                            AudioTranscript = question.AudioTranscript,
                             ImageUrl = question.ImageUrl,
                             Explanation = question.Explanation,
                             SortOrder = question.SortOrder,
@@ -1481,6 +1496,7 @@ namespace RikiPath.Application.Services
                             {
                                 OptionText = option.OptionText,
                                 ImageUrl = option.ImageUrl,
+                                Explanation = option.Explanation,
                                 IsCorrect = option.IsCorrect,
                                 SortOrder = option.SortOrder
                             }).ToList()

@@ -30,7 +30,8 @@ public sealed partial class HomeworkService(
     IEmailService? emailService = null,
     IEmailTemplateService? emailTemplates = null,
     AppSettings? appSettings = null,
-    ISidebarCounterNotifier? sidebarNotifier = null)
+    ISidebarCounterNotifier? sidebarNotifier = null,
+    INotificationService? notificationService = null)
 {
     private static readonly TimeSpan VietnamOffset = TimeSpan.FromHours(7);
     private static readonly string[] SupportedLevels = ["N5", "N4", "N3", "N2", "N1"];
@@ -39,7 +40,7 @@ public sealed partial class HomeworkService(
     {
         var mentorId = claims.GetUserClaim().Id;
         var enrollments = await unit.StudyCourses.Query()
-            .Where(c => c.CohortId != null && c.PaymentStatus == "Paid" && c.Status == "Active"
+            .Where(c => c.CohortId != null && (c.PaymentStatus == "Paid" || c.PaymentStatus == "PartiallyRefunded") && c.Status == "Active"
                 && c.Cohort!.MentorId == mentorId && !c.Learner.IsDeleted)
             .OrderByDescending(c => c.StartsAt ?? c.Cohort!.StartsAt)
             .ThenByDescending(c => c.Id)
@@ -91,7 +92,7 @@ public sealed partial class HomeworkService(
     public async Task<ApiResponse<int>> CreateAsync(CreateHomeworkRequest request, CancellationToken ct)
     {
         if (!request.CohortId.HasValue)
-            return ApiResponse<int>.Fail("Vui lòng chọn lớp học nhóm (Cohort) để giao bài tập.", HttpStatusCode.BadRequest, "COHORT_REQUIRED");
+            return ApiResponse<int>.Fail("Vui lòng chọn lớp học nhóm để giao bài tập.", HttpStatusCode.BadRequest, "COHORT_REQUIRED");
 
         var batch = await CreateCohortAssignmentsAsync(request.CohortId.Value, request, ct);
         return batch.IsSuccess && batch.Result is { Count: > 0 } ids
@@ -103,21 +104,50 @@ public sealed partial class HomeworkService(
     {
         var user = claims.GetUserClaim();
         if (user.Role != Role.Mentor)
-            return ApiResponse<List<int>>.Fail("Chỉ cố vấn mới được giao bài tập.", HttpStatusCode.Forbidden);
+            return ApiResponse<List<int>>.Fail("Chỉ Giáo viên mới được giao bài tập.", HttpStatusCode.Forbidden);
 
         var cohort = await unit.StudyCohorts.Query().AsNoTracking()
-            .Include(c => c.Enrollments)
+            .Include(c => c.GroupPolicy)
+            .Include(c => c.Enrollments).ThenInclude(e => e.Sessions)
+            .Include(c => c.Sessions).ThenInclude(s => s.Availability).ThenInclude(a => a.GroupPolicy)
+            .AsSplitQuery()
             .FirstOrDefaultAsync(c => c.Id == cohortId, ct);
         if (cohort is null)
             return ApiResponse<List<int>>.NotFound("Không tìm thấy lớp nhóm.");
         if (cohort.MentorId != user.Id)
             return ApiResponse<List<int>>.Fail("Bạn chỉ được giao bài tập cho lớp nhóm do mình phụ trách.", HttpStatusCode.Forbidden);
+        if (cohort.Status is "Cancelled" or "Completed" or "Draft")
+            return ApiResponse<List<int>>.Fail("Lớp học đã kết thúc, đã hủy hoặc chưa mở; không thể giao bài tập.", HttpStatusCode.Conflict);
+
+        var validSessions = cohort.Sessions
+            .Where(s => s.Availability is not null
+                && s.Availability.IsApproved
+                && !s.Availability.IsDeleted
+                && s.Availability.RejectedAt == null)
+            .OrderBy(s => s.Availability.StartTime)
+            .ToList();
+        var firstValidSessionStartUtc = BusinessDateHelper.EnsureUtc(
+            validSessions.FirstOrDefault()?.Availability.StartTime ?? cohort.StartsAt);
+        var fallbackPolicy = cohort.GroupPolicy is null && groupPolicies is not null
+            ? await groupPolicies.GetEffectiveAsync(DateTime.UtcNow, ct)
+            : null;
+        var minLearnersToStart = Math.Max(1,
+            (cohort.GroupPolicy
+                ?? validSessions.Select(s => s.Availability.GroupPolicy).FirstOrDefault(p => p is not null)
+                ?? fallbackPolicy)?.MinLearnersToStart ?? 1);
 
         var activeEnrollments = cohort.Enrollments
-            .Where(e => e.PaymentStatus == "Paid" && e.Status == "Active")
+            .Where(e => e.PaymentStatus is "Paid" or "PartiallyRefunded" && e.Status == "Active")
             .ToList();
-        if (activeEnrollments.Count == 0)
-            return ApiResponse<List<int>>.Fail("Lớp nhóm chưa có học viên đang theo học.", HttpStatusCode.Conflict);
+        var confirmedLearnerCount = activeEnrollments.Select(e => e.LearnerId).Distinct().Count();
+        if (confirmedLearnerCount < minLearnersToStart)
+            return ApiResponse<List<int>>.Fail("Lớp nhóm chưa đạt sĩ số tối thiểu để bắt đầu.", HttpStatusCode.Conflict);
+
+        var hasDeliveredSession = activeEnrollments
+            .SelectMany(e => e.Sessions)
+            .Any(s => s.Status is "Present" or "Absent" or "ExcusedAbsent" or "Completed");
+        if (!hasDeliveredSession && firstValidSessionStartUtc > DateTime.UtcNow)
+            return ApiResponse<List<int>>.Fail("Chưa thể phát hành bài tập trước khi buổi học đầu tiên của lớp bắt đầu.", HttpStatusCode.Conflict);
 
         List<(int LearnerId, int CourseId)> recipients;
         string scope;
@@ -367,7 +397,7 @@ public sealed partial class HomeworkService(
                     ? null
                     : JsonSerializer.Serialize(request.SelectedOptions);
                 if (privateScanReference is not null) existing.PrivateScanReference = privateScanReference;
-                existing.SubmittedAt = nowUtc;
+                if (existing.SubmittedAt == default) existing.SubmittedAt = nowUtc;
                 existing.LastRevisedAtUtc = nowUtc;
                 existing.RevisionCount++;
                 // Xóa nháp AI cũ vì học viên đã nộp phiên bản mới.
@@ -418,7 +448,7 @@ public sealed partial class HomeworkService(
     {
         var actor = claims.GetUserClaim();
         if (actor.Role != Role.Mentor)
-            return ApiResponse<HomeworkPublishedGradeView>.Fail("Chỉ cố vấn mới được chấm và công bố kết quả bài tập.", HttpStatusCode.Forbidden);
+            return ApiResponse<HomeworkPublishedGradeView>.Fail("Chỉ Giáo viên mới được chấm và công bố kết quả bài tập.", HttpStatusCode.Forbidden);
         var target = await AssignmentsFor(actor, null).AsNoTracking().Where(a => a.Id == assignmentId)
             .Select(a => new
             {
@@ -460,11 +490,11 @@ public sealed partial class HomeworkService(
         if (user.Role == Role.Mentor)
         {
             if (learnerId is null)
-                return ApiResponse<HomeworkPeriodReport>.Fail("Hãy chọn người học để xem báo cáo.");
+                return ApiResponse<HomeworkPeriodReport>.Fail("Vui lòng chọn học viên để xem báo cáo.");
             courses = courses.Where(c => (c.MentorId == user.Id || (c.Cohort != null && c.Cohort.MentorId == user.Id)) &&
                 c.LearnerId == learnerId);
             if (!await courses.AnyAsync(ct) && !await assignments.AnyAsync(ct))
-                return ApiResponse<HomeworkPeriodReport>.NotFound("Không tìm thấy người học của bạn.");
+                return ApiResponse<HomeworkPeriodReport>.NotFound("Không tìm thấy học viên của bạn.");
         }
         else
         {

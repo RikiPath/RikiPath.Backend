@@ -126,7 +126,7 @@ public sealed partial class HomeworkService
     {
         var actor = claims.GetUserClaim();
         if (actor.Role != Role.Mentor)
-            return ApiResponse<List<HomeworkAiBatchItem>>.Fail("Chỉ mentor được tạo gợi ý chấm bài.", HttpStatusCode.Forbidden);
+            return ApiResponse<List<HomeworkAiBatchItem>>.Fail("Chỉ Giáo viên mới được tạo gợi ý chấm bài.", HttpStatusCode.Forbidden);
         var ids = request.AssignmentIds;
         if (ids is not { Length: >= 1 and <= MaxGradingBatchSize } || ids.Any(id => id <= 0) || ids.Distinct().Count() != ids.Length)
             return ApiResponse<List<HomeworkAiBatchItem>>.Fail("Chọn từ 1 đến 4 bài tập khác nhau.");
@@ -157,13 +157,13 @@ public sealed partial class HomeworkService
     {
         var actor = claims.GetUserClaim();
         if (actor.Role != Role.Mentor)
-            return ApiResponse<HomeworkAiGradeDraft>.Fail("Chỉ mentor được tạo gợi ý chấm bài.", HttpStatusCode.Forbidden);
+            return ApiResponse<HomeworkAiGradeDraft>.Fail("Chỉ Giáo viên mới được tạo gợi ý chấm bài.", HttpStatusCode.Forbidden);
         var assignment = await AssignmentsFor(actor, null).AsTracking().Include(a => a.Submission)
             .SingleOrDefaultAsync(a => a.Id == id, ct);
         if (assignment?.Submission is not { IsDeleted: false } submission)
             return ApiResponse<HomeworkAiGradeDraft>.NotFound("Chưa tìm thấy bài nộp của học viên.");
         if (grader is null)
-            return await DraftUnavailableAsync(assignment, "AI chấm bài chưa sẵn sàng. Mentor có thể chấm trực tiếp.", HttpStatusCode.ServiceUnavailable, ct);
+            return await DraftUnavailableAsync(assignment, "Tính năng chấm bài AI chưa sẵn sàng. Giáo viên có thể chấm trực tiếp.", HttpStatusCode.ServiceUnavailable, ct);
 
         try
         {
@@ -173,12 +173,12 @@ public sealed partial class HomeworkService
             if (ScanReference(submission) is { } reference && string.IsNullOrWhiteSpace(text))
             {
                 if (ocr is null || storage is null)
-                    return await DraftUnavailableAsync(assignment, "AI đọc ảnh chưa sẵn sàng. Mentor có thể chấm trực tiếp.", HttpStatusCode.ServiceUnavailable, ct);
+                    return await DraftUnavailableAsync(assignment, "Tính năng đọc ảnh AI chưa sẵn sàng. Giáo viên có thể chấm trực tiếp.", HttpStatusCode.ServiceUnavailable, ct);
                 var image = await storage.OpenPrivateVerificationAsync(reference, ct);
                 if (image.ContentType == "application/pdf")
                 {
                     await image.Content.DisposeAsync();
-                    return await DraftUnavailableAsync(assignment, "AI chưa đọc được tệp PDF. Mentor có thể xem bài nộp và chấm trực tiếp.", HttpStatusCode.BadRequest, ct);
+                    return await DraftUnavailableAsync(assignment, "AI chưa đọc được tệp PDF. Giáo viên có thể xem bài nộp và chấm trực tiếp.", HttpStatusCode.BadRequest, ct);
                 }
                 await using var stream = image.Content;
                 using var buffer = new MemoryStream();
@@ -214,7 +214,7 @@ public sealed partial class HomeworkService
                 !string.IsNullOrWhiteSpace(submission.PrivateAudioReference))
             {
                 if (speechRecognition is null)
-                    return await DraftUnavailableAsync(assignment, "Dịch vụ chép lời bài nói chưa sẵn sàng. Mentor có thể chấm trực tiếp.",
+                    return await DraftUnavailableAsync(assignment, "Dịch vụ chuyển giọng nói thành văn bản chưa sẵn sàng. Giáo viên có thể chấm trực tiếp.",
                         HttpStatusCode.ServiceUnavailable, ct);
                 string? transcribedText;
                 try
@@ -229,7 +229,7 @@ public sealed partial class HomeworkService
                 catch (Exception)
                 {
                     return await DraftUnavailableAsync(assignment,
-                        "Chưa chép được bản thu âm tiếng Nhật. Mentor có thể xem bản thu và chấm trực tiếp.",
+                        "Chưa chuyển đổi được bản thu âm tiếng Nhật. Giáo viên có thể nghe bản thu và chấm trực tiếp.",
                         HttpStatusCode.BadGateway, ct);
                 }
                 transcription = transcribedText;
@@ -242,7 +242,7 @@ public sealed partial class HomeworkService
                 : null;
 
             if (definition?.Type != MultipleChoiceHomework && (string.IsNullOrWhiteSpace(text) || text.Length > 20000))
-                return await DraftUnavailableAsync(assignment, "Chưa có phần chữ để AI chấm. Mentor có thể xem bài nộp và chấm trực tiếp.", HttpStatusCode.BadRequest, ct);
+                return await DraftUnavailableAsync(assignment, "Chưa có nội dung văn bản để AI chấm. Giáo viên có thể xem bài nộp và chấm trực tiếp.", HttpStatusCode.BadRequest, ct);
             if (definition?.Type == MultipleChoiceHomework && quizScore is null)
                 return await DraftUnavailableAsync(assignment, "Đề trắc nghiệm chưa có đáp án chuẩn để chấm.", HttpStatusCode.UnprocessableEntity, ct);
 
@@ -285,7 +285,7 @@ public sealed partial class HomeworkService
                 MaxGradingOutputTokens);
             var result = string.IsNullOrWhiteSpace(raw) ? null : JsonSerializer.Deserialize<HomeworkAiDraft>(raw, HomeworkJson);
             if (result is not { Score: >= 0 and <= 100 } || result.Feedback?.Trim().Length is not (> 0 and <= 2000))
-                return await DraftUnavailableAsync(assignment, "AI chưa trả nhận xét hợp lệ. Mentor có thể chấm trực tiếp.", HttpStatusCode.BadGateway, ct);
+                return await DraftUnavailableAsync(assignment, "AI chưa tạo được nhận xét hợp lệ. Giáo viên có thể chấm trực tiếp.", HttpStatusCode.BadGateway, ct);
 
             // Đáp án trắc nghiệm được chấm bằng answer key trên server, không để AI thay đổi điểm khách quan.
             var score = quizScore is not null ? (decimal)quizScore.Score : Math.Round(result.Score.Value, 2);
@@ -364,7 +364,7 @@ public sealed partial class HomeworkService
         CancellationToken ct)
     {
         var actor = claims.GetUserClaim();
-        if (actor.Role != Role.Mentor) return ApiResponse<HomeworkGrade>.Fail("Chỉ mentor được gửi bài chấm.", HttpStatusCode.Forbidden);
+        if (actor.Role != Role.Mentor) return ApiResponse<HomeworkGrade>.Fail("Chỉ Giáo viên mới được gửi kết quả chấm bài.", HttpStatusCode.Forbidden);
         var feedback = request.Feedback?.Trim();
         if (feedback?.Length is not (> 0 and <= 2000) || request.Score is < 0 or > 100)
             return ApiResponse<HomeworkGrade>.Fail("Nhập điểm từ 0 đến 100 và nhận xét tối đa 2000 ký tự.");
@@ -373,9 +373,10 @@ public sealed partial class HomeworkService
 
         var query = AssignmentsFor(actor, null).Where(a => a.Id == id);
         var learnerId = await query.Select(a => (int?)a.LearnerId).SingleOrDefaultAsync(ct);
-        var response = ApiResponse<HomeworkGrade>.NotFound("Không tìm thấy bài tập của mentor.");
+        var response = ApiResponse<HomeworkGrade>.NotFound("Không tìm thấy bài tập của Giáo viên.");
         if (!learnerId.HasValue) return response;
         (int LearnerId, string Title, int? CohortId, double Score, string Feedback, bool? Passed)? emailPayload = null;
+        Notification? persistedNotification = null;
         await unit.ExecuteInTransactionAsync(async token =>
         {
             await unit.UserAccounts.GetByIdForUpdateAsync(learnerId.Value, token);
@@ -415,11 +416,16 @@ public sealed partial class HomeworkService
             assignment.Passed = passed ?? assignment.Passed;
             assignment.PublishedFeedbackAtUtc = grade.GradedAt;
             assignment.PublishedByMentorId = actor.Id;
-            await NotifyAsync(assignment.LearnerId, "Mentor đã chấm bài tập", assignment.Title, assignment.CohortId, token);
+            persistedNotification = await NotifyAsync(assignment.LearnerId, "Giáo viên đã chấm bài tập", assignment.Title, assignment.CohortId, token);
             await unit.SaveChangesAsync(token);
             emailPayload = (assignment.LearnerId, assignment.Title, assignment.CohortId, score, feedback, assignment.Passed);
             response = ApiResponse<HomeworkGrade>.Success(PublishedGrade(grade)!);
         }, ct);
+
+        if (persistedNotification is not null && notificationService is not null)
+        {
+            await notificationService.BroadcastPersistedNotificationAsync(persistedNotification, ct);
+        }
 
         if (emailPayload is { } graded)
         {
@@ -524,14 +530,19 @@ public sealed partial class HomeworkService
         return true;
     }
 
-    private Task NotifyAsync(int learnerId, string title, string message, int? cohortId, CancellationToken ct)
-        => unit.Notifications.AddAsync(new Notification
+    private async Task<Notification> NotifyAsync(int learnerId, string title, string message, int? cohortId, CancellationToken ct)
+    {
+        var notification = new Notification
         {
             UserId = learnerId,
             Title = title,
             Message = message,
             Type = "Homework",
             IsRead = false,
+            CreatedDate = DateTime.UtcNow,
             LinkUrl = cohortId.HasValue ? $"/homework/?cohortId={cohortId}" : "/homework/",
-        }, ct);
+        };
+        await unit.Notifications.AddAsync(notification, ct);
+        return notification;
+    }
 }

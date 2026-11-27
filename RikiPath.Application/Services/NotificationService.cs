@@ -186,56 +186,79 @@ namespace RikiPath.Application.Services
 
         }
 
-        public async Task<ApiResponse> MarkAllAsReadAsync(CancellationToken cancellationToken)
-
+        public async Task<ApiResponse> MarkAsUnreadAsync(int notificationId, CancellationToken cancellationToken)
         {
-
             try
-
             {
-
                 var userId = claimService.GetUserClaim().Id;
+                var notification = await unitOfWork.Notifications.GetByIdAsync(notificationId);
+                if (notification is null)
+                    return ApiResponse.NotFound($"Không tìm thấy thông báo Id = {notificationId}.");
+                if (notification.UserId != userId)
+                    return ApiResponse.Fail("Thông báo này không thuộc về bạn.", HttpStatusCode.Forbidden);
 
-                await unitOfWork.Notifications.MarkAllAsReadAsync(userId);
-
-                if (hubContext is not null)
-
+                if (notification.IsRead)
                 {
+                    notification.IsRead = false;
+                    unitOfWork.Notifications.Update(notification);
+                    await unitOfWork.SaveChangesAsync();
 
-                    try
-
+                    if (hubContext is not null)
                     {
-
-                        var userGroup = $"user_{userId}";
-
-                        await hubContext.Clients.Group(userGroup).SendAsync("UnreadCountChanged", 0, cancellationToken);
-
+                        try
+                        {
+                            var userGroup = $"user_{userId}";
+                            await hubContext.Clients.Group(userGroup).SendAsync("NotificationUnread", notificationId, cancellationToken);
+                            var unreadCount = await unitOfWork.Notifications.CountUnreadAsync(userId);
+                            await hubContext.Clients.Group(userGroup).SendAsync("UnreadCountChanged", unreadCount, cancellationToken);
+                        }
+                        catch
+                        {
+                            // SignalR broadcast error is non-blocking
+                        }
                     }
-
-                    catch
-
-                    {
-
-                        // SignalR broadcast error is non-blocking
-
-                    }
-
                 }
 
                 return ApiResponse.Success();
-
             }
-
             catch (Exception ex)
-
             {
-
                 return ApiResponse.Fail(
-
-                    "Không thể đánh dấu tất cả đã đọc.", HttpStatusCode.InternalServerError, errors: BuildDebugErrors(ex));
-
+                    "Không thể đánh dấu chưa đọc.", HttpStatusCode.InternalServerError, errors: BuildDebugErrors(ex));
             }
+        }
 
+        public async Task<ApiResponse> MarkAllAsReadAsync(CancellationToken cancellationToken)
+        {
+            try
+            {
+                var userId = claimService.GetUserClaim().Id;
+                // Server-side cutoff prevents concurrently arriving notifications from being marked read accidentally.
+                var cutoffUtc = DateTime.UtcNow;
+                await unitOfWork.Notifications.MarkAllAsReadAsync(userId, cutoffUtc);
+
+                if (hubContext is not null)
+                {
+                    try
+                    {
+                        var userGroup = $"user_{userId}";
+                        var remainingUnread = await unitOfWork.Notifications.CountUnreadAsync(userId);
+                        await hubContext.Clients.Group(userGroup).SendAsync("NotificationsMarkedAllRead", cutoffUtc, cancellationToken);
+                        await hubContext.Clients.Group(userGroup).SendAsync("UnreadCountChanged", remainingUnread, cancellationToken);
+                    }
+                    catch
+                    {
+                        // SignalR broadcast error is non-blocking
+                    }
+                }
+
+                return ApiResponse.Success();
+            }
+            catch (Exception ex)
+            {
+                return ApiResponse.Fail(
+                    "Không thể đánh dấu tất cả đã đọc.", HttpStatusCode.InternalServerError, errors: BuildDebugErrors(ex));
+            }
         }
 
         public async Task CreateNotificationAsync(string title, string message, string type, CancellationToken cancellationToken)
@@ -396,12 +419,14 @@ namespace RikiPath.Application.Services
                 }
                 else if (!string.IsNullOrEmpty(linkUrl))
                 {
-                    // Fallback heuristic only when caller did not supply an idempotency key
-                    var cutoff = DateTime.UtcNow.AddHours(-2);
+                    // Narrow fallback heuristic when caller did not supply an idempotency key:
+                    // match exact message too so distinct legitimate events on the same entity are never suppressed.
+                    var cutoff = DateTime.UtcNow.AddMinutes(-2);
                     notification = await unitOfWork.Notifications.FirstOrDefaultAsync(
                         n => n.UserId == targetUserId &&
                              n.Type == type &&
                              n.Title == title &&
+                             n.Message == message &&
                              n.LinkUrl == linkUrl &&
                              n.CreatedDate >= cutoff,
                         cancellationToken);
@@ -477,8 +502,8 @@ namespace RikiPath.Application.Services
 
                         var fcmPayload = new FcmPushPayload
                         {
-                            Title = title,
-                            Body = message,
+                            Title = NotificationDisplayNormalizer.Normalize(title),
+                            Body = NotificationDisplayNormalizer.Normalize(message),
                             Data = new Dictionary<string, string>
                             {
                                 ["type"] = type,
@@ -581,15 +606,33 @@ namespace RikiPath.Application.Services
             }
         }
 
+        public async Task BroadcastPersistedNotificationAsync(Notification notification, CancellationToken cancellationToken = default)
+        {
+            if (notification is null || notification.UserId <= 0 || hubContext is null)
+                return;
+
+            try
+            {
+                var userGroup = $"user_{notification.UserId}";
+                await hubContext.Clients.Group(userGroup).SendAsync("NotificationReceived", MapToResponse(notification), cancellationToken);
+                var unreadCount = await unitOfWork.Notifications.CountUnreadAsync(notification.UserId);
+                await hubContext.Clients.Group(userGroup).SendAsync("UnreadCountChanged", unreadCount, cancellationToken);
+            }
+            catch
+            {
+                // Best-effort SignalR delivery after DB commit; authoritative history remains in PostgreSQL.
+            }
+        }
+
         private static NotificationResponse MapToResponse(Notification n) => new()
 
         {
 
             Id = n.Id,
 
-            Title = n.Title,
+            Title = NotificationDisplayNormalizer.Normalize(n.Title),
 
-            Message = n.Message,
+            Message = NotificationDisplayNormalizer.Normalize(n.Message),
 
             Type = n.Type,
 

@@ -64,13 +64,29 @@ public sealed record AdminSubscriptionPlansWorkspaceResponse(
     IReadOnlyList<AdminSubscriptionPlanDto> Plans,
     IReadOnlyList<AdminFeatureItemDto> Features);
 
+public sealed record AdminDailyRevenuePointDto(
+    string Date,
+    decimal SubscriptionAmount,
+    decimal CourseTuitionAmount,
+    decimal AiTopUpAmount,
+    decimal RefundedAmount,
+    decimal NetAmount);
+
 public sealed record AdminPaymentSummaryDto(
     int TotalCount,
     int PaidCount,
     int PendingCount,
     int FailedOrCancelledCount,
     int ReviewCount,
-    decimal TotalPaidAmount);
+    decimal TotalPaidAmount,
+    decimal SubscriptionRevenue = 0,
+    decimal CourseTuitionRevenue = 0,
+    decimal AiTopUpRevenue = 0,
+    decimal TotalRefundedAmount = 0,
+    decimal NetCollectedAmount = 0,
+    int ExpiredCount = 0,
+    int RefundedCount = 0,
+    IReadOnlyList<AdminDailyRevenuePointDto>? DailySeries = null);
 
 public sealed record AdminPaymentTransactionDto(
     string Key,
@@ -89,7 +105,8 @@ public sealed record AdminPaymentTransactionDto(
     DateTime CreatedAtUtc,
     DateTime? PaidAtUtc,
     DateTime? ExpiresAtUtc,
-    string? StatusReason);
+    string? StatusReason,
+    decimal RefundedAmount = 0);
 
 public sealed record AdminPaymentListResponse(
     IReadOnlyList<AdminPaymentTransactionDto> Items,
@@ -125,7 +142,8 @@ public sealed record AdminPaymentDetailDto(
     int? AiUsed,
     int? DurationDaysSnapshot,
     int? PlanRevisionSnapshot,
-    string? OrderSnapshotJson);
+    string? OrderSnapshotJson,
+    decimal RefundedAmount = 0);
 
 public sealed record PayOsGatewayStatusDto(
     bool ClientIdConfigured,

@@ -75,5 +75,9 @@ namespace RikiPath.Application.IClients
             => long.TryParse(paymentRequestId, out var code)
                 ? GetPaymentInformationAsync(code, cancellationToken)
                 : throw new PaymentGatewayException(PaymentGatewayFailure.Rejected, "Gateway cannot look links up by id.");
+
+        /// <summary>Vô hiệu hóa/hủy link thanh toán trên cổng khi giữ chỗ hết hạn hoặc người dùng hủy (best-effort).</summary>
+        Task<bool> CancelPaymentLinkAsync(long orderCode, string? cancellationReason, CancellationToken cancellationToken)
+            => Task.FromResult(false);
     }
 }

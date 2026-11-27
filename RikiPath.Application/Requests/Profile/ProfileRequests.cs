@@ -33,6 +33,12 @@ namespace RikiPath.Application.Requests.Profile
         public DateTime? TargetExamDate { get; set; }
         /// <summary>Only true explicitly clears an existing date; omitted/null preserves it.</summary>
         public bool ClearTargetExamDate { get; set; }
+
+        /// <summary>
+        /// True when the learner pressed "Xác nhận mục tiêu" at the end of onboarding. Only decides whether a
+        /// goal-confirmed celebration is recorded; it never changes validation or the saved goal.
+        /// </summary>
+        public bool ConfirmedFromOnboarding { get; set; }
     }
 
     public class SetStudyLevelRequest

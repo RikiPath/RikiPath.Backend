@@ -34,7 +34,7 @@ public sealed class MentorSlotGenerator : IMentorSlotGenerator
         int publicationHorizonDays)
     {
         if (mentorId <= 0)
-            throw new ArgumentOutOfRangeException(nameof(mentorId), "Cố vấn được chọn không hợp lệ.");
+            throw new ArgumentOutOfRangeException(nameof(mentorId), "Giáo viên được chọn không hợp lệ.");
         if (enabledDayparts is null)
             throw new ArgumentNullException(nameof(enabledDayparts), "Danh sách ca làm việc không được để trống.");
         if (policyVersion <= 0)
@@ -102,7 +102,7 @@ public sealed class MentorSlotGenerator : IMentorSlotGenerator
             throw new ArgumentNullException(nameof(existingAppointments), "Danh sách buổi hỗ trợ hiện có không được để trống.");
 
         if (candidate.MentorId <= 0 || candidate.PolicyVersion <= 0)
-            return MentorSlotValidationResult.Invalid("INVALID_BOOKING", "Thông tin cố vấn hoặc chính sách lịch tư vấn không hợp lệ.");
+            return MentorSlotValidationResult.Invalid("INVALID_BOOKING", "Thông tin Giáo viên hoặc chính sách lịch dạy không hợp lệ.");
         if (candidate.EndUtc <= candidate.StartUtc)
             return MentorSlotValidationResult.Invalid("INVALID_INTERVAL", "Giờ kết thúc buổi hỗ trợ phải sau giờ bắt đầu.");
         if (candidate.EndUtc - candidate.StartUtc != TimeSpan.FromMinutes(MentorSlotPolicy.AppointmentDurationMinutes))
@@ -130,7 +130,7 @@ public sealed class MentorSlotGenerator : IMentorSlotGenerator
             .Where(x => x.MentorId == candidate.MentorId && !x.IsCancelled)
             .ToArray();
         if (relevant.Any(x => candidate.StartUtc < x.EndUtc && x.StartUtc < candidate.EndUtc))
-            return MentorSlotValidationResult.Invalid("APPOINTMENT_OVERLAP", "Cố vấn đã có buổi tư vấn trùng thời gian này.");
+            return MentorSlotValidationResult.Invalid("APPOINTMENT_OVERLAP", "Giáo viên đã có buổi dạy trùng thời gian này.");
 
         var rest = TimeSpan.FromMinutes(MentorSlotPolicy.MinimumRestMinutes);
         foreach (var existing in relevant.Where(x => x.UsesNinetyMinutePolicy))
@@ -149,7 +149,7 @@ public sealed class MentorSlotGenerator : IMentorSlotGenerator
 
         var currentPolicyBookingCount = relevant.Count(x => x.UsesNinetyMinutePolicy && _policy.GetBusinessDate(x.StartUtc) == bookingLocalDate);
         if (currentPolicyBookingCount >= _policy.DailyBookingCap)
-            return MentorSlotValidationResult.Invalid("DAILY_CAP", $"Cố vấn đã đạt giới hạn {_policy.DailyBookingCap} buổi tư vấn trong ngày.");
+            return MentorSlotValidationResult.Invalid("DAILY_CAP", $"Giáo viên đã đạt giới hạn {_policy.DailyBookingCap} buổi dạy trong ngày.");
 
         return MentorSlotValidationResult.Valid();
     }

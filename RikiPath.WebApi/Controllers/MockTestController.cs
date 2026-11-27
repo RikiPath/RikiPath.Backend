@@ -29,9 +29,11 @@ namespace RikiPath.WebApi.Controllers
             [FromQuery] int? languageSkillId,
             [FromQuery] string? examKind,
             [FromQuery] string? keyword,
+            [FromQuery] string? status,
+            [FromQuery] string? sort,
             CancellationToken ct)
         {
-            var result = await mockTestService.GetPracticeSetsAsync(certificateLevelId, languageSkillId, examKind, keyword, ct);
+            var result = await mockTestService.GetPracticeSetsAsync(certificateLevelId, languageSkillId, examKind, keyword, status, sort, ct);
             return StatusCode(result.StatusCode, result);
         }
 
@@ -39,9 +41,11 @@ namespace RikiPath.WebApi.Controllers
         public async Task<IActionResult> ListFullMockTests(
             [FromQuery] int? certificateLevelId,
             [FromQuery] string? keyword,
+            [FromQuery] string? status,
+            [FromQuery] string? sort,
             CancellationToken ct)
         {
-            var result = await mockTestService.GetFullMockTestsAsync(certificateLevelId, keyword, ct);
+            var result = await mockTestService.GetFullMockTestsAsync(certificateLevelId, keyword, status, sort, ct);
             return StatusCode(result.StatusCode, result);
         }
 
@@ -49,6 +53,14 @@ namespace RikiPath.WebApi.Controllers
         public async Task<IActionResult> GetTestInfo(int practiceTestId, CancellationToken ct)
         {
             var result = await mockTestService.GetTestInfoAsync(practiceTestId, ct);
+            return StatusCode(result.StatusCode, result);
+        }
+
+        [HttpGet("{practiceTestId:int}/preview")]
+        [ProducesResponseType(typeof(ApiResponse<PracticeSetPreviewResponse>), StatusCodes.Status200OK)]
+        public async Task<IActionResult> GetPracticeSetPreview(int practiceTestId, CancellationToken ct)
+        {
+            var result = await mockTestService.GetPracticeSetPreviewAsync(practiceTestId, ct);
             return StatusCode(result.StatusCode, result);
         }
 
@@ -74,9 +86,27 @@ namespace RikiPath.WebApi.Controllers
         }
 
         [HttpGet("history")]
-        public async Task<IActionResult> MockTestHistory(CancellationToken ct)
+        public async Task<IActionResult> MockTestHistory(
+            [FromQuery] string? kind,
+            [FromQuery] string? status,
+            CancellationToken ct)
         {
-            var result = await mockTestService.GetHistoryAsync(ct);
+            var result = await mockTestService.GetHistoryAsync(kind, status, ct);
+            return StatusCode(result.StatusCode, result);
+        }
+
+        [HttpGet("history/paged")]
+        public async Task<IActionResult> MockTestHistoryPaged(
+            [FromQuery] string? kind,
+            [FromQuery] string? status,
+            [FromQuery] string? level,
+            [FromQuery] int? days,
+            [FromQuery] string? search,
+            [FromQuery] int page = 1,
+            [FromQuery] int pageSize = 10,
+            CancellationToken ct = default)
+        {
+            var result = await mockTestService.GetPagedHistoryAsync(kind, status, level, days, search, page, pageSize, ct);
             return StatusCode(result.StatusCode, result);
         }
 
@@ -341,10 +371,27 @@ namespace RikiPath.WebApi.Controllers
         [ProducesResponseType(typeof(ApiResponse<StartAttemptResponse>), StatusCodes.Status200OK)]
         [ProducesResponseType(typeof(ApiResponse<StartAttemptResponse>), StatusCodes.Status400BadRequest)]
         [ProducesResponseType(typeof(ApiResponse<StartAttemptResponse>), StatusCodes.Status404NotFound)]
+        [ProducesResponseType(typeof(ApiResponse<StartAttemptResponse>), StatusCodes.Status409Conflict)]
         [ProducesResponseType(typeof(ApiResponse<StartAttemptResponse>), StatusCodes.Status500InternalServerError)]
-        public async Task<IActionResult> StartAttempt(int practiceTestId, CancellationToken cancellationToken)
+        public async Task<IActionResult> StartAttempt(
+            int practiceTestId,
+            [FromQuery] bool forceNew = false,
+            [FromBody] StartMockTestAttemptRequest? request = null,
+            CancellationToken cancellationToken = default)
         {
-            var result = await mockTestService.StartAttemptAsync(practiceTestId, cancellationToken);
+            var result = await mockTestService.StartAttemptAsync(practiceTestId, forceNew || (request?.ForceNew ?? false), cancellationToken);
+            return StatusCode((int)result.StatusCode, result);
+        }
+
+        /// <summary>Tạm dừng & lưu tiến độ bài luyện tập (PracticeSet/MixedPractice).</summary>
+        [HttpPost("attempts/{attemptId:int}/pause")]
+        [ProducesResponseType(typeof(ApiResponse<AttemptResultResponse>), StatusCodes.Status200OK)]
+        public async Task<IActionResult> PauseAttempt(
+            int attemptId,
+            [FromBody] SubmitAttemptRequest? request = null,
+            CancellationToken cancellationToken = default)
+        {
+            var result = await mockTestService.PauseAttemptAsync(attemptId, request, cancellationToken);
             return StatusCode((int)result.StatusCode, result);
         }
 

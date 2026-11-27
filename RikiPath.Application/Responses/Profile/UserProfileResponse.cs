@@ -74,5 +74,8 @@ namespace RikiPath.Application.Responses.Profile
         public bool EmailNotificationsEnabled { get; set; }
         public bool SystemNotificationsEnabled { get; set; }
         public Dictionary<string, bool> NotificationCategories { get; set; } = new();
+
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public LearnerSetupStateResponse? SetupState { get; set; }
     }
 }

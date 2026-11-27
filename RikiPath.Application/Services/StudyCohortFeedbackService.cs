@@ -5,6 +5,7 @@ using RikiPath.Application.IServices;
 using RikiPath.Application.Requests.StudyCourses;
 using RikiPath.Application.Responses;
 using RikiPath.Application.Responses.MentorMeetings;
+using RikiPath.Domain;
 using RikiPath.Domain.Entities;
 using RikiPath.Domain.Enums;
 
@@ -46,9 +47,9 @@ public sealed partial class StudyCourseService
             (
                 course.LearnerId,
                 "Giao dịch đang chờ xem xét",
-                "Giao dịch đã được ghi nhận nhưng chưa thể hoàn tất ghi danh. Bộ phận quản trị sẽ xem xét yêu cầu của bạn.",
+                "Giao dịch đã được ghi nhận nhưng chưa thể hoàn tất ghi danh. Quản trị viên sẽ xem xét yêu cầu của bạn.",
                 "PaymentReview",
-                $"/my-courses/{course.Id}"
+                "/my-courses"
             )
         };
 
@@ -179,7 +180,7 @@ public sealed partial class StudyCourseService
         int courseId, CreateCohortMentorReviewRequest request, CancellationToken ct) => Run(async () =>
     {
         if (Actor.Role != Role.Learner) throw new UnauthorizedAccessException();
-        Rule(request.MentorId > 0, "COHORT_REVIEW_INVALID_MENTOR", "Cố vấn không hợp lệ.");
+        Rule(request.MentorId > 0, "COHORT_REVIEW_INVALID_MENTOR", "Giáo viên không hợp lệ.");
         Rule(request.Rating is >= 1 and <= 5, "COHORT_REVIEW_INVALID_RATING", "Điểm đánh giá phải từ 1 đến 5 sao.");
         var comment = string.IsNullOrWhiteSpace(request.Comment) ? null : request.Comment.Trim();
         Rule(comment is null || comment.Length <= 2000, "COHORT_REVIEW_COMMENT_TOO_LONG", "Nhận xét tối đa 2000 ký tự.");
@@ -197,6 +198,10 @@ public sealed partial class StudyCourseService
                 .AsSplitQuery()
                 .SingleAsync(x => x.Id == courseId, token);
 
+            Rule(HasConfirmedCourseAccess(course), "PAYMENT_REQUIRED",
+                "Vui lòng hoàn tất thanh toán để đánh giá Giáo viên lớp học.",
+                HttpStatusCode.Forbidden);
+
             var delivered = course.Sessions.Where(s => s.Status == "Present").ToList();
             var eligibleMentors = new HashSet<int>();
             if (delivered.Count > 0 && course.PaymentStatus == "Paid")
@@ -211,12 +216,12 @@ public sealed partial class StudyCourseService
             }
 
             Rule(eligibleMentors.Contains(request.MentorId), "COHORT_REVIEW_NOT_ELIGIBLE",
-                "Chỉ được đánh giá cố vấn đã giảng dạy ít nhất một buổi có mặt hoặc cố vấn hiện tại sau khi khóa học đã có buổi học.");
+                "Bạn chỉ có thể đánh giá Giáo viên đã giảng dạy ít nhất một buổi học bạn có mặt hoặc Giáo viên hiện tại sau khi lớp đã có buổi học.");
 
             var duplicate = await uow.CohortMentorReviews.AnyAsync(
                 x => x.CourseId == courseId && x.MentorId == request.MentorId, token);
             Rule(!duplicate, "COHORT_REVIEW_DUPLICATE",
-                "Bạn đã đánh giá cố vấn này trong khóa học này rồi.", HttpStatusCode.Conflict);
+                "Bạn đã đánh giá Giáo viên này trong khóa học này rồi.", HttpStatusCode.Conflict);
 
             var now = DateTime.UtcNow;
             var review = new CohortMentorReview
@@ -275,6 +280,12 @@ public sealed partial class StudyCourseService
 
         if (Actor.Role == Role.Learner && course!.LearnerId != Actor.Id)
             throw new UnauthorizedAccessException();
+        if (Actor.Role == Role.Learner)
+        {
+            Rule(HasConfirmedCourseAccess(course!), "PAYMENT_REQUIRED",
+                "Vui lòng hoàn tất thanh toán để xem đánh giá của lớp học.",
+                HttpStatusCode.Forbidden);
+        }
         if (Actor.Role == Role.Mentor && !InvolvedMentorIdsOf(course!).Contains(Actor.Id))
             throw new UnauthorizedAccessException();
 
@@ -291,7 +302,7 @@ public sealed partial class StudyCourseService
     public Task<ApiResponse<object>> MentorCohortReviewSummaryAsync(int mentorId, CancellationToken ct) => Run(async () =>
     {
         if (Actor.Role is not (Role.Admin or Role.Learner or Role.Mentor)) throw new UnauthorizedAccessException();
-        Rule(mentorId > 0, "COHORT_REVIEW_INVALID_MENTOR", "Cố vấn không hợp lệ.");
+        Rule(mentorId > 0, "COHORT_REVIEW_INVALID_MENTOR", "Giáo viên không hợp lệ.");
 
         var ratings = await uow.CohortMentorReviews.Query().AsNoTracking()
             .Where(x => x.MentorId == mentorId && !x.IsHidden)
@@ -334,13 +345,13 @@ public sealed partial class StudyCourseService
         Rule(idempotencyKey != Guid.Empty, "COMPLAINT_IDEMPOTENCY_KEY_REQUIRED", "Thiếu mã chống gửi trùng.");
         var normalizedCategory = category?.Trim() ?? "";
         Rule(AllowedComplaintCategories.Contains(normalizedCategory), "COMPLAINT_INVALID_CATEGORY",
-            "Danh mục khiếu nại phải là TeachingQuality, MentorConduct, Schedule, PaymentEnrollment hoặc Other.");
+            "Danh mục khiếu nại không hợp lệ. Vui lòng chọn: Chất lượng giảng dạy, Tác phong Giáo viên, Lịch học, Thanh toán & Ghi danh hoặc Khác.");
         var trimmedMessage = message?.Trim() ?? "";
         Rule(trimmedMessage.Length is >= 10 and <= 2000, "COMPLAINT_MESSAGE_INVALID",
             "Nội dung khiếu nại phải từ 10 đến 2000 ký tự.");
         Rule(!refundReviewRequested || normalizedCategory == CohortComplaint.CategoryPaymentEnrollment,
             "COMPLAINT_REFUND_REVIEW_NOT_ALLOWED",
-            "Chỉ khiếu nại thanh toán/ghi danh (PaymentEnrollment) mới được yêu cầu xem xét hoàn tiền.");
+            "Chỉ khiếu nại về thanh toán hoặc ghi danh mới có thể yêu cầu xem xét hoàn tiền.");
         if (evidence is not null)
             Rule(evidence.Length is > 0 and <= 10 * 1024 * 1024 && AllowedEvidenceTypes.Contains(evidence.ContentType),
                 "COMPLAINT_EVIDENCE_INVALID", "Minh chứng phải là PDF/PNG/JPG tối đa 10 MB.");
@@ -372,10 +383,17 @@ public sealed partial class StudyCourseService
                 .AsSplitQuery()
                 .SingleAsync(x => x.Id == courseId, token);
 
+            if (normalizedCategory != CohortComplaint.CategoryPaymentEnrollment)
+            {
+                Rule(HasConfirmedCourseAccess(course), "PAYMENT_REQUIRED",
+                    "Vui lòng hoàn tất thanh toán để gửi khiếu nại nội dung lớp học.",
+                    HttpStatusCode.Forbidden);
+            }
+
             if (mentorId.HasValue)
             {
                 Rule(InvolvedMentorIdsOf(course).Contains(mentorId.Value), "COMPLAINT_MENTOR_NOT_INVOLVED",
-                    "Cố vấn được chọn không thuộc lịch sử giảng dạy của khóa học này.");
+                    "Giáo viên được chọn không thuộc lịch sử giảng dạy của khóa học này.");
             }
 
             if (evidence is not null && !uploaded)
@@ -401,10 +419,18 @@ public sealed partial class StudyCourseService
                 CreatedAtUtc = now,
                 Revision = 1
             };
+            var categoryLabel = normalizedCategory switch
+            {
+                CohortComplaint.CategoryTeachingQuality => "Chất lượng giảng dạy",
+                CohortComplaint.CategoryMentorConduct => "Tác phong Giáo viên",
+                CohortComplaint.CategorySchedule => "Lịch học",
+                CohortComplaint.CategoryPaymentEnrollment => "Thanh toán & Ghi danh",
+                _ => "Khác"
+            };
             AddComplaintEvent(complaint, Actor.Id, Actor.Role, "Created",
                 refundReviewRequested
-                    ? $"Học viên gửi khiếu nại ({normalizedCategory}) và đề nghị Admin xem xét hoàn tiền/bồi hoàn."
-                    : $"Học viên gửi khiếu nại ({normalizedCategory}).");
+                    ? $"Học viên gửi khiếu nại ({categoryLabel}) và đề nghị Quản trị viên xem xét hoàn tiền/bồi hoàn."
+                    : $"Học viên gửi khiếu nại ({categoryLabel}).");
 
             await uow.CohortComplaints.AddAsync(complaint, token);
             await uow.SaveChangesAsync(token);
@@ -415,7 +441,7 @@ public sealed partial class StudyCourseService
                 .ToListAsync(token);
             QueueNotifications($"cohort-complaint:{complaint.Id}:created", "CohortComplaint", complaint.Id.ToString(),
                 admins.Select(id => (id, "Khiếu nại khóa học mới",
-                    $"Có khiếu nại mới #{complaint.Id} ({normalizedCategory}) cần xem xét.",
+                    $"Có khiếu nại mới ({categoryLabel}) đang chờ xem xét.",
                     "CohortComplaint", (string?)$"/admin/study-courses?complaintId={complaint.Id}")));
             await uow.SaveChangesAsync(token);
 
@@ -431,13 +457,16 @@ public sealed partial class StudyCourseService
         var normalizedStatus = string.IsNullOrWhiteSpace(status) ? null : status.Trim();
         if (normalizedStatus is not null)
             Rule(AllowedComplaintStatuses.Contains(normalizedStatus), "COMPLAINT_INVALID_STATUS",
-                "Trạng thái lọc phải là Open, UnderReview, Resolved hoặc Rejected.");
+                "Trạng thái lọc không hợp lệ (chỉ hỗ trợ: Đang mở, Đang xem xét, Đã giải quyết hoặc Bị từ chối).");
 
         var actor = Actor;
         var query = ComplaintDetails.Where(x =>
             actor.Role == Role.Admin
             || (actor.Role == Role.Learner && x.LearnerId == actor.Id)
-            || (actor.Role == Role.Mentor && x.MentorId == actor.Id));
+            || (actor.Role == Role.Mentor
+                && x.MentorId == actor.Id
+                && x.Category != CohortComplaint.CategoryPaymentEnrollment
+                && !x.RefundReviewRequested));
         if (normalizedStatus is not null)
             query = query.Where(x => x.Status == normalizedStatus);
 
@@ -451,10 +480,13 @@ public sealed partial class StudyCourseService
         var complaint = await ComplaintDetails.SingleOrDefaultAsync(x => x.Id == complaintId, ct);
         Rule(complaint is not null, "COMPLAINT_NOT_FOUND", "Không tìm thấy khiếu nại.", HttpStatusCode.NotFound);
 
-        // Không tiết lộ khiếu nại ngoài phạm vi của Học viên hoặc Cố vấn.
+        // Không tiết lộ khiếu nại ngoài phạm vi của Học viên hoặc Cố vấn (bao gồm khiếu nại thanh toán/hoàn tiền của Học viên).
         if (Actor.Role == Role.Learner && complaint!.LearnerId != Actor.Id)
             Rule(false, "COMPLAINT_NOT_FOUND", "Không tìm thấy khiếu nại.", HttpStatusCode.NotFound);
-        if (Actor.Role == Role.Mentor && complaint!.MentorId != Actor.Id)
+        if (Actor.Role == Role.Mentor
+            && (complaint!.MentorId != Actor.Id
+                || complaint.Category == CohortComplaint.CategoryPaymentEnrollment
+                || complaint.RefundReviewRequested))
             Rule(false, "COMPLAINT_NOT_FOUND", "Không tìm thấy khiếu nại.", HttpStatusCode.NotFound);
 
         return ComplaintView(complaint!, Actor.Role);
@@ -477,7 +509,7 @@ public sealed partial class StudyCourseService
             Rule(complaint!.MentorId == Actor.Id, "COMPLAINT_FORBIDDEN",
                 "Bạn chỉ được phản hồi khiếu nại nhắm tới mình.", HttpStatusCode.Forbidden);
             Rule(complaint.Category != CohortComplaint.CategoryPaymentEnrollment, "COMPLAINT_MENTOR_RESPONSE_NOT_ALLOWED",
-                "Cố vấn không phản hồi khiếu nại thanh toán hoặc ghi danh.");
+                "Giáo viên không phản hồi khiếu nại về thanh toán hoặc ghi danh.");
             Rule(complaint.Status is CohortComplaint.Open or CohortComplaint.UnderReview, "COMPLAINT_ALREADY_DECIDED",
                 "Khiếu nại đã có quyết định cuối cùng.", HttpStatusCode.Conflict);
 
@@ -496,8 +528,8 @@ public sealed partial class StudyCourseService
                 .ToListAsync(token);
             QueueNotifications($"cohort-complaint:{complaint.Id}:mentor-responded:{complaint.Revision}",
                 "CohortComplaint", complaint.Id.ToString(),
-                admins.Select(id => (id, "Cố vấn đã phản hồi khiếu nại",
-                    $"Cố vấn đã gửi phản hồi cho khiếu nại #{complaint.Id}.",
+                admins.Select(id => (id, "Giáo viên đã phản hồi khiếu nại",
+                    $"Giáo viên đã gửi phản hồi cho khiếu nại #{complaint.Id}.",
                     "CohortComplaint", (string?)$"/admin/study-courses?complaintId={complaint.Id}")));
             await uow.SaveChangesAsync(token);
 
@@ -512,7 +544,7 @@ public sealed partial class StudyCourseService
     {
         Admin();
         Rule(request.Status is CohortComplaint.Resolved or CohortComplaint.Rejected, "COMPLAINT_INVALID_DECISION_STATUS",
-            "Trạng thái quyết định phải là Resolved hoặc Rejected.");
+            "Trạng thái quyết định phải là Đã giải quyết hoặc Bị từ chối.");
         var decision = request.Decision?.Trim() ?? "";
         Rule(decision.Length is >= 1 and <= 2000, "COMPLAINT_DECISION_REQUIRED",
             "Cần nhập nội dung quyết định (tối đa 2000 ký tự).");
@@ -542,7 +574,7 @@ public sealed partial class StudyCourseService
                 (
                     complaint.LearnerId,
                     "Kết quả xử lý khiếu nại",
-                    $"Khiếu nại #{complaint.Id} đã được xử lý ({(request.Status == CohortComplaint.Resolved ? "Đã giải quyết" : "Từ chối")}): {decision}",
+                    $"Khiếu nại #{complaint.Id} đã được xử lý ({(request.Status == CohortComplaint.Resolved ? "Đã giải quyết" : "Bị từ chối")}): {decision}",
                     "CohortComplaintDecision",
                     $"/my-courses/{complaint.CourseId}"
                 )
@@ -552,7 +584,7 @@ public sealed partial class StudyCourseService
                 recipients.Add((
                     complaint.MentorId.Value,
                     "Kết quả xử lý khiếu nại",
-                    $"Ban quản trị đã đưa ra quyết định cho khiếu nại #{complaint.Id}.",
+                    $"Quản trị viên đã đưa ra quyết định cho khiếu nại #{complaint.Id}.",
                     "CohortComplaintDecision",
                     $"/mentor/complaints/{complaint.Id}"
                 ));
@@ -580,6 +612,7 @@ public sealed partial class StudyCourseService
         if (Actor.Role is not (Role.Admin or Role.Learner or Role.Mentor)) throw new UnauthorizedAccessException();
         var course = await uow.StudyCourses.Query().AsNoTracking()
             .Include(x => x.CertificateLevel)
+            .Include(x => x.GroupPolicy)
             .Include(x => x.Learner)
             .Include(x => x.Mentor)
             .Include(x => x.Cohort).ThenInclude(c => c!.Mentor)
@@ -591,6 +624,12 @@ public sealed partial class StudyCourseService
 
         if (Actor.Role == Role.Learner && course!.LearnerId != Actor.Id)
             throw new UnauthorizedAccessException();
+        if (Actor.Role == Role.Learner)
+        {
+            Rule(HasConfirmedCourseAccess(course!), "PAYMENT_REQUIRED",
+                "Vui lòng hoàn tất thanh toán để xem tổng kết khóa học.",
+                HttpStatusCode.Forbidden);
+        }
         if (Actor.Role == Role.Mentor && !InvolvedMentorIdsOf(course!).Contains(Actor.Id))
             throw new UnauthorizedAccessException();
 
@@ -598,9 +637,14 @@ public sealed partial class StudyCourseService
         var currentPrimaryMentorId = course!.MentorId ?? course.Cohort?.MentorId;
 
         var mentorNames = new Dictionary<int, string>();
+        var mentorAvatars = new Dictionary<int, string?>();
         void RememberMentor(UserAccount? u)
         {
-            if (u is not null && u.Id > 0) mentorNames[u.Id] = $"{u.FirstName} {u.LastName}".Trim();
+            if (u is not null && u.Id > 0)
+            {
+                mentorNames[u.Id] = $"{u.FirstName} {u.LastName}".Trim();
+                mentorAvatars[u.Id] = u.AvatarUrl;
+            }
         }
         RememberMentor(course.Mentor);
         RememberMentor(course.Cohort?.Mentor);
@@ -615,7 +659,9 @@ public sealed partial class StudyCourseService
             {
                 MentorId = g.Key,
                 MentorName = mentorNames.GetValueOrDefault(g.Key, string.Empty),
+                MentorAvatarUrl = mentorAvatars.GetValueOrDefault(g.Key),
                 IsCurrentPrimary = currentPrimaryMentorId == g.Key,
+                IsPrimary = currentPrimaryMentorId == g.Key,
                 SessionNumbers = g.Select(x => x.Session.Number).Distinct().OrderBy(n => n).ToList(),
                 DeliveredSessionCount = g.Count(x => x.Session.Status == "Present")
             })
@@ -627,7 +673,9 @@ public sealed partial class StudyCourseService
             {
                 MentorId = currentPrimaryMentorId.Value,
                 MentorName = mentorNames.GetValueOrDefault(currentPrimaryMentorId.Value, string.Empty),
+                MentorAvatarUrl = mentorAvatars.GetValueOrDefault(currentPrimaryMentorId.Value),
                 IsCurrentPrimary = true,
+                IsPrimary = true,
                 SessionNumbers = new List<int>(),
                 DeliveredSessionCount = 0
             });
@@ -642,6 +690,8 @@ public sealed partial class StudyCourseService
                 s.Number,
                 s.Attempt,
                 Date = s.ScheduledAt,
+                ScheduledAt = s.ScheduledAt,
+                EndAt = s.ScheduledAt.AddMinutes(course.SessionMinutes),
                 s.Status,
                 MentorId = mId,
                 MentorName = mId.HasValue ? mentorNames.GetValueOrDefault(mId.Value, string.Empty) : null
@@ -654,6 +704,19 @@ public sealed partial class StudyCourseService
             .OrderBy(h => h.DueAt).ThenBy(h => h.Id)
             .ToListAsync(ct);
 
+        var feedbackMentorIds = assignments
+            .Where(h => h.PublishedFeedbackAtUtc.HasValue && h.PublishedByMentorId.HasValue && !mentorNames.ContainsKey(h.PublishedByMentorId.Value))
+            .Select(h => h.PublishedByMentorId!.Value)
+            .Distinct()
+            .ToList();
+        if (feedbackMentorIds.Count > 0)
+        {
+            var extraMentors = await uow.UserAccounts.Query().AsNoTracking()
+                .Where(u => feedbackMentorIds.Contains(u.Id))
+                .ToListAsync(ct);
+            foreach (var m in extraMentors) RememberMentor(m);
+        }
+
         var legacyHomework = course.Homework.OrderBy(h => h.DueAt).ThenBy(h => h.Id).ToList();
         var hwAssigned = assignments.Count + legacyHomework.Count;
         var hwSubmitted = assignments.Count(h => h.Submission is { IsDeleted: false })
@@ -662,7 +725,7 @@ public sealed partial class StudyCourseService
             + legacyHomework.Count(h => h.ReviewedAt.HasValue);
         var hwOutstanding = Math.Max(0, hwAssigned - hwSubmitted);
 
-        // Chỉ hiển thị nhận xét đã được Cố vấn công bố; tuyệt đối không lộ nháp AI (AiDraftFeedback/AiDraftScore).
+        // Chỉ hiển thị nhận xét đã được Giáo viên công bố; tuyệt đối không lộ nháp AI (AiDraftFeedback/AiDraftScore).
         var homeworkItems = assignments.Select(h => new
         {
             Source = "CohortAssignment",
@@ -693,6 +756,47 @@ public sealed partial class StudyCourseService
             PublishedByMentorId = (int?)null
         })).ToList();
 
+        var publishedFeedbackList = assignments
+            .Where(h => h.PublishedFeedbackAtUtc.HasValue && !string.IsNullOrWhiteSpace(h.MentorFeedback))
+            .Select(h =>
+            {
+                var mentorId = h.PublishedByMentorId ?? currentPrimaryMentorId;
+                return new
+                {
+                    HomeworkId = h.Id,
+                    Title = h.Title,
+                    Feedback = h.MentorFeedback!.Trim(),
+                    Score = h.MentorScore,
+                    Passed = h.Passed,
+                    PublishedAtUtc = h.PublishedFeedbackAtUtc!.Value,
+                    MentorId = mentorId,
+                    MentorName = mentorId.HasValue ? mentorNames.GetValueOrDefault(mentorId.Value, string.Empty) : null,
+                    MentorAvatarUrl = mentorId.HasValue ? mentorAvatars.GetValueOrDefault(mentorId.Value) : null
+                };
+            })
+            .Concat(legacyHomework
+                .Where(h => h.ReviewedAt.HasValue && !string.IsNullOrWhiteSpace(h.Feedback))
+                .Select(h => new
+                {
+                    HomeworkId = h.Id,
+                    Title = h.Title,
+                    Feedback = h.Feedback!.Trim(),
+                    Score = (double?)null,
+                    Passed = h.Passed,
+                    PublishedAtUtc = h.ReviewedAt!.Value,
+                    MentorId = currentPrimaryMentorId,
+                    MentorName = currentPrimaryMentorId.HasValue ? mentorNames.GetValueOrDefault(currentPrimaryMentorId.Value, string.Empty) : null,
+                    MentorAvatarUrl = currentPrimaryMentorId.HasValue ? mentorAvatars.GetValueOrDefault(currentPrimaryMentorId.Value) : null
+                }))
+            .OrderByDescending(f => f.PublishedAtUtc)
+            .ToList();
+
+        var retaken = await uow.StudyCourses.Query().AsNoTracking().AnyAsync(x => x.RetakeOfId == courseId, ct);
+        var effectivePolicy = course.GroupPolicy ?? (groupPolicies is null
+            ? null
+            : await groupPolicies.GetEffectiveAsync(course.StartsAt ?? course.Cohort?.StartsAt ?? now, ct));
+        var eligibility = CourseRetakePolicy.Evaluate(course, retaken, effectivePolicy, assignments);
+
         MentorLearnerSkillProfileResponse? skillProgress = null;
         var skillProgressAvailable = false;
         if (skillProfiles is not null)
@@ -719,6 +823,7 @@ public sealed partial class StudyCourseService
             CourseName = course.Name,
             course.CohortId,
             CohortName = course.Cohort?.Name,
+            CohortStatus = course.Cohort?.Status,
             course.SessionType,
             Level = course.CertificateLevel?.Code,
             course.LearnerId,
@@ -733,8 +838,6 @@ public sealed partial class StudyCourseService
             course.SessionsPerWeek,
             course.SessionMinutes,
             course.TotalSessions,
-            Intensity = IntensityOf(course.SessionsPerWeek),
-            IntensityLabel = IntensityLabelOf(course.SessionsPerWeek),
             TotalTeachingHours = TotalTeachingHoursOf(course.TotalSessions, course.SessionMinutes),
             CurrentPrimaryMentorId = currentPrimaryMentorId,
             CurrentPrimaryMentorName = currentPrimaryMentorId.HasValue
@@ -760,8 +863,19 @@ public sealed partial class StudyCourseService
                 Outstanding = hwOutstanding,
                 Items = homeworkItems
             },
+            MentorFeedback = publishedFeedbackList,
+            Eligibility = eligibility,
+            CompletionPolicy = new
+            {
+                HomeworkThresholdPercent = effectivePolicy?.RemediationCompletionThresholdPercent ?? course.MinimumHomeworkPercent,
+                HomeworkThresholdComparison = effectivePolicy?.RemediationThresholdComparison ?? ">="
+            },
             SkillProgressAvailable = skillProgressAvailable,
             SkillProgress = skillProgress,
+            IsClassCompleted = course.Cohort is not null
+                ? string.Equals(course.Cohort.Status, "Completed", StringComparison.OrdinalIgnoreCase)
+                : course.Status == "Completed",
+            IsLearnerCompleted = course.Status == "Completed",
             IsCompleted = course.Status == "Completed",
             Certificate = (object?)null,
             Note = InternalCompletionNote

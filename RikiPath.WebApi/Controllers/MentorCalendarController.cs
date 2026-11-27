@@ -13,7 +13,7 @@ public sealed class MentorCalendarController(IMentorCalendarService service, ICl
     [HttpPost("connect")]
     public async Task<IActionResult> Connect(CancellationToken ct)
     {
-        if (!service.IsConfigured) return Conflict(new { ErrorMessage = "Google Calendar chưa được cấu hình trên Backend." });
+        if (!service.IsConfigured) return Conflict(new { ErrorMessage = "Tính năng kết nối Google Calendar hiện chưa sẵn sàng." });
         return Ok(new { Result = new { Url = await service.ConnectAsync(claims.GetUserClaim().Id, ct) } });
     }
     [HttpPost("callback")]

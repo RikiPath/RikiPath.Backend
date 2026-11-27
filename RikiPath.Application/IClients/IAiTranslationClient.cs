@@ -4,7 +4,8 @@ public sealed record AiTranslationPayload(
     string Translation,
     string? Reading,
     string? GrammarNote,
-    List<AiTranslationSegment> Breakdown);
+    List<AiTranslationSegment> Breakdown,
+    string? ProviderName = null);
 
 public sealed record AiTranslationSegment(
     string Surface,

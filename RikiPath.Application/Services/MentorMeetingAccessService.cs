@@ -63,10 +63,54 @@ namespace RikiPath.Application.Services
         }
         public async Task<MeetingAccessInfoResponse?> GetMeetingAsync(Guid roomId, CancellationToken cancellationToken)
         {
+            var nowUtc = DateTime.UtcNow;
             var slot = await unitOfWork.MentorAvailabilities.GetActiveSlotByRoomIdAsync(roomId, cancellationToken);
             if (slot is null || slot.IsDeleted || !slot.IsApproved || slot.RejectedAt != null
-                || DateTime.UtcNow < slot.StartTime.AddMinutes(-15) || DateTime.UtcNow >= slot.EndTime.AddMinutes(30))
+                || nowUtc < slot.StartTime.AddMinutes(-15) || nowUtc >= slot.EndTime.AddMinutes(30))
                 return null;
+
+            var cohort = await unitOfWork.StudyCohorts.Query().AsNoTracking()
+                .Include(x => x.GroupPolicy)
+                .Include(x => x.Enrollments)
+                .Include(x => x.Sessions)
+                    .ThenInclude(s => s.Availability)
+                        .ThenInclude(a => a.GroupPolicy)
+                .AsSplitQuery()
+                .FirstOrDefaultAsync(x => x.Sessions.Any(s => s.AvailabilityId == slot.Id), cancellationToken);
+
+            if (cohort is not null)
+            {
+                var cohortStatus = cohort.Status?.Trim() ?? string.Empty;
+                if (string.Equals(cohortStatus, "Cancelled", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(cohortStatus, "Completed", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(cohortStatus, "Draft", StringComparison.OrdinalIgnoreCase))
+                    return null;
+
+                var confirmedEnrolledCount = cohort.Enrollments.Count(c =>
+                    c.PaymentStatus is "Paid" or "PartiallyRefunded"
+                    && c.Status is not ("PaymentReview" or "Cancelled" or "Transferred" or "PendingPayment" or "PaymentExpired" or "PaymentFailed"));
+
+                var effectivePolicy = cohort.GroupPolicy
+                    ?? slot.GroupPolicy
+                    ?? cohort.Sessions.Select(s => s.Availability.GroupPolicy).FirstOrDefault(p => p is not null);
+                var minLearners = Math.Max(1, effectivePolicy?.MinLearnersToStart ?? 1);
+                if (confirmedEnrolledCount < minLearners)
+                    return null;
+
+                var firstSession = cohort.Sessions
+                    .Where(s => s.Availability != null && s.Availability.IsApproved && !s.Availability.IsDeleted && s.Availability.RejectedAt == null)
+                    .OrderBy(s => s.Availability.StartTime)
+                    .FirstOrDefault();
+                var cutoffMinutes = firstSession?.Availability.GroupPolicy?.EnrollmentCutoffMinutesBeforeFirstSession
+                    ?? effectivePolicy?.EnrollmentCutoffMinutesBeforeFirstSession
+                    ?? 0;
+                var enrollmentCutoffUtc = firstSession is null
+                    ? cohort.StartsAt
+                    : firstSession.Availability.StartTime.AddMinutes(-cutoffMinutes);
+                if (!string.Equals(cohortStatus, "Completed", StringComparison.OrdinalIgnoreCase)
+                    && enrollmentCutoffUtc > nowUtc)
+                    return null;
+            }
 
             // Giữ đúng guard cũ: chỉ coi là Mentor hợp lệ nếu Role thực sự là Mentor
             // (phòng vệ trường hợp dữ liệu Mentor bị sai/thiếu).
@@ -80,10 +124,14 @@ namespace RikiPath.Application.Services
                 IsMentor = true
             };
 
-            var courseLearners = await unitOfWork.StudyCourses.Query().Where(c => c.PaymentStatus == "Paid"
-                && c.Status == "Active" && c.Sessions.Any(s => s.AvailabilityId == slot.Id && s.Status == "Scheduled"))
+            var courseLearners = await unitOfWork.StudyCourses.Query()
+                .Where(c => (c.PaymentStatus == "Paid" || c.PaymentStatus == "PartiallyRefunded")
+                    && (c.Status == "Active" || c.Status == "Ready")
+                    && c.Sessions.Any(s => s.AvailabilityId == slot.Id && s.Status == "Scheduled"))
                 .Select(c => new MeetingParticipantResponse { UserId = c.LearnerId,
                     Name = (c.Learner.FirstName + " " + c.Learner.LastName).Trim(), IsMentor = false }).ToListAsync(cancellationToken);
+            if (cohort is null && courseLearners.Count == 0)
+                return null;
             var learners = courseLearners.DistinctBy(x => x.UserId).ToList();
             return new MeetingAccessInfoResponse
             {

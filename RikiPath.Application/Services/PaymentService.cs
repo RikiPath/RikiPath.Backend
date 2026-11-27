@@ -56,7 +56,7 @@ public sealed class PaymentService(
             {
                 >= 900_000_000 => await HandlePlanPaymentAsync((int)(code - 900_000_000), callback, webhook, ct),
                 >= 800_000_000 => await HandleAiTopUpAsync((int)(code - 800_000_000), callback, webhook, ct),
-                >= 700_000_000 => await HandleCoursePaymentAsync((int)(code - 700_000_000), callback, webhook.Data.Reference, ct),
+                >= 700_000_000 => await HandleCoursePaymentAsync((int)(code - 700_000_000), callback, webhook, ct),
                 // PayOS "confirm webhook" sends a signed sample (e.g. orderCode 123) and requires 2xx; individual mentor
                 // plans are discontinued. Neither grants anything.
                 _ => Ignored(code, "no RikiPath order uses this code range"),
@@ -86,40 +86,91 @@ public sealed class PaymentService(
         return ApiResponse<bool>.Success(false, message: "Webhook đã nhận; thông tin không khớp đơn hàng nên không được ghi nhận.");
     }
 
-    private async Task<ApiResponse<bool>> HandleCoursePaymentAsync(int id, PaymentCallbackResult callback, string? reference, CancellationToken ct)
+    private async Task<ApiResponse<bool>> HandleCoursePaymentAsync(int id, PaymentCallbackResult callback, PayOsWebhookRequest webhook, CancellationToken ct)
     {
         if (studyCourses is null) return ApiResponse<bool>.Fail("Dịch vụ khóa học chưa sẵn sàng.", HttpStatusCode.ServiceUnavailable);
-        var result = await studyCourses.ConfirmPaymentAsync(id, callback, reference, ct);
-        return result.IsSuccess ? ApiResponse<bool>.Success(true)
-            : ApiResponse<bool>.Fail(result.ErrorMessage ?? "Không xác nhận được thanh toán khóa học.", (System.Net.HttpStatusCode)result.StatusCode,
-                result.ErrorCode);
+        var currency = webhook.Data?.Currency;
+        if (!string.IsNullOrWhiteSpace(currency) && !string.Equals(currency, "VND", StringComparison.OrdinalIgnoreCase))
+            return Rejected(id, callback.OrderCode, "currency mismatch (course)");
+
+        var result = await studyCourses.ConfirmPaymentAsync(id, callback, webhook.Data?.Reference, ct);
+        if (result.IsSuccess)
+            return ApiResponse<bool>.Success(true);
+
+        // Lỗi cố định (4xx: sai số tiền, không tìm thấy đơn, đơn không hợp lệ) phải trả 200 kèm log để tránh PayOS retry vô hạn.
+        var statusInt = (int)result.StatusCode;
+        if (statusInt is >= 400 and < 500)
+            return Rejected(id, callback.OrderCode, $"{result.ErrorCode ?? "COURSE_PAYMENT_REJECTED"}: {result.ErrorMessage}");
+
+        return ApiResponse<bool>.Fail(
+            result.ErrorMessage ?? "Không xác nhận được thanh toán khóa học.",
+            (HttpStatusCode)result.StatusCode,
+            result.ErrorCode);
     }
 
     private async Task<ApiResponse<bool>> HandleAiTopUpAsync(
-    int topUpId, PaymentCallbackResult callback, PayOsWebhookRequest webhook, CancellationToken ct)
+        int topUpId, PaymentCallbackResult callback, PayOsWebhookRequest webhook, CancellationToken ct)
     {
-        var topUp = await unitOfWork.AiCreditTopUps.GetByIdAsync(topUpId, ct);
-        if (topUp is null)
+        var data = webhook.Data;
+        if (!string.IsNullOrWhiteSpace(data?.Currency) &&
+            !string.Equals(data.Currency, "VND", StringComparison.OrdinalIgnoreCase))
+        {
+            return Rejected(topUpId, callback.OrderCode, "currency mismatch (AI top-up)");
+        }
+
+        var lookup = await unitOfWork.AiCreditTopUps.Query()
+            .AsNoTracking()
+            .Where(t => t.Id == topUpId)
+            .Select(t => new { t.Id, t.UserId })
+            .FirstOrDefaultAsync(ct);
+        if (lookup is null)
             return Ignored(callback.OrderCode, "unknown AI top-up");
-        if (callback.Amount != topUp.TotalAmount)
-            return Rejected(topUpId, callback.OrderCode, "amount mismatch (AI top-up)");
 
-        if (topUp.PaymentStatus != PaymentStatus.Pending)
-            return ApiResponse<bool>.Success(true, message: "Đơn đã được xử lý trước đó.");
-
-        if (!callback.IsSuccess)
+        ApiResponse<bool>? response = null;
+        await unitOfWork.ExecuteInTransactionAsync(async token =>
         {
-            topUp.PaymentStatus = PaymentStatus.Failed;
-        }
-        else
-        {
-            topUp.PaymentStatus = PaymentStatus.Paid;
-            topUp.PaymentTransactionId = webhook.Data.Reference;
-            topUp.ActivatedAt = DateTime.UtcNow;
-        }
+            response = null;
+            await unitOfWork.UserAccounts.GetByIdForUpdateAsync(lookup.UserId, token);
+            var topUp = await unitOfWork.AiCreditTopUps.GetByIdAsync(topUpId, token);
+            if (topUp is null)
+            {
+                response = Ignored(callback.OrderCode, "unknown AI top-up");
+                return;
+            }
+            if (topUp.PaymentStatus != PaymentStatus.Pending)
+            {
+                response = ApiResponse<bool>.Success(true, message: "Đơn đã được xử lý trước đó.");
+                return;
+            }
+            if (callback.Amount != topUp.TotalAmount)
+            {
+                response = Rejected(topUpId, callback.OrderCode, "amount mismatch (AI top-up)");
+                return;
+            }
+            if (!string.IsNullOrWhiteSpace(topUp.PaymentTransactionId)
+                && StudyOrderCodes.TryReadPendingReference(topUp.PaymentTransactionId, topUp.Id, out var boundLinkId, out _)
+                && !string.Equals(boundLinkId, data?.PaymentLinkId, StringComparison.Ordinal))
+            {
+                response = Rejected(topUpId, callback.OrderCode, "payment link id mismatch (AI top-up)");
+                return;
+            }
 
-        await unitOfWork.SaveChangesAsync(ct);
-        return ApiResponse<bool>.Success(true);
+            if (!callback.IsSuccess)
+            {
+                topUp.PaymentStatus = PaymentStatus.Failed;
+            }
+            else
+            {
+                topUp.PaymentStatus = PaymentStatus.Paid;
+                topUp.PaymentTransactionId = webhook.Data.Reference;
+                topUp.ActivatedAt = DateTime.UtcNow;
+            }
+
+            await unitOfWork.SaveChangesAsync(token);
+            response = ApiResponse<bool>.Success(true);
+        }, ct);
+
+        return response ?? ApiResponse<bool>.Success(true);
     }
 
     private async Task<ApiResponse<bool>> HandlePlanPaymentAsync(

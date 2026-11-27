@@ -53,13 +53,20 @@ public sealed partial class StudyCourseService
     }
 
     private async Task<MentorGroupPolicy> CurrentPolicyAsync(CancellationToken ct)
-        => (groupPolicies is null ? null : await groupPolicies.GetEffectiveAsync(DateTime.UtcNow, ct))
-           ?? new MentorGroupPolicy { Version = 0 };
+    {
+        if (groupPolicies is null)
+            return new MentorGroupPolicy { Version = 0 };
+        var effective = await groupPolicies.GetEffectiveAsync(DateTime.UtcNow, ct);
+        Rule(effective is not null, "GROUP_POLICY_UNAVAILABLE",
+            "Hệ thống chưa có chính sách lớp học nhóm đang có hiệu lực. Vui lòng liên hệ Quản trị viên.",
+            HttpStatusCode.ServiceUnavailable);
+        return effective!;
+    }
 
     private static DateTime? FirstSessionStartUtc(StudyCohort cohort)
         => cohort.Sessions.Count == 0 ? null : cohort.Sessions.Min(s => s.Availability.StartTime);
 
-    private const string SourceStartedMessage = "Lớp hiện tại đã khai giảng; không thể chuyển lớp sau khi khóa học đã bắt đầu.";
+    private const string SourceStartedMessage = "Lớp hiện tại đã bắt đầu; không thể chuyển lớp sau khi khóa học đã bắt đầu.";
 
     private static bool SourceStarted(StudyCohort sourceCohort, DateTime now)
         => (FirstSessionStartUtc(sourceCohort) ?? sourceCohort.StartsAt) <= now;
@@ -105,7 +112,7 @@ public sealed partial class StudyCourseService
         var targetStart = FirstSessionStartUtc(target) ?? target.StartsAt;
         // Chuyển vào lớp đã khai giảng KHÔNG được hỗ trợ khi chưa có quyết định của Product Owner.
         Check("TRANSFER_TARGET_STARTED", targetStart > now,
-            "Lớp đích đã khai giảng; chưa hỗ trợ chuyển vào lớp đang học.");
+            "Lớp đích đã bắt đầu; chưa hỗ trợ chuyển vào lớp đang học.");
         Check("TRANSFER_TARGET_CUTOFF", EnrollmentCutoffUtc(target) > now,
             "Lớp đích đã qua hạn khóa đăng ký theo chính sách.");
         Check("TRANSFER_LEVEL_MISMATCH", target.Plan.CertificateLevelId == source.CertificateLevelId,
@@ -116,16 +123,23 @@ public sealed partial class StudyCourseService
             "Lớp đích khác chương trình (số buổi/thời lượng) của khóa đã mua.");
         var sourcePlanPrice = await uow.StudyCoursePlans.Query().Where(p => p.Id == source.PlanId)
             .Select(p => (decimal?)p.Price).SingleOrDefaultAsync(ct);
-        Check("TRANSFER_PAYMENT_POLICY_REQUIRED", target.PlanId == source.PlanId || target.Plan.Price == sourcePlanPrice,
+        var effectiveSourceTuition = sourceCohort.TotalTuitionSnapshot is decimal srcSnap && srcSnap > 0
+            ? srcSnap
+            : (source.Amount > 0 ? source.Amount : (sourcePlanPrice ?? 0m));
+        var effectiveTargetTuition = target.TotalTuitionSnapshot is decimal dstSnap && dstSnap > 0
+            ? dstSnap
+            : target.Plan.Price;
+        Check("TRANSFER_PAYMENT_POLICY_REQUIRED", target.PlanId == source.PlanId || effectiveTargetTuition == effectiveSourceTuition,
             "Lớp đích có học phí khác; chưa có chính sách thu thêm/hoàn tiền nên không thể chuyển.");
         Check("TRANSFER_TARGET_SCHEDULE_PENDING", target.Sessions.All(s => s.Availability.IsApproved && !s.Availability.IsDeleted
                 && s.Availability.RejectedAt == null && s.Availability.ChangeRequestedAt == null),
             "Lịch lớp đích đang chờ xử lý điều chỉnh.", HttpStatusCode.Conflict);
+        var targetCapacity = target.CapacitySnapshot ?? target.Capacity;
         var targetPolicy = target.Sessions.Select(s => s.Availability.GroupPolicy).FirstOrDefault(p => p is not null);
-        Check("TRANSFER_TARGET_POLICY_CAPACITY", targetPolicy is null || target.Capacity <= targetPolicy.MaxLearners,
+        Check("TRANSFER_TARGET_POLICY_CAPACITY", targetPolicy is null || targetCapacity <= targetPolicy.MaxLearners,
             "Sĩ số lớp đích vượt giới hạn chính sách.", HttpStatusCode.Conflict);
         var seatsTaken = target.Enrollments.Count(x => ReservesSeat(x, now));
-        Check("TRANSFER_TARGET_FULL", seatsTaken < target.Capacity, "Lớp đích đã hết chỗ.", HttpStatusCode.Conflict);
+        Check("TRANSFER_TARGET_FULL", seatsTaken < targetCapacity, "Lớp đích đã hết chỗ.", HttpStatusCode.Conflict);
         Check("TRANSFER_DUPLICATE_ENROLLMENT", !target.Enrollments.Any(x => x.LearnerId == source.LearnerId && ReservesSeat(x, now)),
             "Học viên đã có ghi danh hoặc giữ chỗ ở lớp đích.", HttpStatusCode.Conflict);
         var conflict = await HasLearnerConflictAsync(source.LearnerId, target.Sessions.Select(s => s.Availability).ToList(), source.Id, ct);
@@ -136,9 +150,10 @@ public sealed partial class StudyCourseService
     private static object TransferCohortSummary(StudyCohort c, DateTime now) => new
     {
         c.Id, c.Name, c.Status, c.MentorId, MentorName = $"{c.Mentor?.FirstName} {c.Mentor?.LastName}".Trim(),
-        Level = c.Plan?.CertificateLevel?.Code, c.PlanId, c.StartsAt, c.EndsAt, c.Capacity,
+        Level = c.Plan?.CertificateLevel?.Code, c.PlanId, c.StartsAt, c.EndsAt,
+        Capacity = c.CapacitySnapshot ?? c.Capacity,
         EnrolledCount = c.Enrollments.Count(x => ReservesSeat(x, now)),
-        SeatsAvailable = Math.Max(0, c.Capacity - c.Enrollments.Count(x => ReservesSeat(x, now))),
+        SeatsAvailable = Math.Max(0, (c.CapacitySnapshot ?? c.Capacity) - c.Enrollments.Count(x => ReservesSeat(x, now))),
         EnrollmentClosesAtUtc = c.Sessions.Count == 0 ? c.StartsAt : EnrollmentCutoffUtc(c),
         Sessions = c.Sessions.OrderBy(s => s.Number).Select(s => new { s.Number, s.Availability.StartTime, s.Availability.EndTime })
     };
@@ -205,7 +220,7 @@ public sealed partial class StudyCourseService
                 Rule(target.Status == "Published", "TRANSFER_TARGET_NOT_PUBLISHED", "Lớp đích chưa mở đăng ký.");
                 Rule(target.Plan.CertificateLevelId == locked.CertificateLevelId, "TRANSFER_LEVEL_MISMATCH", "Lớp đích khác cấp độ JLPT của khóa đã mua.");
                 Rule((FirstSessionStartUtc(target) ?? target.StartsAt) > DateTime.UtcNow, "TRANSFER_TARGET_STARTED",
-                    "Lớp đích đã khai giảng; chưa hỗ trợ chuyển vào lớp đang học.");
+                    "Lớp đích đã bắt đầu; chưa hỗ trợ chuyển vào lớp đang học.");
             }
             if (evidence is not null && !uploaded)
             {
@@ -221,10 +236,10 @@ public sealed partial class StudyCourseService
                 PolicyVersionSnapshot = policy.Version == 0 ? null : policy.Version, CreatedAtUtc = DateTime.UtcNow
             };
             AddTransferEvent(request, "Requested", targetCohortId.HasValue
-                ? $"Học viên đề xuất chuyển sang lớp #{targetCohortId}." : "Học viên đề nghị Admin chọn lớp phù hợp.");
+                ? $"Học viên đề xuất chuyển sang lớp #{targetCohortId}." : "Học viên đề nghị Quản trị viên chọn lớp phù hợp.");
             await uow.CohortTransferRequests.AddAsync(request, token);
             var course = await uow.StudyCourses.Query().Include(x => x.Audit).SingleAsync(x => x.Id == courseId, token);
-            Audit(course, "CohortTransferRequested", "Học viên gửi yêu cầu chuyển lớp; chờ Admin xem xét.");
+            Audit(course, "CohortTransferRequested", "Học viên đã gửi yêu cầu chuyển lớp; đang chờ Quản trị viên xem xét.");
             await uow.SaveChangesAsync(token);
             var admins = await uow.UserAccounts.Query().Where(u => u.Role == Role.Admin && !u.IsDeleted).Select(u => u.Id).ToListAsync(token);
             QueueNotifications($"cohort-transfer:{request.Id}:requested", "CohortTransferRequest", request.Id.ToString(),
@@ -378,7 +393,7 @@ public sealed partial class StudyCourseService
             };
             AddCohortSessions(destination, target);
             Audit(destination, "CohortTransferIn", $"Chuyển từ ghi danh #{source.Id} (lớp #{sourceCohort.Id}) theo yêu cầu #{request.Id}.");
-            Audit(source, "CohortTransferOut", $"Đã chuyển sang lớp #{target.Id} theo yêu cầu #{request.Id}; lịch sử điểm danh/BTVN giữ nguyên.");
+            Audit(source, "CohortTransferOut", $"Đã chuyển sang lớp {target.Name}; lịch sử điểm danh và bài tập về nhà được giữ nguyên.");
             await uow.StudyCourses.AddAsync(destination, token);
             await uow.SaveChangesAsync(token);
 
@@ -389,7 +404,7 @@ public sealed partial class StudyCourseService
             request.PolicyVersionSnapshot = evaluation.Policy.Version == 0 ? request.PolicyVersionSnapshot : evaluation.Policy.Version;
             request.EligibilitySnapshot = JsonSerializer.Serialize(evaluation.Checks.Select(c => new { c.Code, c.Passed }));
             request.Revision++;
-            AddTransferEvent(request, "Approved", $"Admin duyệt chuyển sang lớp #{target.Id}; ghi danh mới #{destination.Id}.");
+            AddTransferEvent(request, "Approved", $"Quản trị viên đã phê duyệt chuyển sang lớp {target.Name}.");
             QueueNotifications($"cohort-transfer:{request.Id}:approved", "CohortTransferRequest", request.Id.ToString(),
             [
                 (request.LearnerId, "Yêu cầu chuyển lớp đã được duyệt", $"Bạn đã được chuyển sang lớp {target.Name}.", "CohortTransfer", $"/my-courses/{destination.Id}"),

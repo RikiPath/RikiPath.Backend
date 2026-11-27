@@ -56,6 +56,7 @@ public class AuthorQuestionDetails
     public string QuestionText { get; set; } = string.Empty;
     public string? Explanation { get; set; }
     public string? AudioUrl { get; set; }
+    public string? AudioTranscript { get; set; }
     public string? ImageUrl { get; set; }
     public int SortOrder { get; set; }
     public List<AuthorOptionDetails> Options { get; set; } = [];
@@ -75,6 +76,7 @@ public class AuthorOptionDetails
     public string? ImageUrl { get; set; }
     public int Id { get; set; }
     public string OptionText { get; set; } = string.Empty;
+    public string? Explanation { get; set; }
     public bool IsCorrect { get; set; }
     public int SortOrder { get; set; }
 }

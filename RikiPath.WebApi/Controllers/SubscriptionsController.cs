@@ -19,6 +19,17 @@ public sealed class SubscriptionsController(SubscriptionAccessService subscripti
     public async Task<IActionResult> Me(CancellationToken ct)
         => Ok(ApiResponse<StudyAccessResponse>.Success(await subscriptions.GetAccessAsync(ct)));
 
+    [HttpGet("history")]
+    public async Task<IActionResult> History(
+        [FromQuery] string? status,
+        [FromQuery] string? category,
+        [FromQuery] int? days,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 8,
+        CancellationToken ct = default)
+        => Ok(ApiResponse<PagedSubscriptionHistoryResponse>.Success(
+            await subscriptions.GetPurchaseHistoryAsync(status, category, days, page, pageSize, ct)));
+
     [HttpPost("purchase")]
     public async Task<IActionResult> Purchase([FromBody] StudyPlanPurchase request, CancellationToken ct)
     {

@@ -2,6 +2,8 @@ using RikiPath.Application.Requests.MentorScheduling;
 
 namespace RikiPath.Application.Responses.MentorScheduling;
 
+public sealed record SupportedPolicyLevelDto(int Id, string Code, string Name);
+
 public sealed class TeachingProposalPolicyResponse
 {
     public int PolicyId { get; set; }
@@ -22,8 +24,13 @@ public sealed class TeachingProposalPolicyResponse
     public List<int> AllowedGridSteps { get; set; } = [15, 30];
     public int OperatingStartMinute { get; set; } = 7 * 60;
     public int OperatingEndMinute { get; set; } = 22 * 60;
-    public int MinimumProposalLeadDays { get; set; } = 7;
-    public int MinimumPublishedEnrollmentDays { get; set; } = 3;
+    public int MinimumProposalLeadDays { get; set; } = 14;
+    public int MinimumPublishedEnrollmentDays { get; set; } = 7;
+    public int CheckoutHoldMinutes { get; set; } = 10;
+    public int EnrollmentCutoffMinutesBeforeFirstSession { get; set; }
+    public int MaxTotalActiveClassesPerMentor { get; set; } = 4;
+    public Dictionary<string, int> MaxActiveClassesByLevel { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, decimal> TuitionPerSessionByLevel { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 }
 
 public sealed class QualifiedJlptLevelItem
@@ -41,6 +48,9 @@ public sealed class QualifiedJlptLevelItem
     public int? BlockingProposalId { get; set; }
     public int? BlockingCohortId { get; set; }
     public string? BlockingTitle { get; set; }
+    public int ActiveCount { get; set; }
+    public int MaxActiveClasses { get; set; } = 1;
+    public int RemainingSlots { get; set; }
 }
 
 public sealed class EligibleCoursePlanItem
@@ -111,6 +121,9 @@ public sealed class TeachingProposalValidationResponse
     public int WeeklySessionCount { get; set; }
     public int TotalSessions { get; set; }
     public int TotalTeachingMinutes { get; set; }
+    public decimal TuitionPerSession { get; set; }
+    public decimal TotalCourseTuition { get; set; }
+    public int? TuitionPolicyVersion { get; set; }
     public DateOnly? ProjectedEndDate { get; set; }
     public List<ProposalValidationIssue> Issues { get; set; } = [];
     public List<GeneratedSessionOccurrenceResponse> OccurrencesPreview { get; set; } = [];
@@ -159,6 +172,9 @@ public sealed class TeachingProposalResponse
     public int SessionDurationMinutes { get; set; }
     public int WeeklySessionCount { get; set; }
     public int TotalSessions { get; set; }
+    public decimal TuitionPerSession { get; set; }
+    public decimal TotalCourseTuition { get; set; }
+    public int? TuitionPolicyVersion { get; set; }
 
     public List<WeeklySessionSlotDto> WeeklySessions { get; set; } = [];
     public string? OptionalNotes { get; set; }
@@ -199,4 +215,68 @@ public sealed class MentorTeachingProposalContextResponse
     public List<EligibleCoursePlanItem> CoursePlans { get; set; } = [];
     public MentorWorkloadSummaryResponse Workload { get; set; } = new();
     public List<TeachingProposalResponse> Proposals { get; set; } = [];
+}
+
+public sealed class BulkApproveProposalItemResult
+{
+    public int ProposalId { get; set; }
+    public int? MentorId { get; set; }
+    public string MentorName { get; set; } = string.Empty;
+    public string? JlptLevelCode { get; set; }
+    public string? CourseTitle { get; set; }
+    public DateOnly? ExpectedStartDate { get; set; }
+    public int WeeklySessionCount { get; set; }
+    public int TotalSessions { get; set; }
+    public decimal TuitionPerSession { get; set; }
+    public decimal TotalCourseTuition { get; set; }
+    public int? TuitionPolicyVersion { get; set; }
+    public string Status { get; set; } = string.Empty;
+    public int? CurrentRevision { get; set; }
+    public bool IsEligible { get; set; }
+    public bool Approved { get; set; }
+    public int? LinkedCohortId { get; set; }
+    public string? LinkedCohortName { get; set; }
+    public List<int> GeneratedAvailabilityIds { get; set; } = [];
+    public List<ProposalValidationIssue> Issues { get; set; } = [];
+}
+
+public sealed class RepairApprovedCohortsResponse
+{
+    public int ScannedCount { get; set; }
+    public int CreatedCount { get; set; }
+    public int SkippedCount { get; set; }
+    public List<int> CreatedCohortIds { get; set; } = [];
+    public List<string> Notes { get; set; } = [];
+}
+
+public sealed class BulkApproveTeachingProposalsResponse
+{
+    public bool AllEligible { get; set; }
+    public bool Executed { get; set; }
+    public int TotalRequested { get; set; }
+    public int EligibleCount { get; set; }
+    public int InvalidCount { get; set; }
+    public int ApprovedCount { get; set; }
+    public List<int> ApprovedProposalIds { get; set; } = [];
+    public List<BulkApproveProposalItemResult> Results { get; set; } = [];
+}
+
+public sealed class RepairedProposalScheduleItem
+{
+    public int ProposalId { get; set; }
+    public string? CourseTitle { get; set; }
+    public string? JlptLevelCode { get; set; }
+    public string Action { get; set; } = string.Empty;
+    public int PreviousWeeklyCount { get; set; }
+    public int RestoredWeeklyCount { get; set; }
+    public string Reason { get; set; } = string.Empty;
+}
+
+public sealed class RepairInvalidProposalSchedulesResponse
+{
+    public int ScannedCount { get; set; }
+    public int InvalidFoundCount { get; set; }
+    public int RestoredCount { get; set; }
+    public int SkippedCount { get; set; }
+    public List<RepairedProposalScheduleItem> Items { get; set; } = [];
 }

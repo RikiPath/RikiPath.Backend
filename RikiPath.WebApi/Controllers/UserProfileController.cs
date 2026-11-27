@@ -10,8 +10,20 @@ namespace RikiPath.WebApi.Controllers
     [Route("api/[controller]")]
     [ApiController]
     [Authorize]
-    public class UserProfileController(IUserProfileService userProfileService) : ControllerBase
+    public class UserProfileController(
+        IUserProfileService userProfileService,
+        ILearnerSetupStateService setupStateService) : ControllerBase
     {
+        /// <summary>
+        /// Trạng thái thiết lập mục tiêu JLPT, đánh giá năng lực và quyền mở lộ trình chuẩn/AI của học viên.
+        /// </summary>
+        [Authorize(Roles = "Learner")]
+        [HttpGet("me/setup-state")]
+        public async Task<IActionResult> GetSetupState(CancellationToken cancellationToken)
+        {
+            var result = await setupStateService.GetCurrentAsync(cancellationToken);
+            return StatusCode((int)result.StatusCode, result);
+        }
         /// <summary>
         /// Lấy thông tin hồ sơ (profile) của người dùng hiện tại.
         /// </summary>

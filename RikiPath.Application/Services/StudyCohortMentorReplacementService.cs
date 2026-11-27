@@ -29,36 +29,131 @@ public sealed partial class StudyCourseService
         void Check(string code, bool passed, string message, HttpStatusCode status = HttpStatusCode.UnprocessableEntity)
             => checks.Add(new TransferCheck(code, passed, message, (int)status));
 
-        Check("REPLACEMENT_DISABLED_BY_POLICY", policy.MentorReplacementEnabled, "Chính sách hiện hành chưa cho phép thay cố vấn chính.");
+        Check("REPLACEMENT_DISABLED_BY_POLICY", policy.MentorReplacementEnabled, "Chính sách hiện hành chưa cho phép thay Giáo viên phụ trách.");
         var cohort = await CohortForTransfer.SingleOrDefaultAsync(x => x.Id == cohortId, ct);
         Check("REPLACEMENT_COHORT_NOT_FOUND", cohort is not null, "Không tìm thấy lớp.", HttpStatusCode.NotFound);
         if (cohort is null) return new ReplacementEvaluation(null, null, policy, 0, [], [], checks, conflicts);
-        Check("REPLACEMENT_COHORT_NOT_ACTIVE", cohort.Status is "Published" or "Draft", "Lớp đã đóng; không thể thay cố vấn.", HttpStatusCode.Conflict);
-        Check("REPLACEMENT_SAME_MENTOR", cohort.MentorId != mentorId, "Cố vấn thay thế phải khác cố vấn hiện tại.");
+        Check("REPLACEMENT_COHORT_NOT_ACTIVE", cohort.Status is "Published" or "Draft", "Lớp đã đóng; không thể thay Giáo viên.", HttpStatusCode.Conflict);
+        Check("REPLACEMENT_SAME_MENTOR", cohort.MentorId != mentorId, "Giáo viên thay thế phải khác Giáo viên hiện tại.");
 
         var mentor = await uow.UserAccounts.Query().Include(x => x.MentorProfile).SingleOrDefaultAsync(x => x.Id == mentorId, ct);
         Check("REPLACEMENT_MENTOR_NOT_ELIGIBLE", mentor is { Role: Role.Mentor, IsDeleted: false }
                 && mentor.MentorProfile?.VerificationStatus == MentorVerificationStatus.Approved,
-            "Cố vấn thay thế chưa được duyệt hồ sơ hoặc không còn hoạt động.");
-        var qualified = uow.MentorTeachingQualifications is not null && await uow.MentorTeachingQualifications.Query()
+            "Giáo viên thay thế chưa được phê duyệt hồ sơ hoặc không còn hoạt động.");
+        var qualCodes = uow.MentorTeachingQualifications is null
+            ? new List<string>()
+            : await uow.MentorTeachingQualifications.Query().AsNoTracking()
+                .Include(q => q.CertificateLevel)
+                .Where(q => q.MentorUserId == mentorId && q.IsActive && q.RevokedAtUtc == null)
+                .Select(q => q.CertificateLevel.Code)
+                .ToListAsync(ct);
+        var highestRank = qualCodes
+            .Append(mentor?.MentorProfile?.JlptLevel)
+            .Select(RikiPath.Domain.MentorScheduling.MentorSlotPolicy.GetJlptRank)
+            .DefaultIfEmpty(0)
+            .Max();
+        var targetLevelCode = cohort.Plan.CertificateLevel?.Code;
+        var hasDirectQualification = uow.MentorTeachingQualifications is not null && await uow.MentorTeachingQualifications.Query()
             .AnyAsync(q => q.MentorUserId == mentorId && q.CertificateLevelId == cohort.Plan.CertificateLevelId && q.IsActive && q.RevokedAtUtc == null, ct);
-        Check("REPLACEMENT_LEVEL_NOT_QUALIFIED", qualified, $"Cố vấn thay thế chưa được xác nhận dạy cấp độ {cohort.Plan.CertificateLevel?.Code}.");
+        var qualified = hasDirectQualification || RikiPath.Domain.MentorScheduling.MentorSlotPolicy.CanMentorTeachLevel(highestRank, targetLevelCode);
+        Check("REPLACEMENT_LEVEL_NOT_QUALIFIED", qualified, $"Giáo viên thay thế chưa đủ trình độ hoặc chưa được phân quyền giảng dạy cấp độ {targetLevelCode}.");
+
+        if (mentor is not null)
+        {
+            var levelLimit = policy.GetMaxActiveClassesForLevel(cohort.Plan.CertificateLevelId, targetLevelCode);
+            var maxTotalLimit = Math.Max(1, policy.MaxTotalActiveClassesPerMentor);
+            var targetCohorts = await uow.StudyCohorts.Query().AsNoTracking()
+                .Include(c => c.Plan)
+                .Include(c => c.Enrollments)
+                .Where(c => c.MentorId == mentorId && c.Id != cohort.Id)
+                .Select(c => new
+                {
+                    c.Id,
+                    c.Status,
+                    c.EndsAt,
+                    c.SourceProposalId,
+                    LevelId = c.Plan.CertificateLevelId,
+                    HasConfirmed = c.Enrollments.Any(e =>
+                        (e.PaymentStatus == "Paid" || e.PaymentStatus == "PartiallyRefunded")
+                        && e.Status != "PaymentReview"
+                        && e.Status != "Cancelled"
+                        && e.Status != "Transferred"
+                        && e.Status != "PendingPayment"
+                        && e.Status != "PaymentExpired"
+                        && e.Status != "PaymentFailed"),
+                    HasIncompleteConfirmed = c.Enrollments.Any(e =>
+                        (e.PaymentStatus == "Paid" || e.PaymentStatus == "PartiallyRefunded")
+                        && e.Status != "PaymentReview"
+                        && e.Status != "Cancelled"
+                        && e.Status != "Transferred"
+                        && e.Status != "PendingPayment"
+                        && e.Status != "PaymentExpired"
+                        && e.Status != "PaymentFailed"
+                        && e.Status != "Completed"),
+                })
+                .ToListAsync(ct);
+
+            var activeTargetCohorts = targetCohorts
+                .Where(c => !string.Equals(c.Status, "Cancelled", StringComparison.OrdinalIgnoreCase)
+                    && !string.Equals(c.Status, "Completed", StringComparison.OrdinalIgnoreCase)
+                    && (!(c.HasConfirmed && !c.HasIncompleteConfirmed))
+                    && (c.HasConfirmed || c.EndsAt > now))
+                .ToList();
+
+            var cohortProposalIds = targetCohorts
+                .Where(c => c.SourceProposalId.HasValue)
+                .Select(c => c.SourceProposalId!.Value)
+                .ToHashSet();
+
+            var activeTargetProposals = await uow.MentorTeachingProposals.Query().AsNoTracking()
+                .Where(p => p.MentorId == mentorId
+                    && p.CertificateLevelId.HasValue
+                    && (p.Status == MentorTeachingProposalStatus.PendingReview
+                        || p.Status == MentorTeachingProposalStatus.ChangesRequested
+                        || p.Status == MentorTeachingProposalStatus.Approved))
+                .Select(p => new
+                {
+                    p.Id,
+                    LevelId = p.CertificateLevelId!.Value,
+                    p.Status,
+                    HasFutureSlots = p.GeneratedAvailabilities.Any(a => !a.IsDeleted && a.IsApproved && a.RejectedAt == null && a.EndTime > now),
+                })
+                .ToListAsync(ct);
+
+            var unlinkedActiveProposals = activeTargetProposals
+                .Where(p => p.Status != MentorTeachingProposalStatus.Approved
+                    || (!cohortProposalIds.Contains(p.Id) && p.HasFutureSlots))
+                .ToList();
+
+            var activeAtTargetLevel = activeTargetCohorts.Count(c => c.LevelId == cohort.Plan.CertificateLevelId)
+                + unlinkedActiveProposals.Count(p => p.LevelId == cohort.Plan.CertificateLevelId);
+            var totalActiveForMentor = activeTargetCohorts.Count + unlinkedActiveProposals.Count;
+
+            Check("REPLACEMENT_LEVEL_CLASS_LIMIT", levelLimit > 0 && activeAtTargetLevel < levelLimit,
+                levelLimit <= 0
+                    ? $"Cấp độ JLPT {targetLevelCode} hiện tạm ngưng nhận lớp mới theo cấu hình."
+                    : $"Giáo viên thay thế đã đạt giới hạn tối đa {levelLimit} lớp đồng thời ở cấp độ JLPT {targetLevelCode}.",
+                HttpStatusCode.Conflict);
+            Check("REPLACEMENT_TOTAL_CLASS_LIMIT", totalActiveForMentor < maxTotalLimit,
+                $"Giáo viên thay thế đã đạt tổng giới hạn tối đa {maxTotalLimit} lớp đồng thời của hệ thống.",
+                HttpStatusCode.Conflict);
+        }
 
         var earliest = now.AddHours(policy.MentorReplacementLeadHours);
         var ordered = cohort.Sessions.OrderBy(s => s.Number).ToList();
         var from = fromSessionNumber ?? ordered.FirstOrDefault(s => s.Availability.StartTime >= earliest)?.Number ?? 0;
         var affected = ordered.Where(s => from > 0 && s.Number >= from).ToList();
         var retained = ordered.Where(s => from <= 0 || s.Number < from).ToList();
-        Check("REPLACEMENT_NO_FUTURE_SESSIONS", affected.Count > 0, "Lớp không còn buổi tương lai đủ thời gian báo trước để chuyển cho cố vấn mới.", HttpStatusCode.Conflict);
+        Check("REPLACEMENT_NO_FUTURE_SESSIONS", affected.Count > 0, "Lớp không còn buổi học sắp tới đáp ứng đủ thời gian báo trước để chuyển cho Giáo viên mới.", HttpStatusCode.Conflict);
         Check("REPLACEMENT_LEAD_TIME", affected.All(s => s.Availability.StartTime >= earliest),
-            $"Buổi đầu tiên chuyển cho cố vấn mới phải bắt đầu sau ít nhất {policy.MentorReplacementLeadHours} giờ; buổi đã/sắp diễn ra giữ cố vấn hiện tại.");
+            $"Buổi học đầu tiên chuyển cho Giáo viên mới phải bắt đầu sau ít nhất {policy.MentorReplacementLeadHours} giờ; các buổi đã hoặc sắp diễn ra vẫn do Giáo viên hiện tại phụ trách.");
         Check("REPLACEMENT_SESSION_LOCKED", affected.All(s => s.Availability.IsApproved && !s.Availability.IsDeleted
                 && s.Availability.RejectedAt == null && s.Availability.ChangeRequestedAt == null && s.Availability.MentorId == cohort.MentorId),
-            "Có buổi đang chờ điều chỉnh lịch hoặc không còn thuộc cố vấn hiện tại.", HttpStatusCode.Conflict);
+            "Có buổi học đang chờ điều chỉnh lịch hoặc không còn thuộc Giáo viên hiện tại.", HttpStatusCode.Conflict);
         var affectedIds = affected.Select(s => s.AvailabilityId).ToList();
         Check("REPLACEMENT_PENDING_CHANGE_REQUEST", !await uow.CourseScheduleRequests.Query().AnyAsync(x => x.Status == "Pending"
                 && x.Course.CohortId == cohortId && x.Course.Sessions.Any(s => s.Id == x.SessionId && s.AvailabilityId.HasValue && affectedIds.Contains(s.AvailabilityId.Value)), ct),
-            "Có yêu cầu đổi/hủy buổi đang chờ xử lý trong phạm vi thay cố vấn.", HttpStatusCode.Conflict);
+            "Có yêu cầu dời/hủy buổi học đang chờ xử lý trong phạm vi thay Giáo viên.", HttpStatusCode.Conflict);
 
         if (mentor is not null && affected.Count > 0)
         {
@@ -85,12 +180,12 @@ public sealed partial class StudyCourseService
                     StartTime = x.CommitmentStartUtc ?? x.ProposedStartUtc, EndTime = x.CommitmentEndUtc ?? x.ProposedEndUtc, x.Message
                 });
             Check("REPLACEMENT_MENTOR_SCHEDULE_CONFLICT", scheduleConflicts.Count == 0,
-                scheduleConflicts.Count == 0 ? "Cố vấn thay thế không bị trùng lịch."
-                    : $"Cố vấn thay thế bị trùng lịch hoặc vi phạm thời gian nghỉ ở buổi {scheduleConflicts[0].SessionNumber}: {scheduleConflicts[0].Message}",
+                scheduleConflicts.Count == 0 ? "Giáo viên thay thế không bị trùng lịch dạy."
+                    : $"Giáo viên thay thế bị trùng lịch hoặc không đủ thời gian nghỉ ở buổi {scheduleConflicts[0].SessionNumber}: {scheduleConflicts[0].Message}",
                 HttpStatusCode.Conflict);
             Check("REPLACEMENT_DAILY_CAP", capConflicts.Count == 0,
-                capConflicts.Count == 0 ? "Cố vấn thay thế không vượt giới hạn số buổi."
-                    : $"Cố vấn thay thế sẽ vượt số buổi tối đa theo chính sách: {capConflicts[0].Message}", HttpStatusCode.Conflict);
+                capConflicts.Count == 0 ? "Giáo viên thay thế không vượt giới hạn số buổi dạy."
+                    : $"Giáo viên thay thế sẽ vượt số buổi tối đa theo chính sách: {capConflicts[0].Message}", HttpStatusCode.Conflict);
         }
         return new ReplacementEvaluation(cohort, mentor, policy, from, retained, affected, checks, conflicts);
     }
@@ -108,7 +203,7 @@ public sealed partial class StudyCourseService
         var now = DateTime.UtcNow;
         var history = await uow.StudyCohortMentorAssignments.Query().AsNoTracking().Where(x => x.CohortId == cohortId)
             .OrderByDescending(x => x.Id).ToListAsync(ct);
-        var activeLearners = e.Cohort!.Enrollments.Count(x => x.Status == "Active" && x.PaymentStatus == "Paid");
+        var activeLearners = e.Cohort!.Enrollments.Count(x => x.Status == "Active" && x.PaymentStatus is "Paid" or "PartiallyRefunded");
         return new
         {
             CohortId = e.Cohort.Id, e.Cohort.Name, e.Cohort.Revision, e.Cohort.Capacity,
@@ -150,7 +245,7 @@ public sealed partial class StudyCourseService
         Admin();
         Rule(r.IdempotencyKey != Guid.Empty, "REPLACEMENT_IDEMPOTENCY_KEY_REQUIRED", "Thiếu mã chống gửi trùng.");
         var reason = r.Reason?.Trim() ?? "";
-        Rule(reason.Length is >= 10 and <= 1000, "REPLACEMENT_REASON_REQUIRED", "Nhập lý do thay cố vấn từ 10 đến 1000 ký tự.");
+        Rule(reason.Length is >= 10 and <= 1000, "REPLACEMENT_REASON_REQUIRED", "Vui lòng nhập lý do thay Giáo viên từ 10 đến 1000 ký tự.");
         object result = new { };
         await uow.ExecuteInTransactionAsync(async token =>
         {
@@ -201,18 +296,18 @@ public sealed partial class StudyCourseService
                 {
                     MentorId = r.MentorId, StartTime = old.StartTime, EndTime = old.EndTime, RoomId = Guid.NewGuid(),
                     AttendanceTrackingEnabled = old.AttendanceTrackingEnabled, MaxLearners = old.MaxLearners, BookedCount = 0,
-                    IsApproved = true, AdminName = "Admin (thay cố vấn chính)", PublishedAt = now,
+                    IsApproved = true, AdminName = "Quản trị viên (thay Giáo viên phụ trách)", PublishedAt = now,
                     GroupPolicyId = old.GroupPolicyId, PolicyVersion = old.PolicyVersion,
                     SessionMinutesSnapshot = old.SessionMinutesSnapshot, RestMinutesSnapshot = old.RestMinutesSnapshot,
                     LocalBusinessDate = old.LocalBusinessDate, MentorScheduleRuleId = old.MentorScheduleRuleId,
                     GenerationKey = old.GenerationKey is null ? null : $"mentor-replacement:{old.Id}:{r.MentorId}",
-                    ChangeResolution = $"Nhận buổi {session.Number} của lớp #{cohort.Id} từ khung giờ #{old.Id}.",
+                    ChangeResolution = $"Nhận buổi {session.Number} của lớp {cohort.Name}.",
                     CreatedDate = now
                 };
                 old.IsDeleted = true; old.ModifiedDate = now;
-                old.ChangeResolution = $"Chuyển cho cố vấn #{r.MentorId} (thay cố vấn chính lớp #{cohort.Id}).";
+                old.ChangeResolution = $"Chuyển cho Giáo viên mới (thay Giáo viên phụ trách lớp {cohort.Name}).";
                 session.Availability = replacement;
-                foreach (var learnerSession in enrollments.Where(x => x.Status == "Active" && x.PaymentStatus == "Paid")
+                foreach (var learnerSession in enrollments.Where(x => x.Status == "Active" && x.PaymentStatus is "Paid" or "PartiallyRefunded")
                     .SelectMany(x => x.Sessions).Where(x => x.AvailabilityId == old.Id && x.Status == "Scheduled"))
                 {
                     learnerSession.Availability = replacement;
@@ -223,18 +318,18 @@ public sealed partial class StudyCourseService
             {
                 // Mentor phụ trách hiện tại của ghi danh đang học; buổi đã dạy vẫn gắn khung giờ của Mentor cũ.
                 enrollment.MentorId = r.MentorId;
-                Audit(enrollment, "CohortMentorReplaced", $"Cố vấn #{previousMentorId} -> #{r.MentorId} từ buổi {e.FromSessionNumber}. {reason}");
+                Audit(enrollment, "CohortMentorReplaced", $"Thay Giáo viên phụ trách từ buổi {e.FromSessionNumber}. {reason}");
             }
             cohort.MentorId = r.MentorId;
             cohort.Revision++;
             await uow.SaveChangesAsync(token);
             Rule(cohort.Capacity == capacityBefore && cohort.Enrollments.Select(x => x.Id).OrderBy(x => x).SequenceEqual(enrollmentIds),
                 "REPLACEMENT_INVARIANT", "Sĩ số hoặc ghi danh bị thay đổi ngoài dự kiến.", HttpStatusCode.Conflict);
-            var learnerIds = enrollments.Where(x => x.Status == "Active" && x.PaymentStatus == "Paid").Select(x => x.LearnerId).ToList();
+            var learnerIds = enrollments.Where(x => x.Status == "Active" && x.PaymentStatus is "Paid" or "PartiallyRefunded").Select(x => x.LearnerId).ToList();
             QueueNotifications($"cohort-mentor-replacement:{assignment.Id}", "StudyCohort", cohort.Id.ToString(),
-                learnerIds.Select(id => (id, "Lớp có cố vấn chính mới", $"Từ buổi {e.FromSessionNumber}, lớp {cohort.Name} do cố vấn mới phụ trách.", "CohortMentorReplaced", (string?)"/my-courses"))
+                learnerIds.Select(id => (id, "Lớp học có Giáo viên mới", $"Từ buổi {e.FromSessionNumber}, lớp {cohort.Name} sẽ do Giáo viên mới phụ trách.", "CohortMentorReplaced", (string?)"/my-courses"))
                     .Append((r.MentorId, "Bạn được phân công lớp mới", $"Bạn phụ trách lớp {cohort.Name} từ buổi {e.FromSessionNumber}.", "CohortMentorReplaced", (string?)$"/mentor/cohorts/{cohort.Id}"))
-                    .Append((previousMentorId, "Thay đổi phân công lớp", $"Lớp {cohort.Name} được chuyển cho cố vấn khác từ buổi {e.FromSessionNumber}.", "CohortMentorReplaced", (string?)"/mentor/cohorts")));
+                    .Append((previousMentorId, "Thay đổi phân công lớp", $"Lớp {cohort.Name} đã được chuyển cho Giáo viên khác phụ trách từ buổi {e.FromSessionNumber}.", "CohortMentorReplaced", (string?)"/mentor/cohorts")));
             await uow.SaveChangesAsync(token);
             result = new { AssignmentId = assignment.Id, CohortId = cohort.Id, assignment.MentorId, assignment.PreviousMentorId,
                 assignment.EffectiveFromSessionNumber, assignment.AffectedSessionCount, CohortRevision = cohort.Revision, Idempotent = false };

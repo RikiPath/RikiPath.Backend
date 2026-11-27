@@ -7,7 +7,7 @@ public static class MentorScheduleRules
     public static int StartHour(string period) => period switch
     {
         "Morning" => 8, "Afternoon" => 13, "Evening" => 18,
-        _ => throw new ArgumentException("Buổi phải là Morning, Afternoon hoặc Evening.")
+        _ => throw new ArgumentException("Khung buổi phải là Sáng, Chiều hoặc Tối.")
     };
     public static bool CanRegister(DateOnly date, DateTime utcNow)
     {

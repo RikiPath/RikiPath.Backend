@@ -58,13 +58,31 @@ namespace RikiPath.Application.Responses
             };
         }
 
-        public static ApiResponse<T> NotFound(string message = "Resource not found")
+        public static ApiResponse<T> FailWithResult(
+            T result,
+            string message,
+            HttpStatusCode statusCode = HttpStatusCode.Conflict,
+            string? errorCode = null,
+            List<string>? errors = null)
+        {
+            return new ApiResponse<T>
+            {
+                IsSuccess = false,
+                StatusCode = (int)statusCode,
+                ErrorMessage = message,
+                ErrorCode = errorCode,
+                Errors = errors,
+                Result = result
+            };
+        }
+
+        public static ApiResponse<T> NotFound(string message = "Không tìm thấy dữ liệu yêu cầu.")
             => Fail(message, HttpStatusCode.NotFound);
 
         public static ApiResponse<T> NotFound(string message, string? errorCode, bool? retryable = null)
             => Fail(message, HttpStatusCode.NotFound, errorCode, retryable);
 
-        public static ApiResponse<T> Unauthorized(string message = "Unauthorized access")
+        public static ApiResponse<T> Unauthorized(string message = "Bạn cần đăng nhập để thực hiện thao tác này.")
             => Fail(message, HttpStatusCode.Unauthorized);
 
         public static ApiResponse<T> Forbidden(string message = "Forbidden")
@@ -122,13 +140,13 @@ namespace RikiPath.Application.Responses
             };
         }
 
-        public static new ApiResponse NotFound(string message = "Resource not found")
+        public static new ApiResponse NotFound(string message = "Không tìm thấy dữ liệu yêu cầu.")
             => Fail(message, HttpStatusCode.NotFound);
 
         public static new ApiResponse NotFound(string message, string? errorCode, bool? retryable = null)
             => Fail(message, HttpStatusCode.NotFound, errorCode, retryable);
 
-        public static new ApiResponse Unauthorized(string message = "Unauthorized access")
+        public static new ApiResponse Unauthorized(string message = "Bạn cần đăng nhập để thực hiện thao tác này.")
             => Fail(message, HttpStatusCode.Unauthorized);
 
         public static new ApiResponse Forbidden(string message = "Forbidden")

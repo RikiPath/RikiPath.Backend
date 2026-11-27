@@ -106,7 +106,7 @@ public sealed partial class AdminBusinessConfigService(
         var category = request.PlanCategory?.Trim().ToLowerInvariant() ?? string.Empty;
         if (!SubscriptionAccessService.SellableCategories.Contains(category))
             return ApiResponse<AdminSubscriptionPlanDto>.Fail(
-                "Loại gói học không hợp lệ. Chỉ chấp nhận: self_study, speaking, writing, ai_grading, learning_path.",
+                "Loại gói học không hợp lệ. Chỉ chấp nhận: self_study, speaking, writing, ai_grading, learning_path, combo.",
                 HttpStatusCode.BadRequest,
                 "PLAN_CATEGORY_INVALID");
 
@@ -386,7 +386,7 @@ public sealed partial class AdminBusinessConfigService(
             if (string.Equals(feature.Category, SubscriptionAccessService.CategoryMentorLegacy, StringComparison.OrdinalIgnoreCase))
             {
                 failure = ApiResponse<AdminFeatureItemDto>.Fail(
-                    "Không thể chỉnh sửa tính năng mentor cũ đã ngừng sử dụng.",
+                    "Không thể chỉnh sửa tính năng Giáo viên cũ đã ngừng sử dụng.",
                     HttpStatusCode.BadRequest,
                     "FEATURE_LEGACY_READONLY");
                 return;
@@ -595,13 +595,73 @@ public sealed partial class AdminBusinessConfigService(
 
         // Summary counts reflect current stream/date/search scope before single-status tab filtering
         var scopeList = filtered.ToList();
+        static decimal TxNetAmount(AdminPaymentTransactionDto x) => x.Stream == "study_course"
+            ? (x.Status is "Paid" or "PartiallyRefunded" ? Math.Max(0m, x.Amount - Math.Clamp(x.RefundedAmount, 0m, x.Amount)) : 0m)
+            : (x.Status == "Paid" ? x.Amount : 0m);
+        static decimal TxRefundAmount(AdminPaymentTransactionDto x) => x.Status switch
+        {
+            "Refunded" => x.RefundedAmount > 0 ? Math.Min(x.RefundedAmount, x.Amount) : x.Amount,
+            "PartiallyRefunded" => Math.Clamp(x.RefundedAmount, 0m, x.Amount),
+            _ => 0m,
+        };
+
+        var subscriptionRev = scopeList.Where(x => x.Stream == "subscription").Sum(TxNetAmount);
+        var courseTuitionRev = scopeList.Where(x => x.Stream == "study_course").Sum(TxNetAmount);
+        var aiTopUpRev = scopeList.Where(x => x.Stream == "ai_topup").Sum(TxNetAmount);
+        var totalPaidAmount = subscriptionRev + courseTuitionRev + aiTopUpRev;
+        var totalRefundedAmount = scopeList.Sum(TxRefundAmount);
+        var expiredCount = scopeList.Count(x => x.Status == "Expired");
+        var refundedCount = scopeList.Count(x => x.Status is "Refunded" or "PartiallyRefunded");
+
+        // 30-day VN-time daily revenue series computed server-side over the FULL filtered scope (never truncated at page size)
+        var vnZone = TimeZoneInfo.FindSystemTimeZoneById(RikiPath.Domain.MentorScheduling.MentorSlotPolicy.BusinessTimeZoneId);
+        var todayVn = DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, vnZone));
+        var dailyBuckets = new Dictionary<DateOnly, (decimal Sub, decimal Course, decimal Ai, decimal Refund)>();
+        for (var d = 29; d >= 0; d--)
+            dailyBuckets[todayVn.AddDays(-d)] = (0m, 0m, 0m, 0m);
+
+        foreach (var tx in scopeList)
+        {
+            if (tx.Status is not ("Paid" or "PartiallyRefunded" or "Refunded")) continue;
+            var anchorUtc = tx.PaidAtUtc ?? tx.CreatedAtUtc;
+            var dayVn = DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(NormalizeUtc(anchorUtc), vnZone));
+            if (!dailyBuckets.TryGetValue(dayVn, out var b)) continue;
+            var net = TxNetAmount(tx);
+            var refunded = TxRefundAmount(tx);
+            if (tx.Stream == "subscription")
+                dailyBuckets[dayVn] = (b.Sub + net, b.Course, b.Ai, b.Refund + refunded);
+            else if (tx.Stream == "study_course")
+                dailyBuckets[dayVn] = (b.Sub, b.Course + net, b.Ai, b.Refund + refunded);
+            else if (tx.Stream == "ai_topup")
+                dailyBuckets[dayVn] = (b.Sub, b.Course, b.Ai + net, b.Refund + refunded);
+        }
+
+        var dailySeries = dailyBuckets
+            .OrderBy(kv => kv.Key)
+            .Select(kv => new AdminDailyRevenuePointDto(
+                kv.Key.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture),
+                kv.Value.Sub,
+                kv.Value.Course,
+                kv.Value.Ai,
+                kv.Value.Refund,
+                kv.Value.Sub + kv.Value.Course + kv.Value.Ai))
+            .ToList();
+
         var summary = new AdminPaymentSummaryDto(
             scopeList.Count,
-            scopeList.Count(x => x.Status == "Paid"),
+            scopeList.Count(x => x.Status is "Paid" or "PartiallyRefunded"),
             scopeList.Count(x => x.Status == "Pending"),
-            scopeList.Count(x => x.Status is "Failed" or "Cancelled" or "Refunded"),
+            scopeList.Count(x => x.Status is "Failed" or "Cancelled" or "Refunded" or "Expired"),
             scopeList.Count(x => x.Status == "PaymentReview"),
-            scopeList.Where(x => x.Status == "Paid").Sum(x => x.Amount));
+            totalPaidAmount,
+            subscriptionRev,
+            courseTuitionRev,
+            aiTopUpRev,
+            totalRefundedAmount,
+            totalPaidAmount,
+            expiredCount,
+            refundedCount,
+            dailySeries);
 
         var statusFilter = query.Status?.Trim();
         if (!string.IsNullOrEmpty(statusFilter) && !string.Equals(statusFilter, "All", StringComparison.OrdinalIgnoreCase))
@@ -682,6 +742,7 @@ public sealed partial class AdminBusinessConfigService(
                 .FirstOrDefaultAsync(x => x.Id == id, ct);
             if (c is null) return ApiResponse<AdminPaymentDetailDto>.NotFound("Không tìm thấy giao dịch khóa học.");
 
+            var nowUtc = DateTime.UtcNow;
             return ApiResponse<AdminPaymentDetailDto>.Success(new AdminPaymentDetailDto(
                 $"course-{c.Id}",
                 "study_course",
@@ -694,7 +755,7 @@ public sealed partial class AdminBusinessConfigService(
                 c.SessionType == "Group" ? "study_course_group" : "study_course",
                 c.Amount,
                 c.Currency,
-                c.PaymentStatus,
+                NormalizeStudyCoursePaymentStatus(c, nowUtc),
                 c.PaymentReference,
                 c.ProviderPaymentReference,
                 NormalizeUtc(c.CreatedAt),
@@ -709,7 +770,8 @@ public sealed partial class AdminBusinessConfigService(
                 null,
                 null,
                 c.PlanRevision,
-                c.OrderSnapshot));
+                c.OrderSnapshot,
+                c.RefundedAmount));
         }
 
         if (normalizedStream == "ai_topup")
@@ -751,6 +813,205 @@ public sealed partial class AdminBusinessConfigService(
         }
 
         return ApiResponse<AdminPaymentDetailDto>.Fail("Luồng giao dịch không hợp lệ.", HttpStatusCode.BadRequest, "INVALID_PAYMENT_STREAM");
+    }
+
+    public async Task<ApiResponse<AdminPaymentDetailDto>> RefundStudyCoursePaymentAsync(
+        int studyCourseId,
+        RefundStudyCoursePaymentRequest request,
+        int adminUserId,
+        CancellationToken ct = default)
+    {
+        var reason = request?.Reason?.Trim();
+        if (string.IsNullOrWhiteSpace(reason))
+            return ApiResponse<AdminPaymentDetailDto>.Fail(
+                "Vui lòng nhập lý do xác nhận hoàn học phí.",
+                HttpStatusCode.BadRequest,
+                "REFUND_REASON_REQUIRED");
+        if (reason.Length > 1000)
+            return ApiResponse<AdminPaymentDetailDto>.Fail(
+                "Lý do hoàn học phí tối đa 1000 ký tự.",
+                HttpStatusCode.BadRequest,
+                "REFUND_REASON_TOO_LONG");
+
+        ApiResponse<AdminPaymentDetailDto>? failure = null;
+        var nowUtc = DateTime.UtcNow;
+
+        await uow.ExecuteInTransactionAsync(async token =>
+        {
+            var locked = await uow.StudyCourses.LockAsync(studyCourseId, token);
+            if (locked is null)
+            {
+                failure = ApiResponse<AdminPaymentDetailDto>.NotFound("Không tìm thấy giao dịch khóa học.");
+                return;
+            }
+
+            var course = await uow.StudyCourses.Query()
+                .Include(x => x.Sessions)
+                .Include(x => x.Audit)
+                .SingleAsync(x => x.Id == studyCourseId, token);
+
+            if (course.Amount <= 0 || course.RetakeOfId.HasValue || course.TransferredFromCourseId.HasValue)
+            {
+                failure = ApiResponse<AdminPaymentDetailDto>.Fail(
+                    "Ghi danh này không phát sinh thanh toán nên không thể hoàn tiền.",
+                    HttpStatusCode.Conflict,
+                    "PAYMENT_NOT_REFUNDABLE");
+                return;
+            }
+
+            if (course.PaymentStatus == "Refunded")
+            {
+                failure = ApiResponse<AdminPaymentDetailDto>.Fail(
+                    "Giao dịch này đã được xác nhận hoàn tiền toàn phần trước đó.",
+                    HttpStatusCode.Conflict,
+                    "ALREADY_REFUNDED");
+                return;
+            }
+
+            if (course.PaymentStatus is not ("Paid" or "PartiallyRefunded"))
+            {
+                failure = ApiResponse<AdminPaymentDetailDto>.Fail(
+                    "Chỉ có thể xác nhận hoàn tiền cho giao dịch đã thanh toán hoặc đang chờ rà soát thanh toán.",
+                    HttpStatusCode.Conflict,
+                    "PAYMENT_NOT_REFUNDABLE");
+                return;
+            }
+
+            var alreadyRefunded = Math.Clamp(course.RefundedAmount, 0m, course.Amount);
+            var remainingRefundable = course.Amount - alreadyRefunded;
+            if (remainingRefundable <= 0m)
+            {
+                failure = ApiResponse<AdminPaymentDetailDto>.Fail(
+                    "Giao dịch này đã được hoàn đủ toàn bộ số tiền.",
+                    HttpStatusCode.Conflict,
+                    "ALREADY_REFUNDED");
+                return;
+            }
+
+            var refundAmount = request?.RefundAmount.HasValue == true
+                ? decimal.Truncate(request.RefundAmount.Value)
+                : remainingRefundable;
+            if (refundAmount <= 0m || refundAmount > remainingRefundable)
+            {
+                failure = ApiResponse<AdminPaymentDetailDto>.Fail(
+                    $"Số tiền hoàn phải lớn hơn 0 đ và không vượt quá phần còn lại ({remainingRefundable:N0} đ).",
+                    HttpStatusCode.BadRequest,
+                    "INVALID_REFUND_AMOUNT");
+                return;
+            }
+
+            var beforeSnapshot = JsonSerializer.Serialize(new
+            {
+                course.PaymentStatus,
+                course.Status,
+                course.Amount,
+                course.RefundedAmount,
+                course.PaymentReviewReason,
+                course.CancellationReason,
+            });
+
+            course.RefundedAmount = alreadyRefunded + refundAmount;
+            course.RefundedAtUtc = nowUtc;
+            var isFullRefund = course.RefundedAmount >= course.Amount;
+            course.PaymentStatus = isFullRefund ? "Refunded" : "PartiallyRefunded";
+            if (isFullRefund && course.Status != "Cancelled")
+            {
+                course.Status = "Cancelled";
+                course.CancelledAtUtc ??= nowUtc;
+                foreach (var session in course.Sessions.Where(s => s.Status == "Scheduled"))
+                {
+                    session.Status = "CancelledByAdmin";
+                    session.Note = reason;
+                    session.ConfirmedById = adminUserId;
+                    session.ConfirmedAt = nowUtc;
+                }
+            }
+            course.CancellationReason = reason;
+            course.PaymentReviewReason = null;
+            var auditDetail = isFullRefund
+                ? $"Quản trị viên xác nhận hoàn toàn phần học phí ({refundAmount:N0} đ; tổng hoàn {course.RefundedAmount:N0} đ): {reason}"
+                : $"Quản trị viên xác nhận hoàn một phần học phí {refundAmount:N0} đ (đã hoàn {course.RefundedAmount:N0}/{course.Amount:N0} đ): {reason}";
+            course.Audit.Add(new CourseAuditEntry
+            {
+                CourseId = course.Id,
+                ActorId = adminUserId,
+                Action = isFullRefund ? "PaymentRefunded" : "PaymentPartiallyRefunded",
+                Detail = auditDetail,
+                At = nowUtc,
+            });
+
+            await uow.AdminAuditLogs.AddAsync(new AdminAuditLog
+            {
+                ActorUserId = adminUserId,
+                EntityType = "StudyCoursePayment",
+                EntityId = course.Id,
+                Action = isFullRefund ? "PaymentRefunded" : "PaymentPartiallyRefunded",
+                BeforeJson = beforeSnapshot,
+                AfterJson = JsonSerializer.Serialize(new
+                {
+                    course.PaymentStatus,
+                    course.Status,
+                    course.Amount,
+                    course.RefundedAmount,
+                    RefundStepAmount = refundAmount,
+                    course.CancellationReason,
+                }),
+                Reason = reason,
+                CreatedAtUtc = nowUtc,
+            }, token);
+
+            var learnerNotifyTitle = isFullRefund ? "Đã xác nhận hoàn học phí" : "Đã xác nhận hoàn một phần học phí";
+            var learnerNotifyMessage = isFullRefund
+                ? $"Giao dịch lớp \"{course.Name}\" ({refundAmount:N0} đ) đã được Quản trị viên xác nhận hoàn tiền. Lý do: {reason}"
+                : $"Giao dịch lớp \"{course.Name}\" đã được Quản trị viên xác nhận hoàn một phần {refundAmount:N0} đ (tổng đã hoàn {course.RefundedAmount:N0}/{course.Amount:N0} đ). Lý do: {reason}";
+
+            uow.AddMentorOutboxEvent(new MentorOutboxEvent
+            {
+                EventKey = $"course-payment-refunded:{course.Id}:{course.RefundedAmount:0}",
+                AggregateType = "StudyCourse",
+                AggregateId = course.Id.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                EventType = "CohortLearningNotification",
+                EventVersion = 1,
+                PayloadJson = JsonSerializer.Serialize(new
+                {
+                    Notifications = new[]
+                    {
+                        new
+                        {
+                            UserId = course.LearnerId,
+                            Title = learnerNotifyTitle,
+                            Message = learnerNotifyMessage,
+                            Type = "PaymentRefund",
+                            LinkUrl = $"/my-courses/?courseId={course.Id}",
+                        },
+                    },
+                }),
+                CreatedAtUtc = nowUtc,
+                AvailableAtUtc = nowUtc,
+            });
+
+            await uow.SaveChangesAsync(token);
+        }, ct);
+
+        if (failure is not null)
+            return failure;
+
+        return await GetPaymentDetailAsync("study_course", studyCourseId, ct);
+    }
+
+    private static string NormalizeStudyCoursePaymentStatus(StudyCourse c, DateTime nowUtc)
+    {
+        if (string.Equals(c.PaymentStatus, "Refunded", StringComparison.OrdinalIgnoreCase))
+            return "Refunded";
+        if (string.Equals(c.PaymentStatus, "PartiallyRefunded", StringComparison.OrdinalIgnoreCase))
+            return "PartiallyRefunded";
+        if (string.Equals(c.Status, "PaymentReview", StringComparison.OrdinalIgnoreCase))
+            return "PaymentReview";
+        if (string.Equals(c.PaymentStatus, "Pending", StringComparison.OrdinalIgnoreCase)
+            && c.PaymentExpiresAt.HasValue
+            && NormalizeUtc(c.PaymentExpiresAt.Value) <= nowUtc)
+            return "Expired";
+        return c.PaymentStatus;
     }
 
     public Task<ApiResponse<PayOsGatewayStatusDto>> GetPayOsStatusAsync(CancellationToken ct = default)
@@ -876,8 +1137,13 @@ public sealed partial class AdminBusinessConfigService(
                 null));
         }
 
+        var nowUtc = DateTime.UtcNow;
         foreach (var c in courses)
         {
+            // Bỏ qua các bản ghi ghi danh không phát sinh thu tiền (học lại miễn phí, chuyển lớp, quyền Admin cấp 0đ)
+            if (c.Amount <= 0 || c.RetakeOfId.HasValue || c.TransferredFromCourseId.HasValue)
+                continue;
+
             list.Add(new AdminPaymentTransactionDto(
                 $"course-{c.Id}",
                 "study_course",
@@ -890,12 +1156,13 @@ public sealed partial class AdminBusinessConfigService(
                 c.SessionType == "Group" ? "study_course_group" : "study_course",
                 c.Amount,
                 c.Currency,
-                c.PaymentStatus,
+                NormalizeStudyCoursePaymentStatus(c, nowUtc),
                 c.ProviderPaymentReference ?? c.PaymentReference,
                 NormalizeUtc(c.CreatedAt),
                 c.PaymentConfirmedAtUtc.HasValue ? NormalizeUtc(c.PaymentConfirmedAtUtc.Value) : null,
                 c.PaymentExpiresAt.HasValue ? NormalizeUtc(c.PaymentExpiresAt.Value) : null,
-                SanitizeReason(c.PaymentReviewReason ?? c.CancellationReason)));
+                SanitizeReason(c.PaymentReviewReason ?? c.CancellationReason),
+                c.RefundedAmount));
         }
 
         foreach (var t in topUps)

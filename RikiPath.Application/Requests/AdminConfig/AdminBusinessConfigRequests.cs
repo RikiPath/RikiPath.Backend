@@ -39,3 +39,7 @@ public sealed record AdminPaymentQuery(
     string? ToDate = null,
     int Page = 1,
     int PageSize = 20);
+
+public sealed record RefundStudyCoursePaymentRequest(
+    string Reason,
+    decimal? RefundAmount = null);

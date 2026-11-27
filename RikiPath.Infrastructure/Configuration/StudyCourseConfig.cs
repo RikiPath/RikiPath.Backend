@@ -8,10 +8,15 @@ public sealed class StudyCourseConfig : IEntityTypeConfiguration<StudyCourse>
 {
     public void Configure(EntityTypeBuilder<StudyCourse> b)
     {
-        b.ToTable("StudyCourses"); b.HasKey(x => x.Id);
+        b.ToTable("StudyCourses", t =>
+        {
+            t.HasCheckConstraint("CK_StudyCourses_RefundedAmount", "\"RefundedAmount\" >= 0 AND \"RefundedAmount\" <= \"Amount\"");
+        });
+        b.HasKey(x => x.Id);
         b.Property(x => x.SessionType).HasDefaultValue("Individual");
         b.Property(x => x.Name).HasMaxLength(200);
         b.Property(x => x.Amount).HasPrecision(18, 0);
+        b.Property(x => x.RefundedAmount).HasPrecision(18, 0);
         b.Property(x => x.Currency).HasMaxLength(3).IsRequired();
         b.Property(x => x.OrderSnapshot).HasColumnType("text");
         b.Property(x => x.ProviderPaymentReference).HasMaxLength(120);
@@ -133,11 +138,14 @@ public sealed class StudyCohortConfig : IEntityTypeConfiguration<StudyCohort>
         });
         b.HasKey(x => x.Id);
         b.Property(x => x.Name).HasMaxLength(200); b.Property(x => x.Revision).IsConcurrencyToken();
+        b.Property(x => x.TuitionPerSessionSnapshot).HasPrecision(18, 0);
+        b.Property(x => x.TotalTuitionSnapshot).HasPrecision(18, 0);
+        b.Property(x => x.TuitionSnapshotAtUtc).HasColumnType("timestamp with time zone");
         b.HasOne(x => x.Plan).WithMany().HasForeignKey(x => x.PlanId).OnDelete(DeleteBehavior.Restrict);
         b.HasOne(x => x.Mentor).WithMany().HasForeignKey(x => x.MentorId).OnDelete(DeleteBehavior.Restrict);
         b.HasOne(x => x.GroupPolicy).WithMany().HasForeignKey(x => x.GroupPolicyId).OnDelete(DeleteBehavior.Restrict);
         b.HasOne(x => x.SourceProposal).WithMany().HasForeignKey(x => x.SourceProposalId).OnDelete(DeleteBehavior.Restrict);
-        b.HasIndex(x => x.SourceProposalId).HasFilter("\"SourceProposalId\" IS NOT NULL");
+        b.HasIndex(x => x.SourceProposalId).IsUnique().HasFilter("\"SourceProposalId\" IS NOT NULL AND \"Status\" <> 'Cancelled'");
         b.HasMany(x => x.Sessions).WithOne(x => x.Cohort).HasForeignKey(x => x.CohortId);
     }
 }

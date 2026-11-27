@@ -1,4 +1,5 @@
-﻿using RikiPath.Domain.Entities;
+﻿using RikiPath.Application.Helpers;
+using RikiPath.Domain.Entities;
 using RikiPath.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 using RikiPath.Application.IServices;
@@ -14,14 +15,84 @@ using System.Text.Json.Nodes;
 
 namespace RikiPath.Application.Services
 {
-    public class MockTestService(IUnitOfWork unitOfWork, IClaimService claimService) : IMockTestService
+    public class MockTestService(
+        IUnitOfWork unitOfWork,
+        IClaimService claimService,
+        SubscriptionAccessService? subscriptionAccess = null) : IMockTestService
     {
         private const string StatusInProgress = "in_progress";
         private const string StatusCompleted = "completed";
+        private const string StatusExpired = "expired";
+        private const string StatusAbandoned = "abandoned";
+        private const string StatusGrading = "grading";
+        private const string StatusFailed = "failed";
         private static readonly JsonSerializerOptions MockSnapshotJson = new(JsonSerializerDefaults.Web);
 
         private static bool IsSingleChoiceQuestion(string type) =>
             JlptMockQuestionFormats.IsSingleChoice(type);
+
+        private static bool IsPracticeExamKind(ExamKind kind) =>
+            kind is ExamKind.PracticeSet or ExamKind.MixedPractice;
+
+        private static bool IsPracticeExamKind(string? kind) =>
+            string.Equals(kind, nameof(ExamKind.PracticeSet), StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(kind, nameof(ExamKind.MixedPractice), StringComparison.OrdinalIgnoreCase);
+
+        private static bool IsAttemptAbandoned(MockAttemptSnapshot? snap) =>
+            string.Equals(snap?.AttemptStatus, StatusAbandoned, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(snap?.AttemptStatus, "superseded", StringComparison.OrdinalIgnoreCase) ||
+            snap?.AbandonedAt is not null;
+
+        private static string ResolveAttemptStatus(MockTestAttempt attempt, MockAttemptSnapshot? snap)
+        {
+            if (IsAttemptAbandoned(snap)) return StatusAbandoned;
+            if (!string.IsNullOrWhiteSpace(snap?.AttemptStatus) &&
+                !string.Equals(snap.AttemptStatus, StatusInProgress, StringComparison.OrdinalIgnoreCase))
+            {
+                return snap.AttemptStatus!;
+            }
+            if (attempt.IsCompleted)
+            {
+                return StatusCompleted;
+            }
+            return StatusInProgress;
+        }
+
+        private static bool HasAnsweredValue(MockTestAnswer answer) =>
+            answer.SelectedOptionId.HasValue || !string.IsNullOrWhiteSpace(answer.ResponseJson);
+
+        private async Task<(bool Allowed, HttpStatusCode StatusCode, string? ErrorCode, string? Message)> EvaluateMockFeatureAsync(
+            CancellationToken cancellationToken)
+        {
+            if (subscriptionAccess is null) return (true, HttpStatusCode.OK, null, null);
+            var decision = await subscriptionAccess.EvaluateFeatureAsync(FeatureCodes.MockTests, cancellationToken);
+            return (decision.Allowed, decision.StatusCode, decision.ErrorCode, decision.Message);
+        }
+
+        private static string ResolveEffectiveExamKind(
+            string? snapExamKind,
+            ExamKind? testExamKind,
+            AttemptKind attemptKind = AttemptKind.MockTest,
+            bool isPlacementAssessment = false)
+        {
+            if (attemptKind == AttemptKind.Placement || isPlacementAssessment || testExamKind == ExamKind.Placement)
+                return nameof(ExamKind.Placement);
+            if (testExamKind is ExamKind.PracticeSet or ExamKind.MixedPractice)
+                return testExamKind.Value.ToString();
+            if (!string.IsNullOrWhiteSpace(snapExamKind))
+                return snapExamKind;
+            return testExamKind?.ToString() ?? nameof(ExamKind.FullMockTest);
+        }
+
+        private static bool CanReuseSnapshotScoring(MockAttemptScoringSummary? snapScoring, string effectiveExamKind)
+        {
+            if (snapScoring is null) return false;
+            if (IsPracticeExamKind(effectiveExamKind))
+                return string.Equals(snapScoring.ScoreType, MockTestScoringPolicy.ScoreTypePractice10, StringComparison.OrdinalIgnoreCase);
+            if (string.Equals(effectiveExamKind, nameof(ExamKind.FullMockTest), StringComparison.OrdinalIgnoreCase))
+                return string.Equals(snapScoring.ScoreType, MockTestScoringPolicy.ScoreTypeMock180, StringComparison.OrdinalIgnoreCase);
+            return false;
+        }
 
         private sealed class MockAttemptSnapshot
         {
@@ -29,6 +100,15 @@ namespace RikiPath.Application.Services
             public int MockTestId { get; set; }
             public string? Title { get; set; }
             public string? JlptLevelName { get; set; }
+            public string? ExamKind { get; set; }
+            public string AttemptStatus { get; set; } = StatusInProgress;
+            public DateTime? AbandonedAt { get; set; }
+            public int? SupersededByAttemptId { get; set; }
+            public DateTime? LastSavedAt { get; set; }
+            public long LatestAnswerSequence { get; set; }
+            public Dictionary<int, long> QuestionSequences { get; set; } = [];
+            public int ElapsedSeconds { get; set; }
+            public MockAttemptScoringSummary? Scoring { get; set; }
             public List<int> PreviouslyWrongQuestionIds { get; set; } = [];
             public List<MockQuestionSnapshot> Questions { get; set; } = [];
         }
@@ -53,6 +133,33 @@ namespace RikiPath.Application.Services
                 is { AttemptId: > 0, Questions.Count: > 0 } legacy && legacy.AttemptId == attempt.Id)
                 return null;
             throw new JsonException("Dữ liệu đề thi đã lưu không hợp lệ.");
+        }
+
+        private static MockAttemptSnapshot? TryReadMockSnapshotSafe(MockTestAttempt attempt)
+        {
+            if (string.IsNullOrWhiteSpace(attempt.QuestionSnapshotJson)) return null;
+            try { return JsonSerializer.Deserialize<MockAttemptSnapshot>(attempt.QuestionSnapshotJson, MockSnapshotJson); }
+            catch (JsonException) { return null; }
+        }
+
+        private async Task AutoFinalizeExpiredMockAttemptsInternalAsync(
+            int userId, int? filterMockTestId, CancellationToken cancellationToken)
+        {
+            var nowUtc = DateTime.UtcNow;
+            var active = await unitOfWork.MockTestAttempts.Query()
+                .AsNoTracking()
+                .Where(a => a.UserId == userId && !a.IsDeleted && a.AttemptKind == AttemptKind.MockTest && !a.IsCompleted && a.ExpiresAt.HasValue && a.ExpiresAt.Value <= nowUtc)
+                .OrderByDescending(a => a.Id)
+                .ToListAsync(cancellationToken);
+
+            foreach (var cand in active)
+            {
+                var snap = TryReadMockSnapshotSafe(cand);
+                if (IsAttemptAbandoned(snap)) continue;
+                if (IsPracticeExamKind(snap?.ExamKind)) continue;
+                if (filterMockTestId.HasValue && snap is not null && snap.MockTestId != filterMockTestId.Value) continue;
+                await FinalizeExpiredAttemptAsync(cand.Id, cancellationToken);
+            }
         }
 
         private static Dictionary<int, MockQuestionSnapshot>? ReadFrozenQuestions(
@@ -227,11 +334,14 @@ namespace RikiPath.Application.Services
                 ExamKind = test.ExamKind.ToString(),
                 Version = test.Version,
                 TimeLimitMinutes = test.TimeLimitMinutes,
+                EnforceStrictTimer = !IsPracticeExamKind(test.ExamKind),
+                PublishedAt = test.PublishedAt ?? test.ReviewedAt ?? test.CreatedDate,
                 IncludedSkills = includedSkills,
                 Sections = (test.Sections ?? []).Where(section => !section.IsDeleted)
                     .OrderBy(section => section.SortOrder).ThenBy(section => section.Id)
                     .Select(section => new TestSectionSummaryResponse
                     {
+                        SectionId = section.Id,
                         Title = section.Title,
                         SkillName = section.LanguageSkill?.Name ?? string.Empty,
                         DurationMinutes = section.DurationMinutes,
@@ -425,10 +535,21 @@ namespace RikiPath.Application.Services
             }
         }
 
-        public async Task<ApiResponse<StartAttemptResponse>> StartAttemptAsync(int practiceTestId, CancellationToken cancellationToken = default)
+        public Task<ApiResponse<StartAttemptResponse>> StartAttemptAsync(int practiceTestId, CancellationToken cancellationToken = default) =>
+            StartAttemptAsync(practiceTestId, forceNew: false, cancellationToken);
+
+        public async Task<ApiResponse<StartAttemptResponse>> StartAttemptAsync(
+            int practiceTestId, bool forceNew, CancellationToken cancellationToken = default)
         {
             try
             {
+                var featureGate = await EvaluateMockFeatureAsync(cancellationToken);
+                if (!featureGate.Allowed)
+                    return ApiResponse<StartAttemptResponse>.Fail(
+                        featureGate.Message ?? "Tính năng Luyện đề & Thi thử hiện không khả dụng cho tài khoản của bạn.",
+                        featureGate.StatusCode,
+                        errorCode: featureGate.ErrorCode ?? "FEATURE_ACCESS_DENIED");
+
                 var userId = claimService.GetUserClaim().Id;
                 var test = await unitOfWork.MockTests.GetWithSectionsAndQuestionsAsync(practiceTestId, cancellationToken);
                 if (test is null || test.IsDeleted ||
@@ -436,6 +557,11 @@ namespace RikiPath.Application.Services
                     return ApiResponse<StartAttemptResponse>.NotFound(
                         $"Không tìm thấy MockTest có Id = {practiceTestId}.");
 
+                if (test.ExamKind is not (ExamKind.PracticeSet or ExamKind.MixedPractice or ExamKind.FullMockTest))
+                    return ApiResponse<StartAttemptResponse>.Fail(
+                        "Không thể mở đề đánh giá năng lực dưới dạng bài luyện tập hoặc thi thử.", HttpStatusCode.BadRequest);
+
+                var isPractice = IsPracticeExamKind(test.ExamKind);
                 if (!IsLearnerReady(test) || !await IsApprovedForLearnersAsync(test, cancellationToken))
                     return ApiResponse<StartAttemptResponse>.Fail(
                         "Đề thi chưa đạt điều kiện nội dung để bắt đầu.", HttpStatusCode.Conflict);
@@ -454,7 +580,7 @@ namespace RikiPath.Application.Services
                 if (orderedQuestions.Count == 0)
                     return ApiResponse<StartAttemptResponse>.Fail(
                         "Đề thi chưa có câu hỏi để bắt đầu.", HttpStatusCode.BadRequest);
-                if (test.TimeLimitMinutes <= 0)
+                if (!isPractice && test.TimeLimitMinutes <= 0)
                     return ApiResponse<StartAttemptResponse>.Fail(
                         "Đề thi chưa có thời lượng hợp lệ.", HttpStatusCode.BadRequest);
 
@@ -465,6 +591,8 @@ namespace RikiPath.Application.Services
                         QuestionId = item.Question.Id,
                         MockTestSectionId = item.Section.Id,
                         SectionTitle = item.Section.Title,
+                        LanguageSkillName = item.Section.LanguageSkill?.Name,
+                        QuestionGroupTitle = item.Question.QuestionGroupTitle,
                         SectionOrder = item.Section.SortOrder,
                         Order = item.Question.SortOrder,
                         Content = item.Question.QuestionText,
@@ -526,6 +654,7 @@ namespace RikiPath.Application.Services
                 await unitOfWork.ExecuteInTransactionAsync(async transactionCancellationToken =>
                 {
                     await unitOfWork.MockTestAttempts.LockMockStartAsync(userId, transactionCancellationToken);
+                    await AutoFinalizeExpiredMockAttemptsInternalAsync(userId, practiceTestId, transactionCancellationToken);
                     var active = await GetActiveMockAttemptAsync(practiceTestId, transactionCancellationToken);
                     if (!active.IsSuccess)
                     {
@@ -535,7 +664,92 @@ namespace RikiPath.Application.Services
                     }
                     if (active.Result is not null)
                     {
-                        response = ApiResponse<StartAttemptResponse>.Success(active.Result);
+                        if (!forceNew)
+                        {
+                            active.Result.IsResumed = true;
+                            response = ApiResponse<StartAttemptResponse>.Success(active.Result);
+                            return;
+                        }
+
+                        if (!isPractice)
+                        {
+                            response = ApiResponse<StartAttemptResponse>.Fail(
+                                "Bạn đang có một lượt thi thử JLPT chưa hoàn thành. Vui lòng tiếp tục hoặc nộp lượt hiện tại.",
+                                HttpStatusCode.Conflict,
+                                errorCode: "MOCK_TEST_CANNOT_RESTART_ACTIVE");
+                            return;
+                        }
+
+                        // Prepare to abandon previous PracticeSet attempt atomically only after new attempt succeeds
+                        var oldAttempt = await unitOfWork.MockTestAttempts.GetForSubmissionAsync(active.Result.AttemptId, transactionCancellationToken);
+                        var nowUtc = DateTime.UtcNow;
+                        var newAttempt = new MockTestAttempt
+                        {
+                            UserId = userId,
+                            AttemptKind = AttemptKind.MockTest,
+                            StartedAt = nowUtc,
+                            ExpiresAt = null,
+                            QuestionSnapshotJson = JsonSerializer.Serialize(new MockAttemptSnapshot
+                            {
+                                MockTestId = practiceTestId,
+                                Title = test.Title,
+                                JlptLevelName = test.CertificateLevel?.Code,
+                                ExamKind = test.ExamKind.ToString(),
+                                AttemptStatus = StatusInProgress,
+                                LastSavedAt = nowUtc,
+                                PreviouslyWrongQuestionIds = previouslyWrongQuestionIds,
+                                Questions = frozenQuestions,
+                            }, MockSnapshotJson),
+                            SubmittedAt = null,
+                            TotalScore = 0,
+                            IsCompleted = false,
+                        };
+
+                        await unitOfWork.MockTestAttempts.AddAsync(newAttempt, transactionCancellationToken);
+                        await unitOfWork.SaveChangesAsync(transactionCancellationToken);
+
+                        if (oldAttempt is not null && !oldAttempt.IsCompleted)
+                        {
+                            var oldSnap = TryReadMockSnapshotSafe(oldAttempt) ?? new MockAttemptSnapshot { MockTestId = practiceTestId };
+                            oldSnap.AttemptStatus = StatusAbandoned;
+                            oldSnap.AbandonedAt = nowUtc;
+                            oldSnap.SupersededByAttemptId = newAttempt.Id;
+                            oldAttempt.QuestionSnapshotJson = JsonSerializer.Serialize(oldSnap, MockSnapshotJson);
+                            oldAttempt.IsCompleted = false;
+                            oldAttempt.TotalScore = null;
+                            oldAttempt.SubmittedAt = nowUtc;
+                            unitOfWork.MockTestAttempts.Update(oldAttempt);
+                        }
+
+                        var newSnapshots = orderedQuestions.Select(item => new MockTestAnswer
+                        {
+                            MockTestAttemptId = newAttempt.Id,
+                            MockQuestionId = item.Question.Id,
+                            SelectedOptionId = null,
+                            IsCorrect = false,
+                        });
+                        await unitOfWork.MockTestAnswers.AddRangeAsync(newSnapshots, transactionCancellationToken);
+                        await unitOfWork.SaveChangesAsync(transactionCancellationToken);
+
+                        response = ApiResponse<StartAttemptResponse>.Created(new StartAttemptResponse
+                        {
+                            AttemptId = newAttempt.Id,
+                            MockTestId = practiceTestId,
+                            Title = test.Title,
+                            JlptLevelName = test.CertificateLevel?.Code ?? string.Empty,
+                            ExamKind = test.ExamKind.ToString(),
+                            EnforceStrictTimer = false,
+                            IsResumed = false,
+                            AttemptStatus = StatusInProgress,
+                            StartedAt = newAttempt.StartedAt,
+                            ServerNow = DateTime.UtcNow,
+                            LastSavedAt = nowUtc,
+                            ExpiresAt = null,
+                            TimeLimitMinutes = test.TimeLimitMinutes,
+                            TotalPreviouslyWrongQuestions = previouslyWrongQuestionIds.Count,
+                            PreviouslyWrongQuestionIds = previouslyWrongQuestionIds,
+                            Questions = frozenQuestions.Select(question => question.Prompt).ToList(),
+                        });
                         return;
                     }
 
@@ -545,15 +759,18 @@ namespace RikiPath.Application.Services
                         UserId = userId,
                         AttemptKind = AttemptKind.MockTest,
                         StartedAt = startedAt,
-                        ExpiresAt = test.TimeLimitMinutes > 0 ? startedAt.AddMinutes(test.TimeLimitMinutes) : null,
+                        ExpiresAt = !isPractice && test.TimeLimitMinutes > 0 ? startedAt.AddMinutes(test.TimeLimitMinutes) : null,
                         QuestionSnapshotJson = JsonSerializer.Serialize(new MockAttemptSnapshot
                         {
                             MockTestId = practiceTestId,
                             Title = test.Title,
                             JlptLevelName = test.CertificateLevel?.Code,
+                            ExamKind = test.ExamKind.ToString(),
+                            AttemptStatus = StatusInProgress,
+                            LastSavedAt = startedAt,
                             PreviouslyWrongQuestionIds = previouslyWrongQuestionIds,
                             Questions = frozenQuestions,
-                        }),
+                        }, MockSnapshotJson),
                         SubmittedAt = null,
                         TotalScore = 0,
                         IsCompleted = false,
@@ -577,8 +794,13 @@ namespace RikiPath.Application.Services
                         MockTestId = practiceTestId,
                         Title = test.Title,
                         JlptLevelName = test.CertificateLevel?.Code ?? string.Empty,
+                        ExamKind = test.ExamKind.ToString(),
+                        EnforceStrictTimer = !isPractice,
+                        IsResumed = false,
+                        AttemptStatus = StatusInProgress,
                         StartedAt = attempt.StartedAt,
                         ServerNow = DateTime.UtcNow,
+                        LastSavedAt = startedAt,
                         ExpiresAt = attempt.ExpiresAt,
                         TimeLimitMinutes = test.TimeLimitMinutes,
                         TotalPreviouslyWrongQuestions = previouslyWrongQuestionIds.Count,
@@ -602,28 +824,67 @@ namespace RikiPath.Application.Services
         {
             try
             {
+                var userId = claimService.GetUserClaim().Id;
                 var attempt = await unitOfWork.MockTestAttempts.GetByIdAsync(attemptId, cancellationToken);
                 if (attempt is null || attempt.IsDeleted || attempt.AttemptKind != AttemptKind.MockTest)
-                    return ApiResponse<StartAttemptResponse>.NotFound("Không tìm thấy lượt thi thử.");
-                if (attempt.UserId != claimService.GetUserClaim().Id)
-                    return ApiResponse<StartAttemptResponse>.Fail("Bạn không có quyền xem lượt thi này.", HttpStatusCode.Forbidden);
+                    return ApiResponse<StartAttemptResponse>.NotFound("Không tìm thấy lượt làm bài.");
+                if (attempt.UserId != userId)
+                    return ApiResponse<StartAttemptResponse>.Fail("Bạn không có quyền xem lượt làm bài này.", HttpStatusCode.Forbidden);
+
+                var frozen = ReadMockSnapshot(attempt);
+                if (IsAttemptAbandoned(frozen))
+                    return ApiResponse<StartAttemptResponse>.Fail(
+                        "Lượt làm bài này đã kết thúc do bạn chọn bắt đầu lượt mới.",
+                        HttpStatusCode.Conflict,
+                        errorCode: "MOCK_TEST_ABANDONED");
+
                 if (attempt.IsCompleted)
-                    return ApiResponse<StartAttemptResponse>.Fail("Lượt thi đã được nộp.", HttpStatusCode.Conflict, errorCode: "MOCK_TEST_COMPLETED");
+                    return ApiResponse<StartAttemptResponse>.Fail("Lượt làm bài đã được nộp.", HttpStatusCode.Conflict, errorCode: "MOCK_TEST_COMPLETED");
 
                 var answers = await unitOfWork.MockTestAnswers.GetByAttemptIdAsync(attemptId, cancellationToken);
-                var frozen = ReadMockSnapshot(attempt);
+                var mockTest = answers.FirstOrDefault()?.MockQuestion?.MockTestSection?.MockTest;
+                var resolvedExamKind = ResolveEffectiveExamKind(
+                    frozen?.ExamKind,
+                    mockTest?.ExamKind,
+                    attempt.AttemptKind,
+                    attempt.IsPlacementAssessment);
+                var isPractice = IsPracticeExamKind(resolvedExamKind);
+
+                if (!isPractice)
+                {
+                    var deadline = attempt.ExpiresAt is { } exp
+                        ? BusinessDateHelper.EnsureUtc(exp)
+                        : mockTest is { TimeLimitMinutes: > 0 }
+                            ? BusinessDateHelper.EnsureUtc(attempt.StartedAt).AddMinutes(mockTest.TimeLimitMinutes)
+                            : (DateTime?)null;
+                    if (deadline.HasValue && DateTime.UtcNow >= deadline.Value)
+                    {
+                        await FinalizeExpiredAttemptAsync(attemptId, cancellationToken);
+                        return ApiResponse<StartAttemptResponse>.Fail(
+                            "Bài thi thử JLPT đã hết thời gian và đã được hệ thống chấm tự động theo các đáp án đã lưu.",
+                            HttpStatusCode.Conflict,
+                            errorCode: "MOCK_TEST_EXPIRED");
+                    }
+                }
+
                 var snapshot = frozen is not null && answers.Count > 0
                     ? new StartAttemptResponse
                     {
                         AttemptId = attempt.Id,
                         MockTestId = frozen.MockTestId,
-                        Title = frozen.Title ?? answers[0].MockQuestion.MockTestSection.MockTest.Title,
-                        JlptLevelName = frozen.JlptLevelName ??
-                            answers[0].MockQuestion.MockTestSection.MockTest.CertificateLevel?.Code ?? string.Empty,
-                        StartedAt = attempt.StartedAt,
-                        TimeLimitMinutes = attempt.ExpiresAt is { } expiry
+                        Title = frozen.Title ?? mockTest?.Title ?? string.Empty,
+                        JlptLevelName = frozen.JlptLevelName ?? mockTest?.CertificateLevel?.Code ?? string.Empty,
+                        ExamKind = resolvedExamKind,
+                        EnforceStrictTimer = !isPractice,
+                        IsResumed = true,
+                        AttemptStatus = StatusInProgress,
+                        StartedAt = BusinessDateHelper.EnsureUtc(attempt.StartedAt),
+                        LastSavedAt = frozen.LastSavedAt ?? BusinessDateHelper.EnsureUtc(attempt.ModifiedDate ?? attempt.StartedAt),
+                        LatestAnswerSequence = frozen.LatestAnswerSequence,
+                        ElapsedSeconds = frozen.ElapsedSeconds,
+                        TimeLimitMinutes = !isPractice && attempt.ExpiresAt is { } expiry
                             ? (int)Math.Ceiling((expiry - attempt.StartedAt).TotalMinutes)
-                            : answers[0].MockQuestion.MockTestSection.MockTest.TimeLimitMinutes,
+                            : mockTest?.TimeLimitMinutes ?? 0,
                         PreviouslyWrongQuestionIds = frozen.PreviouslyWrongQuestionIds,
                         TotalPreviouslyWrongQuestions = frozen.PreviouslyWrongQuestionIds.Count,
                         Questions = frozen.Questions.Select(question => question.Prompt).ToList(),
@@ -631,23 +892,30 @@ namespace RikiPath.Application.Services
                     : attempt.QuestionSnapshotJson is { Length: > 0 } json
                         ? JsonSerializer.Deserialize<StartAttemptResponse>(json, MockSnapshotJson) : null;
                 if (snapshot is null || snapshot.AttemptId != attemptId || snapshot.Questions.Count == 0)
-                    return ApiResponse<StartAttemptResponse>.Fail("Lượt thi này cần được mở lại từ danh sách đề.", HttpStatusCode.Conflict);
+                    return ApiResponse<StartAttemptResponse>.Fail("Lượt làm bài này cần được mở lại từ danh sách đề.", HttpStatusCode.Conflict);
 
                 var byQuestion = answers.ToDictionary(answer => answer.MockQuestionId);
                 snapshot.ServerNow = DateTime.UtcNow;
-                if (attempt.ExpiresAt is { } expiresAt) snapshot.ExpiresAt = BusinessDateHelper.EnsureUtc(expiresAt);
+                snapshot.ExamKind = resolvedExamKind;
+                snapshot.EnforceStrictTimer = !isPractice;
+                snapshot.IsResumed = true;
+                snapshot.AttemptStatus = StatusInProgress;
+                if (!isPractice && attempt.ExpiresAt is { } expiresAt) snapshot.ExpiresAt = BusinessDateHelper.EnsureUtc(expiresAt);
+                else snapshot.ExpiresAt = null;
                 foreach (var question in snapshot.Questions)
                 {
                     SanitizeExamPrompt(question);
-                    var answer = byQuestion[question.QuestionId];
-                    question.SelectedOptionId = answer.SelectedOptionId;
-                    question.Response = ParseJsonElement(answer.ResponseJson);
+                    if (byQuestion.TryGetValue(question.QuestionId, out var answer))
+                    {
+                        question.SelectedOptionId = answer.SelectedOptionId;
+                        question.Response = ParseJsonElement(answer.ResponseJson);
+                    }
                 }
                 return ApiResponse<StartAttemptResponse>.Success(snapshot);
             }
             catch (Exception)
             {
-                return ApiResponse<StartAttemptResponse>.Fail("Không thể tải lượt thi thử.", HttpStatusCode.InternalServerError);
+                return ApiResponse<StartAttemptResponse>.Fail("Không thể tải lượt làm bài.", HttpStatusCode.InternalServerError);
             }
         }
 
@@ -699,6 +967,16 @@ namespace RikiPath.Application.Services
                         return;
                     }
 
+                    var existingSnapshot = TryReadMockSnapshotSafe(attempt);
+                    if (IsAttemptAbandoned(existingSnapshot))
+                    {
+                        response = ApiResponse<AttemptResultResponse>.Fail(
+                            "Lượt làm bài này đã kết thúc do bạn chọn bắt đầu lượt mới.",
+                            HttpStatusCode.Conflict,
+                            errorCode: "MOCK_TEST_ABANDONED");
+                        return;
+                    }
+
                     // Attempt đã hoàn tất không được chấm lại khi client retry request.
                     if (attempt.IsCompleted)
                     {
@@ -732,11 +1010,17 @@ namespace RikiPath.Application.Services
                     }
 
                     var mockTest = snapshotAnswers[0].MockQuestion.MockTestSection.MockTest;
+                    var isPractice = IsPracticeExamKind(mockTest.ExamKind) || IsPracticeExamKind(existingSnapshot?.ExamKind);
                     var frozenQuestionsById = ReadFrozenQuestions(attempt, snapshotAnswers);
                     var now = DateTime.UtcNow;
-                    var deadline = attempt.ExpiresAt is { } expiresAt ? BusinessDateHelper.EnsureUtc(expiresAt)
-                        : mockTest.TimeLimitMinutes > 0 ? BusinessDateHelper.EnsureUtc(attempt.StartedAt).AddMinutes(mockTest.TimeLimitMinutes) : (DateTime?)null;
-                    var expired = deadline.HasValue && now >= deadline.Value;
+                    var deadline = isPractice
+                        ? (DateTime?)null
+                        : attempt.ExpiresAt is { } expiresAt
+                            ? BusinessDateHelper.EnsureUtc(expiresAt)
+                            : mockTest.TimeLimitMinutes > 0
+                                ? BusinessDateHelper.EnsureUtc(attempt.StartedAt).AddMinutes(mockTest.TimeLimitMinutes)
+                                : (DateTime?)null;
+                    var expired = !isPractice && deadline.HasValue && now >= deadline.Value;
                     if (expired && (!submit || !attempt.ExpiresAt.HasValue))
                     {
                         response = ApiResponse<AttemptResultResponse>.Fail(
@@ -744,8 +1028,10 @@ namespace RikiPath.Application.Services
                         return;
                     }
 
+                    var isStaleSequence = !submit && request.ClientSequence.HasValue && existingSnapshot is not null &&
+                        request.ClientSequence.Value < existingSnapshot.LatestAnswerSequence;
                     // At expiry, grade the answers already saved before the server deadline.
-                    var submittedAnswers = expired ? [] : request.Answers;
+                    var submittedAnswers = expired || isStaleSequence ? [] : request.Answers;
                     var snapshotsByQuestionId = snapshotAnswers.ToDictionary(
                         answer => answer.MockQuestionId);
                     var invalidQuestionIds = submittedAnswers
@@ -820,6 +1106,13 @@ namespace RikiPath.Application.Services
 
                     foreach (var submittedAnswer in submittedAnswers)
                     {
+                        if (existingSnapshot is not null && submittedAnswer.ClientSequence.HasValue &&
+                            existingSnapshot.QuestionSequences.TryGetValue(submittedAnswer.QuestionId, out var prevQSeq) &&
+                            submittedAnswer.ClientSequence.Value < prevQSeq)
+                        {
+                            continue;
+                        }
+
                         var snapshot = snapshotsByQuestionId[submittedAnswer.QuestionId];
                         var question = snapshot.MockQuestion;
                         var frozenQuestion = frozenQuestionsById is not null &&
@@ -838,45 +1131,110 @@ namespace RikiPath.Application.Services
                             : question.QuestionType.Equals("MultipleChoice", StringComparison.OrdinalIgnoreCase)
                                 ? IsMultipleChoiceCorrect(question, submittedAnswer.Response)
                                 : IsStructuredResponseCorrect(question, submittedAnswer.Response);
+
+                        if (existingSnapshot is not null && submittedAnswer.ClientSequence.HasValue)
+                            existingSnapshot.QuestionSequences[submittedAnswer.QuestionId] = submittedAnswer.ClientSequence.Value;
                     }
+
                     if (!submit)
                     {
+                        if (existingSnapshot is not null)
+                        {
+                            existingSnapshot.LastSavedAt = now;
+                            if (request.ClientSequence.HasValue && request.ClientSequence.Value > existingSnapshot.LatestAnswerSequence)
+                                existingSnapshot.LatestAnswerSequence = request.ClientSequence.Value;
+                            if (isPractice && request.ActiveElapsedSeconds is > 0)
+                                existingSnapshot.ElapsedSeconds = Math.Clamp(Math.Max(existingSnapshot.ElapsedSeconds, request.ActiveElapsedSeconds.Value), 0, 86400);
+                            existingSnapshot.ExamKind = mockTest.ExamKind.ToString();
+                            existingSnapshot.AttemptStatus = StatusInProgress;
+                            attempt.QuestionSnapshotJson = JsonSerializer.Serialize(existingSnapshot, MockSnapshotJson);
+                        }
+                        attempt.ModifiedDate = now;
+                        unitOfWork.MockTestAttempts.Update(attempt);
                         await unitOfWork.SaveChangesAsync(transactionCancellationToken);
                         response = ApiResponse<AttemptResultResponse>.Success(new AttemptResultResponse
                         {
-                            AttemptId = attempt.Id, MockTestId = mockTest.Id, Status = StatusInProgress,
+                            AttemptId = attempt.Id,
+                            MockTestId = mockTest.Id,
+                            Title = mockTest.Title,
+                            JlptLevelName = mockTest.CertificateLevel?.Code ?? existingSnapshot?.JlptLevelName ?? string.Empty,
+                            ExamKind = mockTest.ExamKind.ToString(),
+                            EnforceStrictTimer = !isPractice,
+                            Status = StatusInProgress,
+                            StartedAt = attempt.StartedAt,
+                            TotalQuestions = snapshotAnswers.Count,
                         });
                         return;
                     }
 
                     var correctByQuestion = snapshotAnswers.ToDictionary(answer => answer.MockQuestionId, answer => answer.IsCorrect);
                     var questions = snapshotAnswers.Select(answer => answer.MockQuestion).ToList();
-                    var sections = BuildSectionResults(attemptId, questions, correctByQuestion);
-                    await unitOfWork.MockTestSectionResults.AddRangeAsync(
-                        sections.Entities, transactionCancellationToken);
+                    var levelCode = mockTest.CertificateLevel?.Code ?? existingSnapshot?.JlptLevelName ?? string.Empty;
+                    var evaluated = MockTestScoringPolicy.BuildEvaluatedAttempt(
+                        attemptId, mockTest.ExamKind.ToString(), levelCode, questions, correctByQuestion);
 
-                    attempt.SubmittedAt = DateTime.UtcNow;
+                    if (existingSnapshot is not null)
+                    {
+                        existingSnapshot.LastSavedAt = now;
+                        if (request.ClientSequence.HasValue && request.ClientSequence.Value > existingSnapshot.LatestAnswerSequence)
+                            existingSnapshot.LatestAnswerSequence = request.ClientSequence.Value;
+                        if (isPractice && request.ActiveElapsedSeconds is > 0)
+                            existingSnapshot.ElapsedSeconds = Math.Clamp(Math.Max(existingSnapshot.ElapsedSeconds, request.ActiveElapsedSeconds.Value), 0, 86400);
+                        existingSnapshot.ExamKind = mockTest.ExamKind.ToString();
+                        existingSnapshot.JlptLevelName = levelCode;
+                        existingSnapshot.AttemptStatus = expired ? StatusExpired : StatusCompleted;
+                        existingSnapshot.Scoring = evaluated.Scoring;
+                        attempt.QuestionSnapshotJson = JsonSerializer.Serialize(existingSnapshot, MockSnapshotJson);
+                    }
+
+                    await unitOfWork.MockTestSectionResults.AddRangeAsync(
+                        evaluated.Entities, transactionCancellationToken);
+
+                    attempt.SubmittedAt = expired && deadline.HasValue ? deadline.Value : now;
                     attempt.IsCompleted = true;
-                    attempt.TotalScore = sections.OverallScore;
+                    attempt.TotalScore = evaluated.OverallAccuracyPercent;
                     unitOfWork.MockTestAttempts.Update(attempt);
 
                     // Answers, section results và trạng thái attempt cùng commit trong một transaction.
                     await unitOfWork.SaveChangesAsync(transactionCancellationToken);
 
+                    var totalCount = snapshotAnswers.Count;
+                    var answeredCount = snapshotAnswers.Count(HasAnsweredValue);
+                    var correctCount = snapshotAnswers.Count(a => a.IsCorrect);
+                    var blankCount = Math.Max(0, totalCount - answeredCount);
+                    var wrongCount = Math.Max(0, answeredCount - correctCount);
+                    var finalStatus = expired ? StatusExpired : StatusCompleted;
+                    var durationSec = isPractice && existingSnapshot is { ElapsedSeconds: > 0 }
+                        ? existingSnapshot.ElapsedSeconds
+                        : Math.Max(0, (int)(attempt.SubmittedAt.Value - BusinessDateHelper.EnsureUtc(attempt.StartedAt)).TotalSeconds);
+
                     response = ApiResponse<AttemptResultResponse>.Success(new AttemptResultResponse
                     {
                         AttemptId = attempt.Id,
                         MockTestId = mockTest.Id,
-                        Status = StatusCompleted,
+                        Title = mockTest.Title,
+                        JlptLevelName = levelCode,
+                        ExamKind = mockTest.ExamKind.ToString(),
+                        EnforceStrictTimer = !isPractice,
+                        Status = finalStatus,
                         StartedAt = attempt.StartedAt,
                         SubmittedAt = attempt.SubmittedAt,
                         TotalScore = attempt.TotalScore.Value,
+                        RawScore = evaluated.RawScore,
+                        MaxRawScore = evaluated.MaxRawScore,
+                        AccuracyPercent = evaluated.OverallAccuracyPercent,
+                        Scoring = evaluated.Scoring,
+                        CorrectCount = correctCount,
+                        WrongCount = wrongCount,
+                        BlankCount = blankCount,
+                        TotalQuestions = totalCount,
+                        DurationSeconds = durationSec,
                         WrongQuestionIds = correctByQuestion
                             .Where(item => !item.Value)
                             .Select(item => item.Key)
                             .OrderBy(id => id)
                             .ToList(),
-                        Sections = sections.Responses,
+                        Sections = evaluated.Responses,
                     });
                 }, cancellationToken);
 
@@ -886,6 +1244,65 @@ namespace RikiPath.Application.Services
             {
                 return ApiResponse<AttemptResultResponse>.Fail(
                     "Không thể chấm điểm lượt làm bài.", HttpStatusCode.InternalServerError);
+            }
+        }
+
+        public async Task<ApiResponse<AttemptResultResponse>> PauseAttemptAsync(
+            int attemptId, SubmitAttemptRequest? request = null, CancellationToken cancellationToken = default)
+        {
+            if (request is { Answers.Count: > 0 })
+            {
+                return await StoreAttemptAnswersAsync(attemptId, request, submit: false, cancellationToken);
+            }
+
+            try
+            {
+                var userId = claimService.GetUserClaim().Id;
+                var attempt = await unitOfWork.MockTestAttempts.GetByIdAsync(attemptId, cancellationToken);
+                if (attempt is null || attempt.IsDeleted || attempt.AttemptKind != AttemptKind.MockTest)
+                    return ApiResponse<AttemptResultResponse>.NotFound("Không tìm thấy lượt làm bài.");
+                if (attempt.UserId != userId)
+                    return ApiResponse<AttemptResultResponse>.Fail("Bạn không có quyền thao tác lượt làm bài này.", HttpStatusCode.Forbidden);
+
+                var snap = TryReadMockSnapshotSafe(attempt);
+                if (IsAttemptAbandoned(snap))
+                    return ApiResponse<AttemptResultResponse>.Fail("Lượt làm bài đã kết thúc.", HttpStatusCode.Conflict, errorCode: "MOCK_TEST_ABANDONED");
+                if (attempt.IsCompleted)
+                    return await GetAttemptResultAsync(attemptId, cancellationToken);
+
+                var now = DateTime.UtcNow;
+                if (snap is not null)
+                {
+                    if (request?.ActiveElapsedSeconds is > 0)
+                    {
+                        var clampedElapsed = Math.Clamp(request.ActiveElapsedSeconds.Value, 0, 86_400);
+                        snap.ElapsedSeconds = Math.Max(snap.ElapsedSeconds, clampedElapsed);
+                    }
+                    snap.LastSavedAt = now;
+                    attempt.QuestionSnapshotJson = JsonSerializer.Serialize(snap, MockSnapshotJson);
+                }
+                attempt.ModifiedDate = now;
+                unitOfWork.MockTestAttempts.Update(attempt);
+                await unitOfWork.SaveChangesAsync(cancellationToken);
+
+                var pauseExamKind = ResolveEffectiveExamKind(snap?.ExamKind, null, attempt.AttemptKind, attempt.IsPlacementAssessment);
+
+                return ApiResponse<AttemptResultResponse>.Success(new AttemptResultResponse
+                {
+                    AttemptId = attempt.Id,
+                    MockTestId = snap?.MockTestId ?? 0,
+                    Title = snap?.Title ?? string.Empty,
+                    JlptLevelName = snap?.JlptLevelName ?? string.Empty,
+                    ExamKind = pauseExamKind,
+                    EnforceStrictTimer = !IsPracticeExamKind(pauseExamKind),
+                    DurationSeconds = snap?.ElapsedSeconds ?? 0,
+                    Status = snap?.AttemptStatus ?? StatusInProgress,
+                    StartedAt = attempt.StartedAt,
+                });
+            }
+            catch (Exception)
+            {
+                return ApiResponse<AttemptResultResponse>.Fail("Chưa lưu được trạng thái tạm dừng.", HttpStatusCode.InternalServerError);
             }
         }
 
@@ -909,12 +1326,36 @@ namespace RikiPath.Application.Services
                         response = ApiResponse<bool>.Fail("Bạn không có quyền sửa lượt thi này.", HttpStatusCode.Forbidden);
                         return;
                     }
-                    var snapshots = await unitOfWork.MockTestAnswers.GetByAttemptIdAsync(attemptId, ct);
-                    var timeLimitMinutes = snapshots.FirstOrDefault()?.MockQuestion.MockTestSection.MockTest.TimeLimitMinutes ?? 0;
-                    if (attempt.IsCompleted || (!attempt.ExpiresAt.HasValue && timeLimitMinutes <= 0) ||
-                        DateTime.UtcNow >= (attempt.ExpiresAt ?? attempt.StartedAt.AddMinutes(timeLimitMinutes)))
+                    var existingSnap = TryReadMockSnapshotSafe(attempt);
+                    if (IsAttemptAbandoned(existingSnap))
                     {
-                        response = ApiResponse<bool>.Fail("Lượt thi đã kết thúc hoặc hết thời gian.", HttpStatusCode.Conflict);
+                        response = ApiResponse<bool>.Fail("Lượt làm bài đã kết thúc.", HttpStatusCode.Conflict, errorCode: "MOCK_TEST_ABANDONED");
+                        return;
+                    }
+                    var snapshots = await unitOfWork.MockTestAnswers.GetByAttemptIdAsync(attemptId, ct);
+                    var mockTest = snapshots.FirstOrDefault()?.MockQuestion.MockTestSection.MockTest;
+                    var timeLimitMinutes = mockTest?.TimeLimitMinutes ?? 0;
+                    var isPractice = (mockTest is not null && IsPracticeExamKind(mockTest.ExamKind)) || IsPracticeExamKind(existingSnap?.ExamKind);
+                    if (attempt.IsCompleted)
+                    {
+                        response = ApiResponse<bool>.Fail("Lượt làm bài đã được nộp.", HttpStatusCode.Conflict, errorCode: "MOCK_TEST_COMPLETED");
+                        return;
+                    }
+                    if (!isPractice)
+                    {
+                        var hardDeadline = attempt.ExpiresAt ?? (timeLimitMinutes > 0 ? attempt.StartedAt.AddMinutes(timeLimitMinutes) : (DateTime?)null);
+                        if (!hardDeadline.HasValue || DateTime.UtcNow >= hardDeadline.Value)
+                        {
+                            response = ApiResponse<bool>.Fail("Bài thi thử đã hết thời gian.", HttpStatusCode.Conflict, errorCode: "MOCK_TEST_EXPIRED");
+                            return;
+                        }
+                    }
+
+                    if (existingSnap is not null && answer.ClientSequence.HasValue &&
+                        existingSnap.QuestionSequences.TryGetValue(answer.QuestionId, out var prevSeq) &&
+                        answer.ClientSequence.Value < prevSeq)
+                    {
+                        response = ApiResponse<bool>.Success(true);
                         return;
                     }
 
@@ -969,6 +1410,20 @@ namespace RikiPath.Application.Services
 
                     snapshot.SelectedOptionId = answer.SelectedOptionId;
                     snapshot.ResponseJson = answer.Response?.GetRawText();
+                    var saveUtc = DateTime.UtcNow;
+                    if (existingSnap is not null)
+                    {
+                        existingSnap.LastSavedAt = saveUtc;
+                        if (answer.ClientSequence.HasValue)
+                        {
+                            existingSnap.QuestionSequences[answer.QuestionId] = answer.ClientSequence.Value;
+                            if (answer.ClientSequence.Value > existingSnap.LatestAnswerSequence)
+                                existingSnap.LatestAnswerSequence = answer.ClientSequence.Value;
+                        }
+                        attempt.QuestionSnapshotJson = JsonSerializer.Serialize(existingSnap, MockSnapshotJson);
+                    }
+                    attempt.ModifiedDate = saveUtc;
+                    unitOfWork.MockTestAttempts.Update(attempt);
                     await unitOfWork.SaveChangesAsync(ct);
                     response = ApiResponse<bool>.Success(true);
                 }, cancellationToken);
@@ -986,31 +1441,58 @@ namespace RikiPath.Application.Services
             try
             {
                 var userId = claimService.GetUserClaim().Id;
+                var nowUtc = DateTime.UtcNow;
                 var attempts = await unitOfWork.MockTestAttempts.GetByUserAsync(userId);
                 foreach (var attempt in attempts.Where(item => !item.IsCompleted && !item.IsDeleted))
                 {
+                    var frozenRaw = TryReadMockSnapshotSafe(attempt);
+                    if (IsAttemptAbandoned(frozenRaw)) continue;
+
                     var answers = await unitOfWork.MockTestAnswers.GetByAttemptIdAsync(attempt.Id, cancellationToken);
                     if (answers.Count == 0) continue;
                     var frozenQuestions = ReadFrozenQuestions(attempt, answers);
-                    var frozen = frozenQuestions is null ? null : ReadMockSnapshot(attempt);
+                    var frozen = frozenQuestions is null ? frozenRaw : ReadMockSnapshot(attempt);
                     if (frozen is not null
                             ? frozen.MockTestId != practiceTestId
                             : answers.Any(answer => answer.MockQuestion.MockTestSection.MockTestId != practiceTestId))
                         continue;
 
                     var test = answers[0].MockQuestion.MockTestSection.MockTest;
+                    var isPractice = IsPracticeExamKind(test.ExamKind) || IsPracticeExamKind(frozen?.ExamKind);
+                    if (!isPractice)
+                    {
+                        var deadline = attempt.ExpiresAt is { } exp
+                            ? BusinessDateHelper.EnsureUtc(exp)
+                            : test.TimeLimitMinutes > 0
+                                ? BusinessDateHelper.EnsureUtc(attempt.StartedAt).AddMinutes(test.TimeLimitMinutes)
+                                : (DateTime?)null;
+                        if (deadline.HasValue && nowUtc >= deadline.Value)
+                        {
+                            // Auto-finalize timed out FullMockTest so it never falsely resumes past deadline
+                            await FinalizeExpiredAttemptAsync(attempt.Id, cancellationToken);
+                            continue;
+                        }
+                    }
+
                     return ApiResponse<StartAttemptResponse?>.Success(new StartAttemptResponse
                     {
                         AttemptId = attempt.Id,
                         MockTestId = practiceTestId,
                         Title = frozen?.Title ?? test.Title,
                         JlptLevelName = frozen?.JlptLevelName ?? test.CertificateLevel?.Code ?? string.Empty,
+                        ExamKind = test.ExamKind.ToString(),
+                        EnforceStrictTimer = !isPractice,
+                        IsResumed = true,
+                        AttemptStatus = StatusInProgress,
                         StartedAt = BusinessDateHelper.EnsureUtc(attempt.StartedAt),
-                        ServerNow = DateTime.UtcNow,
-                        ExpiresAt = attempt.ExpiresAt is { } expiry ? BusinessDateHelper.EnsureUtc(expiry) : null,
+                        ServerNow = nowUtc,
+                        LastSavedAt = frozen?.LastSavedAt ?? BusinessDateHelper.EnsureUtc(attempt.ModifiedDate ?? attempt.StartedAt),
+                        LatestAnswerSequence = frozen?.LatestAnswerSequence ?? 0,
+                        ElapsedSeconds = frozen?.ElapsedSeconds ?? 0,
+                        ExpiresAt = !isPractice && attempt.ExpiresAt is { } expiry ? BusinessDateHelper.EnsureUtc(expiry) : null,
                         PreviouslyWrongQuestionIds = frozen?.PreviouslyWrongQuestionIds ?? [],
                         TotalPreviouslyWrongQuestions = frozen?.PreviouslyWrongQuestionIds.Count ?? 0,
-                        TimeLimitMinutes = attempt.ExpiresAt.HasValue
+                        TimeLimitMinutes = !isPractice && attempt.ExpiresAt.HasValue
                             ? (int)Math.Ceiling((attempt.ExpiresAt.Value - attempt.StartedAt).TotalMinutes)
                             : test.TimeLimitMinutes,
                         Questions = answers.Select(answer =>
@@ -1031,6 +1513,8 @@ namespace RikiPath.Application.Services
                                 QuestionId = question.Id,
                                 MockTestSectionId = section.Id,
                                 SectionTitle = section.Title,
+                                LanguageSkillName = section.LanguageSkill?.Name,
+                                QuestionGroupTitle = question.QuestionGroupTitle,
                                 SectionOrder = section.SortOrder,
                                 Order = question.SortOrder,
                                 SelectedOptionId = answer.SelectedOptionId,
@@ -1063,7 +1547,7 @@ namespace RikiPath.Application.Services
             catch (Exception)
             {
                 return ApiResponse<StartAttemptResponse?>.Fail(
-                    "Không thể khôi phục lượt thi thử.", HttpStatusCode.InternalServerError);
+                    "Không thể khôi phục lượt làm bài.", HttpStatusCode.InternalServerError);
             }
         }
 
@@ -1126,23 +1610,57 @@ namespace RikiPath.Application.Services
                                 : IsStructuredResponseCorrect(question, structured);
                         correctByQuestion[answer.MockQuestionId] = answer.IsCorrect;
                     }
-                    var sections = BuildSectionResults(attemptId, answers.Select(a => a.MockQuestion).ToList(), correctByQuestion);
-                    await unitOfWork.MockTestSectionResults.AddRangeAsync(sections.Entities, ct);
+                    var existingSnap = TryReadMockSnapshotSafe(attempt);
+                    if (IsAttemptAbandoned(existingSnap))
+                    {
+                        response = ApiResponse<AttemptResultResponse>.Fail("Lượt làm bài đã kết thúc.", HttpStatusCode.Conflict, errorCode: "MOCK_TEST_ABANDONED");
+                        return;
+                    }
+                    var levelCode = existingSnap?.JlptLevelName ?? mockTest.CertificateLevel?.Code ?? string.Empty;
+                    var evaluated = MockTestScoringPolicy.BuildEvaluatedAttempt(
+                        attemptId, mockTest.ExamKind.ToString(), levelCode, answers.Select(a => a.MockQuestion).ToList(), correctByQuestion);
+                    await unitOfWork.MockTestSectionResults.AddRangeAsync(evaluated.Entities, ct);
                     attempt.SubmittedAt = deadline;
                     attempt.IsCompleted = true;
-                    attempt.TotalScore = sections.OverallScore;
+                    attempt.TotalScore = evaluated.OverallAccuracyPercent;
+                    if (existingSnap is not null)
+                    {
+                        existingSnap.AttemptStatus = StatusExpired;
+                        existingSnap.JlptLevelName = levelCode;
+                        existingSnap.Scoring = evaluated.Scoring;
+                        attempt.QuestionSnapshotJson = JsonSerializer.Serialize(existingSnap, MockSnapshotJson);
+                    }
                     unitOfWork.MockTestAttempts.Update(attempt);
                     await unitOfWork.SaveChangesAsync(ct);
+
+                    var totalCount = answers.Count;
+                    var answeredCount = answers.Count(HasAnsweredValue);
+                    var correctCount = answers.Count(a => a.IsCorrect);
+                    var blankCount = Math.Max(0, totalCount - answeredCount);
+                    var wrongCount = Math.Max(0, answeredCount - correctCount);
                     response = ApiResponse<AttemptResultResponse>.Success(new AttemptResultResponse
                     {
                         AttemptId = attempt.Id,
                         MockTestId = mockTest.Id,
-                        Status = StatusCompleted,
+                        Title = existingSnap?.Title ?? mockTest.Title,
+                        JlptLevelName = levelCode,
+                        ExamKind = mockTest.ExamKind.ToString(),
+                        EnforceStrictTimer = !IsPracticeExamKind(mockTest.ExamKind),
+                        Status = StatusExpired,
                         StartedAt = attempt.StartedAt,
                         SubmittedAt = attempt.SubmittedAt,
-                        TotalScore = sections.OverallScore,
+                        TotalScore = evaluated.OverallAccuracyPercent,
+                        RawScore = evaluated.RawScore,
+                        MaxRawScore = evaluated.MaxRawScore,
+                        AccuracyPercent = evaluated.OverallAccuracyPercent,
+                        Scoring = evaluated.Scoring,
+                        CorrectCount = correctCount,
+                        WrongCount = wrongCount,
+                        BlankCount = blankCount,
+                        TotalQuestions = totalCount,
+                        DurationSeconds = Math.Max(0, (int)(deadline - BusinessDateHelper.EnsureUtc(attempt.StartedAt)).TotalSeconds),
                         WrongQuestionIds = correctByQuestion.Where(item => !item.Value).Select(item => item.Key).OrderBy(id => id).ToList(),
-                        Sections = sections.Responses,
+                        Sections = evaluated.Responses,
                     });
                 }, cancellationToken);
                 return alreadyCompleted ? await GetAttemptResultAsync(attemptId, cancellationToken) : response!;
@@ -1177,6 +1695,29 @@ namespace RikiPath.Application.Services
                 // Đồng bộ với SubmitAttemptAsync: trả luôn danh sách câu sai.
                 var answers = await unitOfWork.MockTestAnswers.GetByAttemptIdAsync(
                     attemptId, cancellationToken);
+                var snap = TryReadMockSnapshotSafe(attempt);
+                var mockTest = answers.FirstOrDefault()?.MockQuestion?.MockTestSection?.MockTest
+                    ?? sectionResults.FirstOrDefault()?.MockTestSection?.MockTest;
+                var examKind = ResolveEffectiveExamKind(
+                    snap?.ExamKind,
+                    mockTest?.ExamKind,
+                    attempt.AttemptKind,
+                    attempt.IsPlacementAssessment);
+                var totalCount = answers?.Count ?? sectionResults.Sum(s => s.TotalCount);
+                var answeredCount = answers?.Count(HasAnsweredValue) ?? totalCount;
+                var correctCount = answers?.Count(a => a.IsCorrect) ?? sectionResults.Sum(s => s.CorrectCount);
+                var blankCount = Math.Max(0, totalCount - answeredCount);
+                var wrongCount = Math.Max(0, answeredCount - correctCount);
+                var status = ResolveAttemptStatus(attempt, snap);
+                var submittedUtc = attempt.SubmittedAt.HasValue ? BusinessDateHelper.EnsureUtc(attempt.SubmittedAt.Value) : DateTime.UtcNow;
+                var durationSec = IsPracticeExamKind(examKind) && snap is { ElapsedSeconds: > 0 }
+                    ? snap.ElapsedSeconds
+                    : Math.Max(0, (int)(submittedUtc - BusinessDateHelper.EnsureUtc(attempt.StartedAt)).TotalSeconds);
+                var levelCode = snap?.JlptLevelName ?? mockTest?.CertificateLevel?.Code ?? sectionResults.FirstOrDefault()?.MockTestSection?.MockTest?.CertificateLevel?.Code ?? string.Empty;
+                var scoring = CanReuseSnapshotScoring(snap?.Scoring, examKind)
+                    ? snap!.Scoring!
+                    : MockTestScoringPolicy.EvaluateFromSectionResults(
+                        examKind, levelCode, sectionResults, correctCount, totalCount, attempt.TotalScore);
 
                 var result = new AttemptResultResponse
                 {
@@ -1184,10 +1725,23 @@ namespace RikiPath.Application.Services
                     MockTestId = sectionResults
                         .Select(section => section.MockTestSection.MockTestId)
                         .FirstOrDefault(),
-                    Status = attempt.IsCompleted ? StatusCompleted : StatusInProgress,
+                    Title = snap?.Title ?? mockTest?.Title ?? string.Empty,
+                    JlptLevelName = levelCode,
+                    ExamKind = examKind,
+                    EnforceStrictTimer = !IsPracticeExamKind(examKind),
+                    Status = status,
                     StartedAt = attempt.StartedAt,
                     SubmittedAt = attempt.SubmittedAt,
                     TotalScore = attempt.TotalScore.GetValueOrDefault(),
+                    RawScore = scoring.RawScore,
+                    MaxRawScore = scoring.MaxRawScore,
+                    AccuracyPercent = scoring.AccuracyPercent,
+                    Scoring = scoring,
+                    CorrectCount = correctCount,
+                    WrongCount = wrongCount,
+                    BlankCount = blankCount,
+                    TotalQuestions = totalCount,
+                    DurationSeconds = durationSec,
                     WrongQuestionIds = (answers ?? Enumerable.Empty<MockTestAnswer>())
                         .Where(a => !a.IsCorrect)
                         .Select(a => a.MockQuestionId)
@@ -1198,6 +1752,7 @@ namespace RikiPath.Application.Services
                         MockTestSectionId = r.MockTestSectionId,
                         SectionTitle = r.MockTestSection.Title,
                         LanguageSkillName = r.MockTestSection.LanguageSkill.Name,
+                        LanguageSkillCode = r.MockTestSection.LanguageSkill?.Code,
                         CorrectCount = r.CorrectCount,
                         TotalCount = r.TotalCount,
                         Score = r.ScorePercent,
@@ -1248,6 +1803,7 @@ namespace RikiPath.Application.Services
                     .OrderBy(test => test.Title).ThenBy(test => test.Id)
                     .Select(ToTestSummary).ToList();
 
+                await EnrichSummariesForLearnerAsync(result, cancellationToken);
                 return ApiResponse<List<TestSummaryResponse>>.Success(result);
             }
             catch (Exception)
@@ -1257,9 +1813,14 @@ namespace RikiPath.Application.Services
             }
         }
 
-        public async Task<ApiResponse<List<TestSummaryResponse>>> GetPracticeSetsAsync(
+        public Task<ApiResponse<List<TestSummaryResponse>>> GetPracticeSetsAsync(
             int? certificateLevelId = null, int? languageSkillId = null, string? examKind = null, string? keyword = null,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default) =>
+            GetPracticeSetsAsync(certificateLevelId, languageSkillId, examKind, keyword, status: null, sort: null, cancellationToken);
+
+        public async Task<ApiResponse<List<TestSummaryResponse>>> GetPracticeSetsAsync(
+            int? certificateLevelId, int? languageSkillId, string? examKind, string? keyword,
+            string? status, string? sort, CancellationToken cancellationToken = default)
         {
             try
             {
@@ -1300,6 +1861,9 @@ namespace RikiPath.Application.Services
                         !ContentAuthoring.JlptBlueprintPolicy.IsRightsBlockedForLegacyOrManaged(test.RightsStatus, test.IsManagedWorkflow))
                     .Select(ToTestSummary)
                     .ToList();
+
+                await EnrichSummariesForLearnerAsync(result, cancellationToken);
+                result = FilterAndSortSummaries(result, status, sort);
                 return ApiResponse<List<TestSummaryResponse>>.Success(result);
             }
             catch (Exception)
@@ -1308,8 +1872,12 @@ namespace RikiPath.Application.Services
             }
         }
 
+        public Task<ApiResponse<List<TestSummaryResponse>>> GetFullMockTestsAsync(
+            int? certificateLevelId = null, string? keyword = null, CancellationToken cancellationToken = default) =>
+            GetFullMockTestsAsync(certificateLevelId, keyword, status: null, sort: null, cancellationToken);
+
         public async Task<ApiResponse<List<TestSummaryResponse>>> GetFullMockTestsAsync(
-            int? certificateLevelId = null, string? keyword = null, CancellationToken cancellationToken = default)
+            int? certificateLevelId, string? keyword, string? status, string? sort, CancellationToken cancellationToken = default)
         {
             try
             {
@@ -1339,6 +1907,9 @@ namespace RikiPath.Application.Services
                     if (IsLearnerReady(test) && await IsApprovedForLearnersAsync(test, cancellationToken))
                         ready.Add(ToTestSummary(test));
                 }
+
+                await EnrichSummariesForLearnerAsync(ready, cancellationToken);
+                ready = FilterAndSortSummaries(ready, status, sort);
                 return ApiResponse<List<TestSummaryResponse>>.Success(ready);
             }
             catch (Exception)
@@ -1358,54 +1929,671 @@ namespace RikiPath.Application.Services
             CancellationToken cancellationToken = default)
         {
             var test = await unitOfWork.MockTests.GetWithSectionsAndQuestionsAsync(practiceTestId, cancellationToken);
-            return test is not null && IsLearnerReady(test) &&
-                await IsApprovedForLearnersAsync(test, cancellationToken)
-                ? ApiResponse<TestSummaryResponse>.Success(ToTestSummary(test))
-                : ApiResponse<TestSummaryResponse>.NotFound("Đề thi chưa sẵn sàng.");
+            if (test is null || !IsLearnerReady(test) || !await IsApprovedForLearnersAsync(test, cancellationToken))
+                return ApiResponse<TestSummaryResponse>.NotFound("Đề thi chưa sẵn sàng.");
+            var summary = ToTestSummary(test);
+            await EnrichSummariesForLearnerAsync([summary], cancellationToken);
+            return ApiResponse<TestSummaryResponse>.Success(summary);
         }
 
-        public async Task<ApiResponse<List<MockTestHistoryItem>>> GetHistoryAsync(CancellationToken cancellationToken = default)
+        public async Task<ApiResponse<PracticeSetPreviewResponse>> GetPracticeSetPreviewAsync(
+            int practiceTestId, CancellationToken cancellationToken = default)
         {
             try
             {
-                var userId = claimService.GetUserClaim().Id;
-                var attempts = await unitOfWork.MockTestAttempts.Query().AsNoTracking()
-                    .Where(attempt => attempt.UserId == userId && attempt.AttemptKind == AttemptKind.MockTest &&
-                        attempt.IsCompleted && !attempt.IsDeleted && attempt.TotalScore.HasValue)
-                    .OrderByDescending(attempt => attempt.SubmittedAt ?? attempt.StartedAt).ThenByDescending(attempt => attempt.Id)
-                    .Select(attempt => new
+                var test = await unitOfWork.MockTests.GetWithSectionsAndQuestionsAsync(practiceTestId, cancellationToken);
+                if (test is null || test.IsDeleted || test.IsArchivedVersion)
+                    return ApiResponse<PracticeSetPreviewResponse>.NotFound("Không tìm thấy bộ đề luyện tập.");
+
+                if (test.ExamKind is not (ExamKind.PracticeSet or ExamKind.MixedPractice))
+                    return ApiResponse<PracticeSetPreviewResponse>.Fail(
+                        "Đề thi thử JLPT không cho phép xem trước danh sách câu hỏi.",
+                        HttpStatusCode.Forbidden,
+                        errorCode: "MOCK_TEST_PREVIEW_FORBIDDEN");
+
+                if (!IsLearnerReady(test) || !await IsApprovedForLearnersAsync(test, cancellationToken))
+                    return ApiResponse<PracticeSetPreviewResponse>.Fail(
+                        "Bộ đề hiện chưa khả dụng hoặc đang chờ cập nhật.",
+                        HttpStatusCode.Conflict,
+                        errorCode: "PRACTICE_SET_UNAVAILABLE");
+
+                var summary = ToTestSummary(test);
+                await EnrichSummariesForLearnerAsync([summary], cancellationToken);
+
+                // Prevent accidental leak of shared FullMockTest questions unless not shared with published FullMockTest
+                var sections = (test.Sections ?? []).Where(s => !s.IsDeleted)
+                    .OrderBy(s => s.SortOrder).ThenBy(s => s.Id)
+                    .ToList();
+                var bankIds = sections.SelectMany(s => s.Questions ?? [])
+                    .Where(q => !q.IsDeleted && q.QuestionBankItemId.HasValue)
+                    .Select(q => q.QuestionBankItemId!.Value)
+                    .Distinct()
+                    .ToList();
+                HashSet<int> confidentialMockBankIds = [];
+                if (bankIds.Count > 0)
+                {
+                    confidentialMockBankIds = (await unitOfWork.MockTests.Query().AsNoTracking()
+                        .Where(m => !m.IsDeleted && !m.IsArchivedVersion && m.ExamKind == ExamKind.FullMockTest && m.PublishStatus == ContentStatus.Published)
+                        .SelectMany(m => m.Sections!.Where(s => !s.IsDeleted))
+                        .SelectMany(s => s.Questions!.Where(q => !q.IsDeleted && q.QuestionBankItemId.HasValue))
+                        .Where(q => bankIds.Contains(q.QuestionBankItemId!.Value))
+                        .Select(q => q.QuestionBankItemId!.Value)
+                        .Distinct()
+                        .ToListAsync(cancellationToken)).ToHashSet();
+                }
+
+                var qOrder = 0;
+                var previewSections = sections.Select(section =>
+                {
+                    var orderedQs = (section.Questions ?? []).Where(q => !q.IsDeleted)
+                        .OrderBy(q => q.SortOrder).ThenBy(q => q.Id)
+                        .ToList();
+                    return new PracticeSetPreviewSectionResponse
                     {
-                        attempt.Id,
-                        Date = attempt.SubmittedAt ?? attempt.StartedAt,
-                        Score = attempt.TotalScore!.Value,
-                        attempt.QuestionSnapshotJson,
-                        Test = attempt.SectionResults!.OrderBy(section => section.MockTestSectionId)
-                            .Select(section => new
-                            {
-                                Id = section.MockTestSection.MockTestId,
-                                section.MockTestSection.MockTest.Title,
-                                Level = section.MockTestSection.MockTest.CertificateLevel.Code,
-                            }).FirstOrDefault(),
-                    }).ToListAsync(cancellationToken);
-                return ApiResponse<List<MockTestHistoryItem>>.Success(attempts.Where(attempt => attempt.Test is not null)
-                    .Select(attempt =>
-                    {
-                        MockAttemptSnapshot? frozen = null;
-                        if (!string.IsNullOrWhiteSpace(attempt.QuestionSnapshotJson))
+                        SectionId = section.Id,
+                        Title = section.Title,
+                        SkillName = section.LanguageSkill?.Name ?? string.Empty,
+                        DurationMinutes = section.DurationMinutes,
+                        QuestionCount = orderedQs.Count,
+                        RequiresAudio = orderedQs.Any(q => !string.IsNullOrWhiteSpace(q.AudioUrl ?? q.Passage?.AudioUrl)),
+                        Questions = orderedQs.Select(question =>
                         {
-                            try { frozen = JsonSerializer.Deserialize<MockAttemptSnapshot>(attempt.QuestionSnapshotJson, MockSnapshotJson); }
-                            catch (JsonException) { /* Preserve access to legacy history. */ }
-                        }
-                        return new MockTestHistoryItem(attempt.Id, attempt.Test!.Id,
-                            frozen?.Title ?? attempt.Test.Title,
-                            frozen?.JlptLevelName ?? attempt.Test.Level,
-                            BusinessDateHelper.EnsureUtc(attempt.Date), attempt.Score);
-                    }).ToList());
+                            qOrder++;
+                            var isConfidential = question.QuestionBankItemId.HasValue && confidentialMockBankIds.Contains(question.QuestionBankItemId.Value);
+                            if (isConfidential)
+                            {
+                                return new PracticeSetPreviewQuestionResponse
+                                {
+                                    QuestionId = question.Id,
+                                    Order = qOrder,
+                                    QuestionText = "Câu hỏi thuộc phạm vi dùng chung với ngân hàng Thi thử JLPT — nội dung chi tiết chỉ hiển thị khi làm bài.",
+                                    QuestionType = question.QuestionType,
+                                    SkillName = section.LanguageSkill?.Name ?? string.Empty,
+                                    QuestionGroupTitle = question.QuestionGroupTitle,
+                                    HasAudio = !string.IsNullOrWhiteSpace(question.AudioUrl ?? question.Passage?.AudioUrl),
+                                    HasImage = !string.IsNullOrWhiteSpace(question.ImageUrl ?? question.Passage?.ImageUrl),
+                                    IsConfidentialRedacted = true,
+                                    Options = [],
+                                };
+                            }
+
+                            var interactionData = ParseJsonElement(question.InteractionDataJson);
+                            return new PracticeSetPreviewQuestionResponse
+                            {
+                                QuestionId = question.Id,
+                                Order = qOrder,
+                                QuestionText = question.QuestionText,
+                                QuestionType = question.QuestionType,
+                                SkillName = section.LanguageSkill?.Name ?? string.Empty,
+                                QuestionGroupTitle = question.QuestionGroupTitle,
+                                PassageId = question.PassageId,
+                                PassageTitle = question.Passage?.Title,
+                                PassageText = ResolvePassageText(question.Passage?.PassageText, interactionData),
+                                PassageInstructions = question.Passage?.Instructions,
+                                HasAudio = !string.IsNullOrWhiteSpace(question.AudioUrl ?? question.Passage?.AudioUrl),
+                                HasImage = !string.IsNullOrWhiteSpace(question.ImageUrl ?? question.Passage?.ImageUrl),
+                                IsConfidentialRedacted = false,
+                                // NEVER return IsCorrect, AnswerKey, Explanation, or AudioTranscript!
+                                Options = (question.Options ?? []).Where(o => !o.IsDeleted)
+                                    .OrderBy(o => o.SortOrder).ThenBy(o => o.Id)
+                                    .Select((o, idx) => new PracticeSetPreviewOptionResponse
+                                    {
+                                        Order = idx + 1,
+                                        OptionText = PublicOptionText(o, question.InteractionDataJson, idx),
+                                        HasImage = !string.IsNullOrWhiteSpace(o.ImageUrl),
+                                    }).ToList(),
+                            };
+                        }).ToList(),
+                    };
+                }).ToList();
+
+                return ApiResponse<PracticeSetPreviewResponse>.Success(new PracticeSetPreviewResponse
+                {
+                    MockTestId = summary.MockTestId,
+                    Title = summary.Title,
+                    Description = summary.Description,
+                    JlptLevelName = summary.JlptLevelName,
+                    ExamKind = summary.ExamKind,
+                    Version = summary.Version,
+                    TimeLimitMinutes = summary.TimeLimitMinutes,
+                    QuestionCount = summary.QuestionCount,
+                    IncludedSkills = summary.IncludedSkills,
+                    UserStatus = summary.UserStatus,
+                    ActiveAttemptId = summary.ActiveAttemptId,
+                    ActiveAnsweredCount = summary.ActiveAnsweredCount,
+                    ActiveTotalQuestions = summary.ActiveTotalQuestions,
+                    ActiveProgressPercent = summary.ActiveProgressPercent,
+                    ActiveLastSavedAt = summary.ActiveLastSavedAt,
+                    CanStart = summary.CanStart,
+                    CanDownloadPdf = summary.CanDownloadPdf,
+                    UnavailableReason = summary.UnavailableReason,
+                    Sections = previewSections,
+                });
             }
             catch (Exception)
             {
-                return ApiResponse<List<MockTestHistoryItem>>.Fail("Không thể tải lịch sử thi thử.", HttpStatusCode.InternalServerError);
+                return ApiResponse<PracticeSetPreviewResponse>.Fail("Không thể tải thông tin bộ đề luyện tập.", HttpStatusCode.InternalServerError);
             }
+        }
+
+        private async Task EnrichSummariesForLearnerAsync(List<TestSummaryResponse> items, CancellationToken cancellationToken)
+        {
+            if (items.Count == 0) return;
+
+            var featureGate = await EvaluateMockFeatureAsync(cancellationToken);
+            int userId;
+            try { userId = claimService.GetUserClaim().Id; }
+            catch { return; }
+
+            await AutoFinalizeExpiredMockAttemptsInternalAsync(userId, null, cancellationToken);
+
+            var attempts = await unitOfWork.MockTestAttempts.Query().AsNoTracking()
+                .Where(a => a.UserId == userId && !a.IsDeleted && a.AttemptKind == AttemptKind.MockTest)
+                .OrderByDescending(a => a.StartedAt).ThenByDescending(a => a.Id)
+                .Select(a => new
+                {
+                    a.Id,
+                    a.StartedAt,
+                    a.SubmittedAt,
+                    a.ModifiedDate,
+                    a.ExpiresAt,
+                    a.IsCompleted,
+                    a.TotalScore,
+                    a.QuestionSnapshotJson,
+                    TotalAnswers = a.Answers!.Count,
+                    AnsweredCount = a.Answers!.Count(ans => ans.SelectedOptionId != null || ans.ResponseJson != null),
+                    CorrectCount = a.Answers!.Count(ans => ans.IsCorrect),
+                    FallbackTestId = a.SectionResults!.Select(sr => (int?)sr.MockTestSection.MockTestId).FirstOrDefault()
+                        ?? a.Answers!.Select(ans => (int?)ans.MockQuestion.MockTestSection.MockTestId).FirstOrDefault(),
+                    SectionRows = a.SectionResults!.Select(sr => new ProjectedSectionScoreRow(
+                        sr.MockTestSectionId,
+                        sr.MockTestSection.Title,
+                        sr.MockTestSection.LanguageSkill.Code,
+                        sr.MockTestSection.LanguageSkill.Name,
+                        sr.CorrectCount,
+                        sr.TotalCount,
+                        sr.ScorePercent)).ToList(),
+                })
+                .ToListAsync(cancellationToken);
+
+            var nowUtc = DateTime.UtcNow;
+            var byTest = new Dictionary<int, List<(
+                int Id, DateTime StartedAt, DateTime? SubmittedAt, DateTime? ModifiedDate, DateTime? ExpiresAt,
+                bool IsCompleted, double? TotalScore, int TotalAnswers, int AnsweredCount, int CorrectCount, MockAttemptSnapshot? Snap, List<ProjectedSectionScoreRow> SectionRows)>>();
+
+            foreach (var a in attempts)
+            {
+                MockAttemptSnapshot? snap = null;
+                if (!string.IsNullOrWhiteSpace(a.QuestionSnapshotJson))
+                {
+                    try { snap = JsonSerializer.Deserialize<MockAttemptSnapshot>(a.QuestionSnapshotJson, MockSnapshotJson); }
+                    catch (JsonException) { }
+                }
+                var testId = snap?.MockTestId > 0 ? snap.MockTestId : (a.FallbackTestId ?? 0);
+                if (testId <= 0) continue;
+                if (!byTest.TryGetValue(testId, out var list))
+                {
+                    list = [];
+                    byTest[testId] = list;
+                }
+                list.Add((a.Id, a.StartedAt, a.SubmittedAt, a.ModifiedDate, a.ExpiresAt, a.IsCompleted, a.TotalScore, a.TotalAnswers, a.AnsweredCount, a.CorrectCount, snap, a.SectionRows));
+            }
+
+            foreach (var item in items)
+            {
+                var isPractice = IsPracticeExamKind(item.ExamKind);
+                byTest.TryGetValue(item.MockTestId, out var list);
+                list ??= [];
+
+                var active = list.FirstOrDefault(a =>
+                    !a.IsCompleted &&
+                    !IsAttemptAbandoned(a.Snap) &&
+                    (isPractice || !a.ExpiresAt.HasValue || BusinessDateHelper.EnsureUtc(a.ExpiresAt.Value) > nowUtc));
+
+                var completed = list
+                    .Where(a => a.IsCompleted && !IsAttemptAbandoned(a.Snap) && a.TotalScore.HasValue)
+                    .OrderByDescending(a => a.SubmittedAt ?? a.StartedAt).ThenByDescending(a => a.Id)
+                    .ToList();
+                var latestCompleted = completed.FirstOrDefault();
+
+                item.AttemptsCompletedCount = completed.Count;
+                item.EnforceStrictTimer = !isPractice;
+
+                if (latestCompleted.Id > 0)
+                {
+                    var latestTotalQ = latestCompleted.TotalAnswers > 0 ? latestCompleted.TotalAnswers : item.QuestionCount;
+                    item.LatestCompletedAttemptId = latestCompleted.Id;
+                    item.LatestScore = latestCompleted.TotalScore;
+                    item.LatestSubmittedAt = latestCompleted.SubmittedAt.HasValue
+                        ? BusinessDateHelper.EnsureUtc(latestCompleted.SubmittedAt.Value)
+                        : BusinessDateHelper.EnsureUtc(latestCompleted.StartedAt);
+                    item.LatestCorrectCount = latestCompleted.CorrectCount;
+                    item.LatestTotalQuestions = latestTotalQ;
+                    item.LatestScoring = latestCompleted.Snap?.Scoring ?? BuildScoringFromProjectedRows(
+                        item.ExamKind, item.JlptLevelName, latestCompleted.SectionRows, latestCompleted.CorrectCount, latestTotalQ, latestCompleted.TotalScore);
+                }
+
+                if (active.Id > 0)
+                {
+                    var totalQ = active.TotalAnswers > 0 ? active.TotalAnswers : item.QuestionCount;
+                    var pct = totalQ > 0 ? (int)Math.Round(active.AnsweredCount * 100d / totalQ) : 0;
+                    item.UserStatus = "IN_PROGRESS";
+                    item.ActiveAttemptId = active.Id;
+                    item.ActiveAnsweredCount = active.AnsweredCount;
+                    item.ActiveTotalQuestions = totalQ;
+                    item.ActiveProgressPercent = pct;
+                    item.ActiveLastSavedAt = active.Snap?.LastSavedAt ?? BusinessDateHelper.EnsureUtc(active.ModifiedDate ?? active.StartedAt);
+                    item.ActiveElapsedSeconds = active.Snap?.ElapsedSeconds ?? 0;
+                    if (!isPractice && active.ExpiresAt.HasValue)
+                    {
+                        var exp = BusinessDateHelper.EnsureUtc(active.ExpiresAt.Value);
+                        item.ActiveExpiresAt = exp;
+                        item.ActiveRemainingSeconds = Math.Max(0, (int)Math.Ceiling((exp - nowUtc).TotalSeconds));
+                    }
+                    item.CanResume = true;
+                    item.CanRestart = isPractice && featureGate.Allowed;
+                    item.CanStart = featureGate.Allowed;
+                    if (!featureGate.Allowed) item.UnavailableReason = featureGate.Message;
+                }
+                else if (!featureGate.Allowed)
+                {
+                    item.UserStatus = "UNAVAILABLE";
+                    item.CanStart = false;
+                    item.CanResume = false;
+                    item.CanRestart = false;
+                    item.UnavailableReason = featureGate.Message;
+                }
+                else if (latestCompleted.Id > 0)
+                {
+                    var latestExpired = string.Equals(latestCompleted.Snap?.AttemptStatus, StatusExpired, StringComparison.OrdinalIgnoreCase);
+                    item.UserStatus = latestExpired ? "EXPIRED" : "COMPLETED";
+                    item.CanStart = true;
+                }
+                else
+                {
+                    item.UserStatus = "NOT_STARTED";
+                    item.CanStart = true;
+                }
+
+                item.CanDownloadPdf = featureGate.Allowed && (isPractice || completed.Count > 0);
+            }
+        }
+
+        private static List<TestSummaryResponse> FilterAndSortSummaries(
+            List<TestSummaryResponse> items, string? status, string? sort)
+        {
+            IEnumerable<TestSummaryResponse> q = items;
+            if (!string.IsNullOrWhiteSpace(status) && !string.Equals(status, "ALL", StringComparison.OrdinalIgnoreCase))
+            {
+                var st = status.Trim().ToUpperInvariant();
+                q = st switch
+                {
+                    "COMPLETED" => q.Where(i => i.UserStatus is "COMPLETED" or "EXPIRED"),
+                    "IN_PROGRESS" => q.Where(i => i.UserStatus == "IN_PROGRESS"),
+                    "NOT_STARTED" => q.Where(i => i.UserStatus == "NOT_STARTED"),
+                    "EXPIRED" => q.Where(i => i.UserStatus == "EXPIRED"),
+                    "UNAVAILABLE" => q.Where(i => i.UserStatus == "UNAVAILABLE"),
+                    _ => q,
+                };
+            }
+
+            q = (sort ?? "default").Trim().ToLowerInvariant() switch
+            {
+                "title" => q.OrderBy(i => i.Title, StringComparer.OrdinalIgnoreCase),
+                "level" => q.OrderBy(i => i.CertificateLevelId).ThenBy(i => i.Title),
+                "progress" => q.OrderByDescending(i => i.UserStatus == "IN_PROGRESS" ? 2 : i.UserStatus is "COMPLETED" or "EXPIRED" ? 1 : 0)
+                    .ThenByDescending(i => i.ActiveProgressPercent ?? 0)
+                    .ThenByDescending(i => i.PublishedAt ?? DateTime.MinValue),
+                "newest" => q.OrderByDescending(i => i.PublishedAt ?? DateTime.MinValue).ThenByDescending(i => i.MockTestId),
+                _ => q,
+            };
+
+            return q.ToList();
+        }
+
+        public Task<ApiResponse<List<MockTestHistoryItem>>> GetHistoryAsync(CancellationToken cancellationToken = default) =>
+            GetHistoryAsync(kind: null, status: null, cancellationToken);
+
+        public async Task<ApiResponse<List<MockTestHistoryItem>>> GetHistoryAsync(
+            string? kind, string? status, CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                var (items, _) = await BuildHistoryInternalAsync(kind, status, null, null, null, cancellationToken);
+                return ApiResponse<List<MockTestHistoryItem>>.Success(items);
+            }
+            catch (Exception)
+            {
+                return ApiResponse<List<MockTestHistoryItem>>.Fail("Không thể tải lịch sử làm bài.", HttpStatusCode.InternalServerError);
+            }
+        }
+
+        public async Task<ApiResponse<PagedMockTestHistoryResponse>> GetPagedHistoryAsync(
+            string? kind,
+            string? status,
+            string? jlptLevel,
+            int? days,
+            string? search,
+            int page,
+            int pageSize,
+            CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                var (items, stats) = await BuildHistoryInternalAsync(kind, status, jlptLevel, days, search, cancellationToken);
+                var safePage = Math.Max(1, page);
+                var safeSize = Math.Clamp(pageSize, 1, 50);
+                var pageItems = items.Skip((safePage - 1) * safeSize).Take(safeSize).ToList();
+                return ApiResponse<PagedMockTestHistoryResponse>.Success(
+                    new PagedMockTestHistoryResponse(
+                        pageItems,
+                        items.Count,
+                        safePage,
+                        safeSize,
+                        safePage * safeSize < items.Count,
+                        stats));
+            }
+            catch (Exception)
+            {
+                return ApiResponse<PagedMockTestHistoryResponse>.Fail("Không thể tải lịch sử làm bài.", HttpStatusCode.InternalServerError);
+            }
+        }
+
+        private async Task<(List<MockTestHistoryItem> Items, ExamHistoryStatsResponse Stats)> BuildHistoryInternalAsync(
+            string? kind,
+            string? status,
+            string? jlptLevel,
+            int? days,
+            string? search,
+            CancellationToken cancellationToken)
+        {
+            var userId = claimService.GetUserClaim().Id;
+            await AutoFinalizeExpiredMockAttemptsInternalAsync(userId, null, cancellationToken);
+
+            var attempts = await unitOfWork.MockTestAttempts.Query().AsNoTracking()
+                .Where(attempt => attempt.UserId == userId
+                    && !attempt.IsDeleted
+                    && (attempt.AttemptKind == AttemptKind.MockTest || attempt.AttemptKind == AttemptKind.Placement))
+                .OrderByDescending(attempt => attempt.SubmittedAt ?? attempt.ModifiedDate ?? attempt.StartedAt)
+                .ThenByDescending(attempt => attempt.Id)
+                .Select(attempt => new
+                {
+                    attempt.Id,
+                    attempt.AttemptKind,
+                    attempt.IsPlacementAssessment,
+                    attempt.StartedAt,
+                    attempt.SubmittedAt,
+                    attempt.ModifiedDate,
+                    attempt.ExpiresAt,
+                    attempt.IsCompleted,
+                    Score = attempt.TotalScore,
+                    attempt.QuestionSnapshotJson,
+                    TotalQuestions = attempt.Answers!.Count,
+                    AnsweredCount = attempt.Answers!.Count(ans => ans.SelectedOptionId != null || ans.ResponseJson != null),
+                    CorrectCount = attempt.Answers!.Count(ans => ans.IsCorrect),
+                    SectionRows = attempt.SectionResults!.Select(sr => new ProjectedSectionScoreRow(
+                        sr.MockTestSectionId,
+                        sr.MockTestSection.Title,
+                        sr.MockTestSection.LanguageSkill.Code,
+                        sr.MockTestSection.LanguageSkill.Name,
+                        sr.CorrectCount,
+                        sr.TotalCount,
+                        sr.ScorePercent)).ToList(),
+                    Test = attempt.SectionResults!.OrderBy(section => section.MockTestSectionId)
+                        .Select(section => new
+                        {
+                            Id = section.MockTestSection.MockTestId,
+                            section.MockTestSection.MockTest.Title,
+                            Level = section.MockTestSection.MockTest.CertificateLevel.Code,
+                            ExamKind = section.MockTestSection.MockTest.ExamKind,
+                        }).FirstOrDefault()
+                        ?? attempt.Answers!.OrderBy(ans => ans.Id)
+                            .Select(ans => new
+                            {
+                                Id = ans.MockQuestion.MockTestSection.MockTestId,
+                                ans.MockQuestion.MockTestSection.MockTest.Title,
+                                Level = ans.MockQuestion.MockTestSection.MockTest.CertificateLevel.Code,
+                                ExamKind = ans.MockQuestion.MockTestSection.MockTest.ExamKind,
+                            }).FirstOrDefault(),
+                }).ToListAsync(cancellationToken);
+
+            var baselineForStats = new List<MockTestHistoryItem>();
+            var filtered = new List<MockTestHistoryItem>();
+            var cutoffUtc = days is > 0 ? DateTime.UtcNow.AddDays(-days.Value) : (DateTime?)null;
+            var levelNorm = string.IsNullOrWhiteSpace(jlptLevel) || string.Equals(jlptLevel, "ALL", StringComparison.OrdinalIgnoreCase)
+                ? null : jlptLevel.Trim().ToUpperInvariant();
+            var keyword = string.IsNullOrWhiteSpace(search) ? null : search.Trim();
+
+            foreach (var attempt in attempts)
+            {
+                var isPlacementRow = attempt.AttemptKind == AttemptKind.Placement
+                    || attempt.IsPlacementAssessment
+                    || attempt.Test?.ExamKind == ExamKind.Placement;
+
+                if (!isPlacementRow && attempt.Test is null) continue;
+
+                if (attempt.AttemptKind == AttemptKind.Placement)
+                {
+                    // Skip onboarding skip-markers that have no questions and no snapshot
+                    if (string.IsNullOrWhiteSpace(attempt.QuestionSnapshotJson)
+                        && attempt.TotalQuestions == 0
+                        && attempt.SectionRows.Count == 0)
+                        continue;
+
+                    var completed = PracticeTestService.TryGetCompletedResultFromSnapshot(attempt.QuestionSnapshotJson);
+                    var pStatus = attempt.IsCompleted
+                        ? StatusCompleted
+                        : (attempt.ExpiresAt is { } exp && BusinessDateHelper.EnsureUtc(exp) <= DateTime.UtcNow ? StatusExpired : StatusInProgress);
+
+                    var includeInDefaultStatus = pStatus != StatusAbandoned
+                        && (attempt.IsCompleted || string.Equals(status, "IN_PROGRESS", StringComparison.OrdinalIgnoreCase) || string.Equals(status, "ALL", StringComparison.OrdinalIgnoreCase));
+
+                    var pDate = BusinessDateHelper.EnsureUtc(completed?.SubmittedAt ?? attempt.SubmittedAt ?? attempt.ModifiedDate ?? attempt.StartedAt);
+                    var pStarted = BusinessDateHelper.EnsureUtc(completed?.StartedAt ?? attempt.StartedAt);
+                    var pDuration = completed?.DurationSeconds > 0
+                        ? completed.DurationSeconds
+                        : Math.Max(0, (int)(pDate - pStarted).TotalSeconds);
+                    var pCorrect = completed?.CorrectCount ?? attempt.CorrectCount;
+                    var pTotalQ = completed?.TotalQuestions > 0 ? completed.TotalQuestions : attempt.TotalQuestions;
+                    var pBlank = Math.Max(0, pTotalQ - Math.Max(attempt.AnsweredCount, pCorrect));
+                    var pWrong = Math.Max(0, Math.Max(attempt.AnsweredCount, pCorrect) - pCorrect);
+                    var pAccuracy = Math.Round(completed?.TotalScore ?? (attempt.Score ?? 0d), 1);
+                    var pLevel = completed?.ScreeningLevelName
+                        ?? completed?.AssessedJlptLevelName
+                        ?? completed?.RecommendedTargetJlptLevelName
+                        ?? attempt.Test?.Level
+                        ?? string.Empty;
+                    var pTitle = completed?.IsComprehensiveAssessment == true
+                        ? "Đánh giá năng lực JLPT toàn diện"
+                        : !string.IsNullOrWhiteSpace(pLevel)
+                            ? $"Đánh giá năng lực {pLevel}"
+                            : "Đánh giá năng lực JLPT";
+
+                    var pScoring = new MockAttemptScoringSummary
+                    {
+                        ScoreType = "PLACEMENT_ASSESSMENT",
+                        JlptLevelCode = pLevel,
+                        AccuracyPercent = pAccuracy,
+                        NormalizedScore = pAccuracy,
+                        NormalizedMaxScore = 100,
+                        IsPassStatusApplicable = false,
+                        IsScoringValid = attempt.IsCompleted && completed is not null,
+                    };
+
+                    var pItem = new MockTestHistoryItem(
+                        attempt.Id,
+                        attempt.Test?.Id ?? 0,
+                        pTitle,
+                        pLevel,
+                        pDate,
+                        pAccuracy,
+                        nameof(ExamKind.Placement),
+                        pStatus,
+                        pCorrect,
+                        pWrong,
+                        pBlank,
+                        pTotalQ,
+                        pDuration,
+                        pStarted,
+                        CanReview: false,
+                        Scoring: pScoring,
+                        AttemptKind: nameof(AttemptKind.Placement),
+                        AssessedJlptLevelName: completed?.AssessedJlptLevelName,
+                        RecommendedTargetJlptLevelName: completed?.RecommendedTargetJlptLevelName);
+
+                    if (pStatus != StatusAbandoned) baselineForStats.Add(pItem);
+                    if (!includeInDefaultStatus) continue;
+                    if (!MatchesHistoryFilters(pItem, kind, status, levelNorm, cutoffUtc, keyword)) continue;
+                    filtered.Add(pItem);
+                    continue;
+                }
+
+                MockAttemptSnapshot? frozen = null;
+                if (!string.IsNullOrWhiteSpace(attempt.QuestionSnapshotJson))
+                {
+                    try { frozen = JsonSerializer.Deserialize<MockAttemptSnapshot>(attempt.QuestionSnapshotJson, MockSnapshotJson); }
+                    catch (JsonException) { /* Preserve access to legacy history. */ }
+                }
+
+                var attemptStatus = ResolveAttemptStatus(new MockTestAttempt
+                {
+                    IsCompleted = attempt.IsCompleted,
+                }, frozen);
+
+                var examKind = ResolveEffectiveExamKind(
+                    frozen?.ExamKind,
+                    attempt.Test?.ExamKind,
+                    attempt.AttemptKind,
+                    attempt.IsPlacementAssessment);
+                var isPlacementLegacy = string.Equals(examKind, nameof(ExamKind.Placement), StringComparison.OrdinalIgnoreCase);
+                var totalQ = attempt.TotalQuestions;
+                var correctC = attempt.CorrectCount;
+                var blankC = Math.Max(0, totalQ - attempt.AnsweredCount);
+                var wrongC = Math.Max(0, attempt.AnsweredCount - correctC);
+                var date = BusinessDateHelper.EnsureUtc(attempt.SubmittedAt ?? attempt.ModifiedDate ?? attempt.StartedAt);
+                var started = BusinessDateHelper.EnsureUtc(attempt.StartedAt);
+                var durationSec = IsPracticeExamKind(examKind) && frozen is { ElapsedSeconds: > 0 }
+                    ? frozen.ElapsedSeconds
+                    : Math.Max(0, (int)(date - started).TotalSeconds);
+
+                var levelCode = frozen?.JlptLevelName ?? attempt.Test?.Level ?? string.Empty;
+                var historyScoring = attempt.IsCompleted && attemptStatus != StatusAbandoned && attempt.Score.HasValue
+                    ? (CanReuseSnapshotScoring(frozen?.Scoring, examKind)
+                        ? frozen!.Scoring!
+                        : BuildScoringFromProjectedRows(
+                            examKind, levelCode, attempt.SectionRows, correctC, totalQ, attempt.Score))
+                    : null;
+
+                var item = new MockTestHistoryItem(
+                    attempt.Id,
+                    attempt.Test?.Id ?? frozen?.MockTestId ?? 0,
+                    frozen?.Title ?? attempt.Test?.Title ?? string.Empty,
+                    levelCode,
+                    date,
+                    attempt.Score ?? 0d,
+                    examKind,
+                    attemptStatus,
+                    correctC,
+                    wrongC,
+                    blankC,
+                    totalQ,
+                    durationSec,
+                    started,
+                    attempt.IsCompleted && attempt.Score.HasValue && !isPlacementLegacy,
+                    historyScoring,
+                    isPlacementLegacy ? nameof(AttemptKind.Placement) : nameof(AttemptKind.MockTest));
+
+                if (attemptStatus != StatusAbandoned) baselineForStats.Add(item);
+
+                if (!attempt.IsCompleted && attemptStatus == StatusInProgress && !IsAttemptAbandoned(frozen))
+                {
+                    if (!string.Equals(status, "IN_PROGRESS", StringComparison.OrdinalIgnoreCase) &&
+                        !string.Equals(status, "ALL", StringComparison.OrdinalIgnoreCase))
+                        continue;
+                }
+                if (attemptStatus == StatusAbandoned && string.IsNullOrWhiteSpace(status))
+                {
+                    continue;
+                }
+
+                if (!MatchesHistoryFilters(item, kind, status, levelNorm, cutoffUtc, keyword)) continue;
+                filtered.Add(item);
+            }
+
+            var stats = BuildHistoryStats(baselineForStats);
+            return (filtered, stats);
+        }
+
+        private static bool MatchesHistoryFilters(
+            MockTestHistoryItem item,
+            string? kind,
+            string? status,
+            string? levelNorm,
+            DateTime? cutoffUtc,
+            string? keyword)
+        {
+            if (!string.IsNullOrWhiteSpace(kind) && !string.Equals(kind, "ALL", StringComparison.OrdinalIgnoreCase))
+            {
+                var kNorm = kind.Trim().ToUpperInvariant();
+                var isPlacement = string.Equals(item.ExamKind, nameof(ExamKind.Placement), StringComparison.OrdinalIgnoreCase);
+                var isPractice = IsPracticeExamKind(item.ExamKind);
+                if (kNorm == "PRACTICE" && !isPractice) return false;
+                if (kNorm == "MOCK" && (isPractice || isPlacement)) return false;
+                if (kNorm == "PLACEMENT" && !isPlacement) return false;
+            }
+            if (!string.IsNullOrWhiteSpace(status) && !string.Equals(status, "ALL", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!string.Equals(status, item.AttemptStatus, StringComparison.OrdinalIgnoreCase)) return false;
+            }
+            if (!string.IsNullOrWhiteSpace(levelNorm))
+            {
+                if (!string.Equals(item.JlptLevelName?.Trim(), levelNorm, StringComparison.OrdinalIgnoreCase)) return false;
+            }
+            if (cutoffUtc.HasValue && item.SubmittedAt < cutoffUtc.Value)
+            {
+                return false;
+            }
+            if (!string.IsNullOrWhiteSpace(keyword))
+            {
+                var hitTitle = item.Title?.Contains(keyword, StringComparison.OrdinalIgnoreCase) == true;
+                var hitLevel = item.JlptLevelName?.Contains(keyword, StringComparison.OrdinalIgnoreCase) == true;
+                if (!hitTitle && !hitLevel) return false;
+            }
+            return true;
+        }
+
+        private static ExamHistoryStatsResponse BuildHistoryStats(List<MockTestHistoryItem> items)
+        {
+            var practiceCount = items.Count(i => IsPracticeExamKind(i.ExamKind));
+            var placementCount = items.Count(i => string.Equals(i.ExamKind, nameof(ExamKind.Placement), StringComparison.OrdinalIgnoreCase));
+            var mockCount = items.Count(i => !IsPracticeExamKind(i.ExamKind) && !string.Equals(i.ExamKind, nameof(ExamKind.Placement), StringComparison.OrdinalIgnoreCase));
+            var completedCount = items.Count(i => string.Equals(i.AttemptStatus, StatusCompleted, StringComparison.OrdinalIgnoreCase) || string.Equals(i.AttemptStatus, StatusExpired, StringComparison.OrdinalIgnoreCase));
+
+            var practiceScores = items
+                .Where(i => IsPracticeExamKind(i.ExamKind)
+                    && (i.AttemptStatus == StatusCompleted || i.AttemptStatus == StatusExpired)
+                    && i.Scoring is { IsScoringValid: true, NormalizedMaxScore: 10 })
+                .Select(i => i.Scoring!.NormalizedScore)
+                .ToList();
+
+            var validMockScores = items
+                .Where(i => !IsPracticeExamKind(i.ExamKind)
+                    && !string.Equals(i.ExamKind, nameof(ExamKind.Placement), StringComparison.OrdinalIgnoreCase)
+                    && (i.AttemptStatus == StatusCompleted || i.AttemptStatus == StatusExpired)
+                    && i.Scoring is { IsScoringValid: true, NormalizedMaxScore: 180 })
+                .Select(i => i.Scoring!.NormalizedScore)
+                .ToList();
+
+            return new ExamHistoryStatsResponse(
+                TotalAttempts: items.Count,
+                PracticeCount: practiceCount,
+                MockCount: mockCount,
+                PlacementCount: placementCount,
+                CompletedCount: completedCount,
+                AveragePracticeScore10: practiceScores.Count > 0 ? Math.Round(practiceScores.Average(), 2) : null,
+                AverageMockScore180: validMockScores.Count > 0 ? Math.Round(validMockScores.Average(), 1) : null,
+                BestMockScore180: validMockScores.Count > 0 ? Math.Round(validMockScores.Max(), 1) : null,
+                CompletionRatePercent: items.Count > 0 ? (int)Math.Round(completedCount * 100.0 / items.Count) : null);
         }
 
         public async Task<ApiResponse<MockTestDetailResponse>> GetPlacementTestDetailAsync(
@@ -1533,6 +2721,9 @@ namespace RikiPath.Application.Services
                         ReviewTranscript = frozen is null ||
                             (string.Equals(frozen.Prompt.AudioUrl, question.AudioUrl, StringComparison.Ordinal))
                             ? (question.AudioTranscript ?? question.Passage?.AudioTranscript) : null,
+                        SectionTitle = frozen?.Prompt.SectionTitle ?? question.MockTestSection?.Title,
+                        SkillName = question.MockTestSection?.LanguageSkill?.Name ?? question.MockTestSection?.Title,
+                        IsAnswered = HasAnsweredValue(a),
                         SelectedOptionId = a.SelectedOptionId,
                         IsCorrect = a.IsCorrect,
                         WasPreviouslyIncorrect = !a.IsCorrect,
@@ -1542,6 +2733,7 @@ namespace RikiPath.Application.Services
                                 OptionId = option.OptionId,
                                 OptionText = option.Content,
                                 ImageUrl = option.ImageUrl,
+                                Explanation = null,
                                 IsCorrect = frozen.CorrectOptionIds.Contains(option.OptionId),
                             }).ToList()
                             : (question.Options ?? [])
@@ -1551,10 +2743,38 @@ namespace RikiPath.Application.Services
                                     OptionId = option.Id,
                                     OptionText = option.OptionText,
                                     ImageUrl = option.ImageUrl,
+                                    Explanation = option.Explanation,
                                     IsCorrect = option.IsCorrect,
                                 }).ToList(),
                     };
                 }).ToList();
+
+                var snap = TryReadMockSnapshotSafe(attempt);
+                var mockTest = answers.FirstOrDefault()?.MockQuestion?.MockTestSection?.MockTest;
+                var totalCount = answers.Count;
+                var answeredCount = answers.Count(HasAnsweredValue);
+                var correctCount = answers.Count(a => a.IsCorrect);
+                var blankCount = Math.Max(0, totalCount - answeredCount);
+                var wrongCount = Math.Max(0, answeredCount - correctCount);
+                var detailExamKind = ResolveEffectiveExamKind(
+                    snap?.ExamKind,
+                    mockTest?.ExamKind,
+                    attempt.AttemptKind,
+                    attempt.IsPlacementAssessment);
+                var detailLevelCode = snap?.JlptLevelName ?? mockTest?.CertificateLevel?.Code ?? string.Empty;
+                var detailScoring = CanReuseSnapshotScoring(snap?.Scoring, detailExamKind) ? snap!.Scoring : null;
+                if (detailScoring is null && attempt.IsCompleted)
+                {
+                    var sectionRows = await unitOfWork.MockTestSectionResults.GetByAttemptIdAsync(attemptId, cancellationToken);
+                    detailScoring = MockTestScoringPolicy.EvaluateFromSectionResults(
+                        detailExamKind, detailLevelCode, sectionRows, correctCount, totalCount, attempt.TotalScore);
+                }
+                var detailSubmittedUtc = attempt.SubmittedAt.HasValue ? BusinessDateHelper.EnsureUtc(attempt.SubmittedAt.Value) : (DateTime?)null;
+                var detailDurationSec = IsPracticeExamKind(detailExamKind) && snap is { ElapsedSeconds: > 0 }
+                    ? snap.ElapsedSeconds
+                    : detailSubmittedUtc.HasValue
+                        ? Math.Max(0, (int)(detailSubmittedUtc.Value - BusinessDateHelper.EnsureUtc(attempt.StartedAt)).TotalSeconds)
+                        : 0;
 
                 return ApiResponse<DetailedAttemptResultResponse>.Success(new DetailedAttemptResultResponse
                 {
@@ -1562,7 +2782,20 @@ namespace RikiPath.Application.Services
                     MockTestId = answers
                         .Select(answer => answer.MockQuestion.MockTestSection.MockTestId)
                         .FirstOrDefault(),
+                    Title = snap?.Title ?? mockTest?.Title ?? string.Empty,
+                    JlptLevelName = detailLevelCode,
+                    ExamKind = detailExamKind,
+                    AttemptStatus = ResolveAttemptStatus(attempt, snap),
                     TotalScore = attempt.TotalScore.GetValueOrDefault(),
+                    AccuracyPercent = detailScoring?.AccuracyPercent ?? attempt.TotalScore.GetValueOrDefault(),
+                    Scoring = detailScoring,
+                    CorrectCount = correctCount,
+                    WrongCount = wrongCount,
+                    BlankCount = blankCount,
+                    TotalQuestions = totalCount,
+                    StartedAt = BusinessDateHelper.EnsureUtc(attempt.StartedAt),
+                    SubmittedAt = detailSubmittedUtc,
+                    DurationSeconds = detailDurationSec,
                     Questions = questions,
                 });
             }
@@ -1652,6 +2885,7 @@ namespace RikiPath.Application.Services
                             OptionId = o.Id,
                             OptionText = o.OptionText,
                             ImageUrl = o.ImageUrl,
+                            Explanation = o.Explanation,
                             IsCorrect = o.IsCorrect,
                         }).ToList(),
                     };
@@ -1730,20 +2964,90 @@ namespace RikiPath.Application.Services
                     }
                 }
 
+                var serverNow = DateTime.UtcNow;
                 var targetLevelId = user.TargetCertificateLevelId;
+                string? targetLevelName = null;
                 if (targetLevelId is not null)
                 {
                     var levels = await LoadLevelsAsync([targetLevelId.Value], cancellationToken);
                     status.TargetJlptLevelId = targetLevelId;
-                    status.TargetJlptLevelName = levels.GetValueOrDefault(targetLevelId.Value)?.Name;
+                    targetLevelName = levels.GetValueOrDefault(targetLevelId.Value)?.Name;
+                    status.TargetJlptLevelName = targetLevelName;
+                }
+                status.IsGoalConfirmed = targetLevelId.HasValue && user.DailyStudyMinutes > 0;
+
+                var compatibility = PracticeTestService.EvaluatePlacementCompatibility(
+                    attempts, targetLevelId, targetLevelName);
+                var matchedCompleted = compatibility.CompatibleAttempt ?? compatibility.LatestAttempt;
+                var matchedRecovered = compatibility.CompatibleResult ?? compatibility.LatestResult;
+
+                if (matchedCompleted is not null && matchedRecovered is not null)
+                {
+                    status.HasCompletedPlacementTest = true;
+                    status.LatestCompletedAttemptId = matchedCompleted.Id;
+                    status.LatestSubmittedAt = matchedCompleted.SubmittedAt;
+                    status.LatestScorePercent = matchedCompleted.TotalScore;
+                    status.AssessedJlptLevelId = matchedRecovered.AssessedJlptLevelId > 0 ? matchedRecovered.AssessedJlptLevelId : null;
+                    status.AssessedJlptLevelName = matchedRecovered.AssessedJlptLevelName;
+                    status.RecommendedTargetJlptLevelId = matchedRecovered.RecommendedTargetJlptLevelId;
+                    status.RecommendedTargetJlptLevelName = matchedRecovered.RecommendedTargetJlptLevelName;
+                    status.LatestAssessmentLevelId = matchedRecovered.AssessmentTargetLevelId;
+                    status.LatestAssessmentLevelName = matchedRecovered.ScreeningLevelName ?? compatibility.CoveredLevelName;
+                    status.LatestAssessmentIsComprehensive = matchedRecovered.IsComprehensiveAssessment;
+                }
+                else
+                {
+                    status.HasCompletedPlacementTest = false;
+                    status.LatestCompletedAttemptId = null;
+                    status.LatestSubmittedAt = null;
+                    status.LatestScorePercent = null;
+                    status.AssessedJlptLevelId = user.AssessedCertificateLevelId;
+                    status.AssessedJlptLevelName = null;
+                    status.RecommendedTargetJlptLevelId = null;
+                    status.RecommendedTargetJlptLevelName = null;
                 }
 
-                status.PlacementDecision = status.HasCompletedPlacementTest
+                status.PlacementCompatibilityStatus = compatibility.Status;
+                status.PlacementCompatibilityReason = compatibility.Reason;
+
+                // Always initialize quota allowance so new users never see false quota exhausted messages.
+                var startedCount = attempts.Count(a => PracticeTestService.TryDeserializeSnapshot(a.QuestionSnapshotJson, out var snap)
+                    && !snap.ParentAssessmentAttemptId.HasValue
+                    && snap.AssessmentTargetLevelId == targetLevelId);
+                var pendingExpired = attempts.FirstOrDefault(a => !a.IsDeleted && !a.IsCompleted
+                    && a.ExpiresAt.HasValue && BusinessDateHelper.EnsureUtc(a.ExpiresAt.Value) <= serverNow);
+                var limit = 2;
+                var remaining = Math.Max(0, limit - startedCount);
+                status.QuotaInitialized = true;
+                status.AttemptAllowance = new PlacementAttemptAllowance(limit, startedCount, remaining, pendingExpired?.Id);
+                if (status.HasActiveAttempt)
+                {
+                    status.CanStartNewAttempt = false;
+                    status.CannotStartReason = "ACTIVE_ATTEMPT_EXISTS";
+                }
+                else if (pendingExpired is not null)
+                {
+                    status.CanStartNewAttempt = false;
+                    status.CannotStartReason = "PENDING_SUBMISSION";
+                }
+                else if (remaining <= 0)
+                {
+                    status.CanStartNewAttempt = false;
+                    status.CannotStartReason = "PLACEMENT_ATTEMPT_LIMIT_REACHED";
+                }
+                else
+                {
+                    status.CanStartNewAttempt = true;
+                    status.CannotStartReason = null;
+                }
+
+                var hasValidCompatiblePlacement = compatibility.Status == "COMPATIBLE"
+                    || (!status.IsGoalConfirmed && compatibility.HasAnyCompletedPlacement);
+                status.PlacementDecision = hasValidCompatiblePlacement
                     ? "COMPLETED"
-                    : ToDecisionCode(user.PlacementDecision);
+                    : status.IsGoalConfirmed && user.PlacementDecision == PlacementDecision.Skipped ? "SKIPPED" : "NOT_TAKEN";
                 status.IsReadyForLearningPath =
-                    (status.HasCompletedPlacementTest || user.PlacementDecision != PlacementDecision.NotTaken)
-                    && targetLevelId is not null;
+                    status.IsGoalConfirmed && compatibility.Status == "COMPATIBLE";
 
                 return ApiResponse<PlacementTestStatusResponse>.Success(status);
             }
@@ -1760,16 +3064,30 @@ namespace RikiPath.Application.Services
             try
             {
                 var userId = claimService.GetUserClaim().Id;
-                var user = await unitOfWork.UserAccounts.GetByIdAsync(userId, cancellationToken);
+                var user = await unitOfWork.UserAccounts.GetWithLearningGoalAsync(userId, cancellationToken);
                 if (user is null || user.IsDeleted)
                     return ApiResponse<PlacementTestStatusResponse>.NotFound("Không tìm thấy người dùng.");
 
-                // Chỉ chuyển NotTaken -> Skipped; không ghi đè khi đã làm bài xong.
-                if (user.PlacementDecision == PlacementDecision.NotTaken)
+                var targetCode = user.TargetCertificateLevel?.Code?.Trim().ToUpperInvariant();
+                if (!user.TargetCertificateLevelId.HasValue || string.IsNullOrWhiteSpace(targetCode) ||
+                    !JlptCurriculum.IsSupportedStudyLevel(targetCode) || user.DailyStudyMinutes <= 0)
+                    return ApiResponse<PlacementTestStatusResponse>.Fail(
+                        "Vui lòng thiết lập mục tiêu JLPT (N5–N2) trước khi chọn bỏ qua bài đánh giá năng lực.",
+                        HttpStatusCode.BadRequest, errorCode: "LEARNING_GOAL_REQUIRED");
+
+                // Chỉ chuyển sang Skipped nếu chưa có kết quả đánh giá hợp lệ và tương thích cho mục tiêu hiện tại.
+                var attempts = (await unitOfWork.MockTestAttempts.FindAsync(a =>
+                    a.UserId == userId && !a.IsDeleted && a.AttemptKind == AttemptKind.Placement, cancellationToken))
+                    .ToList();
+                var compatibility = PracticeTestService.EvaluatePlacementCompatibility(
+                    attempts, user.TargetCertificateLevelId, targetCode);
+                if (compatibility.Status != "COMPATIBLE" && user.PlacementDecision != PlacementDecision.Skipped)
                 {
-                    user.PlacementDecision = PlacementDecision.Skipped;
-                    unitOfWork.UserAccounts.Update(user);
-                    await unitOfWork.SaveChangesAsync(cancellationToken);
+                    // Sequential flow: a new roadmap needs a real assessment result, so skipping is no longer
+                    // accepted. Learners who skipped earlier keep their existing roadmap (see LearnerSetupStateService).
+                    return ApiResponse<PlacementTestStatusResponse>.Fail(
+                        "Hãy hoàn thành bài đánh giá năng lực để tạo lộ trình học phù hợp với bạn.",
+                        HttpStatusCode.Conflict, errorCode: "PLACEMENT_SKIP_DISABLED");
                 }
                 return await GetStatusAsync(cancellationToken);
             }
@@ -2387,6 +3705,37 @@ namespace RikiPath.Application.Services
             var overallScore = totalCount == 0 ? 0d : Math.Round(totalCorrect * 100d / totalCount, 2);
 
             return (entities, responses, overallScore);
+        }
+
+        private sealed record ProjectedSectionScoreRow(
+            int SectionId,
+            string Title,
+            string? SkillCode,
+            string? SkillName,
+            int CorrectCount,
+            int TotalCount,
+            double ScorePercent);
+
+        private static MockAttemptScoringSummary BuildScoringFromProjectedRows(
+            string? examKind,
+            string? jlptLevelCode,
+            IReadOnlyList<ProjectedSectionScoreRow> rows,
+            int totalCorrect,
+            int totalQuestions,
+            double? fallbackAccuracy)
+        {
+            var inputs = rows.Select(r =>
+            {
+                var total = Math.Max(0, r.TotalCount);
+                var earned = total > 0 && r.ScorePercent is >= 0 and <= 100
+                    ? Math.Round(r.ScorePercent * total / 100d, 4, MidpointRounding.AwayFromZero)
+                    : r.CorrectCount;
+                return new MockTestScoringPolicy.TestSectionScoreInput(
+                    r.SectionId, r.Title, r.SkillCode, r.SkillName, r.CorrectCount, total, earned, total);
+            }).ToList();
+
+            return MockTestScoringPolicy.EvaluateFromSections(
+                examKind, jlptLevelCode, inputs, totalCorrect, totalQuestions, fallbackAccuracy);
         }
     }
 }
