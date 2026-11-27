@@ -64,6 +64,13 @@ if [[ "$MODE" != "preflight" && "$MODE" != "apply" ]]; then
   exit 2
 fi
 
+for pg_bin_dir in /usr/lib/postgresql/*/bin /usr/pgsql-*/bin; do
+  if [[ -d "$pg_bin_dir" ]]; then
+    PATH="${PATH}:${pg_bin_dir}"
+  fi
+done
+export PATH
+
 for bin in python3 psql; do
   if ! command -v "$bin" >/dev/null 2>&1; then
     echo "ERROR: Required tool '$bin' is not installed on target host." >&2
@@ -168,7 +175,7 @@ done
 
 echo "=== 2. Fail-Closed Drift & Precondition Checks (Read-Only) ==="
 
-# Guard A: Pre-squash drift check — never execute InitialCreate on an existing populated schema.
+# Guard A: Pre-squash drift check â€” never execute InitialCreate on an existing populated schema.
 if [[ -z "${APPLIED_MAP[20261121010126_InitialCreate]+x}" ]]; then
   HAS_ADMIN_AUDIT="$(psql -v ON_ERROR_STOP=1 -t -A -c "SELECT (to_regclass('public.\"AdminAuditLogs\"') IS NOT NULL)::text;")"
   if [[ "$HAS_ADMIN_AUDIT" == "true" ]]; then
@@ -274,8 +281,8 @@ for id in "${PENDING_IDS[@]}"; do
     exit 15
   fi
   # Re-check inside locked session so a second runner that queued cannot re-apply an already-applied ID.
-  printf "\\echo '  -> Applying %s ...'\n" "$id" >> "$RUNNER_SQL"
-  printf "\\i '%s'\n" "$SQL_FILE" >> "$RUNNER_SQL"
+  printf '%s\n' "\\echo '  -> Applying ${id} ...'" >> "$RUNNER_SQL"
+  printf '%s\n' "\\i '${SQL_FILE}'" >> "$RUNNER_SQL"
 done
 
 cat >> "$RUNNER_SQL" <<EOF
