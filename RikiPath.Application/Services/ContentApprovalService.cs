@@ -1412,7 +1412,6 @@ namespace RikiPath.Application.Services
                             InteractionDataJson = q.InteractionData?.GetRawText(),
                             AnswerKeyJson = q.AnswerKey?.GetRawText(),
                             AudioUrl = q.AudioUrl,
-                            AudioTranscript = q.AudioTranscript,
                             ImageUrl = q.ImageUrl,
                             Explanation = q.Explanation,
                             SortOrder = q.SortOrder,
@@ -1420,7 +1419,6 @@ namespace RikiPath.Application.Services
                             {
                                 OptionText = o.OptionText,
                                 ImageUrl = o.ImageUrl,
-                                Explanation = o.Explanation,
                                 IsCorrect = o.IsCorrect,
                                 SortOrder = o.SortOrder
                             }).ToList()
@@ -1488,7 +1486,6 @@ namespace RikiPath.Application.Services
                             InteractionDataJson = question.InteractionData?.GetRawText(),
                             AnswerKeyJson = question.AnswerKey?.GetRawText(),
                             AudioUrl = question.AudioUrl,
-                            AudioTranscript = question.AudioTranscript,
                             ImageUrl = question.ImageUrl,
                             Explanation = question.Explanation,
                             SortOrder = question.SortOrder,
@@ -1496,7 +1493,6 @@ namespace RikiPath.Application.Services
                             {
                                 OptionText = option.OptionText,
                                 ImageUrl = option.ImageUrl,
-                                Explanation = option.Explanation,
                                 IsCorrect = option.IsCorrect,
                                 SortOrder = option.SortOrder
                             }).ToList()

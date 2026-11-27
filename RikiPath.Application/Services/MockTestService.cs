@@ -2733,7 +2733,6 @@ namespace RikiPath.Application.Services
                                 OptionId = option.OptionId,
                                 OptionText = option.Content,
                                 ImageUrl = option.ImageUrl,
-                                Explanation = null,
                                 IsCorrect = frozen.CorrectOptionIds.Contains(option.OptionId),
                             }).ToList()
                             : (question.Options ?? [])
@@ -2743,7 +2742,6 @@ namespace RikiPath.Application.Services
                                     OptionId = option.Id,
                                     OptionText = option.OptionText,
                                     ImageUrl = option.ImageUrl,
-                                    Explanation = option.Explanation,
                                     IsCorrect = option.IsCorrect,
                                 }).ToList(),
                     };
@@ -2885,7 +2883,6 @@ namespace RikiPath.Application.Services
                             OptionId = o.Id,
                             OptionText = o.OptionText,
                             ImageUrl = o.ImageUrl,
-                            Explanation = o.Explanation,
                             IsCorrect = o.IsCorrect,
                         }).ToList(),
                     };

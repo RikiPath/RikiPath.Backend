@@ -226,36 +226,6 @@ namespace RikiPath.Infrastructure.Migrations
                         {
                             FeaturesId = 8,
                             SubscriptionPlansId = 7
-                        },
-                        new
-                        {
-                            FeaturesId = 13,
-                            SubscriptionPlansId = 8101
-                        },
-                        new
-                        {
-                            FeaturesId = 14,
-                            SubscriptionPlansId = 8102
-                        },
-                        new
-                        {
-                            FeaturesId = 6,
-                            SubscriptionPlansId = 8103
-                        },
-                        new
-                        {
-                            FeaturesId = 12,
-                            SubscriptionPlansId = 8104
-                        },
-                        new
-                        {
-                            FeaturesId = 7,
-                            SubscriptionPlansId = 8105
-                        },
-                        new
-                        {
-                            FeaturesId = 8,
-                            SubscriptionPlansId = 8105
                         });
                 });
 
@@ -544,20 +514,20 @@ namespace RikiPath.Infrastructure.Migrations
                             MaxScore = 0,
                             Name = "Kiến thức ngôn ngữ (Từ vựng)",
                             PassingScore = 0,
-                            SortOrder = 1
+                            SortOrder = 0
                         },
                         new
                         {
                             Id = 2,
                             CertificateLevelId = 1,
-                            Code = "N5_GRAMMAR",
+                            Code = "N5_GRAMMAR_READING",
                             CreatedDate = new DateTime(2026, 10, 31, 11, 13, 24, 991, DateTimeKind.Utc).AddTicks(5292),
-                            Description = "Phần thi kiểm tra cấu trúc ngữ pháp và sắp xếp câu cấp độ N5",
+                            Description = "Phần thi kiểm tra cấu trúc ngữ pháp và đọc hiểu đoạn văn ngắn cấp độ N5",
                             IsDeleted = false,
                             MaxScore = 0,
-                            Name = "Kiến thức ngôn ngữ (Ngữ pháp)",
+                            Name = "Kiến thức ngôn ngữ (Ngữ pháp) & Đọc hiểu",
                             PassingScore = 0,
-                            SortOrder = 2
+                            SortOrder = 0
                         },
                         new
                         {
@@ -570,20 +540,7 @@ namespace RikiPath.Infrastructure.Migrations
                             MaxScore = 0,
                             Name = "Nghe hiểu",
                             PassingScore = 0,
-                            SortOrder = 4
-                        },
-                        new
-                        {
-                            Id = 16,
-                            CertificateLevelId = 1,
-                            Code = "N5_READING",
-                            CreatedDate = new DateTime(2026, 10, 31, 11, 13, 24, 991, DateTimeKind.Utc).AddTicks(5308),
-                            Description = "Phần thi đọc hiểu văn bản, thông báo và đoạn hội thoại ngắn cấp độ N5",
-                            IsDeleted = false,
-                            MaxScore = 0,
-                            Name = "Đọc hiểu",
-                            PassingScore = 0,
-                            SortOrder = 3
+                            SortOrder = 0
                         },
                         new
                         {
@@ -7731,9 +7688,6 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Property<DateTime?>("CreatedDate")
                         .HasColumnType("timestamp without time zone");
 
-                    b.Property<string>("Explanation")
-                        .HasColumnType("text");
-
                     b.Property<string>("ImageUrl")
                         .HasColumnType("text");
 
@@ -10416,96 +10370,6 @@ namespace RikiPath.Infrastructure.Migrations
                             Price = 1000m,
                             Revision = 1,
                             SortOrder = 7
-                        },
-                        new
-                        {
-                            Id = 8101,
-                            AiGradingQuota = 1,
-                            CreatedDate = new DateTime(2026, 11, 23, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Description = "Một lượt luyện nói và chấm phát âm tiếng Nhật bằng AI.",
-                            DurationDays = 0,
-                            IsActive = true,
-                            IsDeleted = false,
-                            IsPopular = false,
-                            IsTrial = false,
-                            MeetingSessionCount = 0,
-                            Name = "Luyện nói AI - 1 lượt",
-                            PlanCategory = "speaking",
-                            Price = 1000m,
-                            Revision = 1,
-                            SortOrder = 10
-                        },
-                        new
-                        {
-                            Id = 8102,
-                            AiGradingQuota = 1,
-                            CreatedDate = new DateTime(2026, 11, 23, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Description = "Một lượt chấm bài viết tiếng Nhật bằng AI.",
-                            DurationDays = 0,
-                            IsActive = true,
-                            IsDeleted = false,
-                            IsPopular = false,
-                            IsTrial = false,
-                            MeetingSessionCount = 0,
-                            Name = "Luyện viết AI - 1 lượt",
-                            PlanCategory = "writing",
-                            Price = 1000m,
-                            Revision = 1,
-                            SortOrder = 11
-                        },
-                        new
-                        {
-                            Id = 8103,
-                            AiGradingQuota = 1,
-                            CreatedDate = new DateTime(2026, 11, 23, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Description = "Một lượt giải thích chi tiết đáp án đề thi thử bằng AI.",
-                            DurationDays = 0,
-                            IsActive = true,
-                            IsDeleted = false,
-                            IsPopular = false,
-                            IsTrial = false,
-                            MeetingSessionCount = 0,
-                            Name = "Giải thích đáp án AI - 1 lượt",
-                            PlanCategory = "ai_grading",
-                            Price = 1000m,
-                            Revision = 1,
-                            SortOrder = 12
-                        },
-                        new
-                        {
-                            Id = 8104,
-                            AiGradingQuota = 1,
-                            CreatedDate = new DateTime(2026, 11, 23, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Description = "Một lượt tạo lộ trình học cá nhân hóa bằng AI.",
-                            DurationDays = 0,
-                            IsActive = true,
-                            IsDeleted = false,
-                            IsPopular = false,
-                            IsTrial = false,
-                            MeetingSessionCount = 0,
-                            Name = "Lộ trình học AI - 1 lượt",
-                            PlanCategory = "learning_path",
-                            Price = 1000m,
-                            Revision = 1,
-                            SortOrder = 13
-                        },
-                        new
-                        {
-                            Id = 8105,
-                            AiGradingQuota = 0,
-                            CreatedDate = new DateTime(2026, 11, 23, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Description = "Một buổi ôn luyện với mentor.",
-                            DurationDays = 30,
-                            IsActive = true,
-                            IsDeleted = false,
-                            IsPopular = false,
-                            IsTrial = false,
-                            MeetingSessionCount = 1,
-                            Name = "Mentor - 1 buổi",
-                            PlanCategory = "mentor_legacy",
-                            Price = 1000m,
-                            Revision = 1,
-                            SortOrder = 14
                         });
                 });
 

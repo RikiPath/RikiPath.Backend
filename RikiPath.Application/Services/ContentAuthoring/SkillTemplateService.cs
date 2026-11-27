@@ -423,8 +423,8 @@ public sealed class SkillTemplateService : ISkillTemplateService
         sections = new[]
         {
             new { sortOrder = 1, certificateSectionCode = "N5_VOCAB", skillName = "Vocabulary", title = "Từ vựng", durationMinutes = 20 },
-            new { sortOrder = 2, certificateSectionCode = "N5_GRAMMAR", skillName = "Grammar", title = "Ngữ pháp", durationMinutes = 20 },
-            new { sortOrder = 3, certificateSectionCode = "N5_READING", skillName = "Reading", title = "Đọc hiểu", durationMinutes = 20 },
+            new { sortOrder = 2, certificateSectionCode = "N5_GRAMMAR_READING", skillName = "Grammar", title = "Ngữ pháp", durationMinutes = 40 },
+            new { sortOrder = 3, certificateSectionCode = "N5_GRAMMAR_READING", skillName = "Reading", title = "Đọc hiểu", durationMinutes = 0 },
             new { sortOrder = 4, certificateSectionCode = "N5_LISTENING", skillName = "Listening", title = "Nghe hiểu", durationMinutes = 30 }
         }
     };
