@@ -4,9 +4,9 @@
 # Why this script exists:
 #   Historical migration 20261120112045_SeedFullAccessLearnerDemo carries a timestamp
 #   earlier than the Nov 21 squash migration 20261121010126_InitialCreate.
-#   Existing databases already record both IDs in "__EFMigrationsHistory" and upgrade
-#   via tools/apply-release-migrations.sh. For a brand-new empty PostgreSQL database,
-#   this script automatically orders:
+#   Existing databases already record their migration history in "__EFMigrationsHistory"
+#   and must be upgraded via standard reviewed EF Core migration procedures. For a brand-new
+#   empty local or isolated Docker PostgreSQL database, this script automatically orders:
 #     1) Ensure "__EFMigrationsHistory" exists
 #     2) Apply 20261121010126_InitialCreate
 #     3) Apply 20261120112045_SeedFullAccessLearnerDemo
@@ -193,7 +193,7 @@ psql -v ON_ERROR_STOP=1 -t -A -c 'SELECT 1;' >/dev/null
 
 EXISTING_CORE="$(psql -v ON_ERROR_STOP=1 -t -A -c "SELECT ((to_regclass('public.\"__EFMigrationsHistory\"') IS NOT NULL) OR (to_regclass('public.\"Users\"') IS NOT NULL) OR (to_regclass('public.\"AdminAuditLogs\"') IS NOT NULL))::text;")"
 if [[ "$EXISTING_CORE" == "true" ]]; then
-  echo "ERROR [TARGET_NOT_EMPTY]: Database ${PGDATABASE} is not empty. Use tools/apply-release-migrations.sh to upgrade an existing database safely." >&2
+  echo "ERROR [TARGET_NOT_EMPTY]: Database ${PGDATABASE} is not empty. Refusing fresh bootstrap on an existing database." >&2
   exit 10
 fi
 
