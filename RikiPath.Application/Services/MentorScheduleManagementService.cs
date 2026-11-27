@@ -82,8 +82,8 @@ namespace RikiPath.Application.Services
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Lỗi khi lấy mẫu lịch làm việc của chuyên gia.");
-                return ApiResponse<MentorScheduleResponse>.Fail($"Không thể tải lịch làm việc: {ex.Message}", HttpStatusCode.InternalServerError);
+                logger.LogError(ex, "Lỗi khi lấy lịch làm việc của Giáo viên.");
+                return ApiResponse<MentorScheduleResponse>.Fail("Không thể tải lịch làm việc. Vui lòng thử lại.", HttpStatusCode.InternalServerError);
             }
         }
 
@@ -158,8 +158,8 @@ namespace RikiPath.Application.Services
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Lỗi khi cập nhật mẫu lịch làm việc của chuyên gia.");
-                return ApiResponse<MentorScheduleResponse>.Fail($"Không thể cập nhật lịch làm việc: {ex.Message}", HttpStatusCode.InternalServerError);
+                logger.LogError(ex, "Lỗi khi cập nhật lịch làm việc của Giáo viên.");
+                return ApiResponse<MentorScheduleResponse>.Fail("Không thể cập nhật lịch làm việc. Vui lòng thử lại.", HttpStatusCode.InternalServerError);
             }
         }
 
@@ -230,8 +230,7 @@ namespace RikiPath.Application.Services
                 if (request.StartDate < todayLocal)
                     return ApiResponse<SlotPreviewResponse>.Fail("Không thể xem trước khung giờ cho các ngày trong quá khứ.", HttpStatusCode.BadRequest);
 
-                var horizonDays = (await GetGroupPolicyAsync(DateTime.UtcNow, cancellationToken))?.PublicationHorizonDays
-                    ?? MentorSlotPolicy.MaximumScheduleHorizonDays;
+                const int horizonDays = MentorSlotPolicy.DefaultSingleSlotHorizonDays;
                 if (request.EndDate > todayLocal.AddDays(horizonDays))
                     return ApiResponse<SlotPreviewResponse>.Fail($"Chỉ được xem trước khung giờ trong phạm vi {horizonDays} ngày tới.", HttpStatusCode.BadRequest);
 
@@ -325,8 +324,8 @@ namespace RikiPath.Application.Services
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Lỗi khi xem trước khung giờ sinh lịch của chuyên gia.");
-                return ApiResponse<SlotPreviewResponse>.Fail($"Không thể xem trước khung giờ: {ex.Message}", HttpStatusCode.InternalServerError);
+                logger.LogError(ex, "Lỗi khi xem trước khung giờ sinh lịch của Giáo viên.");
+                return ApiResponse<SlotPreviewResponse>.Fail("Không thể xem trước khung giờ. Vui lòng thử lại.", HttpStatusCode.InternalServerError);
             }
         }
 
@@ -366,8 +365,7 @@ namespace RikiPath.Application.Services
                 if (request.StartDate < todayLocal)
                     return ApiResponse<PublishSlotsResponse>.Fail("Không thể công bố khung giờ cho các ngày trong quá khứ.", HttpStatusCode.BadRequest);
 
-                var horizonDays = (await GetGroupPolicyAsync(DateTime.UtcNow, cancellationToken))?.PublicationHorizonDays
-                    ?? MentorSlotPolicy.MaximumScheduleHorizonDays;
+                const int horizonDays = MentorSlotPolicy.DefaultSingleSlotHorizonDays;
                 if (request.EndDate > todayLocal.AddDays(horizonDays))
                     return ApiResponse<PublishSlotsResponse>.Fail($"Chỉ được gửi duyệt khung giờ trong phạm vi {horizonDays} ngày tới.", HttpStatusCode.BadRequest);
 
@@ -522,8 +520,8 @@ namespace RikiPath.Application.Services
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Lỗi khi công bố khung giờ làm việc của chuyên gia.");
-                return ApiResponse<PublishSlotsResponse>.Fail($"Không thể công bố khung giờ: {ex.Message}", HttpStatusCode.InternalServerError);
+                logger.LogError(ex, "Lỗi khi công bố khung giờ làm việc của Giáo viên.");
+                return ApiResponse<PublishSlotsResponse>.Fail("Không thể công bố khung giờ. Vui lòng thử lại.", HttpStatusCode.InternalServerError);
             }
         }
 
@@ -542,7 +540,7 @@ namespace RikiPath.Application.Services
 
                 // Kiểm tra quyền sở hữu
                 if (claim.Role != Role.Admin && slot.MentorId != claim.Id)
-                    return ApiResponse<bool>.Fail("Bạn không có quyền can thiệp vào khung giờ làm việc của chuyên gia khác.", HttpStatusCode.Forbidden);
+                    return ApiResponse<bool>.Fail("Bạn không có quyền thao tác với khung giờ làm việc của Giáo viên khác.", HttpStatusCode.Forbidden);
 
                 // RÀNG BUỘC TOÀN VẸN: Không được xóa hoặc hủy slot đã có học viên đặt lịch
                 if (slot.BookedCount > 0 || (slot.MentorBookings != null && slot.MentorBookings.Any(b => !b.IsDeleted && b.Status != MentorStatus.Cancelled)))
@@ -573,7 +571,7 @@ namespace RikiPath.Application.Services
             catch (Exception ex)
             {
                 logger.LogError(ex, "Lỗi khi hủy khung giờ {SlotId}.", slotId);
-                return ApiResponse<bool>.Fail($"Không thể hủy khung giờ: {ex.Message}", HttpStatusCode.InternalServerError);
+                return ApiResponse<bool>.Fail("Không thể hủy khung giờ. Vui lòng thử lại.", HttpStatusCode.InternalServerError);
             }
         }
 
@@ -584,18 +582,18 @@ namespace RikiPath.Application.Services
             {
                 var claim = claimService.GetUserClaim();
                 if (claim.Role != Role.Admin)
-                    return ApiResponse<MentorScheduleResponse>.Fail("Chỉ Quản trị viên mới có quyền xem lịch làm việc của chuyên gia khác.", HttpStatusCode.Forbidden);
+                    return ApiResponse<MentorScheduleResponse>.Fail("Chỉ Quản trị viên mới có quyền xem lịch làm việc của Giáo viên khác.", HttpStatusCode.Forbidden);
 
                 var schedule = await unitOfWork.MentorSchedules.GetByMentorIdWithRulesAsync(mentorId, DefaultPolicyVersion, cancellationToken);
                 if (schedule is null)
-                    return ApiResponse<MentorScheduleResponse>.Fail("Chuyên gia chưa cấu hình mẫu lịch làm việc.", HttpStatusCode.NotFound);
+                    return ApiResponse<MentorScheduleResponse>.Fail("Giáo viên chưa cấu hình lịch làm việc.", HttpStatusCode.NotFound);
 
                 return ApiResponse<MentorScheduleResponse>.Success(MapToMentorScheduleResponse(schedule));
             }
             catch (Exception ex)
             {
                 logger.LogError(ex, "Lỗi khi Quản trị viên lấy lịch làm việc của mentor {MentorId}.", mentorId);
-                return ApiResponse<MentorScheduleResponse>.Fail($"Không thể tải lịch làm việc: {ex.Message}", HttpStatusCode.InternalServerError);
+                return ApiResponse<MentorScheduleResponse>.Fail("Không thể tải lịch làm việc. Vui lòng thử lại.", HttpStatusCode.InternalServerError);
             }
         }
 
@@ -717,7 +715,7 @@ namespace RikiPath.Application.Services
             var slots = policy is null
                 ? slotGenerator.GenerateDailySlots(mentorId, localDate, dayparts, DateTimeOffset.UtcNow, DefaultPolicyVersion)
                 : slotGenerator.GenerateDailySlots(mentorId, localDate, dayparts, DateTimeOffset.UtcNow,
-                    DefaultPolicyVersion, policy.SessionMinutes, policy.RestMinutes, policy.PublicationHorizonDays);
+                    DefaultPolicyVersion, policy.SessionMinutes, policy.RestMinutes, MentorSlotPolicy.DefaultSingleSlotHorizonDays);
             return (slots, policy);
         }
 
@@ -738,13 +736,10 @@ namespace RikiPath.Application.Services
                 PolicyVersion = groupPolicy?.Version ?? 0,
                 SessionMinutes = sessionMinutes,
                 RestMinutes = restMinutes,
-                DailySessionCap = groupPolicy?.DailySessionCap ?? slotPolicy.DailyBookingCap,
-                WeeklySessionCap = groupPolicy?.WeeklySessionCap ?? 0,
                 MaxSlotsPerSubmission = Math.Clamp(opts.MaxSlotsPerSubmission, 1, 50),
                 MaxPendingSlots = Math.Clamp(opts.MaxPendingSlots, 1, 200),
                 SubmissionCooldownSeconds = Math.Clamp(opts.SubmissionCooldownSeconds, 0, 120),
-                PublicationHorizonDays = groupPolicy?.PublicationHorizonDays ?? MentorSlotPolicy.MaximumScheduleHorizonDays,
-                CourseDurationWeeks = groupPolicy?.CourseDurationWeeks ?? 10,
+                MinimumPreparationDays = groupPolicy?.MinimumPreparationDays ?? MentorSlotPolicy.MinimumPreparationDays,
                 CancellationLeadHours = groupPolicy?.CancellationLeadHours ?? 24,
                 ReschedulingLeadHours = groupPolicy?.ReschedulingLeadHours ?? 24,
                 MaxLearners = groupPolicy?.MaxLearners ?? 4,

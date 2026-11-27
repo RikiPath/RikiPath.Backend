@@ -73,18 +73,18 @@ public sealed partial class StudyCourseService
         if (cohort is null) return new(null, kind, weeks, checks, [], [], null, null);
 
         Check("COHORT_NOT_ACTIVE", cohort.Status is "Published" or "Draft", "Lớp đã đóng hoặc đã hủy; không thể dời/hủy lịch.");
-        Check("COHORT_ALREADY_STARTED", (FirstSessionStartUtc(cohort) ?? cohort.StartsAt) > now,
-            "Lớp đã bắt đầu; chỉ dời/hủy được lớp chưa bắt đầu.");
         var blockers = cohort.Enrollments.Select(e => PaymentBlockerOf(e, now)).OfType<CohortPaymentBlocker>().ToList();
-        Check("COHORT_PAYMENT_REVIEW_OPEN", !blockers.Any(b => b.Kind == "PaymentReview"),
-            "Lớp có giao dịch thanh toán đang được Quản trị viên xem xét; cần xử lý xong trước khi dời hoặc hủy lịch.");
-        Check("COHORT_PAYMENT_PENDING", !blockers.Any(b => b.Kind is "CheckoutHold" or "AwaitingReconciliation"),
-            "Lớp có học viên đang giữ chỗ thanh toán hoặc đơn thanh toán chờ đối soát; cần đối soát trước khi dời/hủy lịch.");
         var confirmed = cohort.Enrollments.Count(e => e.PaymentStatus is "Paid" or "PartiallyRefunded"
             && e.Status is not ("PaymentReview" or "Cancelled" or "Transferred" or "PendingPayment" or "PaymentExpired" or "PaymentFailed")
             && ReservesSeat(e, now));
         Check("COHORT_HAS_CONFIRMED_LEARNERS", confirmed == 0,
             $"Lớp đã có {confirmed} học viên xác nhận; chỉ dời/hủy được lớp chưa có học viên.");
+        Check("COHORT_PAYMENT_REVIEW_OPEN", !blockers.Any(b => b.Kind == "PaymentReview"),
+            "Lớp có giao dịch thanh toán đang được Quản trị viên xem xét; cần xử lý xong trước khi dời hoặc hủy lịch.");
+        Check("COHORT_PAYMENT_PENDING", !blockers.Any(b => b.Kind is "CheckoutHold" or "AwaitingReconciliation"),
+            "Lớp có học viên đang giữ chỗ thanh toán hoặc đơn thanh toán chờ đối soát; cần đối soát trước khi dời/hủy lịch.");
+        Check("COHORT_ALREADY_STARTED", (!isShift && confirmed == 0) || (FirstSessionStartUtc(cohort) ?? cohort.StartsAt) > now,
+            "Lớp đã bắt đầu; chỉ dời/hủy được lớp chưa bắt đầu.");
 
         var ordered = cohort.Sessions.OrderBy(s => s.Number).ToList();
         if (isShift)
@@ -112,8 +112,6 @@ public sealed partial class StudyCourseService
                     // Các khung giờ cũ của chính lớp sẽ bị thu hồi, không tính là cam kết.
                     ExcludeCohortId = cohort.Id,
                     RestMinutes = policy.Version == 0 ? null : policy.RestMinutes,
-                    DailyCap = policy.Version == 0 ? null : policy.DailySessionCap,
-                    WeeklyCap = policy.Version == 0 ? null : policy.WeeklySessionCap,
                     // Mẫu lịch của lớp đã hợp lệ và chỉ tịnh tiến nguyên khối.
                     IncludeOwnIntervals = false
                 }, ct);
@@ -122,8 +120,9 @@ public sealed partial class StudyCourseService
                 report.IsValid ? "Giáo viên không bị trùng lịch dạy trong các tuần mới."
                     : $"Buổi {first!.SessionNumber} sau khi dời bị trùng lịch: {first.Message}", (int)HttpStatusCode.Conflict));
             var firstShift = shifted.MinBy(x => x.ProposedStart)!;
-            newCutoff = firstShift.ProposedStart.AddMinutes(
-                -(firstShift.Session.Availability.GroupPolicy?.EnrollmentCutoffMinutesBeforeFirstSession ?? 0));
+            newCutoff = cohort.EnrollmentClosesAtUtc.HasValue
+                ? cohort.EnrollmentClosesAtUtc.Value.AddDays(days)
+                : firstShift.ProposedStart;
         }
         return new(cohort, kind, weeks, checks, blockers, shifted, report, newCutoff);
     }
@@ -213,6 +212,7 @@ public sealed partial class StudyCourseService
         Rule(reason.Length is >= 10 and <= 1000, "COHORT_SCHEDULE_REQUEST_REASON_REQUIRED", "Nhập lý do từ 10 đến 1000 ký tự.");
         Rule(r.IdempotencyKey != Guid.Empty, "COHORT_SCHEDULE_IDEMPOTENCY_KEY_REQUIRED", "Thiếu mã chống gửi trùng.");
         object result = new { };
+        var changed = false;
         await uow.ExecuteInTransactionAsync(async token =>
         {
             var existing = await ScheduleRequestDetails.AsNoTracking()
@@ -269,9 +269,12 @@ public sealed partial class StudyCourseService
                         $"Lớp {cohort.Name} có {e.Blockers.Count} giao dịch đang giữ chỗ/chờ đối soát/đang xem xét. Yêu cầu #{request.Id} chỉ được duyệt sau khi đối soát xong.",
                         "CohortPaymentReconciliation", (string?)link)));
             await uow.SaveChangesAsync(token);
+            changed = true;
             var saved = await ScheduleRequestDetails.AsNoTracking().SingleAsync(x => x.Id == request.Id, token);
             result = ScheduleRequestView(saved, CohortSchedulePreview(e, Actor.Role == Role.Admin), idempotent: false);
         }, ct);
+        if (changed)
+            await NotifyAdminsCounterAsync("cohort_schedule_request_updated", ct);
         return result;
     });
 
@@ -316,6 +319,7 @@ public sealed partial class StudyCourseService
         var note = string.IsNullOrWhiteSpace(r?.Note) ? null : r!.Note!.Trim();
         Rule(note is null || note.Length <= 1000, "COHORT_SCHEDULE_NOTE_TOO_LONG", "Ghi chú tối đa 1000 ký tự.");
         object result = new { };
+        var changed = false;
         await uow.ExecuteInTransactionAsync(async token =>
         {
             var header = await uow.CohortScheduleRequests.Query().AsNoTracking().Where(x => x.Id == requestId)
@@ -387,18 +391,30 @@ public sealed partial class StudyCourseService
                 }
                 cohort.StartsAt = cohort.StartsAt.AddDays(days);
                 cohort.EndsAt = cohort.EndsAt.AddDays(days);
+                cohort.EnrollmentClosesAtUtc = e.NewCutoffUtc;
                 Rule(cohort.Sessions.Count == countBefore, "COHORT_SHIFT_INVARIANT", "Số buổi của lớp bị thay đổi ngoài dự kiến.", HttpStatusCode.Conflict);
-                detail = $"Quản trị viên đã phê duyệt dời toàn bộ {countBefore} buổi thêm {weeks} tuần; ngày bắt đầu mới {cohort.StartsAt:O}.";
+                detail = $"Quản trị viên đã phê duyệt dời toàn bộ {countBefore} buổi thêm {weeks} tuần; ngày bắt đầu mới {LocalTime(cohort.StartsAt):dd/MM/yyyy}.";
                 title = "Lịch lớp đã được dời";
                 message = $"Lớp {cohort.Name} được dời {weeks} tuần; buổi đầu tiên mới bắt đầu {LocalTime(cohort.StartsAt):HH:mm dd/MM/yyyy}.";
             }
             else
             {
-                // Lớp trống bị hủy: khung giờ được giữ làm lịch sử; lớp đã hủy không còn giữ lịch dạy của Mentor.
+                // Lớp trống bị hủy: giải phóng khung giờ và lưu rõ lý do hủy lớp.
                 cohort.Status = "Cancelled";
+                cohort.CancellationReason = request.Reason;
+                cohort.CancelledAtUtc = now;
+                foreach (var s in cohort.Sessions)
+                {
+                    if (s.Availability is not null && !s.Availability.IsDeleted && s.Availability.StartTime > now.AddMinutes(-15))
+                    {
+                        s.Availability.IsDeleted = true;
+                        s.Availability.ModifiedDate = now;
+                        s.Availability.ChangeResolution = request.Reason;
+                    }
+                }
                 detail = "Quản trị viên đã phê duyệt hủy lớp chưa có học viên.";
                 title = "Lớp đã được hủy";
-                message = $"Lớp {cohort.Name} chưa có học viên đã được hủy theo yêu cầu #{request.Id}.";
+                message = $"Lớp {cohort.Name} chưa có học viên đã được hủy.";
             }
             cohort.Revision++;
             request.Status = CohortScheduleRequest.Approved;
@@ -417,6 +433,7 @@ public sealed partial class StudyCourseService
             recipients.AddRange(admins.Select(id => (id, title, message, "CohortScheduleRequest", (string?)$"/admin/study-courses?cohortScheduleRequestId={request.Id}")));
             QueueNotifications($"cohort-schedule:{request.Id}:approved", "CohortScheduleRequest", request.Id.ToString(), recipients);
             await uow.SaveChangesAsync(token);
+            changed = true;
             result = new
             {
                 request.Id, request.Status, request.CohortId, request.Kind, request.ShiftWeeks,
@@ -424,6 +441,8 @@ public sealed partial class StudyCourseService
                 SessionCount = cohort.Sessions.Count, Idempotent = false
             };
         }, ct);
+        if (changed)
+            await NotifyAdminsCounterAsync("cohort_schedule_request_updated", ct);
         return result;
     });
 
@@ -433,6 +452,7 @@ public sealed partial class StudyCourseService
         var reason = r?.Reason?.Trim() ?? "";
         Rule(reason.Length is >= 1 and <= 1000, "COHORT_SCHEDULE_REQUEST_REASON_REQUIRED", "Nhập lý do từ chối (tối đa 1000 ký tự).");
         object result = new { };
+        var changed = false;
         await uow.ExecuteInTransactionAsync(async token =>
         {
             var header = await uow.CohortScheduleRequests.Query().AsNoTracking().Where(x => x.Id == requestId)
@@ -458,8 +478,11 @@ public sealed partial class StudyCourseService
                 (request.Cohort.MentorId, "Yêu cầu dời/hủy lớp bị từ chối", reason, "CohortScheduleRequest", $"/mentor/cohorts/{request.CohortId}")
             ]);
             await uow.SaveChangesAsync(token);
+            changed = true;
             result = new { request.Id, request.Status, request.DecisionNote, Idempotent = false };
         }, ct);
+        if (changed)
+            await NotifyAdminsCounterAsync("cohort_schedule_request_updated", ct);
         return result;
     });
 
@@ -467,6 +490,7 @@ public sealed partial class StudyCourseService
     {
         if (Actor.Role is not (Role.Admin or Role.Mentor)) throw new UnauthorizedAccessException();
         object result = new { };
+        var changed = false;
         await uow.ExecuteInTransactionAsync(async token =>
         {
             var header = await uow.CohortScheduleRequests.Query().AsNoTracking().Where(x => x.Id == requestId)
@@ -480,8 +504,111 @@ public sealed partial class StudyCourseService
             request.Status = CohortScheduleRequest.Withdrawn; request.Revision++;
             AddScheduleRequestEvent(request, "Withdrawn", "Người gửi rút yêu cầu.");
             await uow.SaveChangesAsync(token);
+            changed = true;
             result = new { request.Id, request.Status, Idempotent = false };
         }, ct);
+        if (changed)
+            await NotifyAdminsCounterAsync("cohort_schedule_request_updated", ct);
+        return result;
+    });
+
+    public Task<ApiResponse<object>> MentorCancelRecruitingCohortAsync(int cohortId, CancelCohortEnrollmentRequest? request, CancellationToken ct) => Run(async () =>
+    {
+        if (Actor.Role != Role.Mentor)
+            throw new UnauthorizedAccessException();
+
+        var reason = string.IsNullOrWhiteSpace(request?.Reason)
+            ? "Giáo viên tự hủy lớp đang tuyển sinh khi chưa có học viên."
+            : request!.Reason!.Trim();
+        Rule(reason.Length <= 1000, "COHORT_CANCEL_REASON_TOO_LONG", "Lý do hủy lớp tối đa 1000 ký tự.");
+
+        object result = new { };
+        int? cancelMentorId = null;
+        await uow.ExecuteInTransactionAsync(async token =>
+        {
+            await uow.StudyCourses.LockCohortAsync(cohortId, token);
+            var cohort = await CohortForTransfer.SingleOrDefaultAsync(x => x.Id == cohortId, token);
+            Rule(cohort is not null, "COHORT_NOT_FOUND", "Không tìm thấy lớp.", HttpStatusCode.NotFound);
+            if (cohort!.MentorId != Actor.Id)
+                throw new UnauthorizedAccessException();
+
+            if (cohort.Status == "Cancelled")
+            {
+                result = new
+                {
+                    CohortId = cohort.Id,
+                    CohortStatus = cohort.Status,
+                    cohort.CancellationReason,
+                    cohort.CancelledAtUtc,
+                    Idempotent = true,
+                };
+                return;
+            }
+
+            Rule(cohort.Status == "Published", "COHORT_NOT_RECRUITING",
+                "Chỉ có thể tự hủy lớp đang ở trạng thái tuyển sinh.", HttpStatusCode.Conflict);
+
+            var now = DateTime.UtcNow;
+            var blockers = cohort.Enrollments.Select(e => PaymentBlockerOf(e, now)).OfType<CohortPaymentBlocker>().ToList();
+            var confirmed = cohort.Enrollments.Count(e => e.PaymentStatus is "Paid" or "PartiallyRefunded"
+                && e.Status is not ("PaymentReview" or "Cancelled" or "Transferred" or "PendingPayment" or "PaymentExpired" or "PaymentFailed")
+                && ReservesSeat(e, now));
+
+            Rule(confirmed == 0, "COHORT_HAS_CONFIRMED_LEARNERS",
+                $"Lớp đã có {confirmed} học viên xác nhận; không thể tự hủy lớp.");
+            Rule(!blockers.Any(b => b.Kind == "PaymentReview"), "COHORT_PAYMENT_REVIEW_OPEN",
+                "Lớp có giao dịch thanh toán đang chờ Quản trị viên xem xét; chưa thể tự hủy lớp.");
+            Rule(!blockers.Any(b => b.Kind is "CheckoutHold" or "AwaitingReconciliation"), "COHORT_PAYMENT_PENDING",
+                "Lớp đang có học viên giữ chỗ thanh toán hoặc đơn chờ đối soát; chưa thể tự hủy lớp.");
+
+            await uow.StudyCourses.LockScheduleAsync(cohort.MentorId, cohort.MentorId, token);
+
+            cohort.Status = "Cancelled";
+            cohort.CancellationReason = reason;
+            cohort.CancelledAtUtc = now;
+            cohort.EnrollmentClosedAtUtc ??= now;
+            cohort.Revision++;
+
+            var releasedCount = 0;
+            foreach (var session in cohort.Sessions)
+            {
+                if (session.Availability is not null && !session.Availability.IsDeleted && session.Availability.StartTime > now.AddMinutes(-15))
+                {
+                    session.Availability.IsDeleted = true;
+                    session.Availability.ModifiedDate = now;
+                    session.Availability.ChangeResolution = reason;
+                    releasedCount++;
+                }
+            }
+
+            // Hủy mọi yêu cầu dời/hủy lớp đang chờ nếu có
+            var pendingReqs = await uow.CohortScheduleRequests.Query()
+                .Include(x => x.History)
+                .Where(x => x.CohortId == cohort.Id && x.Status == CohortScheduleRequest.Pending)
+                .ToListAsync(token);
+            foreach (var pendingReq in pendingReqs)
+            {
+                pendingReq.Status = CohortScheduleRequest.Withdrawn;
+                pendingReq.Revision++;
+                AddScheduleRequestEvent(pendingReq, "Withdrawn", "Giáo viên đã tự hủy lớp đang tuyển sinh.");
+            }
+
+            await uow.SaveChangesAsync(token);
+            cancelMentorId = cohort.MentorId;
+            result = new
+            {
+                CohortId = cohort.Id,
+                CohortStatus = cohort.Status,
+                cohort.CancellationReason,
+                cohort.CancelledAtUtc,
+                ReleasedSlotsCount = releasedCount,
+                Idempotent = false,
+            };
+        }, ct);
+
+        if (cancelMentorId is > 0)
+            await NotifyUsersCounterAsync([cancelMentorId.Value], "cohort_cancelled", ct);
+
         return result;
     });
 }

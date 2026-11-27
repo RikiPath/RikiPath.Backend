@@ -13,7 +13,10 @@ using RikiPath.Domain.Enums;
 
 namespace RikiPath.Application.Services
 {
-    public class ReviewService(IUnitOfWork unitOfWork, AppSettings? appSettings = null) : IReviewService
+    public class ReviewService(
+        IUnitOfWork unitOfWork,
+        AppSettings? appSettings = null,
+        ISidebarCounterNotifier? sidebarNotifier = null) : IReviewService
     {
         private bool IsEmailProviderConfigured =>
             appSettings?.SmtpSettings is { } smtp
@@ -748,6 +751,9 @@ namespace RikiPath.Application.Services
                     await unitOfWork.SaveChangesAsync(token);
                 }, cancellationToken);
 
+                if (sidebarNotifier is not null && outcome is not null && !string.Equals(outcome.Action, "Skipped", StringComparison.OrdinalIgnoreCase))
+                    await sidebarNotifier.NotifyUsersAsync([userId], "srs_card_enrolled", cancellationToken);
+
                 return ApiResponse<SrsEnrollOutcomeResponse>.Success(outcome!);
             }
             catch (OperationCanceledException) { throw; }
@@ -801,6 +807,9 @@ namespace RikiPath.Application.Services
                     }
                     await unitOfWork.SaveChangesAsync(token);
                 }, cancellationToken);
+
+                if (sidebarNotifier is not null && (result.CreatedCount > 0 || result.ReactivatedCount > 0 || result.LinkedCount > 0))
+                    await sidebarNotifier.NotifyUsersAsync([userId], "srs_cards_batch_enrolled", cancellationToken);
 
                 return ApiResponse<SrsBatchEnrollResponse>.Success(result);
             }
@@ -952,6 +961,9 @@ namespace RikiPath.Application.Services
             unitOfWork.ReviewCards.Update(card);
             await unitOfWork.SaveChangesAsync(cancellationToken);
 
+            if (sidebarNotifier is not null)
+                await sidebarNotifier.NotifyUsersAsync([userId], "srs_card_lifecycle_changed", cancellationToken);
+
             return ApiResponse<ReviewQueueItemResponse>.Success(
                 MapToQueueItem(card, utcNow, includePreviews: true));
         }
@@ -1084,6 +1096,9 @@ namespace RikiPath.Application.Services
                 if (conflict is not null)
                     return conflict;
 
+                if (sidebarNotifier is not null)
+                    await sidebarNotifier.NotifyUsersAsync([userId], "srs_preferences_updated", cancellationToken);
+
                 return ApiResponse<UserSrsPreferenceResponse>.Success(
                     MapPreference(saved!, IsEmailProviderConfigured, userAccount?.IsEmailVerified ?? true));
             }
@@ -1109,6 +1124,7 @@ namespace RikiPath.Application.Services
             {
                 SubmitReviewResultResponse? response = null;
                 ApiResponse<SubmitReviewResultResponse>? failure = null;
+                var notifyDueChanged = false;
                 var utcNow = DateTime.UtcNow;
 
                 await unitOfWork.ExecuteInTransactionAsync(async token =>
@@ -1482,6 +1498,7 @@ namespace RikiPath.Application.Services
                     await unitOfWork.SaveChangesAsync(token);
                     if (!isPracticeSession)
                     {
+                        notifyDueChanged = true;
                         await ReconcileUnreadSrsRemindersIfCompletedAsync(userId, pref, utcNow, token);
                     }
 
@@ -1514,6 +1531,9 @@ namespace RikiPath.Application.Services
 
                 if (failure is not null)
                     return failure;
+
+                if (sidebarNotifier is not null && notifyDueChanged)
+                    await sidebarNotifier.NotifyUsersAsync([userId], "srs_review_submitted", cancellationToken);
 
                 return ApiResponse<SubmitReviewResultResponse>.Success(response!);
             }

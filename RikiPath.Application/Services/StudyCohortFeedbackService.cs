@@ -311,16 +311,25 @@ public sealed partial class StudyCourseService
 
         var count = ratings.Count;
         var average = count == 0 ? 0.0 : Math.Round(ratings.Average(), 2);
+        var ratingDistribution = Enumerable.Range(1, 5)
+            .OrderByDescending(star => star)
+            .Select(star => new
+            {
+                Star = star,
+                Count = ratings.Count(r => r == star),
+            })
+            .ToList();
 
         // Tuyệt đối không trả thông tin định danh học viên trong tổng hợp đánh giá công khai của cố vấn.
         var comments = await uow.CohortMentorReviews.Query().AsNoTracking()
             .Where(x => x.MentorId == mentorId && !x.IsHidden && x.Comment != null && x.Comment != "")
             .OrderByDescending(x => x.CreatedAtUtc).ThenByDescending(x => x.Id)
-            .Take(20)
+            .Take(50)
             .Select(x => new
             {
                 x.Id,
                 x.CohortId,
+                CohortName = x.Cohort != null ? x.Cohort.Name : null,
                 x.Rating,
                 x.Comment,
                 x.CreatedAtUtc,
@@ -333,6 +342,7 @@ public sealed partial class StudyCourseService
             MentorId = mentorId,
             AverageRating = average,
             ReviewCount = count,
+            RatingDistribution = ratingDistribution,
             Comments = comments
         };
     });
@@ -448,6 +458,14 @@ public sealed partial class StudyCourseService
             var saved = await ComplaintDetails.SingleAsync(x => x.Id == complaint.Id, token);
             result = ComplaintView(saved, Actor.Role);
         }, ct);
+        await NotifyAdminsCounterAsync("cohort_complaint_updated", ct);
+        if (result is not null)
+        {
+            var mentorProp = result.GetType().GetProperty("MentorId")?.GetValue(result) as int?;
+            var categoryProp = result.GetType().GetProperty("Category")?.GetValue(result) as string;
+            if (mentorProp is > 0 && categoryProp != CohortComplaint.CategoryPaymentEnrollment)
+                await NotifyUsersCounterAsync([mentorProp.Value], "cohort_complaint_updated", ct);
+        }
         return result;
     });
 
@@ -536,6 +554,8 @@ public sealed partial class StudyCourseService
             var reloaded = await ComplaintDetails.SingleAsync(x => x.Id == complaint.Id, token);
             result = ComplaintView(reloaded, Actor.Role);
         }, ct);
+        await NotifyAdminsCounterAsync("cohort_complaint_updated", ct);
+        await NotifyUsersCounterAsync([Actor.Id], "cohort_complaint_updated", ct);
         return result;
     });
 
@@ -550,6 +570,7 @@ public sealed partial class StudyCourseService
             "Cần nhập nội dung quyết định (tối đa 2000 ký tự).");
 
         object result = new { };
+        int? notifyMentorId = null;
         await uow.ExecuteInTransactionAsync(async token =>
         {
             var complaint = await uow.CohortComplaints.Query().Include(x => x.History)
@@ -581,6 +602,7 @@ public sealed partial class StudyCourseService
             };
             if (complaint.MentorId.HasValue && complaint.Category != CohortComplaint.CategoryPaymentEnrollment)
             {
+                notifyMentorId = complaint.MentorId.Value;
                 recipients.Add((
                     complaint.MentorId.Value,
                     "Kết quả xử lý khiếu nại",
@@ -595,6 +617,9 @@ public sealed partial class StudyCourseService
             var reloaded = await ComplaintDetails.SingleAsync(x => x.Id == complaint.Id, token);
             result = ComplaintView(reloaded, Actor.Role);
         }, ct);
+        await NotifyAdminsCounterAsync("cohort_complaint_updated", ct);
+        if (notifyMentorId is > 0)
+            await NotifyUsersCounterAsync([notifyMentorId.Value], "cohort_complaint_updated", ct);
         return result;
     });
 

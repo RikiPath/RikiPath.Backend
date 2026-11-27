@@ -1,34 +1,26 @@
 using System.Globalization;
-using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using RikiPath.Application.IServices;
-using RikiPath.Application.Requests.MentorScheduling;
 using RikiPath.Domain.Entities;
-using RikiPath.Domain.Enums;
 using RikiPath.Domain.MentorScheduling;
 
 namespace RikiPath.Application.Services;
 
-// Kiểm tra trùng lịch dạy chuẩn duy nhất của Mentor. Chỉ đọc dữ liệu; tuần tự hóa do bên gọi giữ advisory lock
-// LockScheduleAsync(mentorId, ...) trong cùng giao dịch. Khung giờ rảnh đơn lẻ chưa gắn đề xuất/lớp, lớp đã hủy,
-// và đề xuất Draft/Rejected/Withdrawn KHÔNG phải cam kết dạy.
+// Kiểm tra trùng lịch dạy chuẩn duy nhất của cùng một Giáo viên.
+// Chỉ đối chiếu với lịch giảng dạy CHÍNH THỨC (StudyCohort đang hoạt động/nháp và khung giờ đã duyệt chưa gắn lớp hủy);
+// không bao giờ khóa vô thời hạn khung giờ của đề xuất chưa duyệt và không giới hạn chéo giữa các Giáo viên khác nhau.
 public sealed class MentorTeachingConflictService(IUnitOfWork uow, IMentorGroupPolicyService? groupPolicies = null)
     : IMentorTeachingConflictService
 {
     public const string ScheduleConflict = "MENTOR_SCHEDULE_CONFLICT";
     public const string RestViolation = "MENTOR_REST_INTERVAL_VIOLATION";
     public const string Duplicate = "COHORT_SESSION_DUPLICATE";
-    public const string DailyLimit = "MENTOR_DAILY_LIMIT_EXCEEDED";
-    public const string WeeklyLimit = "MENTOR_WEEKLY_LIMIT_EXCEEDED";
 
     public const string KindCohort = "CohortSession";
-    public const string KindLegacy = "LegacyBooking";
-    public const string KindIndividual = "IndividualCourseSession";
     public const string KindProposed = "ProposedSession";
     public const string KindProposal = "TeachingProposal";
 
     private const int MaxReportedConflicts = 200;
-    private static readonly JsonSerializerOptions JsonOpts = new(JsonSerializerDefaults.Web);
     private static readonly Lazy<TimeZoneInfo> BusinessZone =
         new(() => TimeZoneInfo.FindSystemTimeZoneById(MentorSlotPolicy.BusinessTimeZoneId));
 
@@ -53,17 +45,32 @@ public sealed class MentorTeachingConflictService(IUnitOfWork uow, IMentorGroupP
 
         var minStart = items[0].StartUtc;
         var maxEnd = items.Max(p => p.EndUtc);
-        var (rest, dailyCap, weeklyCap) = await LimitsAsync(minStart, options, ct);
+        var rest = await RestMinutesAsync(minStart, options, ct);
 
-        // Cửa sổ tải: [min-1 ngày, max+1 ngày], mở rộng thêm cho đủ tuần ISO (giờ Việt Nam) khi có giới hạn tuần.
         var windowStart = minStart.AddDays(-1);
         var windowEnd = maxEnd.AddDays(1);
-        if (weeklyCap > 0)
-        {
-            windowStart = Min(windowStart, WeekStartUtc(minStart));
-            windowEnd = Max(windowEnd, WeekStartUtc(maxEnd).AddDays(7));
-        }
         var commitments = await LoadCommitmentsAsync(mentorId, windowStart, windowEnd, options, ct);
+
+        if (options.AdditionalCommittedIntervals is { Count: > 0 })
+        {
+            foreach (var extra in options.AdditionalCommittedIntervals)
+            {
+                var extraStart = Utc(extra.StartUtc);
+                var extraEnd = Utc(extra.EndUtc);
+                if (extraEnd <= windowStart || extraStart >= windowEnd) continue;
+                commitments.Add(new Commitment(
+                    KindProposal,
+                    null,
+                    null,
+                    "Lịch dự kiến cùng đợt duyệt",
+                    extraStart,
+                    extraEnd,
+                    null,
+                    MentorTeachingProposalStatus.PendingReview,
+                    null));
+            }
+            commitments = commitments.OrderBy(x => x.StartUtc).ToList();
+        }
 
         var conflicts = new List<TeachingConflict>();
         void Add(TeachingConflict c) { if (conflicts.Count < MaxReportedConflicts) conflicts.Add(c); }
@@ -74,7 +81,7 @@ public sealed class MentorTeachingConflictService(IUnitOfWork uow, IMentorGroupP
             {
                 if (a.StartUtc < p.EndUtc && p.StartUtc < a.EndUtc)
                     Add(Conflict(ScheduleConflict, p, a, OverlapMessage(a)));
-                else if (Gap(a.StartUtc, a.EndUtc, p.StartUtc, p.EndUtc) < TimeSpan.FromMinutes(rest))
+                else if (rest > 0 && Gap(a.StartUtc, a.EndUtc, p.StartUtc, p.EndUtc) < TimeSpan.FromMinutes(rest))
                     Add(Conflict(RestViolation, p, a, RestMessage(p, a, rest)));
             }
         }
@@ -85,7 +92,6 @@ public sealed class MentorTeachingConflictService(IUnitOfWork uow, IMentorGroupP
             for (var j = i + 1; j < items.Count; j++)
             {
                 var a = items[i]; var b = items[j];
-                // Đã sắp theo giờ bắt đầu: khi b bắt đầu sau a.End + nghỉ thì các buổi sau cũng vậy.
                 if (b.StartUtc >= a.EndUtc.AddMinutes(rest) && b.StartUtc > a.StartUtc) break;
                 var own = new Commitment(KindProposed, null, null, null, a.StartUtc, a.EndUtc);
                 if (a.StartUtc == b.StartUtc)
@@ -93,34 +99,9 @@ public sealed class MentorTeachingConflictService(IUnitOfWork uow, IMentorGroupP
                 else if (a.StartUtc < b.EndUtc && b.StartUtc < a.EndUtc)
                     Add(Conflict(ScheduleConflict, b, own,
                         $"Các buổi được chọn bị trùng giờ: {Range(a.StartUtc, a.EndUtc)} và {Range(b.StartUtc, b.EndUtc)}. Vui lòng chọn khung giờ khác."));
-                else if (Gap(a.StartUtc, a.EndUtc, b.StartUtc, b.EndUtc) < TimeSpan.FromMinutes(rest))
+                else if (rest > 0 && Gap(a.StartUtc, a.EndUtc, b.StartUtc, b.EndUtc) < TimeSpan.FromMinutes(rest))
                     Add(Conflict(RestViolation, b, own,
                         $"Các buổi {Range(a.StartUtc, a.EndUtc)} và {Range(b.StartUtc, b.EndUtc)} quá sát nhau; cần nghỉ tối thiểu {rest} phút giữa hai buổi."));
-            }
-        }
-
-        // Giới hạn ngày/tuần theo ngày làm việc giờ Việt Nam; cam kết chỉ được đếm một lần.
-        if (dailyCap > 0)
-        {
-            foreach (var day in items.GroupBy(p => LocalDate(p.StartUtc)))
-            {
-                var total = day.Count() + commitments.Count(a => LocalDate(a.StartUtc) == day.Key);
-                if (total <= dailyCap) continue;
-                var p = day.First();
-                Add(new TeachingConflict(DailyLimit, p.SessionNumber, p.StartUtc, p.EndUtc, KindProposed, null, null, null, null,
-                    $"Lịch dạy vào {DayLabel(day.Key)} sẽ có {total} buổi, vượt giới hạn {dailyCap} buổi mỗi ngày theo chính sách. Vui lòng chọn ngày khác."));
-            }
-        }
-        if (weeklyCap > 0)
-        {
-            foreach (var week in items.GroupBy(p => LocalWeekStart(LocalDate(p.StartUtc))))
-            {
-                var weekEnd = week.Key.AddDays(7);
-                var total = week.Count() + commitments.Count(a => LocalDate(a.StartUtc) is var d && d >= week.Key && d < weekEnd);
-                if (total <= weeklyCap) continue;
-                var p = week.First();
-                Add(new TeachingConflict(WeeklyLimit, p.SessionNumber, p.StartUtc, p.EndUtc, KindProposed, null, null, null, null,
-                    $"Tuần bắt đầu {DayLabel(week.Key)} sẽ có {total} buổi dạy, vượt giới hạn {weeklyCap} buổi mỗi tuần theo chính sách. Vui lòng chọn tuần khác."));
             }
         }
 
@@ -128,15 +109,12 @@ public sealed class MentorTeachingConflictService(IUnitOfWork uow, IMentorGroupP
         return new TeachingConflictReport(ordered.Count == 0, ordered);
     }
 
-    private async Task<(int RestMinutes, int DailyCap, int WeeklyCap)> LimitsAsync(DateTime atUtc, TeachingConflictOptions o, CancellationToken ct)
+    private async Task<int> RestMinutesAsync(DateTime atUtc, TeachingConflictOptions o, CancellationToken ct)
     {
-        RikiPath.Domain.Entities.MentorGroupPolicy? policy = null;
-        if ((o.RestMinutes is null || o.DailyCap is null || o.WeeklyCap is null) && groupPolicies is not null)
-            policy = await groupPolicies.GetEffectiveAsync(atUtc, ct);
-        var rest = o.RestMinutes ?? policy?.RestMinutes ?? MentorSlotPolicy.MinimumRestMinutes;
-        var daily = o.DailyCap ?? policy?.DailySessionCap ?? MentorSlotPolicy.DefaultDailyBookingCap;
-        var weekly = o.WeeklyCap ?? policy?.WeeklySessionCap ?? 0;
-        return (Math.Max(0, rest), daily, weekly);
+        if (o.RestMinutes.HasValue)
+            return Math.Max(0, o.RestMinutes.Value);
+        var policy = groupPolicies is not null ? await groupPolicies.GetEffectiveAsync(atUtc, ct) : null;
+        return Math.Max(0, policy?.RestMinutes ?? MentorSlotPolicy.MinimumRestMinutes);
     }
 
     private async Task<List<Commitment>> LoadCommitmentsAsync(int mentorId, DateTime from, DateTime to,
@@ -153,7 +131,7 @@ public sealed class MentorTeachingConflictService(IUnitOfWork uow, IMentorGroupP
         var excludeCohortId = o.ExcludeCohortId ?? 0;
         var excludeProposalId = o.ExcludeProposalId ?? 0;
 
-        // (a) Buổi của lớp nhóm đang mở hoặc nháp do Giáo viên này dạy (bỏ qua lớp đã hủy).
+        // (a) Buổi học chính thức của lớp đang mở hoặc nháp do chính Giáo viên này dạy (loại trừ lớp đã hủy).
         var cohortRows = await uow.StudyCohorts.Query().AsNoTracking()
             .Where(g => (g.Status == "Published" || g.Status == "Draft") && g.Id != excludeCohortId)
             .SelectMany(g => g.Sessions
@@ -172,10 +150,40 @@ public sealed class MentorTeachingConflictService(IUnitOfWork uow, IMentorGroupP
                 }))
             .ToListAsync(ct);
 
+        var cohortAvIds = cohortRows.Select(r => r.AvailabilityId).Distinct().ToList();
+        var fullyCancelledCohortAvIds = cohortAvIds.Count == 0
+            ? new HashSet<int>()
+            : (await uow.StudyCourses.Query().AsNoTracking()
+                .Where(c => c.CohortId.HasValue
+                    && c.Status != "Cancelled"
+                    && c.Status != "Transferred"
+                    && c.Status != "PaymentReview"
+                    && (c.PaymentStatus == "Paid"
+                        || c.PaymentStatus == "PartiallyRefunded"
+                        || (c.PaymentStatus == "Pending" && c.PaymentExpiresAt > DateTime.UtcNow)))
+                .SelectMany(c => c.Sessions
+                    .Where(s => s.AvailabilityId.HasValue && cohortAvIds.Contains(s.AvailabilityId.Value))
+                    .Select(s => new { AvailabilityId = s.AvailabilityId!.Value, s.Status }))
+                .GroupBy(x => x.AvailabilityId)
+                .Select(g => new
+                {
+                    AvailabilityId = g.Key,
+                    HasActiveSession = g.Any(s =>
+                        s.Status != "CancelledByMentor"
+                        && s.Status != "Cancelled"
+                        && s.Status != "CancelledByLearner"
+                        && s.Status != "TransferredOut"),
+                })
+                .Where(x => !x.HasActiveSession)
+                .Select(x => x.AvailabilityId)
+                .ToListAsync(ct))
+                .ToHashSet();
+
         var seen = new HashSet<int>();
         var result = new List<Commitment>();
         foreach (var r in cohortRows)
         {
+            if (fullyCancelledCohortAvIds.Contains(r.AvailabilityId)) continue;
             if (seen.Add(r.AvailabilityId))
             {
                 result.Add(new Commitment(
@@ -191,32 +199,36 @@ public sealed class MentorTeachingConflictService(IUnitOfWork uow, IMentorGroupP
             }
         }
 
-        // Các Availability thuộc lớp đã hủy không còn giữ lịch dạy của Mentor.
+        // Khung giờ của lớp đã hủy không còn giữ lịch dạy của Giáo viên.
         var cancelledCohortAvIds = await uow.StudyCohorts.Query().AsNoTracking()
             .Where(g => g.MentorId == mentorId && g.Status == "Cancelled")
             .SelectMany(g => g.Sessions.Select(s => s.AvailabilityId))
             .ToListAsync(ct);
         var cancelledAvSet = cancelledCohortAvIds.ToHashSet();
 
-        // (b) Các buổi đã duyệt từ đề xuất mở lớp nhưng chưa gắn vào StudyCohort.
+        // (b) Các buổi đã phê duyệt chính thức (từ đề xuất mở lớp khác hoặc slot độc lập đã duyệt).
         var approvedProposalSlots = await uow.MentorAvailabilities.Query().AsNoTracking()
             .Include(a => a.TeachingProposal).ThenInclude(p => p!.CertificateLevel)
             .Where(a => a.MentorId == mentorId
                 && !a.IsDeleted
                 && a.RejectedAt == null
                 && a.IsApproved
-                && a.TeachingProposalId != null
-                && a.TeachingProposalId != excludeProposalId
                 && a.EndTime > from
                 && a.StartTime < to
                 && !excludedIds.Contains(a.Id)
-                && a.TeachingProposal!.Status == MentorTeachingProposalStatus.Approved)
+                && (a.TeachingProposalId == null
+                    || (a.TeachingProposalId != excludeProposalId
+                        && a.TeachingProposal != null
+                        && (a.TeachingProposal.Status == MentorTeachingProposalStatus.OpenedClass
+                            || a.TeachingProposal.Status == MentorTeachingProposalStatus.Approved))))
             .Select(a => new
             {
                 a.Id,
                 a.TeachingProposalId,
-                a.TeachingProposal!.CourseTitle,
-                JlptLevel = a.TeachingProposal.CertificateLevel != null ? a.TeachingProposal.CertificateLevel.Code : null,
+                CourseTitle = a.TeachingProposal != null ? a.TeachingProposal.CourseTitle : null,
+                JlptLevel = a.TeachingProposal != null && a.TeachingProposal.CertificateLevel != null
+                    ? a.TeachingProposal.CertificateLevel.Code
+                    : null,
                 a.StartTime,
                 a.EndTime,
             })
@@ -225,7 +237,7 @@ public sealed class MentorTeachingConflictService(IUnitOfWork uow, IMentorGroupP
         foreach (var av in approvedProposalSlots)
         {
             if (cancelledAvSet.Contains(av.Id) || !seen.Add(av.Id)) continue;
-            var label = string.IsNullOrWhiteSpace(av.CourseTitle) ? $"Đề xuất đã duyệt #{av.TeachingProposalId}" : av.CourseTitle;
+            var label = string.IsNullOrWhiteSpace(av.CourseTitle) ? "Lớp học đã duyệt" : av.CourseTitle;
             result.Add(new Commitment(
                 KindProposal,
                 av.Id,
@@ -238,75 +250,7 @@ public sealed class MentorTeachingConflictService(IUnitOfWork uow, IMentorGroupP
                 av.TeachingProposalId));
         }
 
-        // (c) Đề xuất đang chờ duyệt hoặc đang yêu cầu chỉnh sửa (giữ chỗ tạm thời cho lịch 10 tuần).
-        var heldProposals = await uow.MentorTeachingProposals.Query().AsNoTracking()
-            .Include(p => p.CertificateLevel)
-            .Where(p => p.MentorId == mentorId
-                && p.Id != excludeProposalId
-                && (p.Status == MentorTeachingProposalStatus.PendingReview
-                    || p.Status == MentorTeachingProposalStatus.ChangesRequested)
-                && p.ExpectedStartDate.HasValue)
-            .ToListAsync(ct);
-
-        foreach (var p in heldProposals)
-        {
-            var sessions = DeserializeWeeklySessions(p.WeeklySessionsJson);
-            if (sessions.Count == 0 || !p.ExpectedStartDate.HasValue) continue;
-            var durationWeeks = p.CourseDurationWeeks > 0 ? p.CourseDurationWeeks : 10;
-            var sessionMinutes = p.SessionDurationMinutes > 0 ? p.SessionDurationMinutes : 90;
-            var cutoffUtc = p.SubmittedAtUtc.HasValue ? Utc(p.SubmittedAtUtc.Value) : DateTime.MinValue;
-            var title = string.IsNullOrWhiteSpace(p.CourseTitle) ? $"Đề xuất #{p.Id}" : p.CourseTitle;
-            var levelCode = p.CertificateLevel?.Code;
-
-            foreach (var (startUtc, endUtc) in ExpandProposalIntervals(p.ExpectedStartDate.Value, sessions, durationWeeks, sessionMinutes, cutoffUtc))
-            {
-                if (endUtc <= from || startUtc >= to) continue;
-                result.Add(new Commitment(
-                    KindProposal,
-                    null,
-                    null,
-                    title,
-                    startUtc,
-                    endUtc,
-                    levelCode,
-                    p.Status,
-                    p.Id));
-            }
-        }
-
         return result.OrderBy(x => x.StartUtc).ToList();
-    }
-
-    private static List<WeeklySessionSlotDto> DeserializeWeeklySessions(string? json)
-    {
-        if (string.IsNullOrWhiteSpace(json)) return [];
-        try
-        {
-            return (JsonSerializer.Deserialize<List<WeeklySessionSlotDto>>(json, JsonOpts) ?? [])
-                .Where(s => s is not null && s.StartMinute >= 0)
-                .OrderBy(s => (s.Weekday + 6) % 7)
-                .ThenBy(s => s.StartMinute)
-                .ToList();
-        }
-        catch (JsonException)
-        {
-            return [];
-        }
-    }
-
-    private static IEnumerable<(DateTime StartUtc, DateTime EndUtc)> ExpandProposalIntervals(
-        DateOnly expectedStartDate,
-        List<WeeklySessionSlotDto> sessions,
-        int durationWeeks,
-        int sessionMinutes,
-        DateTime cutoffUtc)
-    {
-        _ = cutoffUtc;
-        var tuples = sessions.Select(s => (s.Weekday, s.StartMinute)).ToList();
-        foreach (var occ in MentorSlotPolicy.ExpandRecurringSchedule(expectedStartDate, tuples, durationWeeks, sessionMinutes, BusinessZone.Value))
-        {
-            yield return (occ.StartUtc, occ.EndUtc);
-        }
     }
 
     private static TeachingConflict Conflict(string code, ProposedTeachingInterval p, Commitment a, string message)
@@ -317,24 +261,20 @@ public sealed class MentorTeachingConflictService(IUnitOfWork uow, IMentorGroupP
         var level = string.IsNullOrWhiteSpace(a.JlptLevelCode) ? "" : $" ({a.JlptLevelCode})";
         if (a.Kind == KindCohort)
             return $"lịch dạy lớp {a.CohortName}{level}";
-        if (a.Status == MentorTeachingProposalStatus.PendingReview)
-            return $"đề xuất đang chờ duyệt{level}";
-        if (a.Status == MentorTeachingProposalStatus.ChangesRequested)
-            return $"đề xuất cần bổ sung{level}";
         if (a.Status == MentorTeachingProposalStatus.Approved)
             return $"lịch dạy đã duyệt{level}";
         return $"lịch dạy đã xác nhận{level}";
     }
 
     private static string OverlapMessage(Commitment a)
-        => $"Bạn đã có {Subject(a)} từ {Time(a.StartUtc)} đến {Time(a.EndUtc)} vào {DayLabel(LocalDate(a.StartUtc))}. Vui lòng chọn khung giờ khác.";
+        => $"Khung giờ này trùng với {Subject(a)} từ {Time(a.StartUtc)} đến {Time(a.EndUtc)} vào {DayLabel(LocalDate(a.StartUtc))}.";
 
     private static string RestMessage(ProposedTeachingInterval p, Commitment a, int rest)
-        => $"Khung giờ {Range(p.StartUtc, p.EndUtc)} quá sát {Subject(a)} từ {Time(a.StartUtc)} đến {Time(a.EndUtc)} vào {DayLabel(LocalDate(a.StartUtc))}; cần nghỉ tối thiểu {rest} phút giữa hai buổi. Vui lòng chọn khung giờ khác.";
+        => $"Khung giờ {Range(p.StartUtc, p.EndUtc)} quá sát {Subject(a)} từ {Time(a.StartUtc)} đến {Time(a.EndUtc)} vào {DayLabel(LocalDate(a.StartUtc))}; cần nghỉ tối thiểu {rest} phút giữa hai buổi.";
 
     private static int Priority(string code) => code switch
     {
-        ScheduleConflict => 0, Duplicate => 1, RestViolation => 2, DailyLimit => 3, _ => 4
+        ScheduleConflict => 0, Duplicate => 1, RestViolation => 2, _ => 3
     };
 
     private static TimeSpan Gap(DateTime aStart, DateTime aEnd, DateTime bStart, DateTime bEnd)
@@ -349,12 +289,6 @@ public sealed class MentorTeachingConflictService(IUnitOfWork uow, IMentorGroupP
 
     private static DateTime Local(DateTime utc) => TimeZoneInfo.ConvertTimeFromUtc(Utc(utc), BusinessZone.Value);
     private static DateOnly LocalDate(DateTime utc) => DateOnly.FromDateTime(Local(utc));
-    private static DateOnly LocalWeekStart(DateOnly d) => d.AddDays(-(((int)d.DayOfWeek + 6) % 7));
-    private static DateTime WeekStartUtc(DateTime utc)
-        => TimeZoneInfo.ConvertTimeToUtc(DateTime.SpecifyKind(LocalWeekStart(LocalDate(utc)).ToDateTime(TimeOnly.MinValue),
-            DateTimeKind.Unspecified), BusinessZone.Value);
-    private static DateTime Min(DateTime a, DateTime b) => a < b ? a : b;
-    private static DateTime Max(DateTime a, DateTime b) => a > b ? a : b;
 
     private static string Time(DateTime utc) => Local(utc).ToString("HH:mm", CultureInfo.InvariantCulture);
     private static string Range(DateTime startUtc, DateTime endUtc)

@@ -16,6 +16,9 @@ public interface IMentorTeachingProposalService
     Task<ApiResponse<TeachingProposalResponse>> SubmitProposalAsync(int id, SubmitTeachingProposalRequest request, CancellationToken ct = default);
     Task<ApiResponse<TeachingProposalResponse>> ResubmitProposalAsync(int id, ResubmitTeachingProposalRequest request, CancellationToken ct = default);
     Task<ApiResponse<TeachingProposalResponse>> WithdrawProposalAsync(int id, WithdrawTeachingProposalRequest? request, CancellationToken ct = default);
+    Task<ApiResponse<ApprovalSchedulePreviewResponse>> PreviewOpenEnrollmentAsync(int id, OpenEnrollmentPreviewRequest? request, CancellationToken ct = default);
+    Task<ApiResponse<OpenEnrollmentConfirmResponse>> ConfirmOpenEnrollmentAsync(int id, ConfirmOpenEnrollmentRequest request, CancellationToken ct = default);
+    Task<ApiResponse<bool>> HideRejectedProposalAsync(int id, CancellationToken ct = default);
     Task<ApiResponse<TeachingProposalResponse>> ReopenForRevisionAsync(int id, CancellationToken ct = default);
     Task<ApiResponse<ProposalAttachmentDto>> GetAuthorizedAttachmentAsync(int proposalId, int attachmentIndex, bool isAdmin, CancellationToken ct = default);
 
@@ -25,8 +28,5 @@ public interface IMentorTeachingProposalService
     Task<ApiResponse<TeachingProposalResponse>> ReviewProposalAsync(int id, ReviewTeachingProposalRequest request, CancellationToken ct = default);
     Task<ApiResponse<BulkApproveTeachingProposalsResponse>> PrevalidateBulkApproveAsync(BulkApproveTeachingProposalsRequest request, CancellationToken ct = default);
     Task<ApiResponse<BulkApproveTeachingProposalsResponse>> BulkApproveProposalsAsync(BulkApproveTeachingProposalsRequest request, CancellationToken ct = default);
-    Task<ApiResponse<List<TeachingProposalResponse>>> GetApprovedProposalsForCohortAsync(int? mentorId = null, int? certificateLevelId = null, CancellationToken ct = default);
-    Task<ApiResponse<RepairApprovedCohortsResponse>> RepairApprovedCohortsAsync(CancellationToken ct = default);
-    Task<RepairApprovedCohortsResponse> BackfillApprovedProposalCohortsSystemAsync(CancellationToken ct = default);
     Task<ApiResponse<RepairInvalidProposalSchedulesResponse>> RepairInvalidNeedsRevisionSchedulesAsync(CancellationToken ct = default);
 }
