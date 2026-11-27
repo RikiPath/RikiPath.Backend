@@ -226,6 +226,36 @@ namespace RikiPath.Infrastructure.Migrations
                         {
                             FeaturesId = 8,
                             SubscriptionPlansId = 7
+                        },
+                        new
+                        {
+                            FeaturesId = 13,
+                            SubscriptionPlansId = 8101
+                        },
+                        new
+                        {
+                            FeaturesId = 14,
+                            SubscriptionPlansId = 8102
+                        },
+                        new
+                        {
+                            FeaturesId = 6,
+                            SubscriptionPlansId = 8103
+                        },
+                        new
+                        {
+                            FeaturesId = 12,
+                            SubscriptionPlansId = 8104
+                        },
+                        new
+                        {
+                            FeaturesId = 7,
+                            SubscriptionPlansId = 8105
+                        },
+                        new
+                        {
+                            FeaturesId = 8,
+                            SubscriptionPlansId = 8105
                         });
                 });
 
@@ -10227,6 +10257,96 @@ namespace RikiPath.Infrastructure.Migrations
                             Price = 1000m,
                             Revision = 1,
                             SortOrder = 7
+                        },
+                        new
+                        {
+                            Id = 8101,
+                            AiGradingQuota = 1,
+                            CreatedDate = new DateTime(2026, 11, 23, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Description = "Một lượt luyện nói và chấm phát âm tiếng Nhật bằng AI.",
+                            DurationDays = 0,
+                            IsActive = true,
+                            IsDeleted = false,
+                            IsPopular = false,
+                            IsTrial = false,
+                            MeetingSessionCount = 0,
+                            Name = "Luyện nói AI - 1 lượt",
+                            PlanCategory = "speaking",
+                            Price = 1000m,
+                            Revision = 1,
+                            SortOrder = 10
+                        },
+                        new
+                        {
+                            Id = 8102,
+                            AiGradingQuota = 1,
+                            CreatedDate = new DateTime(2026, 11, 23, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Description = "Một lượt chấm bài viết tiếng Nhật bằng AI.",
+                            DurationDays = 0,
+                            IsActive = true,
+                            IsDeleted = false,
+                            IsPopular = false,
+                            IsTrial = false,
+                            MeetingSessionCount = 0,
+                            Name = "Luyện viết AI - 1 lượt",
+                            PlanCategory = "writing",
+                            Price = 1000m,
+                            Revision = 1,
+                            SortOrder = 11
+                        },
+                        new
+                        {
+                            Id = 8103,
+                            AiGradingQuota = 1,
+                            CreatedDate = new DateTime(2026, 11, 23, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Description = "Một lượt giải thích chi tiết đáp án đề thi thử bằng AI.",
+                            DurationDays = 0,
+                            IsActive = true,
+                            IsDeleted = false,
+                            IsPopular = false,
+                            IsTrial = false,
+                            MeetingSessionCount = 0,
+                            Name = "Giải thích đáp án AI - 1 lượt",
+                            PlanCategory = "ai_grading",
+                            Price = 1000m,
+                            Revision = 1,
+                            SortOrder = 12
+                        },
+                        new
+                        {
+                            Id = 8104,
+                            AiGradingQuota = 1,
+                            CreatedDate = new DateTime(2026, 11, 23, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Description = "Một lượt tạo lộ trình học cá nhân hóa bằng AI.",
+                            DurationDays = 0,
+                            IsActive = true,
+                            IsDeleted = false,
+                            IsPopular = false,
+                            IsTrial = false,
+                            MeetingSessionCount = 0,
+                            Name = "Lộ trình học AI - 1 lượt",
+                            PlanCategory = "learning_path",
+                            Price = 1000m,
+                            Revision = 1,
+                            SortOrder = 13
+                        },
+                        new
+                        {
+                            Id = 8105,
+                            AiGradingQuota = 0,
+                            CreatedDate = new DateTime(2026, 11, 23, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Description = "Một buổi ôn luyện với mentor.",
+                            DurationDays = 30,
+                            IsActive = true,
+                            IsDeleted = false,
+                            IsPopular = false,
+                            IsTrial = false,
+                            MeetingSessionCount = 1,
+                            Name = "Mentor - 1 buổi",
+                            PlanCategory = "mentor_legacy",
+                            Price = 1000m,
+                            Revision = 1,
+                            SortOrder = 14
                         });
                 });
 

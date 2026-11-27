@@ -141,8 +141,7 @@ public sealed class SubscriptionAccessService(
         int? studyDaysRemaining = studyExpiresAt is { } expiry
             ? (int)Math.Ceiling((expiry - now).TotalDays)
             : study is null ? 0 : null;
-        var grading = active.Where(s => OrderCategory(s) is CategoryAiGrading or CategorySelfStudy)
-            .Sum(RemainingAi);
+        var grading = SaturatingSumRemainingAi(active.Where(s => OrderCategory(s) is CategoryAiGrading or CategorySelfStudy));
         var speaking = active.Any(s => OrderCategory(s) == CategorySpeaking) || study is not null || grading > 0;
         var writing = active.Any(s => OrderCategory(s) == CategoryWriting) || study is not null || grading > 0;
         var allFeatures = await unitOfWork.Features.Query().AsNoTracking()
@@ -158,10 +157,12 @@ public sealed class SubscriptionAccessService(
             speaking,
             writing,
             grading,
-            active.Where(s => OrderCategory(s) == CategorySpeaking).Sum(RemainingAi),
-            active.Where(s => OrderCategory(s) == CategoryWriting).Sum(RemainingAi),
-            active.Where(s => OrderCategory(s) == CategoryLearningPath).Sum(RemainingAi),
-            0,
+            SaturatingSumRemainingAi(active.Where(s => OrderCategory(s) == CategorySpeaking)),
+            SaturatingSumRemainingAi(active.Where(s => OrderCategory(s) == CategoryWriting)),
+            SaturatingSumRemainingAi(active.Where(s => OrderCategory(s) == CategoryLearningPath)),
+            SaturatingSum(active
+                .Where(s => OrderCategory(s) == CategoryMentorLegacy)
+                .Select(s => Math.Max(0, s.MeetingSessionsIncluded - s.MeetingSessionsUsed))),
             purchases.Select(s => new PurchasedStudyPlan(
                 s.Id,
                 s.SubscriptionPlanId,
@@ -282,7 +283,9 @@ public sealed class SubscriptionAccessService(
         var creditKey = feature.CreditFeatureKey?.Trim();
         var creditsRemaining = string.IsNullOrWhiteSpace(creditKey)
             ? 0
-            : activeGrants.Where(grant => SupportsCredit(grant.Category, creditKey)).Sum(grant => grant.AiQuotaRemaining);
+            : SaturatingSum(activeGrants
+                .Where(grant => SupportsCredit(grant.Category, creditKey))
+                .Select(grant => grant.AiQuotaRemaining));
 
         return mode switch
         {
@@ -718,6 +721,25 @@ public sealed class SubscriptionAccessService(
         => (order.StartDate is null || order.StartDate <= now) && (order.EndDate is null || order.EndDate > now);
 
     private static int RemainingAi(UserSubscription order) => Math.Max(0, order.AiGradingQuota - order.AiGradingUsedCount);
+
+    // Several demo subscriptions can be active at once. Keep the public DTO
+    // backward-compatible (int) while preventing LINQ Sum(int) overflow when
+    // each demo subscription carries a very large quota.
+    private static int SaturatingSumRemainingAi(IEnumerable<UserSubscription> orders)
+        => SaturatingSum(orders.Select(RemainingAi));
+
+    private static int SaturatingSum(IEnumerable<int> values)
+    {
+        long total = 0;
+        foreach (var value in values)
+        {
+            total += Math.Max(0, value);
+            if (total >= int.MaxValue)
+                return int.MaxValue;
+        }
+
+        return (int)total;
+    }
     private static bool IsWebUrl(string? value)
         => Uri.TryCreate(value, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https";
 }

@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Caching.Memory;
-using Microsoft.Extensions.Options;
+using Microsoft.EntityFrameworkCore;
+using RikiPath.Application;
 using RikiPath.Application.Exceptions;
 using RikiPath.Application.IServices;
 using RikiPath.Domain;
@@ -13,14 +14,20 @@ namespace RikiPath.Infrastructure.Services
     // quota tổng vì mỗi instance cho phép hết hạn ngạch riêng nó). Nếu bạn scale-out, thay
     // IMemoryCache bằng IDistributedCache (Redis) hoặc một bảng DB (AiUsageDailyCounter) - interface
     // IAiUsageQuotaService giữ nguyên, chỉ đổi implementation này.
-    public class AiUsageQuotaService(IMemoryCache cache, IOptions<AppSettings> appSettings) : IAiUsageQuotaService
+    public class AiUsageQuotaService(
+        IMemoryCache cache,
+        AppSettings appSettings,
+        IUnitOfWork unitOfWork) : IAiUsageQuotaService
     {
-        private readonly AiRateLimitSettings _limits = appSettings.Value.Ai.RateLimit;
+        private readonly AiRateLimitSettings _limits = appSettings.Ai.RateLimit;
         private static readonly TimeZoneInfo VietnamTimeZone = ResolveVietnamTimeZone();
         private static readonly object SyncRoot = new();
 
-        public Task EnsureWithinQuotaAsync(int userId, AiFeature feature, CancellationToken cancellationToken)
+        public async Task EnsureWithinQuotaAsync(int userId, AiFeature feature, CancellationToken cancellationToken)
         {
+            if (await IsUnlimitedUserAsync(userId, cancellationToken))
+                return;
+
             lock (SyncRoot)
             {
                 var usage = GetOrCreateUsage(userId, feature);
@@ -40,11 +47,13 @@ namespace RikiPath.Infrastructure.Services
                 }
             }
 
-            return Task.CompletedTask;
         }
 
-        public Task RecordUsageAsync(int userId, AiFeature feature, int tokensUsed, CancellationToken cancellationToken)
+        public async Task RecordUsageAsync(int userId, AiFeature feature, int tokensUsed, CancellationToken cancellationToken)
         {
+            if (await IsUnlimitedUserAsync(userId, cancellationToken))
+                return;
+
             lock (SyncRoot)
             {
                 var key = BuildKey(userId, feature);
@@ -54,7 +63,31 @@ namespace RikiPath.Infrastructure.Services
                 cache.Set(key, usage, NextMidnightVietnamTimeUtc());
             }
 
-            return Task.CompletedTask;
+        }
+
+        private async Task<bool> IsUnlimitedUserAsync(int userId, CancellationToken cancellationToken)
+        {
+            var configuredEmails = _limits.UnlimitedUserEmails
+                .Where(email => !string.IsNullOrWhiteSpace(email))
+                .Select(email => email.Trim().ToUpperInvariant())
+                .ToHashSet(StringComparer.Ordinal);
+
+            if (configuredEmails.Count == 0)
+                return false;
+
+            var cacheKey = $"ai-unlimited-user:{userId}";
+            if (cache.TryGetValue(cacheKey, out bool cached))
+                return cached;
+
+            var email = await unitOfWork.UserAccounts.Query()
+                .AsNoTracking()
+                .Where(user => user.Id == userId && !user.IsDeleted)
+                .Select(user => user.Email)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            var unlimited = email is not null && configuredEmails.Contains(email.Trim().ToUpperInvariant());
+            cache.Set(cacheKey, unlimited, TimeSpan.FromMinutes(5));
+            return unlimited;
         }
 
         private DailyUsage GetOrCreateUsage(int userId, AiFeature feature)
