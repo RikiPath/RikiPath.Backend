@@ -392,7 +392,9 @@ public sealed class SubscriptionAccessService(
         var creditKey = feature.CreditFeatureKey?.Trim();
         var creditsRemaining = string.IsNullOrWhiteSpace(creditKey)
             ? 0
-            : activeGrants.Where(grant => SupportsCredit(grant.Category, creditKey)).Sum(grant => grant.AiQuotaRemaining);
+            : SaturatingSum(activeGrants
+                .Where(grant => SupportsCredit(grant.Category, creditKey))
+                .Select(grant => grant.AiQuotaRemaining));
 
         return mode switch
         {
@@ -829,6 +831,25 @@ public sealed class SubscriptionAccessService(
         => (order.StartDate is null || order.StartDate <= now) && (order.EndDate is null || order.EndDate > now);
 
     private static int RemainingAi(UserSubscription order) => Math.Max(0, order.AiGradingQuota - order.AiGradingUsedCount);
+
+    // Several demo subscriptions can be active at once. Keep the public DTO
+    // backward-compatible (int) while preventing LINQ Sum(int) overflow when
+    // each demo subscription carries a very large quota.
+    private static int SaturatingSumRemainingAi(IEnumerable<UserSubscription> orders)
+        => SaturatingSum(orders.Select(RemainingAi));
+
+    private static int SaturatingSum(IEnumerable<int> values)
+    {
+        long total = 0;
+        foreach (var value in values)
+        {
+            total += Math.Max(0, value);
+            if (total >= int.MaxValue)
+                return int.MaxValue;
+        }
+
+        return (int)total;
+    }
     private static bool IsWebUrl(string? value)
         => Uri.TryCreate(value, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https";
 }

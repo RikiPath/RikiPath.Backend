@@ -1,10 +1,12 @@
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
+using Microsoft.AspNetCore.Http;
+using System.Security.Claims;
 using RikiPath.Application.Exceptions;
 using RikiPath.Application.IServices;
 using RikiPath.Domain;
 
-namespace RikiPath.Infrastructure.Services
+namespace RikiPath.Application.Services
 {
     // Đếm số lượt gọi + token AI theo user/ngày bằng IMemoryCache (per-instance, in-memory).
     //
@@ -18,6 +20,7 @@ namespace RikiPath.Infrastructure.Services
         private readonly IMemoryCache _cache;
         private readonly AiRateLimitSettings _limits;
         private readonly TranslationSettings _translationLimits;
+        private readonly IHttpContextAccessor? _httpContextAccessor;
         private static readonly TimeZoneInfo VietnamTimeZone = ResolveVietnamTimeZone();
         private static readonly object SyncRoot = new();
 
@@ -25,9 +28,11 @@ namespace RikiPath.Infrastructure.Services
             IMemoryCache cache,
             IOptions<AiSettings> aiSettings,
             IOptions<AppSettings>? appSettings = null,
-            IOptions<TranslationSettings>? translationSettings = null)
+            IOptions<TranslationSettings>? translationSettings = null,
+            IHttpContextAccessor? httpContextAccessor = null)
         {
             _cache = cache;
+            _httpContextAccessor = httpContextAccessor;
             var primary = aiSettings?.Value?.RateLimit;
             var fallback = appSettings?.Value?.Ai?.RateLimit;
             // Program.cs binds section "Ai" to IOptions<AiSettings>, whereas legacy deployments may nest under "AppSettings:Ai".
@@ -39,6 +44,12 @@ namespace RikiPath.Infrastructure.Services
 
         public Task EnsureWithinQuotaAsync(int userId, AiFeature feature, CancellationToken cancellationToken)
         {
+            // Demo account allowlist is intentionally evaluated from the signed request
+            // identity, not from the numeric user id. The Huy account is registered
+            // outside HasData, so its database id can differ between environments.
+            if (IsUnlimitedUser())
+                return Task.CompletedTask;
+
             var maxRequests = feature == AiFeature.Translation
                 ? Math.Max(20, _translationLimits.DailyRequestsPerUser)
                 : _limits.MaxRequestsPerUserPerDay;
@@ -72,6 +83,9 @@ namespace RikiPath.Infrastructure.Services
 
         public Task RecordUsageAsync(int userId, AiFeature feature, int tokensUsed, CancellationToken cancellationToken)
         {
+            if (IsUnlimitedUser())
+                return Task.CompletedTask;
+
             lock (SyncRoot)
             {
                 var key = BuildKey(userId, feature);
@@ -82,6 +96,21 @@ namespace RikiPath.Infrastructure.Services
             }
 
             return Task.CompletedTask;
+        }
+
+        private bool IsUnlimitedUser()
+        {
+            var principal = _httpContextAccessor?.HttpContext?.User;
+            if (principal?.Identity?.IsAuthenticated != true)
+                return false;
+
+            var email = principal.FindFirst(ClaimTypes.Email)?.Value
+                        ?? principal.FindFirst("email")?.Value;
+            if (string.IsNullOrWhiteSpace(email))
+                return false;
+
+            return (_limits.UnlimitedUserEmails ?? []).Any(configured =>
+                string.Equals(configured?.Trim(), email.Trim(), StringComparison.OrdinalIgnoreCase));
         }
 
         private DailyUsage GetOrCreateUsage(int userId, AiFeature feature)

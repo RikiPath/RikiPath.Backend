@@ -1,4 +1,5 @@
 using System.Runtime;
+using System.Collections.Generic;
 
 namespace RikiPath.Domain
 {
@@ -135,6 +136,13 @@ namespace RikiPath.Domain
         // Tổng số token (input + output cộng dồn, lấy từ usage.total_tokens của provider)
         // tối đa / user / ngày, tính riêng theo từng feature.
         public int MaxTokensPerUserPerDay { get; set; } = 50000;
+
+        /// <summary>
+        /// Demo-only allowlist for accounts that must not be blocked by the
+        /// application-level daily AI throttle. Subscription quotas are still
+        /// checked separately by SubscriptionAccessService.
+        /// </summary>
+        public List<string> UnlimitedUserEmails { get; set; } = ["huydqse151428@fpt.edu.vn"];
     }
 
     public sealed class QaPaymentSimulatorSettings
