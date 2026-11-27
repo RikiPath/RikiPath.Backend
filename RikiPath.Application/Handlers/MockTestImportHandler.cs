@@ -299,6 +299,9 @@ namespace RikiPath.Application.Handlers
                     InteractionData = interactionData,
                     AnswerKey = answerKey,
                     AudioUrl = audio,
+                    AudioTranscript = ImportHandlerSupport.Clean(row.Get("AudioText"))
+                        ?? ImportHandlerSupport.Clean(row.Get("AudioTranscript"))
+                        ?? ImportHandlerSupport.Clean(row.Get("Transcript")),
                     ImageUrl = image,
                     Explanation = ImportHandlerSupport.Clean(row.Get("Explanation")),
                     Options = options,
@@ -387,9 +390,12 @@ namespace RikiPath.Application.Handlers
                 if (s.Questions is null) continue;
                 foreach (var q in s.Questions.Where(q => !q.IsDeleted))
                 {
-                    var opts = (q.Options ?? []).Where(o => !o.IsDeleted).OrderBy(o => o.SortOrder).Select(o => ($"{o.OptionText}\u001e{o.ImageUrl}", o.IsCorrect));
+                    var opts = (q.Options ?? []).Where(o => !o.IsDeleted).OrderBy(o => o.SortOrder)
+                        .Select(o => ($"{o.OptionText}\u001e{o.ImageUrl}\u001e{o.Explanation}", o.IsCorrect));
                     oldQuestions[q.SortOrder] = ImportHandlerSupport.QuestionSignature(
-                        s.Title, $"{q.QuestionType}|{q.InteractionDataJson}|{q.AnswerKeyJson}|{q.QuestionText}", q.Explanation, q.AudioUrl, q.ImageUrl, opts);
+                        s.Title, $"{q.QuestionType}|{q.InteractionDataJson}|{q.AnswerKeyJson}|{q.QuestionText}",
+                        $"{q.Explanation}\u001e{q.AudioTranscript}", q.AudioUrl, q.ImageUrl,
+                        opts);
                 }
             }
 
@@ -397,8 +403,9 @@ namespace RikiPath.Application.Handlers
             foreach (var s in payload.Sections)
                 foreach (var q in s.Questions)
                     newQuestions[q.SortOrder] = ImportHandlerSupport.QuestionSignature(
-                        s.Title, $"{q.QuestionType}|{q.InteractionData?.GetRawText()}|{q.AnswerKey?.GetRawText()}|{q.QuestionText}", q.Explanation, q.AudioUrl, q.ImageUrl,
-                        q.Options.Select(o => ($"{o.OptionText}\u001e{o.ImageUrl}", o.IsCorrect)));
+                        s.Title, $"{q.QuestionType}|{q.InteractionData?.GetRawText()}|{q.AnswerKey?.GetRawText()}|{q.QuestionText}",
+                        $"{q.Explanation}\u001e{q.AudioTranscript}", q.AudioUrl, q.ImageUrl,
+                        q.Options.Select(o => ($"{o.OptionText}\u001e{o.ImageUrl}\u001e{o.Explanation}", o.IsCorrect)));
 
             var questionSummary = ImportHandlerSupport.QuestionDiffSummary(oldQuestions, newQuestions);
             if (questionSummary is not null) changed["questions"] = questionSummary;
@@ -647,6 +654,7 @@ namespace RikiPath.Application.Handlers
                     SortOrder = item.index + 1,
                     OptionText = item.value!,
                     ImageUrl = images[item.index],
+                    Explanation = ImportHandlerSupport.GetOptionExplanation(row, item.index + 1),
                     IsCorrect = correct.Contains(item.index + 1)
                 }).ToList();
         }
