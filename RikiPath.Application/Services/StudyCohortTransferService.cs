@@ -187,7 +187,6 @@ public sealed partial class StudyCourseService
         object result = new { };
         string? evidenceUrl = null;
         var uploaded = false;
-        var changed = false;
         await uow.ExecuteInTransactionAsync(async token =>
         {
             var locked = await uow.StudyCourses.LockAsync(courseId, token);
@@ -247,11 +246,8 @@ public sealed partial class StudyCourseService
                 admins.Select(id => (id, "Yêu cầu chuyển lớp mới", "Có học viên gửi yêu cầu chuyển lớp cần xem xét.",
                     "CohortTransfer", (string?)$"/admin/study-courses?transferRequestId={request.Id}")));
             await uow.SaveChangesAsync(token);
-            changed = true;
             result = TransferView(await TransferDetails.SingleAsync(x => x.Id == request.Id, token));
         }, ct);
-        if (changed)
-            await NotifyAdminsCounterAsync("cohort_transfer_updated", ct);
         return result;
     });
 
@@ -336,7 +332,6 @@ public sealed partial class StudyCourseService
         Admin();
         Rule(r.Note is null || r.Note.Trim().Length <= 1000, "TRANSFER_NOTE_TOO_LONG", "Ghi chú tối đa 1000 ký tự.");
         object result = new { };
-        var changed = false;
         await uow.ExecuteInTransactionAsync(async token =>
         {
             var header = await uow.CohortTransferRequests.Query().AsNoTracking()
@@ -417,11 +412,8 @@ public sealed partial class StudyCourseService
                 (target.MentorId, "Thay đổi danh sách lớp", $"Một học viên mới chuyển vào lớp {target.Name}.", "CohortRoster", $"/mentor/cohorts/{target.Id}")
             ]);
             await uow.SaveChangesAsync(token);
-            changed = true;
             result = new { request.Id, request.Status, request.TargetCohortId, request.DestinationCourseId, Idempotent = false };
         }, ct);
-        if (changed)
-            await NotifyAdminsCounterAsync("cohort_transfer_updated", ct);
         return result;
     });
 
@@ -431,7 +423,6 @@ public sealed partial class StudyCourseService
         var reason = r.Reason?.Trim() ?? "";
         Rule(reason.Length is >= 1 and <= 1000, "TRANSFER_REJECTION_REASON_REQUIRED", "Nhập lý do từ chối (tối đa 1000 ký tự).");
         object result = new { };
-        var changed = false;
         await uow.ExecuteInTransactionAsync(async token =>
         {
             var header = await uow.CohortTransferRequests.Query().AsNoTracking().Select(x => new { x.Id, x.SourceCourseId })
@@ -455,11 +446,8 @@ public sealed partial class StudyCourseService
             QueueNotifications($"cohort-transfer:{request.Id}:rejected", "CohortTransferRequest", request.Id.ToString(),
                 [(request.LearnerId, "Yêu cầu chuyển lớp bị từ chối", reason, "CohortTransfer", $"/my-courses/{request.SourceCourseId}")]);
             await uow.SaveChangesAsync(token);
-            changed = true;
             result = new { request.Id, request.Status, request.DecisionNote, Idempotent = false };
         }, ct);
-        if (changed)
-            await NotifyAdminsCounterAsync("cohort_transfer_updated", ct);
         return result;
     });
 
@@ -467,7 +455,6 @@ public sealed partial class StudyCourseService
     {
         if (Actor.Role != Role.Learner) throw new UnauthorizedAccessException();
         object result = new { };
-        var changed = false;
         await uow.ExecuteInTransactionAsync(async token =>
         {
             var header = await uow.CohortTransferRequests.Query().AsNoTracking().Select(x => new { x.Id, x.SourceCourseId, x.LearnerId })
@@ -480,11 +467,8 @@ public sealed partial class StudyCourseService
             request.Status = CohortTransferRequest.Withdrawn; request.Revision++;
             AddTransferEvent(request, "Withdrawn", "Học viên rút yêu cầu.");
             await uow.SaveChangesAsync(token);
-            changed = true;
             result = new { request.Id, request.Status, Idempotent = false };
         }, ct);
-        if (changed)
-            await NotifyAdminsCounterAsync("cohort_transfer_updated", ct);
         return result;
     });
 

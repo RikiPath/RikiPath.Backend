@@ -12,10 +12,10 @@ using RikiPath.Domain.Enums;
 namespace RikiPath.Infrastructure.Services;
 
 /// <summary>
-/// Tự động hóa vòng đời giữ chỗ và tuyển sinh lớp học:
-/// 1) Giải phóng giữ chỗ thanh toán đã quá hạn (sau khi đối soát PayOS để không làm mất giao dịch đã trả tiền).
-/// 2) Tự động đóng tuyển sinh & hủy các lớp không có học viên khi hết hạn tuyển sinh, giải phóng lịch Giáo viên.
-/// 3) Tự động đồng bộ các đề xuất đã phê duyệt chưa tạo lớp (nếu có).
+/// Tự động hóa vòng đời giữ chỗ và tuyển sinh lớp học nhóm:
+/// 1) Giải phóng giữ chỗ thanh toán đã quá hạn (PaymentStatus = Pending &amp;&amp; PaymentExpiresAt &lt;= nowUtc) thành Expired / PaymentExpired.
+/// 2) Cảnh báo Quản trị viên một lần duy nhất (idempotent EventKey) khi lớp Published đã qua mốc đóng đăng ký nhưng chưa có học viên thanh toán hợp lệ.
+/// 3) Tự động đồng bộ an toàn, chống trùng lặp các đề xuất đã phê duyệt nhưng chưa được khởi tạo lớp học nhóm.
 /// </summary>
 public sealed class StudyCohortLifecycleWorker(
     IServiceScopeFactory scopes,
@@ -45,7 +45,8 @@ public sealed class StudyCohortLifecycleWorker(
             var nowUtc = DateTime.UtcNow;
 
             await ExpireStaleSeatHoldsAsync(scope.ServiceProvider, db, nowUtc, ct);
-            await ProcessEnrollmentDeadlinesAsync(scope.ServiceProvider, ct);
+            await NotifyEmptyCohortsPastCutoffAsync(db, nowUtc, ct);
+            await BackfillApprovedProposalCohortsAsync(scope.ServiceProvider, ct);
         }
         catch (OperationCanceledException)
         {
@@ -102,7 +103,7 @@ public sealed class StudyCohortLifecycleWorker(
                     {
                         CourseId = course.Id,
                         Action = "PaidEnrollmentUnresolved",
-                        Detail = "Phát hiện thanh toán từ PayOS sau khi giữ chỗ hết hạn; chuyển Quản trị viên xem xét hoàn tiền hoặc chuyển lớp.",
+                        Detail = "Phát hiện thanh toán từ PayOS sau khi giữ chỗ hết hạn; chuyển Quản trị viên xem xét hoàn tiền hoặc chuyển lớp, không tự ghi danh vượt sĩ số.",
                         At = nowUtc,
                     });
 
@@ -119,7 +120,7 @@ public sealed class StudyCohortLifecycleWorker(
                             Title = "Giao dịch đang chờ xem xét",
                             Message = "Giao dịch đã được ghi nhận sau khi giữ chỗ hết hạn. Quản trị viên sẽ xem xét yêu cầu của bạn.",
                             Type = "PaymentReview",
-                            LinkUrl = "/my-courses/",
+                            LinkUrl = "/my-courses",
                         }
                     };
                     foreach (var adminId in cachedAdminIds)
@@ -128,9 +129,9 @@ public sealed class StudyCohortLifecycleWorker(
                         {
                             UserId = adminId,
                             Title = "Đơn ghi danh cần xem xét thanh toán",
-                            Message = "Một giao dịch ghi danh được thanh toán sau khi giữ chỗ hết hạn; vui lòng xem xét xử lý.",
+                            Message = $"Đơn khóa học #{course.Id} ghi nhận thanh toán sau khi giữ chỗ hết hạn; vui lòng xem xét.",
                             Type = "PaymentReview",
-                            LinkUrl = $"/admin/payments?stream=study_course&id={course.Id}",
+                            LinkUrl = $"/admin/study-courses?courseId={course.Id}",
                         });
                     }
                     db.MentorOutboxEvents.Add(new MentorOutboxEvent
@@ -166,7 +167,7 @@ public sealed class StudyCohortLifecycleWorker(
             {
                 CourseId = course.Id,
                 Action = "SeatHoldExpired",
-                Detail = "Hết thời gian giữ chỗ thanh toán; chỗ đã được tự động giải phóng.",
+                Detail = "Hết thời gian giữ chỗ thanh toán; chỗ đã được tự động giải phóng và phiên thanh toán hết hiệu lực.",
                 At = nowUtc,
             });
         }
@@ -175,14 +176,128 @@ public sealed class StudyCohortLifecycleWorker(
         logger.LogInformation("Processed {Count} stale StudyCourse seat hold(s).", expiredCourses.Count);
     }
 
-    private async Task ProcessEnrollmentDeadlinesAsync(IServiceProvider sp, CancellationToken ct)
+    private async Task NotifyEmptyCohortsPastCutoffAsync(AppDbContext db, DateTime nowUtc, CancellationToken ct)
     {
-        var deadlineService = sp.GetService<ICohortEnrollmentDeadlineService>();
-        if (deadlineService is null)
+        var effectivePolicy = await db.MentorGroupPolicies.AsNoTracking()
+            .Where(p => p.IsActive && !p.IsArchivedRevision && !p.IsDeleted)
+            .OrderByDescending(p => p.LastAppliedAtUtc)
+            .ThenByDescending(p => p.Version)
+            .FirstOrDefaultAsync(ct);
+
+        var windowStart = nowUtc.AddDays(-7);
+        var windowEnd = nowUtc.AddDays(7);
+
+        var candidates = await db.StudyCohorts.AsNoTracking()
+            .Include(c => c.GroupPolicy)
+            .Include(c => c.Sessions).ThenInclude(s => s.Availability).ThenInclude(a => a.GroupPolicy)
+            .Include(c => c.Enrollments)
+            .Where(c => c.Status == "Published" && c.StartsAt >= windowStart && c.StartsAt <= windowEnd)
+            .ToListAsync(ct);
+
+        if (candidates.Count == 0)
             return;
 
-        var processed = await deadlineService.ProcessAllPastCutoffCohortsAsync(ct);
-        if (processed > 0)
-            logger.LogInformation("Processed enrollment deadlines for {Count} cohort(s).", processed);
+        var emptyPastCutoff = new List<StudyCohort>();
+        foreach (var cohort in candidates)
+        {
+            var firstApproved = cohort.Sessions
+                .Where(s => s.Availability.IsApproved && !s.Availability.IsDeleted && s.Availability.RejectedAt == null)
+                .OrderBy(s => s.Availability.StartTime)
+                .FirstOrDefault();
+
+            var cutoffMinutes = firstApproved?.Availability.GroupPolicy?.EnrollmentCutoffMinutesBeforeFirstSession
+                ?? cohort.GroupPolicy?.EnrollmentCutoffMinutesBeforeFirstSession
+                ?? effectivePolicy?.EnrollmentCutoffMinutesBeforeFirstSession
+                ?? 0;
+            var cutoffUtc = firstApproved is null
+                ? DateTime.SpecifyKind(cohort.StartsAt, DateTimeKind.Utc)
+                : DateTime.SpecifyKind(firstApproved.Availability.StartTime, DateTimeKind.Utc).AddMinutes(-cutoffMinutes);
+
+            if (cutoffUtc > nowUtc)
+                continue;
+
+            var minLearnersToStart = cohort.GroupPolicy?.MinLearnersToStart
+                ?? firstApproved?.Availability.GroupPolicy?.MinLearnersToStart
+                ?? effectivePolicy?.MinLearnersToStart
+                ?? 1;
+
+            var confirmedCount = cohort.Enrollments.Count(e =>
+                (e.PaymentStatus is "Paid" or "PartiallyRefunded")
+                && e.Status != "PaymentReview"
+                && e.Status != "Cancelled"
+                && e.Status != "Transferred");
+
+            if (confirmedCount < minLearnersToStart)
+                emptyPastCutoff.Add(cohort);
+        }
+
+        if (emptyPastCutoff.Count == 0)
+            return;
+
+        var adminIds = await db.Set<UserAccount>().AsNoTracking()
+            .Where(u => u.Role == Role.Admin && !u.IsDeleted)
+            .Select(u => u.Id)
+            .ToListAsync(ct);
+        if (adminIds.Count == 0)
+            return;
+
+        var eventKeys = emptyPastCutoff.Select(c => $"cohort-empty-cutoff:{c.Id}").ToList();
+        var alreadyQueued = await db.MentorOutboxEvents.AsNoTracking()
+            .Where(e => eventKeys.Contains(e.EventKey))
+            .Select(e => e.EventKey)
+            .ToListAsync(ct);
+        var queuedSet = alreadyQueued.ToHashSet(StringComparer.Ordinal);
+
+        var added = 0;
+        foreach (var cohort in emptyPastCutoff)
+        {
+            var eventKey = $"cohort-empty-cutoff:{cohort.Id}";
+            if (queuedSet.Contains(eventKey))
+                continue;
+
+            var notifications = adminIds.Select(adminId => new
+            {
+                UserId = adminId,
+                Title = "Lớp học chưa có học viên trước giờ bắt đầu",
+                Message = $"Lớp \"{cohort.Name}\" đã qua mốc đóng đăng ký nhưng chưa có học viên thanh toán hợp lệ. Vui lòng xem xét đổi ngày bắt đầu hoặc hủy lớp.",
+                Type = "CohortLifecycle",
+                LinkUrl = $"/admin/study-courses/?cohortId={cohort.Id}",
+            }).ToList();
+
+            db.MentorOutboxEvents.Add(new MentorOutboxEvent
+            {
+                EventKey = eventKey,
+                AggregateType = "StudyCohort",
+                AggregateId = cohort.Id.ToString(CultureInfo.InvariantCulture),
+                EventType = "CohortLearningNotification",
+                EventVersion = 1,
+                PayloadJson = JsonSerializer.Serialize(new { Notifications = notifications }),
+                CreatedAtUtc = nowUtc,
+                AvailableAtUtc = nowUtc,
+            });
+            added++;
+        }
+
+        if (added > 0)
+        {
+            await db.SaveChangesAsync(ct);
+            logger.LogInformation("Queued empty-cohort cutoff alerts for {Count} cohort(s).", added);
+        }
+    }
+
+    private async Task BackfillApprovedProposalCohortsAsync(IServiceProvider sp, CancellationToken ct)
+    {
+        var proposalService = sp.GetService<IMentorTeachingProposalService>();
+        if (proposalService is null)
+            return;
+
+        var result = await proposalService.BackfillApprovedProposalCohortsSystemAsync(ct);
+        if (result.CreatedCount > 0)
+        {
+            logger.LogInformation(
+                "Auto-synced {Count} approved proposal(s) into StudyCohort(s): {CohortIds}",
+                result.CreatedCount,
+                string.Join(", ", result.CreatedCohortIds));
+        }
     }
 }

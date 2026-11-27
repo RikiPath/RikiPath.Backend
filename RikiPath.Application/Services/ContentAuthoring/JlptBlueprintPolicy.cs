@@ -69,9 +69,8 @@ public static class JlptBlueprintPolicy
                 90,
                 [
                     new(1, "N5_VOCAB", "Kiến thức ngôn ngữ (Từ vựng)", 20, ["Vocabulary", "Kanji"]),
-                    new(2, "N5_GRAMMAR", "Kiến thức ngôn ngữ (Ngữ pháp)", 20, ["Grammar"]),
-                    new(3, "N5_READING", "Đọc hiểu", 20, ["Reading"]),
-                    new(4, "N5_LISTENING", "Nghe hiểu", 30, ["Listening"]),
+                    new(2, "N5_GRAMMAR_READING", "Kiến thức ngôn ngữ (Ngữ pháp) & Đọc hiểu", 40, ["Grammar", "Reading"]),
+                    new(3, "N5_LISTENING", "Nghe hiểu", 30, ["Listening"]),
                 ],
                 HasWordUsageType: false,
                 HasListeningVerbalExpressions: true),

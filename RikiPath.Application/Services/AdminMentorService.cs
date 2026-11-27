@@ -20,8 +20,7 @@ namespace RikiPath.Application.Services
         IUnitOfWork unitOfWork,
         IClaimService claimService,
         IFileStorageService? fileStorageService = null,
-        ILogger<AdminMentorService>? logger = null,
-        ISidebarCounterNotifier? sidebarNotifier = null) : IAdminMentorService
+        ILogger<AdminMentorService>? logger = null) : IAdminMentorService
     {
         public async Task<ApiResponse<MentorResponse>> CreateMentorAsync(
             CreateMentorRequest request, CancellationToken cancellationToken)
@@ -418,11 +417,6 @@ namespace RikiPath.Application.Services
                 }, cancellationToken);
 
                 await unitOfWork.SaveChangesAsync(cancellationToken);
-                if (sidebarNotifier is not null)
-                {
-                    await sidebarNotifier.NotifyAdminsAsync("mentor_verification_reviewed", cancellationToken);
-                    await sidebarNotifier.NotifyUsersAsync([profile.MentorId], "mentor_verification_reviewed", cancellationToken);
-                }
 
                 return ApiResponse<AdminMentorProfileResponse>.Success(
                     MapToAdminMentorProfileResponse(mentor, profile),

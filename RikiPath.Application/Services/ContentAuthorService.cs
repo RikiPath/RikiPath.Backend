@@ -386,7 +386,7 @@ public class ContentAuthorService(
             SortOrder = s.SortOrder,
             LanguageSkillId = s.LanguageSkillId,
             Questions = s.Questions?.Where(q => !q.IsDeleted).OrderBy(q => q.SortOrder).Select(q => new AuthorQuestionDetails
-            { Id = q.Id, QuestionText = q.QuestionText, Explanation = q.Explanation, AudioUrl = q.AudioUrl, AudioTranscript = q.AudioTranscript, ImageUrl = q.ImageUrl, SortOrder = q.SortOrder, Options = q.Options?.Where(o => !o.IsDeleted).OrderBy(o => o.SortOrder).Select(ToOption).ToList() ?? [] }).ToList() ?? []
+            { Id = q.Id, QuestionText = q.QuestionText, Explanation = q.Explanation, AudioUrl = q.AudioUrl, ImageUrl = q.ImageUrl, SortOrder = q.SortOrder, Options = q.Options?.Where(o => !o.IsDeleted).OrderBy(o => o.SortOrder).Select(ToOption).ToList() ?? [] }).ToList() ?? []
         }).ToList()
     };
 
@@ -403,6 +403,6 @@ public class ContentAuthorService(
         { Id = q.Id, QuestionText = q.QuestionText, Explanation = q.Explanation, SortOrder = q.SortOrder, Options = q.Options?.Where(o => !o.IsDeleted).OrderBy(o => o.SortOrder).Select(ToOption).ToList() ?? [] }).ToList()
     };
 
-    private static AuthorOptionDetails ToOption(MockQuestionOption o) => new() { Id = o.Id, OptionText = o.OptionText, ImageUrl = o.ImageUrl, Explanation = o.Explanation, IsCorrect = o.IsCorrect, SortOrder = o.SortOrder };
+    private static AuthorOptionDetails ToOption(MockQuestionOption o) => new() { Id = o.Id, OptionText = o.OptionText, ImageUrl = o.ImageUrl, IsCorrect = o.IsCorrect, SortOrder = o.SortOrder };
     private static AuthorOptionDetails ToOption(PracticeQuestionOption o) => new() { Id = o.Id, OptionText = o.OptionText, IsCorrect = o.IsCorrect, SortOrder = o.SortOrder };
 }

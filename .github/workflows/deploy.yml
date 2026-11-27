@@ -1,374 +1,63 @@
-name: Build, Migration Verification & Deployment
+name: Deploy .NET 8 Web API
 
 on:
   push:
     branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
   workflow_dispatch:
-    inputs:
-      deploy_production:
-        description: "Deploy built API to the production VPS (requires configured VPS & PostgreSQL prerequisites)"
-        required: false
-        default: false
-        type: boolean
-      allow_db_migration:
-        description: "Explicitly authorize applying pending EF migrations after verified backup"
-        required: false
-        default: false
-        type: boolean
-      backup_verified:
-        description: "Set true only if an external/managed PostgreSQL backup snapshot is already verified"
-        required: false
-        default: false
-        type: boolean
 
 concurrency:
-  group: release-pipeline-${{ github.ref }}
+  group: deploy-production
   cancel-in-progress: false
 
 permissions:
   contents: read
 
 jobs:
-  verify-build-and-migrations:
-    name: Build, Migration Package & Release Verification
+  build-and-deploy:
     runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup .NET 8
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '8.0.x'
-
-      - name: Restore & Build Solution (Release)
-        run: |
-          dotnet restore RikiPath.Backend.slnx
-          dotnet build RikiPath.Backend.slnx --no-restore -c Release
-
-      - name: Install EF Core CLI & Verify Migration Snapshot Integrity
-        shell: pwsh
-        run: |
-          dotnet tool install --global dotnet-ef --version 8.0.8
-          ./tools/verify-migration-readiness.ps1 -SkipDatabaseCheck -NoBuild -BuildConfiguration Release
-
-      - name: Generate Ordered Per-Migration SQL Package
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p ./release-migrations
-          cp ./tools/apply-release-migrations.sh ./release-migrations/apply-release-migrations.sh
-          cp ./tools/bootstrap-fresh-database.sh ./release-migrations/bootstrap-fresh-database.sh
-          chmod +x ./release-migrations/apply-release-migrations.sh ./release-migrations/bootstrap-fresh-database.sh
-
-          mapfile -t DISCOVERED_MIGRATIONS < <(
-            dotnet ef migrations list \
-              --project RikiPath.Infrastructure \
-              --startup-project RikiPath.WebApi \
-              --no-build \
-              --configuration Release \
-              --no-connect \
-              -- --no-connect | grep -E '^[0-9]{14}_[A-Za-z0-9_]+$'
-          )
-
-          if [[ ${#DISCOVERED_MIGRATIONS[@]} -eq 0 ]]; then
-            echo "ERROR: No EF migrations discovered." >&2
-            exit 1
-          fi
-
-          MIGRATIONS=()
-          HAS_INITIAL="false"
-          HAS_PRE_SQUASH="false"
-          for mig in "${DISCOVERED_MIGRATIONS[@]}"; do
-            if [[ "$mig" == "20261121010126_InitialCreate" ]]; then HAS_INITIAL="true"; fi
-            if [[ "$mig" == "20261120112045_SeedFullAccessLearnerDemo" ]]; then HAS_PRE_SQUASH="true"; fi
-          done
-          if [[ "$HAS_INITIAL" == "true" ]]; then
-            MIGRATIONS+=("20261121010126_InitialCreate")
-          fi
-          if [[ "$HAS_PRE_SQUASH" == "true" ]]; then
-            MIGRATIONS+=("20261120112045_SeedFullAccessLearnerDemo")
-          fi
-          for mig in "${DISCOVERED_MIGRATIONS[@]}"; do
-            if [[ "$mig" == "20261121010126_InitialCreate" || "$mig" == "20261120112045_SeedFullAccessLearnerDemo" ]]; then
-              continue
-            fi
-            MIGRATIONS+=("$mig")
-          done
-
-          printf '%s\n' "${MIGRATIONS[@]}" > ./release-migrations/manifest.txt
-
-          PREV="0"
-          for MIG in "${MIGRATIONS[@]}"; do
-            dotnet ef migrations script "$PREV" "$MIG" \
-              --project RikiPath.Infrastructure \
-              --startup-project RikiPath.WebApi \
-              --no-build \
-              --configuration Release \
-              --output "./release-migrations/${MIG}.sql" \
-              -- --no-connect
-            PREV="$MIG"
-          done
-
-      - name: Verify Self-Contained Release Publish (CI Only)
-        run: dotnet publish RikiPath.WebApi/RikiPath.WebApi.csproj -c Release -o ./publish-ci --no-build
-
-      - name: Upload Migration Release Package
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-migrations
-          path: release-migrations/
-          retention-days: 7
-
-  simulate-fresh-bootstrap:
-    name: Isolated Fresh Database Bootstrap Simulation
-    runs-on: ubuntu-latest
-    needs: verify-build-and-migrations
-
-    services:
-      postgres:
-        image: postgres:15-alpine
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: postgres
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 12
-
-    steps:
-      - name: Download Migration Release Package
-        uses: actions/download-artifact@v4
-        with:
-          name: release-migrations
-          path: ./release-migrations
-
-      - name: Install PostgreSQL Client
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq postgresql-client >/dev/null
-
-      - name: Bootstrap Fresh Database & Verify Idempotent Re-check
-        shell: bash
-        env:
-          PGHOST: 127.0.0.1
-          PGPORT: 5432
-          PGUSER: postgres
-          PGPASSWORD: postgres
-          PGSSLMODE: disable
-        run: |
-          set -euo pipefail
-          chmod +x ./release-migrations/bootstrap-fresh-database.sh ./release-migrations/apply-release-migrations.sh
-          psql -d postgres -v ON_ERROR_STOP=1 -c "CREATE DATABASE rikipath_ci_fresh;"
-          PGDATABASE=rikipath_ci_fresh ./release-migrations/bootstrap-fresh-database.sh --migrations-dir ./release-migrations
-
-          set +e
-          PGDATABASE=rikipath_ci_fresh ./release-migrations/bootstrap-fresh-database.sh --migrations-dir ./release-migrations
-          REBOOT_EXIT=$?
-          set -e
-          if [[ "$REBOOT_EXIT" -ne 10 ]]; then
-            echo "ERROR: Expected fail-closed exit code 10 on non-empty DB, got ${REBOOT_EXIT}." >&2
-            exit 1
-          fi
-
-          cat > /tmp/appsettings.ci-sim.json <<'EOF'
-          {
-            "AppSettings": {
-              "ConnectionStrings": {
-                "DefaultConnection": "Host=127.0.0.1;Port=5432;Database=rikipath_ci_fresh;Username=postgres;Password=postgres;SSL Mode=Disable"
-              }
-            }
-          }
-          EOF
-          RIKIPATH_ALLOW_DB_MIGRATION=true ./release-migrations/apply-release-migrations.sh \
-            --appsettings /tmp/appsettings.ci-sim.json \
-            --migrations-dir ./release-migrations \
-            --backup-dir /tmp/ci-backups \
-            --mode apply
-
-  deploy-production:
-    name: Deploy API to Production VPS
-    runs-on: ubuntu-latest
-    needs: [ verify-build-and-migrations, simulate-fresh-bootstrap ]
-    if: ${{ github.ref == 'refs/heads/main' && ((github.event_name == 'workflow_dispatch' && inputs.deploy_production == true) || vars.RIKIPATH_ENABLE_PRODUCTION_DEPLOY == 'true') }}
     environment: production
 
     steps:
-      - name: Verify Required Production Deployment Secrets
-        shell: bash
-        env:
-          CHECK_VPS_HOST: ${{ secrets.VPS_HOST }}
-          CHECK_VPS_USERNAME: ${{ secrets.VPS_USERNAME }}
-          CHECK_VPS_PASSWORD: ${{ secrets.VPS_PASSWORD }}
-          CHECK_APPSETTINGS: ${{ secrets.APPSETTINGS_PRODUCTION }}
-        run: |
-          set -euo pipefail
-          for var_name in CHECK_VPS_HOST CHECK_VPS_USERNAME CHECK_VPS_PASSWORD CHECK_APPSETTINGS; do
-            if [[ -z "${!var_name:-}" ]]; then
-              echo "ERROR: Missing required production secret for ${var_name#CHECK_}. Aborting production deployment." >&2
-              exit 1
-            fi
-          done
+    - name: Checkout code
+      uses: actions/checkout@v4
 
-      - name: Checkout code
-        uses: actions/checkout@v4
+    - name: Setup .NET 8
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '8.0.x'
 
-      - name: Setup .NET 8
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '8.0.x'
+    - name: Create appsettings.Production.json for build
+      env:
+        APPSETTINGS_PRODUCTION: ${{ secrets.APPSETTINGS_PRODUCTION }}
+      run: |
+        printf '%s' "$APPSETTINGS_PRODUCTION" > RikiPath.WebApi/appsettings.Production.json
 
-      - name: Download Verified Migration Release Package
-        uses: actions/download-artifact@v4
-        with:
-          name: release-migrations
-          path: ./release-migrations
+    - name: Publish Web API
+      run: dotnet publish RikiPath.WebApi/RikiPath.WebApi.csproj -c Release -o ./publish
 
-      - name: Create appsettings.Production.json for build
-        env:
-          APPSETTINGS_PRODUCTION: ${{ secrets.APPSETTINGS_PRODUCTION }}
-        run: |
-          printf '%s' "$APPSETTINGS_PRODUCTION" > RikiPath.WebApi/appsettings.Production.json
+    - name: Create appsettings.Production.json in publish
+      env:
+        APPSETTINGS_PRODUCTION: ${{ secrets.APPSETTINGS_PRODUCTION }}
+      run: |
+        printf '%s' "$APPSETTINGS_PRODUCTION" > ./publish/appsettings.Production.json
 
-      - name: Publish Web API
-        run: |
-          dotnet restore RikiPath.Backend.slnx
-          dotnet publish RikiPath.WebApi/RikiPath.WebApi.csproj -c Release -o ./publish --no-restore
+    - name: Transfer files to VPS
+      uses: appleboy/scp-action@v0.1.7
+      with:
+        host: ${{ secrets.VPS_HOST }}
+        username: ${{ secrets.VPS_USERNAME }}
+        password: ${{ secrets.VPS_PASSWORD }}
+        source: "publish/*"
+        target: "/var/www/rikipath-api"
+        strip_components: 1
+        rm: false
 
-      - name: Create appsettings.Production.json in publish
-        env:
-          APPSETTINGS_PRODUCTION: ${{ secrets.APPSETTINGS_PRODUCTION }}
-        run: |
-          printf '%s' "$APPSETTINGS_PRODUCTION" > ./publish/appsettings.Production.json
-
-      - name: Stage Migration Package on VPS (Before Binary Deployment)
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USERNAME }}
-          password: ${{ secrets.VPS_PASSWORD }}
-          source: "release-migrations/*"
-          target: "/tmp/rikipath-release-migrations"
-          strip_components: 1
-          rm: true
-
-      - name: Database Preflight, Backup Verification & Ordered Migration Gate
-        uses: appleboy/ssh-action@v1.0.3
-        env:
-          RIKIPATH_ALLOW_DB_MIGRATION: ${{ (github.event_name == 'workflow_dispatch' && inputs.allow_db_migration) || vars.RIKIPATH_ALLOW_DB_MIGRATION == 'true' }}
-          RIKIPATH_BACKUP_VERIFIED: ${{ (github.event_name == 'workflow_dispatch' && inputs.backup_verified) || vars.RIKIPATH_BACKUP_VERIFIED == 'true' }}
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USERNAME }}
-          password: ${{ secrets.VPS_PASSWORD }}
-          envs: RIKIPATH_ALLOW_DB_MIGRATION,RIKIPATH_BACKUP_VERIFIED
-          script: |
-            set -euo pipefail
-            chmod +x /tmp/rikipath-release-migrations/apply-release-migrations.sh /tmp/rikipath-release-migrations/bootstrap-fresh-database.sh
-            MODE="preflight"
-            if [[ "${RIKIPATH_ALLOW_DB_MIGRATION:-false}" == "true" ]]; then
-              MODE="apply"
-            fi
-            /tmp/rikipath-release-migrations/apply-release-migrations.sh \
-              --appsettings /var/www/rikipath-api/appsettings.Production.json \
-              --migrations-dir /tmp/rikipath-release-migrations \
-              --mode "$MODE"
-
-      - name: Snapshot Current Running API Binaries for Automatic Rollback
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USERNAME }}
-          password: ${{ secrets.VPS_PASSWORD }}
-          script: |
-            set -euo pipefail
-            mkdir -p /var/backups/rikipath-api
-            chmod 700 /var/backups/rikipath-api
-            rm -rf /var/backups/rikipath-api/previous
-            if [[ -d /var/www/rikipath-api ]]; then
-              cp -a /var/www/rikipath-api /var/backups/rikipath-api/previous
-              chmod 600 /var/backups/rikipath-api/previous/appsettings.Production.json 2>/dev/null || true
-            fi
-
-      - name: Transfer Published API to VPS (Only After Migration Gate Passes)
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USERNAME }}
-          password: ${{ secrets.VPS_PASSWORD }}
-          source: "publish/*"
-          target: "/var/www/rikipath-api"
-          strip_components: 1
-          rm: false
-
-      - name: Restart Service, Verify /health/ready & Auto-Rollback Binary on Failure
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USERNAME }}
-          password: ${{ secrets.VPS_PASSWORD }}
-          script: |
-            set -euo pipefail
-            chmod 600 /var/www/rikipath-api/appsettings.Production.json
-            systemctl restart rikipath-api.service
-            rm -rf /tmp/rikipath-release-migrations
-
-            LOCAL_URL="$(systemctl cat rikipath-api.service 2>/dev/null | grep -oE 'http://(127\.0\.0\.1|localhost|0\.0\.0\.0):[0-9]+' | head -n 1 | sed 's/0\.0\.0\.0/127.0\.0\.1/' || true)"
-            if [[ -z "$LOCAL_URL" ]]; then
-              LOCAL_URL="http://127.0.0.1:5000"
-            fi
-
-            rollback_previous_binary() {
-              echo "WARNING: New Backend failed verification; restoring previous API binaries from /var/backups/rikipath-api/previous ..." >&2
-              if [[ -d /var/backups/rikipath-api/previous ]]; then
-                rm -rf /var/www/rikipath-api/*
-                cp -a /var/backups/rikipath-api/previous/. /var/www/rikipath-api/
-                chmod 600 /var/www/rikipath-api/appsettings.Production.json 2>/dev/null || true
-                systemctl restart rikipath-api.service || true
-                echo "Previous API binaries restored and service restarted. Inspect journalctl -u rikipath-api.service." >&2
-              else
-                echo "ERROR: No previous binary snapshot available for automatic rollback." >&2
-              fi
-            }
-
-            READY_OK=false
-            for i in $(seq 1 15); do
-              HTTP_CODE="$(curl -s -o /tmp/rikipath-ready.json -w '%{http_code}' "${LOCAL_URL}/health/ready" || echo 000)"
-              if [[ "$HTTP_CODE" == "200" ]] && grep -q '"Ready"' /tmp/rikipath-ready.json; then
-                READY_OK=true
-                break
-              fi
-              sleep 2
-            done
-
-            if [[ "$READY_OK" != "true" ]]; then
-              echo "ERROR: /health/ready did not return 200 Ready after service restart." >&2
-              cat /tmp/rikipath-ready.json 2>/dev/null || true
-              rm -f /tmp/rikipath-ready.json
-              rollback_previous_binary
-              exit 1
-            fi
-            rm -f /tmp/rikipath-ready.json
-
-            # Unauthenticated route registration smoke check (401/403 proves route is mounted; full auth contract requires operator verification).
-            for ROUTE in \
-              "/api/UserProfile/me/setup-state" \
-              "/api/MockTest/history/paged" \
-              "/api/admin/mentor-group-policies/levels" \
-              "/api/subscriptions/history"; do
-              CODE="$(curl -s -o /dev/null -w '%{http_code}' "${LOCAL_URL}${ROUTE}" || echo 000)"
-              echo "  Route registration check ${ROUTE} -> HTTP ${CODE}"
-              if [[ "$CODE" == "404" || "$CODE" == "000" || "$CODE" =~ ^5 ]]; then
-                echo "ERROR: Critical route ${ROUTE} failed registration check (HTTP ${CODE})." >&2
-                rollback_previous_binary
-                exit 1
-              fi
-            done
-            echo "Deployment verified: /health/ready=Ready and new API routes registered."
+    - name: Restart Systemd Service
+      uses: appleboy/ssh-action@v1.0.3
+      with:
+        host: ${{ secrets.VPS_HOST }}
+        username: ${{ secrets.VPS_USERNAME }}
+        password: ${{ secrets.VPS_PASSWORD }}
+        script: |
+          chmod 600 /var/www/rikipath-api/appsettings.Production.json
+          systemctl restart rikipath-api.service

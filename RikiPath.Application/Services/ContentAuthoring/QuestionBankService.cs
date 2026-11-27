@@ -288,10 +288,7 @@ public sealed class QuestionBankService(
         await unitOfWork.ContentApprovalRequests.AddAsync(approval, ct);
         await unitOfWork.SaveChangesAsync(ct);
         if (sidebarNotifier is not null)
-        {
             await sidebarNotifier.NotifyAdminsAsync("question_submitted", ct);
-            await sidebarNotifier.NotifyUsersAsync([actorUserId], "question_submitted", ct);
-        }
 
         return await GetDetailAsync(item.Id, actorUserId, isAdmin: false, ct);
     }
@@ -617,10 +614,7 @@ public sealed class QuestionBankService(
         await unitOfWork.ContentApprovalRequests.AddAsync(approval, ct);
         await unitOfWork.SaveChangesAsync(ct);
         if (sidebarNotifier is not null)
-        {
             await sidebarNotifier.NotifyAdminsAsync("passage_submitted", ct);
-            await sidebarNotifier.NotifyUsersAsync([actorUserId], "passage_submitted", ct);
-        }
 
         return await GetPassageGroupDetailAsync(passage.Id, actorUserId, isAdmin: false, ct);
     }

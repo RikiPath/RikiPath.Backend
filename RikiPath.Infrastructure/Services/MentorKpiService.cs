@@ -575,13 +575,13 @@ public sealed class MentorKpiService(
 
             MetricSources = new Dictionary<string, string>
             {
-                ["AssignedAndCompletedSessions"] = "Tổng hợp từ lịch buổi học chính thức của lớp nhóm (loại trừ lớp đã hủy và buổi chuyển lớp). Buổi hợp lệ là buổi đã được xác nhận hoàn thành.",
-                ["ConfirmedTeachingMinutes"] = "Ưu tiên tổng thời lượng hiện diện thực tế của Giáo viên; nếu chưa có dữ liệu thời lượng trực tiếp thì tính theo thời lượng kế hoạch (phút).",
+                ["AssignedAndCompletedSessions"] = "Tổng hợp từ lịch buổi học của lớp nhóm (StudyCourseSessions, loại trừ lớp đã hủy và buổi chuyển lớp). Buổi hợp lệ: đã xác nhận điểm danh chính thức (Present hoặc có mặt trong buổi đã xác nhận).",
+                ["ConfirmedTeachingMinutes"] = "Ưu tiên tổng thời lượng hiện diện của Giáo viên trong MentorAttendanceRecords; với buổi đã xác nhận hoàn thành chưa có bản ghi WebRTC thì lấy theo thời lượng kế hoạch (phút).",
                 ["ScheduledCompletedMinutes"] = "Tổng thời lượng kế hoạch (phút) của các buổi đã hoàn thành hợp lệ.",
-                ["HomeworkMetrics"] = "Tổng hợp từ bài tập trong lớp và bài tập về nhà đã giao, đã nộp và đã chấm.",
-                ["AverageFeedbackTurnaroundMinutes"] = "Thời gian phản hồi trung bình (phút) tính từ lúc học viên nộp bài đến khi Giáo viên chấm xong.",
-                ["QualityMetrics"] = "Tổng hợp từ đánh giá chất lượng giảng dạy của học viên và các phản hồi/khiếu nại về lớp học theo múi giờ Việt Nam.",
-                ["CompensationScopeNotice"] = "Hệ thống không áp dụng trọng số KPI hay quy đổi thưởng, phạt hoặc thù lao."
+                ["HomeworkMetrics"] = "Tổng hợp trực tiếp từ StudyCourseHomework (SubmittedAt, ReviewedAt, Passed) và HomeworkAssignments (GradingResult).",
+                ["AverageFeedbackTurnaroundMinutes"] = "Trung bình (GradedAt/ReviewedAt - SubmittedAt) tính bằng phút; trả null khi chưa có mẫu bài tập đã chấm trong kỳ (không giả lập 0).",
+                ["QualityMetrics"] = "MentorReviews (trạng thái Approved) và khiếu nại học tập/chất lượng giảng dạy trong kỳ thống kê theo múi giờ UTC+7 (không tính khiếu nại thanh toán).",
+                ["CompensationScopeNotice"] = "Hệ thống không áp dụng trọng số KPI hay quy đổi thưởng/phạt/thù lao."
             }
         };
     }
@@ -613,7 +613,7 @@ public sealed class MentorKpiService(
 
         if (fromDate > toDate)
         {
-            error = "Ngày bắt đầu phải nhỏ hơn hoặc bằng ngày kết thúc.";
+            error = "Ngày bắt đầu (from) phải nhỏ hơn hoặc bằng ngày kết thúc (to).";
             return false;
         }
 

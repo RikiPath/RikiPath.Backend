@@ -22,9 +22,5 @@ namespace RikiPath.Application.IRepositories
         // Tìm kiếm và phân trang danh sách chuyên gia đã được phê duyệt công khai.
         Task<(IReadOnlyList<UserAccount> Mentors, int TotalCount)> SearchApprovedMentorsAsync(
             string? searchTerm, string? expertise, string? jlptLevel, int page, int pageSize, string? sortBy, CancellationToken cancellationToken = default);
-
-        // Lấy toàn bộ chuyên gia đã được phê duyệt khớp bộ lọc text cơ bản để lọc nâng cao & xếp hạng trước phân trang.
-        Task<IReadOnlyList<UserAccount>> GetApprovedMentorsForDiscoveryAsync(
-            string? searchTerm, string? expertise, string? jlptLevel, CancellationToken cancellationToken = default);
     }
 }

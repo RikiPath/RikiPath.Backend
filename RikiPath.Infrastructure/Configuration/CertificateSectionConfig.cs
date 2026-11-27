@@ -40,8 +40,8 @@ namespace RikiPath.Infrastructure.Configuration
                 .HasFilter("\"IsDeleted\" = false");
 
             // Seed data mẫu cho các phần thi JLPT (N5 tới N2) với Id là int.
-            // N5 cũng tách riêng đủ 4 section để dữ liệu mock test và dữ liệu
-            // chấm theo kỹ năng không bị gộp Ngữ pháp với Đọc hiểu.
+            // N5 dùng một section gộp Ngữ pháp & Đọc hiểu theo cấu trúc JLPT N5;
+            // N4-N2 tách riêng hai kỹ năng này để khớp file import mock test.
             builder.HasData(
                 // ==================== CẤP ĐỘ N5 (Giả sử CertificateLevel Id của N5 là 1) ====================
                 new CertificateSection
@@ -51,18 +51,16 @@ namespace RikiPath.Infrastructure.Configuration
                     CertificateLevelId = 1, // Khớp với Id của N5 trong bảng CertificateLevel
                     Name = "Kiến thức ngôn ngữ (Từ vựng)",
                     Code = "N5_VOCAB",
-                    Description = "Phần thi kiểm tra chữ Hán, cách đọc và từ vựng cấp độ N5",
-                    SortOrder = 1
+                    Description = "Phần thi kiểm tra chữ Hán, cách đọc và từ vựng cấp độ N5"
                 },
                 new CertificateSection
                 {
                     Id = 2,
                     CreatedDate = SeedCreatedDate.AddTicks(5292),
                     CertificateLevelId = 1,
-                    Name = "Kiến thức ngôn ngữ (Ngữ pháp)",
-                    Code = "N5_GRAMMAR",
-                    Description = "Phần thi kiểm tra cấu trúc ngữ pháp và sắp xếp câu cấp độ N5",
-                    SortOrder = 2
+                    Name = "Kiến thức ngôn ngữ (Ngữ pháp) & Đọc hiểu",
+                    Code = "N5_GRAMMAR_READING",
+                    Description = "Phần thi kiểm tra cấu trúc ngữ pháp và đọc hiểu đoạn văn ngắn cấp độ N5"
                 },
                 new CertificateSection
                 {
@@ -71,20 +69,7 @@ namespace RikiPath.Infrastructure.Configuration
                     CertificateLevelId = 1,
                     Name = "Nghe hiểu",
                     Code = "N5_LISTENING",
-                    Description = "Phần thi nghe hiểu tình huống giao tiếp hàng ngày cấp độ N5",
-                    SortOrder = 4
-                },
-                // Không tái sử dụng Id 3/4 vì các bản ghi MockTestSection cũ có thể
-                // đang tham chiếu các Id đó. Id 16 là section Reading mới của N5.
-                new CertificateSection
-                {
-                    Id = 16,
-                    CreatedDate = SeedCreatedDate.AddTicks(5308),
-                    CertificateLevelId = 1,
-                    Name = "Đọc hiểu",
-                    Code = "N5_READING",
-                    Description = "Phần thi đọc hiểu văn bản, thông báo và đoạn hội thoại ngắn cấp độ N5",
-                    SortOrder = 3
+                    Description = "Phần thi nghe hiểu tình huống giao tiếp hàng ngày cấp độ N5"
                 },
 
                 // ==================== CẤP ĐỘ N4 (Giả sử CertificateLevel Id của N4 là 2) ====================

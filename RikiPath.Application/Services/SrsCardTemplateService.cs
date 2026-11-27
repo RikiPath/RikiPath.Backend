@@ -244,10 +244,7 @@ public class SrsCardTemplateService(
         unitOfWork.SrsCardTemplates.Update(entity);
         await unitOfWork.SaveChangesAsync(cancellationToken);
         if (sidebarNotifier is not null)
-        {
             await sidebarNotifier.NotifyAdminsAsync("srs_template_submitted", cancellationToken);
-            await sidebarNotifier.NotifyUsersAsync([authorId], "srs_template_submitted", cancellationToken);
-        }
         return ApiResponse<SrsCardTemplateResponse>.Success(Map(entity));
     }
 

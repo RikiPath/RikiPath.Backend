@@ -1,5 +1,4 @@
 using RikiPath.Application.Requests.MentorScheduling;
-using RikiPath.Domain.MentorScheduling;
 
 namespace RikiPath.Application.Responses.MentorScheduling;
 
@@ -9,20 +8,28 @@ public sealed class TeachingProposalPolicyResponse
 {
     public int PolicyId { get; set; }
     public int PolicyVersion { get; set; }
-    public string TimeZoneId { get; set; } = MentorSlotPolicy.BusinessTimeZoneId;
+    public string TimeZoneId { get; set; } = "Asia/Ho_Chi_Minh";
+    public int MinSessionsPerWeek { get; set; } = 2;
+    public int MaxSessionsPerWeek { get; set; } = 4;
+    public int DefaultSessionsPerWeek { get; set; } = 3;
+    public List<int> AllowedSessionsPerWeek { get; set; } = [2, 3, 4];
+    public int CourseDurationWeeks { get; set; } = 10;
     public int SessionDurationMinutes { get; set; } = 90;
     public int RestMinutes { get; set; } = 15;
+    public int MinLearners { get; set; } = 1;
     public int MaxLearners { get; set; } = 4;
+    public int DailySessionCap { get; set; } = 4;
+    public int WeeklySessionCap { get; set; }
     public int GridStepMinutes { get; set; } = 15;
     public List<int> AllowedGridSteps { get; set; } = [15, 30];
     public int OperatingStartMinute { get; set; } = 7 * 60;
     public int OperatingEndMinute { get; set; } = 22 * 60;
-    public int MinimumPreparationDays { get; set; } = MentorSlotPolicy.MinimumPreparationDays;
+    public int MinimumProposalLeadDays { get; set; } = 14;
     public int MinimumPublishedEnrollmentDays { get; set; } = 7;
     public int CheckoutHoldMinutes { get; set; } = 10;
-    public int MinCourseDurationWeeks { get; set; } = MentorSlotPolicy.MinCourseDurationWeeks;
-    public int MaxCourseDurationWeeksTechnical { get; set; } = MentorSlotPolicy.MaxCourseDurationWeeksTechnical;
-    public int MaxTotalCourseSessionsTechnical { get; set; } = MentorSlotPolicy.MaxTotalCourseSessionsTechnical;
+    public int EnrollmentCutoffMinutesBeforeFirstSession { get; set; }
+    public int MaxTotalActiveClassesPerMentor { get; set; } = 4;
+    public Dictionary<string, int> MaxActiveClassesByLevel { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, decimal> TuitionPerSessionByLevel { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 }
 
@@ -37,6 +44,13 @@ public sealed class QualifiedJlptLevelItem
     public string? QualificationReason { get; set; }
     public bool IsAvailableForNewProposal { get; set; } = true;
     public string? UnavailableReason { get; set; }
+    public string? BlockingStatus { get; set; }
+    public int? BlockingProposalId { get; set; }
+    public int? BlockingCohortId { get; set; }
+    public string? BlockingTitle { get; set; }
+    public int ActiveCount { get; set; }
+    public int MaxActiveClasses { get; set; } = 1;
+    public int RemainingSlots { get; set; }
 }
 
 public sealed class EligibleCoursePlanItem
@@ -64,6 +78,8 @@ public sealed class MentorWorkloadSummaryResponse
     public int WeeklyPendingProposalSessions { get; set; }
     public int WeeklyTotalProjectedSessions { get; set; }
     public int PeakDaySessions { get; set; }
+    public int DailySessionCap { get; set; }
+    public int WeeklySessionCap { get; set; }
 }
 
 public sealed class ProposalValidationIssue
@@ -98,64 +114,16 @@ public sealed class GeneratedSessionOccurrenceResponse
     public DateTime EndUtc { get; set; }
 }
 
-public sealed class ApprovalSchedulePreviewResponse
-{
-    public bool CanApprove { get; set; }
-    public string? BlockingReason { get; set; }
-    public DateTime EnrollmentOpensAtUtc { get; set; }
-    public DateTime EnrollmentClosesAtUtc { get; set; }
-    public DateTime StartsAtUtc { get; set; }
-    public DateTime EndsAtUtc { get; set; }
-    public DateOnly? StartDate { get; set; }
-    public DateOnly? EndDate { get; set; }
-    public DateOnly? RequestedEnrollmentDeadlineDate { get; set; }
-    public DateOnly? MinimumEnrollmentDeadlineDate { get; set; }
-    public DateOnly? SuggestedEnrollmentDeadlineDate { get; set; }
-    public string? SuggestedDeadlineReason { get; set; }
-    public int MinimumPreparationDays { get; set; } = MentorSlotPolicy.MinimumPreparationDays;
-    public int WeeklySessionCount { get; set; }
-    public int CourseDurationWeeks { get; set; }
-    public int TotalSessions { get; set; }
-    public int SessionDurationMinutes { get; set; }
-    public int TotalTeachingMinutes { get; set; }
-    public int MaxLearners { get; set; }
-    public decimal TuitionPerSession { get; set; }
-    public decimal TotalCourseTuition { get; set; }
-    public int? PolicyVersion { get; set; }
-    public bool WasShiftedDueToConflict { get; set; }
-    public string? ConflictShiftReason { get; set; }
-    public List<ProposalValidationIssue> Conflicts { get; set; } = [];
-    public string? SchedulePreviewToken { get; set; }
-    public List<GeneratedSessionOccurrenceResponse> Occurrences { get; set; } = [];
-}
-
-public sealed class OpenEnrollmentConfirmResponse
-{
-    public TeachingProposalResponse Proposal { get; set; } = new();
-    public int CohortId { get; set; }
-    public string CohortName { get; set; } = string.Empty;
-    public string CohortStatus { get; set; } = string.Empty;
-    public DateTime EnrollmentOpensAtUtc { get; set; }
-    public DateTime EnrollmentClosesAtUtc { get; set; }
-    public DateTime StartsAtUtc { get; set; }
-    public DateTime EndsAtUtc { get; set; }
-    public int CreatedSessionsCount { get; set; }
-    public bool WasShiftedDueToConflict { get; set; }
-    public string? ConflictShiftReason { get; set; }
-}
-
 public sealed class TeachingProposalValidationResponse
 {
     public bool IsValid { get; set; }
     public bool CanSubmit { get; set; }
-    public int CourseDurationWeeks { get; set; }
     public int WeeklySessionCount { get; set; }
     public int TotalSessions { get; set; }
     public int TotalTeachingMinutes { get; set; }
     public decimal TuitionPerSession { get; set; }
     public decimal TotalCourseTuition { get; set; }
     public int? TuitionPolicyVersion { get; set; }
-    public int MaxLearners { get; set; }
     public DateOnly? ProjectedEndDate { get; set; }
     public List<ProposalValidationIssue> Issues { get; set; } = [];
     public List<GeneratedSessionOccurrenceResponse> OccurrencesPreview { get; set; } = [];
@@ -199,15 +167,11 @@ public sealed class TeachingProposalResponse
     public string? CourseObjective { get; set; }
 
     public DateOnly? ExpectedStartDate { get; set; }
-    public DateOnly? ReferenceStartDate { get; set; }
     public DateOnly? ProjectedEndDate { get; set; }
-    public DateTime? EnrollmentClosesAtUtc { get; set; }
     public int CourseDurationWeeks { get; set; }
     public int SessionDurationMinutes { get; set; }
     public int WeeklySessionCount { get; set; }
     public int TotalSessions { get; set; }
-    public int TotalTeachingMinutes { get; set; }
-    public int MaxLearners { get; set; }
     public decimal TuitionPerSession { get; set; }
     public decimal TotalCourseTuition { get; set; }
     public int? TuitionPolicyVersion { get; set; }
@@ -220,7 +184,6 @@ public sealed class TeachingProposalResponse
     public int Revision { get; set; }
     public DateTime? SubmittedAtUtc { get; set; }
     public DateTime? ReviewedAtUtc { get; set; }
-    public DateTime? OpenedClassAtUtc { get; set; }
     public int? ReviewedByAdminId { get; set; }
     public string? ReviewedByAdminName { get; set; }
     public string? ReviewReason { get; set; }
@@ -232,12 +195,7 @@ public sealed class TeachingProposalResponse
     public int? LinkedCohortId { get; set; }
     public string? LinkedCohortName { get; set; }
     public string? LinkedCohortStatus { get; set; }
-    public string? LinkedCohortCancellationReason { get; set; }
-    public DateTime? LinkedCohortStartsAtUtc { get; set; }
-    public DateTime? LinkedCohortEndsAtUtc { get; set; }
-    public DateTime? LinkedCohortEnrollmentClosesAtUtc { get; set; }
 
-    public ApprovalSchedulePreviewResponse? ApprovalSchedulePreview { get; set; }
     public bool HasConflicts { get; set; }
     public List<ProposalValidationIssue> ValidationIssues { get; set; } = [];
     public List<GeneratedSessionOccurrenceResponse> OccurrencesPreview { get; set; } = [];
@@ -267,20 +225,11 @@ public sealed class BulkApproveProposalItemResult
     public string? JlptLevelCode { get; set; }
     public string? CourseTitle { get; set; }
     public DateOnly? ExpectedStartDate { get; set; }
-    public DateOnly? ReferenceStartDate { get; set; }
-    public DateOnly? ProjectedEndDate { get; set; }
-    public DateTime? EnrollmentOpensAtUtc { get; set; }
-    public DateTime? EnrollmentClosesAtUtc { get; set; }
-    public int CourseDurationWeeks { get; set; }
     public int WeeklySessionCount { get; set; }
     public int TotalSessions { get; set; }
-    public int MaxLearners { get; set; }
     public decimal TuitionPerSession { get; set; }
     public decimal TotalCourseTuition { get; set; }
     public int? TuitionPolicyVersion { get; set; }
-    public bool WasShiftedDueToConflict { get; set; }
-    public string? ConflictShiftReason { get; set; }
-    public string? SchedulePreviewToken { get; set; }
     public string Status { get; set; } = string.Empty;
     public int? CurrentRevision { get; set; }
     public bool IsEligible { get; set; }

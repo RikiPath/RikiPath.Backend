@@ -23,6 +23,13 @@ public sealed class AdminTeachingProposalController(
         CancellationToken ct)
         => ToActionResult(await service.GetAdminProposalsAsync(status, mentorId, certificateLevelId, ct));
 
+    [HttpGet("approved-for-cohort")]
+    public async Task<IActionResult> GetApprovedForCohort(
+        [FromQuery] int? mentorId,
+        [FromQuery] int? certificateLevelId,
+        CancellationToken ct)
+        => ToActionResult(await service.GetApprovedProposalsForCohortAsync(mentorId, certificateLevelId, ct));
+
     [HttpGet("{id:int}")]
     public async Task<IActionResult> GetById(int id, CancellationToken ct)
         => ToActionResult(await service.GetAdminProposalByIdAsync(id, ct));
@@ -38,17 +45,6 @@ public sealed class AdminTeachingProposalController(
             this, fileStorageService, httpClientFactory, meta.Result, download, ct);
     }
 
-    [HttpGet("{id:int}/attachments/{index:int}/preview")]
-    public async Task<IActionResult> PreviewAttachment(int id, int index, CancellationToken ct = default)
-    {
-        var meta = await service.GetAuthorizedAttachmentAsync(id, index, isAdmin: true, ct);
-        if (!meta.IsSuccess || meta.Result is null)
-            return ToActionResult(meta);
-
-        return await ProposalAttachmentStreamHelper.PreviewAttachmentAsync(
-            this, fileStorageService, httpClientFactory, meta.Result, ct);
-    }
-
     [HttpPost("{id:int}/review")]
     public async Task<IActionResult> Review(int id, [FromBody] ReviewTeachingProposalRequest request, CancellationToken ct)
         => ToActionResult(await service.ReviewProposalAsync(id, request, ct));
@@ -60,6 +56,10 @@ public sealed class AdminTeachingProposalController(
     [HttpPost("bulk-approve")]
     public async Task<IActionResult> BulkApprove([FromBody] BulkApproveTeachingProposalsRequest request, CancellationToken ct)
         => ToActionResult(await service.BulkApproveProposalsAsync(request, ct));
+
+    [HttpPost("repair-approved-cohorts")]
+    public async Task<IActionResult> RepairApprovedCohorts(CancellationToken ct)
+        => ToActionResult(await service.RepairApprovedCohortsAsync(ct));
 
     [HttpPost("repair-invalid-schedules")]
     public async Task<IActionResult> RepairInvalidNeedsRevisionSchedules(CancellationToken ct)

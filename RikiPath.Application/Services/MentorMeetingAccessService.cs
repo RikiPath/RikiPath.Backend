@@ -7,19 +7,8 @@ using System.Collections.Concurrent;
 
 namespace RikiPath.Application.Services
 {
-    public sealed class MentorMeetingAccessService : IMentorMeetingAccessService
+    public sealed class MentorMeetingAccessService(IUnitOfWork unitOfWork) : IMentorMeetingAccessService
     {
-        private readonly IUnitOfWork unitOfWork;
-        private readonly ICohortEnrollmentDeadlineService? enrollmentDeadlines;
-
-        public MentorMeetingAccessService(
-            IUnitOfWork unitOfWork,
-            ICohortEnrollmentDeadlineService? enrollmentDeadlines = null)
-        {
-            this.unitOfWork = unitOfWork;
-            this.enrollmentDeadlines = enrollmentDeadlines;
-        }
-
         private static readonly TimeSpan EmptyChatRoomGrace = TimeSpan.FromMinutes(10);
         private const int MaxChatMessagesPerRoom = 200;
         private const int MaxChatTextLength = 2000;
@@ -104,25 +93,21 @@ namespace RikiPath.Application.Services
                 var effectivePolicy = cohort.GroupPolicy
                     ?? slot.GroupPolicy
                     ?? cohort.Sessions.Select(s => s.Availability.GroupPolicy).FirstOrDefault(p => p is not null);
+                var minLearners = Math.Max(1, effectivePolicy?.MinLearnersToStart ?? 1);
+                if (confirmedEnrolledCount < minLearners)
+                    return null;
+
                 var firstSession = cohort.Sessions
                     .Where(s => s.Availability != null && s.Availability.IsApproved && !s.Availability.IsDeleted && s.Availability.RejectedAt == null)
                     .OrderBy(s => s.Availability.StartTime)
                     .FirstOrDefault();
-                var enrollmentCutoffUtc = cohort.EnrollmentClosesAtUtc
-                    ?? (firstSession is null ? cohort.StartsAt : firstSession.Availability.StartTime);
-
-                // Khi đã qua hạn tuyển sinh mà lớp vẫn trống -> xử lý đóng/hủy tức thời trước khi cho vào phòng.
-                if (confirmedEnrolledCount == 0 && enrollmentCutoffUtc <= nowUtc && enrollmentDeadlines is not null)
-                {
-                    await enrollmentDeadlines.ProcessCohortIfPastCutoffAsync(cohort.Id, cancellationToken);
-                    return null;
-                }
-
-                if (confirmedEnrolledCount < 1)
-                    return null;
-
+                var cutoffMinutes = firstSession?.Availability.GroupPolicy?.EnrollmentCutoffMinutesBeforeFirstSession
+                    ?? effectivePolicy?.EnrollmentCutoffMinutesBeforeFirstSession
+                    ?? 0;
+                var enrollmentCutoffUtc = firstSession is null
+                    ? cohort.StartsAt
+                    : firstSession.Availability.StartTime.AddMinutes(-cutoffMinutes);
                 if (!string.Equals(cohortStatus, "Completed", StringComparison.OrdinalIgnoreCase)
-                    && cohort.EnrollmentClosedAtUtc is null
                     && enrollmentCutoffUtc > nowUtc)
                     return null;
             }

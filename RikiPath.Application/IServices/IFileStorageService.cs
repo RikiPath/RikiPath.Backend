@@ -1,11 +1,6 @@
 namespace RikiPath.Application.IServices
 {
-    public record UploadedFileResult(
-        string Url,
-        string StoredFileName,
-        long SizeBytes,
-        string? OriginalFileName = null,
-        string? ContentType = null);
+    public record UploadedFileResult(string Url, string StoredFileName, long SizeBytes);
     public record PrivateVerificationReadResult(Stream Content, string ContentType);
     //Upload supabase
     public interface IFileStorageService

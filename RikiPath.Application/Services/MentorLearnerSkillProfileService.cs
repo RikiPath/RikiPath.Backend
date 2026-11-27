@@ -230,6 +230,13 @@ public sealed class MentorLearnerSkillProfileService(
             var firstValidStartUtc = BusinessDateHelper.EnsureUtc(
                 validSessions.FirstOrDefault()?.Availability.StartTime ?? cohort.StartsAt);
 
+            var fallbackPolicy = cohort.GroupPolicy is null && groupPolicies is not null
+                ? await groupPolicies.GetEffectiveAsync(nowUtc, cancellationToken)
+                : null;
+            var effectivePolicy = cohort.GroupPolicy
+                ?? validSessions.Select(s => s.Availability.GroupPolicy).FirstOrDefault(p => p is not null)
+                ?? fallbackPolicy;
+            var minLearners = Math.Max(1, effectivePolicy?.MinLearnersToStart ?? 1);
             var confirmedLearnerCount = cohort.Enrollments
                 .Where(c => c.PaymentStatus is "Paid" or "PartiallyRefunded"
                     && c.Status is "Ready" or "Active" or "Completed")
@@ -243,7 +250,7 @@ public sealed class MentorLearnerSkillProfileService(
 
             hasClassStarted = string.Equals(cohort.Status, "Completed", StringComparison.OrdinalIgnoreCase)
                 || hasDeliveredLearnerSession
-                || (cohortNotAborted && confirmedLearnerCount >= 1 && firstValidStartUtc <= nowUtc);
+                || (cohortNotAborted && confirmedLearnerCount >= minLearners && firstValidStartUtc <= nowUtc);
 
             baselineCutoffUtc = hasClassStarted
                 ? (earliestDeliveredSessionUtc.HasValue && earliestDeliveredSessionUtc.Value < firstValidStartUtc
