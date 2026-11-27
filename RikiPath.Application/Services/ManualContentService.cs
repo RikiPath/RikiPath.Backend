@@ -11,7 +11,7 @@ using RikiPath.Domain.Enums;
 namespace RikiPath.Application.Services;
 
 public sealed class ManualContentService(IUnitOfWork uow, IClaimService claims, IContentApprovalNotifierService? notifier = null,
-    IContentAudioTranscriptionService? audioTranscriptions = null)
+    IContentAudioTranscriptionService? audioTranscriptions = null, ISidebarCounterNotifier? sidebarNotifier = null)
 {
     private const string ManualSource = "Nhập tay";
     private static readonly JsonSerializerOptions Json = new() { PropertyNameCaseInsensitive = true };
@@ -98,6 +98,8 @@ public sealed class ManualContentService(IUnitOfWork uow, IClaimService claims, 
         var response = ApiResponse<int>.Fail("Không thể lưu bản nháp.");
         await uow.ExecuteContentAuthorWriteAsync(userId, async token =>
             response = await SaveDraftAsync(type, id, input, userId, token), ct);
+        if (sidebarNotifier is not null && response.IsSuccess)
+            await sidebarNotifier.NotifyUsersAsync([userId], "manual_content_draft_saved", ct);
         return response;
     }
 
@@ -203,6 +205,8 @@ public sealed class ManualContentService(IUnitOfWork uow, IClaimService claims, 
             await uow.SaveChangesAsync(token);
             result = ApiResponse<bool>.Success(true);
         }, ct);
+        if (sidebarNotifier is not null && result.IsSuccess)
+            await sidebarNotifier.NotifyUsersAsync([userId], "manual_content_draft_deleted", ct);
         return result;
     }
 
@@ -227,6 +231,11 @@ public sealed class ManualContentService(IUnitOfWork uow, IClaimService claims, 
 
         if (notifier is not null && result.IsSuccess && result.Result > 0)
             await notifier.NotifyAdminsOnRequestCreatedAsync(result.Result, batchName, ct);
+        if (sidebarNotifier is not null && result.IsSuccess && result.Result > 0)
+        {
+            await sidebarNotifier.NotifyAdminsAsync("manual_content_submitted", ct);
+            await sidebarNotifier.NotifyUsersAsync([userId], "manual_content_submitted", ct);
+        }
         return result;
     }
 

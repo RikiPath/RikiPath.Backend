@@ -64,7 +64,15 @@ public sealed class LocalDevMediaStorageService : IFileStorageService
         }
 
         var url = $"/api/FileStorage/local/{normalizedFolder}/{storedFileName}";
-        return new UploadedFileResult(url, storedFileName, buffer.Length);
+        var resolvedMime = string.IsNullOrWhiteSpace(contentType) || string.Equals(contentType, "application/octet-stream", StringComparison.OrdinalIgnoreCase)
+            ? ResolveContentType(ext)
+            : contentType;
+        return new UploadedFileResult(
+            url,
+            storedFileName,
+            buffer.Length,
+            Path.GetFileName(fileName ?? string.Empty),
+            resolvedMime);
     }
 
     public Task DeleteAsync(string storedFileName, string folder, CancellationToken cancellationToken)

@@ -33,19 +33,15 @@ public sealed partial class StudyCourseService
         _ => c.PaymentStatus
     };
 
-    private static DateTime EnrollmentCutoffUtc(StudyCohort cohort, MentorGroupPolicy? fallbackPolicy = null)
+    private static DateTime EnrollmentCutoffUtc(StudyCohort cohort, MentorGroupPolicy? _ = null)
     {
-        // Buổi đầu đã duyệt là mốc bắt đầu; policy của slot (hoặc policy của lớp / policy hiệu hành) là cấu hình đóng tuyển sinh thực tế.
+        if (cohort.EnrollmentClosesAtUtc.HasValue)
+            return cohort.EnrollmentClosesAtUtc.Value;
+
         var first = cohort.Sessions.Where(s => s.Availability.IsApproved && !s.Availability.IsDeleted
                 && s.Availability.RejectedAt == null)
             .OrderBy(s => s.Availability.StartTime).FirstOrDefault();
-        return first is null
-            ? cohort.StartsAt
-            : first.Availability.StartTime.AddMinutes(
-                -(first.Availability.GroupPolicy?.EnrollmentCutoffMinutesBeforeFirstSession
-                  ?? cohort.GroupPolicy?.EnrollmentCutoffMinutesBeforeFirstSession
-                  ?? fallbackPolicy?.EnrollmentCutoffMinutesBeforeFirstSession
-                  ?? 0));
+        return first is null ? cohort.StartsAt : first.Availability.StartTime;
     }
 
     private async Task<bool> HasLearnerConflictAsync(int learnerId, IReadOnlyList<MentorAvailability> proposed, int excludeId, CancellationToken ct)
@@ -76,11 +72,13 @@ public sealed partial class StudyCourseService
         if (filter is not null)
         {
             Require(filter.Weekday is null or >= 0 and <= 6, "Thứ trong tuần phải từ 0 (Chủ nhật) đến 6 (Thứ 7).");
-            Require(filter.SessionsPerWeek is null or >= 1 and <= 84, "Tần suất học phải là số nguyên dương hợp lệ.");
-            Require(string.IsNullOrWhiteSpace(filter.Intensity) || SessionsPerWeekOfIntensity(filter.Intensity).HasValue,
-                "Cường độ phải là Light, Standard hoặc Advanced.");
+            Require(filter.SessionsPerWeek is null or >= 1 and <= 84, "Số buổi mỗi tuần phải là số nguyên dương hợp lệ.");
             Require(!filter.FromTime.HasValue || !filter.ToTime.HasValue || filter.FromTime <= filter.ToTime,
                 "Giờ bắt đầu lọc phải trước hoặc bằng giờ kết thúc.");
+        }
+        if (Actor.Role == Role.Learner && enrollmentDeadlines is not null)
+        {
+            await enrollmentDeadlines.ProcessAllPastCutoffCohortsAsync(ct);
         }
         var mentorFilter = filter?.MentorId;
         var query = uow.StudyCohorts.Query().Include(x => x.Plan).ThenInclude(x => x.CertificateLevel)
@@ -135,6 +133,28 @@ public sealed partial class StudyCourseService
                 .GroupBy(r => r.RoomId)
                 .ToDictionary(g => g.Key, g => g.ToList());
         var mentorIds = rows.Select(x => x.MentorId).Distinct().ToList();
+        var includeMentorWorkHistory = Actor.Role == Role.Mentor || Actor.Role == Role.Admin;
+        var rescheduledHistoryRows = !includeMentorWorkHistory || mentorIds.Count == 0
+            ? []
+            : await uow.MentorAvailabilities.Query().AsNoTracking()
+                .Where(a => mentorIds.Contains(a.MentorId)
+                    && a.IsDeleted
+                    && a.ChangeResolution != null
+                    && a.ChangeResolution.Contains("sang khung giờ mới"))
+                .OrderBy(a => a.StartTime)
+                .Select(a => new
+                {
+                    a.Id,
+                    a.MentorId,
+                    a.TeachingProposalId,
+                    a.StartTime,
+                    a.EndTime,
+                    a.ChangeResolution,
+                })
+                .ToListAsync(ct);
+        var rescheduledHistoryByMentor = rescheduledHistoryRows
+            .GroupBy(a => a.MentorId)
+            .ToDictionary(g => g.Key, g => g.ToList());
         var mentorRatings = mentorIds.Count == 0 || uow.CohortMentorReviews is null
             ? new Dictionary<int, (double AverageRating, int ReviewCount)>()
             : (await uow.CohortMentorReviews.Query().AsNoTracking()
@@ -169,7 +189,6 @@ public sealed partial class StudyCourseService
             var cohortPolicy = x.GroupPolicy
                 ?? x.Sessions.Select(s => s.Availability.GroupPolicy).FirstOrDefault(p => p is not null)
                 ?? policy;
-            var minLearnersToStart = Math.Max(1, cohortPolicy.MinLearnersToStart);
             var hasMentorRating = mentorRatings.TryGetValue(x.MentorId, out var mentorRating);
             var hasAnyCompletedSession = confirmedEnrollments
                 .SelectMany(c => c.Sessions)
@@ -230,7 +249,7 @@ public sealed partial class StudyCourseService
                 || enrollmentClosesAtUtc <= now
                 || x.StartsAt <= now;
             var isWorkScheduleEligible = isCohortActiveOrPublished
-                && confirmedEnrolledCount >= minLearnersToStart
+                && confirmedEnrolledCount >= 1
                 && isEnrollmentClosed;
             return new
             {
@@ -250,17 +269,21 @@ public sealed partial class StudyCourseService
                 x.PolicyVersionSnapshot,
                 x.SourceProposalId,
                 CourseObjective = hasProposalMeta ? proposalMeta.CourseObjective : null,
-                CourseDurationWeeks = hasProposalMeta && proposalMeta.CourseDurationWeeks > 0
-                    ? proposalMeta.CourseDurationWeeks
-                    : (x.Plan.SessionsPerWeek > 0 && x.Plan.TotalSessions is int planTotal && planTotal > 0
-                        ? (int)Math.Ceiling((double)planTotal / x.Plan.SessionsPerWeek)
-                        : cohortPolicy.CourseDurationWeeks),
+                CourseDurationWeeks = x.CourseDurationWeeks > 0
+                    ? x.CourseDurationWeeks
+                    : (hasProposalMeta && proposalMeta.CourseDurationWeeks > 0
+                        ? proposalMeta.CourseDurationWeeks
+                        : (x.Plan.SessionsPerWeek > 0 && x.Plan.TotalSessions is int planTotal && planTotal > 0
+                            ? Math.Max(1, (int)Math.Ceiling((double)planTotal / x.Plan.SessionsPerWeek))
+                            : 1)),
+                CancellationReason = x.CancellationReason,
+                CancelledAtUtc = x.CancelledAtUtc,
                 Attachments = parsedAttachments
                     .Where(a => !string.IsNullOrWhiteSpace(a.Name))
                     .Select((a, idx) => new
                     {
                         a.Name,
-                        a.Url,
+                        Url = (string?)null,
                         a.ContentType,
                         a.SizeBytes,
                         Index = idx,
@@ -271,20 +294,18 @@ public sealed partial class StudyCourseService
                 x.Plan.TotalSessions,
                 x.Plan.SessionMinutes,
                 x.Plan.SessionsPerWeek,
-                Intensity = IntensityOf(x.Plan.SessionsPerWeek),
-                IntensityLabel = IntensityLabelOf(x.Plan.SessionsPerWeek),
-                IsRecommendedIntensity = x.Plan.SessionsPerWeek == cohortPolicy.DefaultSessionsPerWeek,
                 TotalTeachingHours = TotalTeachingHoursOf(x.Plan.TotalSessions, x.Plan.SessionMinutes),
                 SchedulePattern = SchedulePatternOf(x),
                 EnrollmentClosesAtUtc = enrollmentClosesAtUtc,
+                EnrollmentOpensAtUtc = x.EnrollmentOpensAtUtc,
+                EnrollmentClosedAtUtc = x.EnrollmentClosedAtUtc,
                 IsEnrollmentWindowOpen = withinScheduleWindow,
                 IsFull = effectiveCapacity > 0 && confirmedEnrolledCount >= effectiveCapacity,
-                IsAllSeatsHeld = !isMentorView && effectiveCapacity > 0 && confirmedEnrolledCount < effectiveCapacity && seatsAvailable == 0 && pendingHoldCount > 0,
-                EnrolledCount = isMentorView ? confirmedEnrolledCount : enrolledCount,
+                IsAllSeatsHeld = effectiveCapacity > 0 && confirmedEnrolledCount < effectiveCapacity && seatsAvailable == 0 && pendingHoldCount > 0,
+                EnrolledCount = enrolledCount,
                 ConfirmedEnrolledCount = confirmedEnrolledCount,
-                PendingHoldCount = isMentorView ? 0 : pendingHoldCount,
+                PendingHoldCount = pendingHoldCount,
                 CheckoutHoldMinutes = cohortPolicy.CheckoutHoldMinutes,
-                MinLearnersToStart = minLearnersToStart,
                 IsWorkScheduleEligible = isWorkScheduleEligible,
                 RequiresEntitlement = requiresEntitlement,
                 HasApprovedEntitlement = hasApprovedEntitlement,
@@ -356,10 +377,76 @@ public sealed partial class StudyCourseService
                             IsSessionLive = isSessionLive,
                             SessionCompleted = sessionCompleted,
                         };
-                    })
+                    }),
+                RescheduledHistorySessions = !includeMentorWorkHistory || string.Equals(statusNormalized, "Cancelled", StringComparison.OrdinalIgnoreCase)
+                    ? Enumerable.Empty<object>()
+                    : (rescheduledHistoryByMentor.TryGetValue(x.MentorId, out var mentorMovedSlots)
+                        ? mentorMovedSlots
+                            .Where(a => (x.SourceProposalId.HasValue && a.TeachingProposalId == x.SourceProposalId.Value)
+                                || (!string.IsNullOrEmpty(a.ChangeResolution)
+                                    && (a.ChangeResolution.Contains($"lớp #{x.Id} ")
+                                        || a.ChangeResolution.Contains($"lớp #{x.Id})")
+                                        || a.ChangeResolution.Contains($"của lớp {x.Name} sang khung giờ mới"))))
+                            .Select(a => (object)new
+                            {
+                                AvailabilityId = a.Id,
+                                StartTime = a.StartTime,
+                                EndTime = a.EndTime,
+                                ChangeResolution = a.ChangeResolution,
+                            })
+                        : Enumerable.Empty<object>())
             };
         }).ToList();
     });
+
+    public async Task<ApiResponse<RikiPath.Application.Requests.MentorScheduling.ProposalAttachmentDto>> GetAuthorizedCohortAttachmentAsync(
+        int cohortId, int attachmentIndex, CancellationToken ct)
+    {
+        var cohort = await uow.StudyCohorts.Query().AsNoTracking()
+            .Where(x => x.Id == cohortId)
+            .Select(x => new { x.Id, x.MentorId, x.Status, x.SourceProposalId })
+            .FirstOrDefaultAsync(ct);
+        if (cohort is null || !cohort.SourceProposalId.HasValue)
+        {
+            return ApiResponse<RikiPath.Application.Requests.MentorScheduling.ProposalAttachmentDto>.NotFound(
+                "Không tìm thấy tài liệu của lớp học.", "COHORT_ATTACHMENT_NOT_FOUND");
+        }
+
+        var isAuthorized = Actor.Role switch
+        {
+            Role.Admin => true,
+            Role.Mentor => cohort.MentorId == Actor.Id
+                || cohort.Status is "Published" or "Completed",
+            Role.Learner => cohort.Status is "Published" or "Completed"
+                || await uow.StudyCourses.Query().AsNoTracking()
+                    .AnyAsync(c => c.CohortId == cohortId && c.LearnerId == Actor.Id && c.Status != "Cancelled", ct),
+            _ => false,
+        };
+
+        if (!isAuthorized)
+        {
+            return ApiResponse<RikiPath.Application.Requests.MentorScheduling.ProposalAttachmentDto>.Fail(
+                "Bạn không có quyền truy cập tài liệu của lớp học này.",
+                HttpStatusCode.Forbidden,
+                "COHORT_ATTACHMENT_FORBIDDEN");
+        }
+
+        var json = await uow.MentorTeachingProposals.Query().AsNoTracking()
+            .Where(p => p.Id == cohort.SourceProposalId.Value)
+            .Select(p => p.OptionalAttachmentsJson)
+            .FirstOrDefaultAsync(ct);
+        var attachments = DeserializeCohortProposalAttachments(json)
+            .Where(a => !string.IsNullOrWhiteSpace(a.Name))
+            .ToList();
+
+        if (attachmentIndex < 0 || attachmentIndex >= attachments.Count)
+        {
+            return ApiResponse<RikiPath.Application.Requests.MentorScheduling.ProposalAttachmentDto>.NotFound(
+                "Không tìm thấy tài liệu đính kèm.", "COHORT_ATTACHMENT_NOT_FOUND");
+        }
+
+        return ApiResponse<RikiPath.Application.Requests.MentorScheduling.ProposalAttachmentDto>.Success(attachments[attachmentIndex]);
+    }
 
     private static readonly System.Text.Json.JsonSerializerOptions CohortProposalJsonOpts = new()
     {
@@ -426,7 +513,6 @@ public sealed partial class StudyCourseService
         if (!string.IsNullOrWhiteSpace(f.Level)
             && !string.Equals(x.Plan.CertificateLevel?.Code, f.Level.Trim(), StringComparison.OrdinalIgnoreCase)) return false;
         if (f.SessionsPerWeek.HasValue && x.Plan.SessionsPerWeek != f.SessionsPerWeek.Value) return false;
-        if (!string.IsNullOrWhiteSpace(f.Intensity) && x.Plan.SessionsPerWeek != SessionsPerWeekOfIntensity(f.Intensity)) return false;
         if (f.Weekday.HasValue || f.FromTime.HasValue || f.ToTime.HasValue)
         {
             // Có ít nhất một buổi (giờ Việt Nam) đúng thứ được lọc và bắt đầu trong khung giờ [fromTime, toTime].

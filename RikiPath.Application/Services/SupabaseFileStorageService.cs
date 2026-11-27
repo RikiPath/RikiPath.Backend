@@ -126,8 +126,14 @@ namespace RikiPath.Application.Services
 
             // URL public (chỉ dùng được nếu bucket được set Public trên Supabase Dashboard)
             var publicUrl = $"{_supabaseUrl}/storage/v1/object/public/{_bucket}/{objectPath}";
+            var resolvedContentType = string.IsNullOrWhiteSpace(contentType) ? "application/octet-stream" : contentType;
 
-            return new UploadedFileResult(publicUrl, objectPath, sizeBytes);
+            return new UploadedFileResult(
+                publicUrl,
+                objectPath,
+                sizeBytes,
+                Path.GetFileName(fileName),
+                resolvedContentType);
         }
 
         public async Task DeleteAsync(string storedFileName, string folder, CancellationToken cancellationToken)
@@ -158,8 +164,64 @@ namespace RikiPath.Application.Services
             }
         }
 
-        // Chỉ ký URL trỏ tới object của chính bucket đã cấu hình; không gửi yêu cầu tới host do client cung cấp.
+        // Ký URL đọc ngắn hạn cho cả kho chung (_bucket) và kho xác minh riêng tư (VerificationBucket);
+        // chỉ chấp nhận URL thuộc đúng Supabase project đã cấu hình.
         public async Task<string> CreateSignedReadUrlAsync(string storedUrl, CancellationToken cancellationToken)
+        {
+            EnsureConfigured();
+            if (!Uri.TryCreate(storedUrl, UriKind.Absolute, out var uri) ||
+                !Uri.TryCreate(_supabaseUrl, UriKind.Absolute, out var configuredUri) ||
+                uri.Scheme != Uri.UriSchemeHttps || uri.GetLeftPart(UriPartial.Authority) != configuredUri.GetLeftPart(UriPartial.Authority) ||
+                !string.IsNullOrEmpty(uri.Query) || !string.IsNullOrEmpty(uri.Fragment))
+                throw new ArgumentException("Tài liệu không thuộc kho lưu trữ được cấu hình.", nameof(storedUrl));
+
+            var generalBucket = _bucket!;
+            var generalPublicPrefix = $"/storage/v1/object/public/{Uri.EscapeDataString(generalBucket)}/";
+            var generalAuthPrefix = $"/storage/v1/object/authenticated/{Uri.EscapeDataString(generalBucket)}/";
+            var rawGeneralPublicPrefix = $"/storage/v1/object/public/{generalBucket}/";
+            var rawGeneralAuthPrefix = $"/storage/v1/object/authenticated/{generalBucket}/";
+
+            string? targetBucket = null;
+            string? objectPath = null;
+
+            if (uri.AbsolutePath.StartsWith(generalPublicPrefix, StringComparison.Ordinal))
+            {
+                targetBucket = generalBucket;
+                objectPath = Uri.UnescapeDataString(uri.AbsolutePath[generalPublicPrefix.Length..]);
+            }
+            else if (uri.AbsolutePath.StartsWith(rawGeneralPublicPrefix, StringComparison.Ordinal))
+            {
+                targetBucket = generalBucket;
+                objectPath = Uri.UnescapeDataString(uri.AbsolutePath[rawGeneralPublicPrefix.Length..]);
+            }
+            else if (uri.AbsolutePath.StartsWith(generalAuthPrefix, StringComparison.Ordinal))
+            {
+                targetBucket = generalBucket;
+                objectPath = Uri.UnescapeDataString(uri.AbsolutePath[generalAuthPrefix.Length..]);
+            }
+            else if (uri.AbsolutePath.StartsWith(rawGeneralAuthPrefix, StringComparison.Ordinal))
+            {
+                targetBucket = generalBucket;
+                objectPath = Uri.UnescapeDataString(uri.AbsolutePath[rawGeneralAuthPrefix.Length..]);
+            }
+
+            if (targetBucket is null)
+            {
+                var verificationBucket = await RequirePrivateVerificationBucketAsync(cancellationToken);
+                var verificationPrefix = $"/storage/v1/object/authenticated/{Uri.EscapeDataString(verificationBucket)}/";
+                if (!uri.AbsolutePath.StartsWith(verificationPrefix, StringComparison.Ordinal))
+                    throw new ArgumentException("Tài liệu không thuộc bucket được cấu hình.", nameof(storedUrl));
+                targetBucket = verificationBucket;
+                objectPath = Uri.UnescapeDataString(uri.AbsolutePath[verificationPrefix.Length..]);
+            }
+
+            if (string.IsNullOrWhiteSpace(objectPath) || objectPath.Split('/').Any(segment => segment is "." or ".." or ""))
+                throw new ArgumentException("Đường dẫn tài liệu không hợp lệ.", nameof(storedUrl));
+
+            return await SignObjectAsync(targetBucket, objectPath, cancellationToken);
+        }
+
+        private async Task<string> SignPrivateVerificationUrlAsync(string storedUrl, CancellationToken cancellationToken)
         {
             EnsureConfigured();
             if (!Uri.TryCreate(storedUrl, UriKind.Absolute, out var uri) ||
@@ -176,6 +238,11 @@ namespace RikiPath.Application.Services
             if (string.IsNullOrWhiteSpace(objectPath) || objectPath.Split('/').Any(segment => segment is "." or ".." or ""))
                 throw new ArgumentException("Đường dẫn tài liệu xác minh không hợp lệ.", nameof(storedUrl));
 
+            return await SignObjectAsync(bucket, objectPath, cancellationToken);
+        }
+
+        private async Task<string> SignObjectAsync(string bucket, string objectPath, CancellationToken cancellationToken)
+        {
             var escapedPath = string.Join('/', objectPath.Split('/').Select(Uri.EscapeDataString));
             using var request = new HttpRequestMessage(HttpMethod.Post, $"/storage/v1/object/sign/{Uri.EscapeDataString(bucket)}/{escapedPath}")
             {
@@ -183,7 +250,7 @@ namespace RikiPath.Application.Services
             };
             using var response = await httpClient.SendAsync(request, cancellationToken);
             if (!response.IsSuccessStatusCode)
-                throw new InvalidOperationException("Không thể tạo liên kết bảo vệ cho tài liệu xác minh.");
+                throw new InvalidOperationException("Không thể tạo liên kết bảo vệ cho tài liệu.");
             using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
             var signedPath = document.RootElement.GetProperty("signedURL").GetString();
             if (string.IsNullOrWhiteSpace(signedPath) || !signedPath.StartsWith("/object/sign/", StringComparison.Ordinal))
@@ -193,7 +260,7 @@ namespace RikiPath.Application.Services
 
         public async Task VerifyPrivateVerificationAsync(string storedUrl, CancellationToken cancellationToken)
         {
-            _ = await CreateSignedReadUrlAsync(storedUrl, cancellationToken);
+            _ = await SignPrivateVerificationUrlAsync(storedUrl, cancellationToken);
         }
 
         public async Task<PrivateVerificationReadResult> OpenPrivateVerificationAsync(

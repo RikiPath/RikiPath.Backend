@@ -6,6 +6,7 @@ using RikiPath.Application.Requests.Homework;
 using RikiPath.Application.Requests.PracticeExercises;
 using RikiPath.Application.Responses;
 using RikiPath.Application.Services;
+using RikiPath.WebApi.Services;
 
 namespace RikiPath.WebApi.Controllers;
 
@@ -39,12 +40,11 @@ public sealed class HomeworkController(HomeworkService homework, IPracticeQuizSe
 
     [HttpGet("{assignmentId:int}/scan")]
     [HttpGet("{assignmentId:int}/submission-scan")]
-    public async Task<IActionResult> Scan(int assignmentId, CancellationToken ct)
+    public async Task<IActionResult> Scan(int assignmentId, [FromQuery] bool download = false, CancellationToken ct = default)
     {
         var file = await homework.ReadScanAsync(assignmentId, ct);
-        Response.Headers.CacheControl = "no-store";
-        Response.Headers.XContentTypeOptions = "nosniff";
-        return file is null ? NotFound() : File(file.Content, file.ContentType);
+        return ProposalAttachmentStreamHelper.StreamPrivateVerificationResult(
+            this, file, $"bai-nop-{assignmentId}", download);
     }
 
     //[HttpPost("{assignmentId:int}/ai-draft"), Authorize(Roles = "Mentor")]

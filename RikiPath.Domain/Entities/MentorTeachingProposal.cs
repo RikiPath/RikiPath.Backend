@@ -6,6 +6,7 @@ public static class MentorTeachingProposalStatus
     public const string PendingReview = "PendingReview";
     public const string ChangesRequested = "ChangesRequested";
     public const string Approved = "Approved";
+    public const string OpenedClass = "OpenedClass";
     public const string Rejected = "Rejected";
     public const string Withdrawn = "Withdrawn";
 
@@ -15,6 +16,7 @@ public static class MentorTeachingProposalStatus
         PendingReview,
         ChangesRequested,
         Approved,
+        OpenedClass,
         Rejected,
         Withdrawn,
     ];
@@ -57,7 +59,7 @@ public sealed class MentorTeachingProposal
     public string? CourseObjective { get; set; }
 
     public DateOnly? ExpectedStartDate { get; set; }
-    public int CourseDurationWeeks { get; set; } = 10;
+    public int CourseDurationWeeks { get; set; } = 1;
     public int SessionDurationMinutes { get; set; } = 90;
 
     /// <summary>
@@ -77,8 +79,10 @@ public sealed class MentorTeachingProposal
     public int Revision { get; set; } = 1;
 
     public string? SubmissionIdempotencyKey { get; set; }
+    public string? OpenEnrollmentIdempotencyKey { get; set; }
     public DateTime? SubmittedAtUtc { get; set; }
     public DateTime? ReviewedAtUtc { get; set; }
+    public DateTime? OpenedClassAtUtc { get; set; }
     public int? ReviewedByAdminId { get; set; }
     public UserAccount? ReviewedByAdmin { get; set; }
     public string? ReviewReason { get; set; }
@@ -90,6 +94,12 @@ public sealed class MentorTeachingProposal
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAtUtc { get; set; } = DateTime.UtcNow;
     public DateTime LastSavedAtUtc { get; set; } = DateTime.UtcNow;
+
+    /// <summary>
+    /// Ẩn đề xuất bị từ chối khỏi lịch sử cá nhân của Giáo viên mà vẫn giữ nguyên bản ghi và lịch sử quản trị/audit.
+    /// </summary>
+    public bool IsHiddenFromMentorHistory { get; set; }
+    public DateTime? HiddenFromMentorAtUtc { get; set; }
 
     public List<MentorTeachingProposalEvent> Events { get; set; } = [];
     public List<MentorAvailability> GeneratedAvailabilities { get; set; } = [];

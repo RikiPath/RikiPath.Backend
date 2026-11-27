@@ -6304,30 +6304,16 @@ namespace RikiPath.Infrastructure.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
-                    b.Property<string>("AllowedSessionsPerWeekCsv")
-                        .IsRequired()
-                        .HasMaxLength(512)
-                        .HasColumnType("character varying(512)");
-
                     b.Property<int>("CancellationLeadHours")
                         .HasColumnType("integer");
 
                     b.Property<int>("CheckoutHoldMinutes")
                         .HasColumnType("integer");
 
-                    b.Property<int>("CourseDurationWeeks")
-                        .HasColumnType("integer");
-
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<int?>("CreatedByAdminId")
-                        .HasColumnType("integer");
-
-                    b.Property<int>("DailySessionCap")
-                        .HasColumnType("integer");
-
-                    b.Property<int>("DefaultSessionsPerWeek")
                         .HasColumnType("integer");
 
                     b.Property<DateTime?>("DeletedAtUtc")
@@ -6338,9 +6324,6 @@ namespace RikiPath.Infrastructure.Migrations
 
                     b.Property<DateTime>("EffectiveFromUtc")
                         .HasColumnType("timestamp with time zone");
-
-                    b.Property<int>("EnrollmentCutoffMinutesBeforeFirstSession")
-                        .HasColumnType("integer");
 
                     b.Property<int>("HomeworkDeadlineDays")
                         .HasColumnType("integer");
@@ -6369,19 +6352,13 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Property<int>("MaxLearners")
                         .HasColumnType("integer");
 
-                    b.Property<int>("MaxTotalActiveClassesPerMentor")
-                        .HasColumnType("integer");
-
                     b.Property<bool>("MentorReplacementEnabled")
                         .HasColumnType("boolean");
 
                     b.Property<int>("MentorReplacementLeadHours")
                         .HasColumnType("integer");
 
-                    b.Property<int>("MinLearnersToStart")
-                        .HasColumnType("integer");
-
-                    b.Property<int>("MinimumProposalLeadDays")
+                    b.Property<int>("MinimumPreparationDays")
                         .HasColumnType("integer");
 
                     b.Property<int>("MinimumPublishedEnrollmentDays")
@@ -6389,13 +6366,6 @@ namespace RikiPath.Infrastructure.Migrations
 
                     b.Property<int>("PlacementAttemptLimit")
                         .HasColumnType("integer");
-
-                    b.Property<int>("PublicationHorizonDays")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("RecurringWeekdayPatternsJson")
-                        .IsRequired()
-                        .HasColumnType("jsonb");
 
                     b.Property<decimal>("RemediationCompletionThresholdPercent")
                         .HasPrecision(5, 2)
@@ -6453,9 +6423,6 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Property<int>("Version")
                         .HasColumnType("integer");
 
-                    b.Property<int>("WeeklySessionCap")
-                        .HasColumnType("integer");
-
                     b.HasKey("Id");
 
                     b.HasIndex("CreatedByAdminId");
@@ -6480,27 +6447,17 @@ namespace RikiPath.Infrastructure.Migrations
 
                     b.ToTable("MentorGroupPolicies", null, t =>
                         {
-                            t.HasCheckConstraint("CK_MentorGroupPolicy_AllowedSessionsPerWeek", "\"AllowedSessionsPerWeekCsv\" ~ '^[1-9][0-9]*(,[1-9][0-9]*)*$'");
-
                             t.HasCheckConstraint("CK_MentorGroupPolicy_Capacity", "\"MaxLearners\" BETWEEN 1 AND 50");
 
                             t.HasCheckConstraint("CK_MentorGroupPolicy_CheckoutHold", "\"CheckoutHoldMinutes\" BETWEEN 1 AND 60");
 
                             t.HasCheckConstraint("CK_MentorGroupPolicy_Comparison", "\"RemediationThresholdComparison\" IN ('>', '>=')");
 
-                            t.HasCheckConstraint("CK_MentorGroupPolicy_CourseDurationWeeks", "\"CourseDurationWeeks\" BETWEEN 1 AND 52");
-
-                            t.HasCheckConstraint("CK_MentorGroupPolicy_DefaultSessionsPerWeek", "\"DefaultSessionsPerWeek\" >= 1");
+                            t.HasCheckConstraint("CK_MentorGroupPolicy_EnrollmentDays", "\"MinimumPublishedEnrollmentDays\" BETWEEN 1 AND 180");
 
                             t.HasCheckConstraint("CK_MentorGroupPolicy_Evidence", "\"RequireOfficialExamEvidence\" AND \"RequireAdminRemediationReview\"");
 
-                            t.HasCheckConstraint("CK_MentorGroupPolicy_LeadDays", "\"MinimumProposalLeadDays\" BETWEEN 1 AND 180 AND \"MinimumPublishedEnrollmentDays\" BETWEEN 1 AND 180 AND \"MinimumPublishedEnrollmentDays\" <= \"MinimumProposalLeadDays\"");
-
-                            t.HasCheckConstraint("CK_MentorGroupPolicy_MaxTotalActiveClasses", "\"MaxTotalActiveClassesPerMentor\" BETWEEN 1 AND 50");
-
-                            t.HasCheckConstraint("CK_MentorGroupPolicy_MinLearners", "\"MinLearnersToStart\" BETWEEN 1 AND \"MaxLearners\"");
-
-                            t.HasCheckConstraint("CK_MentorGroupPolicy_Positive", "\"Version\" > 0 AND \"SessionMinutes\" > 0 AND \"RestMinutes\" >= 0 AND \"DailySessionCap\" > 0 AND \"PublicationHorizonDays\" > 0 AND \"EnrollmentCutoffMinutesBeforeFirstSession\" >= 0 AND \"CancellationLeadHours\" >= 0 AND \"ReschedulingLeadHours\" >= 0 AND \"HomeworkDeadlineDays\" > 0 AND \"PlacementAttemptLimit\" > 0 AND \"KpiReportingPeriodDays\" > 0");
+                            t.HasCheckConstraint("CK_MentorGroupPolicy_Positive", "\"Version\" > 0 AND \"SessionMinutes\" > 0 AND \"RestMinutes\" >= 0 AND \"MinimumPreparationDays\" >= 1 AND \"CancellationLeadHours\" >= 0 AND \"ReschedulingLeadHours\" >= 0 AND \"HomeworkDeadlineDays\" > 0 AND \"PlacementAttemptLimit\" > 0 AND \"KpiReportingPeriodDays\" > 0");
 
                             t.HasCheckConstraint("CK_MentorGroupPolicy_Remediation", "\"RemediationCompletionThresholdPercent\" > 0 AND \"RemediationCompletionThresholdPercent\" <= 100");
 
@@ -6511,23 +6468,16 @@ namespace RikiPath.Infrastructure.Migrations
                             t.HasCheckConstraint("CK_MentorGroupPolicy_TransferAfterStart", "\"LearnerTransferEnabled\" OR NOT \"TransferAllowedAfterSourceStart\"");
 
                             t.HasCheckConstraint("CK_MentorGroupPolicy_Tuition", "\"TuitionPerSessionN5\" >= 0 AND \"TuitionPerSessionN4\" >= 0 AND \"TuitionPerSessionN3\" >= 0 AND \"TuitionPerSessionN2\" >= 0");
-
-                            t.HasCheckConstraint("CK_MentorGroupPolicy_WeeklySessionCap", "\"WeeklySessionCap\" BETWEEN 0 AND 84");
                         });
 
                     b.HasData(
                         new
                         {
                             Id = 1,
-                            AllowedSessionsPerWeekCsv = "2,3,4",
                             CancellationLeadHours = 24,
                             CheckoutHoldMinutes = 10,
-                            CourseDurationWeeks = 10,
                             CreatedAtUtc = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            DailySessionCap = 4,
-                            DefaultSessionsPerWeek = 3,
                             EffectiveFromUtc = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            EnrollmentCutoffMinutesBeforeFirstSession = 0,
                             HomeworkDeadlineDays = 7,
                             IsActive = true,
                             IsArchivedRevision = false,
@@ -6536,15 +6486,11 @@ namespace RikiPath.Infrastructure.Migrations
                             LastAppliedAtUtc = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
                             LearnerTransferEnabled = true,
                             MaxLearners = 4,
-                            MaxTotalActiveClassesPerMentor = 4,
                             MentorReplacementEnabled = true,
                             MentorReplacementLeadHours = 24,
-                            MinLearnersToStart = 1,
-                            MinimumProposalLeadDays = 14,
+                            MinimumPreparationDays = 1,
                             MinimumPublishedEnrollmentDays = 7,
                             PlacementAttemptLimit = 2,
-                            PublicationHorizonDays = 30,
-                            RecurringWeekdayPatternsJson = "[[1,3,5],[2,4,6]]",
                             RemediationCompletionThresholdPercent = 90m,
                             RemediationThresholdComparison = ">",
                             RequireAdminRemediationReview = true,
@@ -6558,38 +6504,7 @@ namespace RikiPath.Infrastructure.Migrations
                             TuitionPerSessionN3 = 90000m,
                             TuitionPerSessionN4 = 75000m,
                             TuitionPerSessionN5 = 60000m,
-                            Version = 1,
-                            WeeklySessionCap = 0
-                        });
-                });
-
-            modelBuilder.Entity("RikiPath.Domain.Entities.MentorGroupPolicyLevelLimit", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<int>("CertificateLevelId")
-                        .HasColumnType("integer");
-
-                    b.Property<int>("MaxActiveClasses")
-                        .HasColumnType("integer");
-
-                    b.Property<int>("MentorGroupPolicyId")
-                        .HasColumnType("integer");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("CertificateLevelId");
-
-                    b.HasIndex("MentorGroupPolicyId", "CertificateLevelId")
-                        .IsUnique();
-
-                    b.ToTable("MentorGroupPolicyLevelLimits", null, t =>
-                        {
-                            t.HasCheckConstraint("CK_MentorGroupPolicyLevelLimit_MaxActive", "\"MaxActiveClasses\" BETWEEN 0 AND 50");
+                            Version = 1
                         });
                 });
 
@@ -7386,11 +7301,26 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Property<int?>("GroupPolicyId")
                         .HasColumnType("integer");
 
+                    b.Property<DateTime?>("HiddenFromMentorAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsHiddenFromMentorHistory")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
                     b.Property<DateTime>("LastSavedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<int>("MentorId")
                         .HasColumnType("integer");
+
+                    b.Property<string>("OpenEnrollmentIdempotencyKey")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<DateTime?>("OpenedClassAtUtc")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("OptionalAttachmentsJson")
                         .IsRequired()
@@ -7454,6 +7384,11 @@ namespace RikiPath.Infrastructure.Migrations
 
                     b.HasIndex("ReviewedByAdminId");
 
+                    b.HasIndex("MentorId", "OpenEnrollmentIdempotencyKey")
+                        .IsUnique()
+                        .HasDatabaseName("IX_MentorTeachingProposals_MentorId_OpenEnrollmentIdempotencyKey")
+                        .HasFilter("\"OpenEnrollmentIdempotencyKey\" IS NOT NULL");
+
                     b.HasIndex("MentorId", "SubmissionIdempotencyKey")
                         .IsUnique()
                         .HasDatabaseName("IX_MentorTeachingProposals_MentorId_SubmissionIdempotencyKey")
@@ -7465,13 +7400,13 @@ namespace RikiPath.Infrastructure.Migrations
 
                     b.ToTable("MentorTeachingProposals", null, t =>
                         {
-                            t.HasCheckConstraint("CK_MentorTeachingProposal_Duration", "\"CourseDurationWeeks\" BETWEEN 1 AND 52 AND \"SessionDurationMinutes\" BETWEEN 30 AND 240");
+                            t.HasCheckConstraint("CK_MentorTeachingProposal_Duration", "\"CourseDurationWeeks\" BETWEEN 1 AND 104 AND \"SessionDurationMinutes\" BETWEEN 30 AND 240");
 
                             t.HasCheckConstraint("CK_MentorTeachingProposal_ProgramType", "\"ProgramType\" IN ('StandardJlpt', 'IntensiveJlpt', 'ExamPrepJlpt', 'CustomJlpt')");
 
                             t.HasCheckConstraint("CK_MentorTeachingProposal_Revision", "\"Revision\" > 0");
 
-                            t.HasCheckConstraint("CK_MentorTeachingProposal_Status", "\"Status\" IN ('Draft', 'PendingReview', 'ChangesRequested', 'Approved', 'Rejected', 'Withdrawn')");
+                            t.HasCheckConstraint("CK_MentorTeachingProposal_Status", "\"Status\" IN ('Draft', 'PendingReview', 'ChangesRequested', 'Approved', 'OpenedClass', 'Rejected', 'Withdrawn')");
                         });
                 });
 
@@ -9675,17 +9610,38 @@ namespace RikiPath.Infrastructure.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
+                    b.Property<string>("CancellationReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<DateTime?>("CancelledAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<int>("Capacity")
                         .HasColumnType("integer");
 
                     b.Property<int?>("CapacitySnapshot")
                         .HasColumnType("integer");
 
+                    b.Property<int>("CourseDurationWeeks")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(1);
+
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("timestamp without time zone");
 
                     b.Property<DateTime>("EndsAt")
                         .HasColumnType("timestamp without time zone");
+
+                    b.Property<DateTime?>("EnrollmentClosedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("EnrollmentClosesAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("EnrollmentOpensAtUtc")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<int?>("GroupPolicyId")
                         .HasColumnType("integer");
@@ -9742,11 +9698,13 @@ namespace RikiPath.Infrastructure.Migrations
 
                     b.HasIndex("SourceProposalId")
                         .IsUnique()
-                        .HasFilter("\"SourceProposalId\" IS NOT NULL AND \"Status\" <> 'Cancelled'");
+                        .HasFilter("\"SourceProposalId\" IS NOT NULL");
 
                     b.ToTable("StudyCohorts", null, t =>
                         {
                             t.HasCheckConstraint("CK_StudyCohort_Capacity", "\"Capacity\" > 0");
+
+                            t.HasCheckConstraint("CK_StudyCohort_DurationWeeks", "\"CourseDurationWeeks\" >= 1");
                         });
                 });
 
@@ -12684,23 +12642,6 @@ namespace RikiPath.Infrastructure.Migrations
                     b.Navigation("UpdatedByAdmin");
                 });
 
-            modelBuilder.Entity("RikiPath.Domain.Entities.MentorGroupPolicyLevelLimit", b =>
-                {
-                    b.HasOne("RikiPath.Domain.Entities.CertificateLevel", "CertificateLevel")
-                        .WithMany()
-                        .HasForeignKey("CertificateLevelId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("RikiPath.Domain.Entities.MentorGroupPolicy", null)
-                        .WithMany("LevelLimits")
-                        .HasForeignKey("MentorGroupPolicyId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("CertificateLevel");
-                });
-
             modelBuilder.Entity("RikiPath.Domain.Entities.MentorHourlyRate", b =>
                 {
                     b.HasOne("RikiPath.Domain.Entities.UserAccount", "ConfiguredByAdmin")
@@ -13929,11 +13870,6 @@ namespace RikiPath.Infrastructure.Migrations
             modelBuilder.Entity("RikiPath.Domain.Entities.MentorDispute", b =>
                 {
                     b.Navigation("Histories");
-                });
-
-            modelBuilder.Entity("RikiPath.Domain.Entities.MentorGroupPolicy", b =>
-                {
-                    b.Navigation("LevelLimits");
                 });
 
             modelBuilder.Entity("RikiPath.Domain.Entities.MentorPayoutObligation", b =>
