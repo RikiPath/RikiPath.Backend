@@ -67,7 +67,7 @@ namespace RikiPath.WebApi.Controllers
                 TimeZoneInfo.FindSystemTimeZoneById(MentorSlotPolicy.BusinessTimeZoneId));
             if (await groupPolicies.GetEffectiveAsync(localMidnightUtc, cancellationToken) is null)
                 return Conflict(ApiResponse<PublishSlotsResponse>.Fail(
-                    "Chưa có chính sách Admin áp dụng cho lịch này; chưa tạo buổi học.", HttpStatusCode.Conflict));
+                    "Chưa có chính sách vận hành áp dụng cho lịch này; chưa thể tạo buổi học.", HttpStatusCode.Conflict));
             return ToActionResult(await scheduleService.PublishSlotsAsync(request, cancellationToken));
         }
 
@@ -90,7 +90,7 @@ namespace RikiPath.WebApi.Controllers
             int slotId,
             [FromBody] DisableSlotRequest? request,
             CancellationToken cancellationToken)
-            => Conflict(new { ErrorMessage = "Lịch đã duyệt phải gửi yêu cầu hủy/dời để Admin xử lý; không đóng trực tiếp bằng luồng cũ." });
+            => Conflict(new { ErrorMessage = "Lịch đã duyệt cần gửi yêu cầu dời hoặc hủy để Quản trị viên xử lý." });
 
         // // Dành cho Quản trị viên: Xem mẫu lịch làm việc và quy tắc ca của một Chuyên gia bất kỳ.
         [HttpGet("/api/admin/mentors/{mentorId:int}/schedule")]

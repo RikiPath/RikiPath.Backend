@@ -220,7 +220,7 @@ namespace RikiPath.Api.Controllers
         private async Task<string> UploadLocalMediaAsync(string path, bool isAudio, CancellationToken cancellationToken)
         {
             if (!User.IsInRole("ContentAuthor") && !User.IsInRole("Admin"))
-                throw new InvalidDataException("Chỉ Content Author hoặc Admin được nhập ảnh hoặc audio từ đường dẫn trên máy chủ.");
+                throw new InvalidDataException("Chỉ Quản lý nội dung hoặc Quản trị viên mới được nhập hình ảnh hoặc âm thanh từ máy chủ.");
 
             var audioRoot = Environment.GetEnvironmentVariable(isAudio ? "RIKIPATH_IMPORT_AUDIO_ROOT" : "RIKIPATH_IMPORT_IMAGE_ROOT")
                 ?? (!isAudio ? Environment.GetEnvironmentVariable("RIKIPATH_IMPORT_AUDIO_ROOT") : null);
@@ -278,7 +278,7 @@ namespace RikiPath.Api.Controllers
             }
             catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
             {
-                throw new InvalidDataException("Không tìm thấy file trên máy chạy backend.");
+                throw new InvalidDataException("Không tìm thấy tệp trên máy chủ.");
             }
             catch (InvalidDataException)
             {
@@ -286,7 +286,7 @@ namespace RikiPath.Api.Controllers
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
             {
-                throw new InvalidDataException("Không đọc được file trên máy chạy backend.");
+                throw new InvalidDataException("Không thể đọc tệp trên máy chủ.");
             }
         }
 

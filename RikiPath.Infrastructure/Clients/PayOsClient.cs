@@ -40,6 +40,41 @@ namespace RikiPath.Infrastructure.Clients
         public Task<PaymentLinkInformation> GetPaymentInformationAsync(long orderCode, CancellationToken cancellationToken)
             => GetPaymentInformationAsync(orderCode.ToString(CultureInfo.InvariantCulture), cancellationToken);
 
+        public async Task<bool> CancelPaymentLinkAsync(long orderCode, string? cancellationReason, CancellationToken cancellationToken)
+        {
+            if (appSettings.PayOs == null || string.IsNullOrWhiteSpace(appSettings.PayOs.ClientId)
+                || string.IsNullOrWhiteSpace(appSettings.PayOs.ApiKey)
+                || string.IsNullOrWhiteSpace(appSettings.PayOs.ChecksumKey))
+            {
+                return false;
+            }
+
+            var payOs = appSettings.PayOs;
+            var orderKey = orderCode.ToString(CultureInfo.InvariantCulture);
+            var reason = string.IsNullOrWhiteSpace(cancellationReason) ? "Seat hold expired" : Truncate(cancellationReason.Trim());
+            try
+            {
+                using var request = new HttpRequestMessage(HttpMethod.Post, $"{PaymentRequestsUrl}/{orderKey}/cancel")
+                {
+                    Content = JsonContent.Create(new { cancellationReason = reason }),
+                };
+                AddAuthHeaders(request, payOs);
+                var (status, root, elapsedMs) = await SendAsync(request, "cancel-payment-link", orderKey, cancellationToken);
+                using (root)
+                {
+                    RequireSuccess(root.RootElement, status, "cancel-payment-link", orderKey);
+                    logger?.LogInformation("PayOS payment link cancelled. OrderCode={OrderCode} DurationMs={DurationMs}", orderCode, elapsedMs);
+                    return true;
+                }
+            }
+            catch (PaymentGatewayException ex)
+            {
+                logger?.LogWarning("PayOS cancel-payment-link did not complete cleanly. OrderCode={OrderCode} Failure={Failure} ProviderCode={ProviderCode}",
+                    orderCode, ex.Failure, ex.ProviderCode);
+                return false;
+            }
+        }
+
         public async Task<PaymentLinkInformation> GetPaymentInformationAsync(string paymentRequestId, CancellationToken cancellationToken)
         {
             var payOs = RequireConfigured(appSettings.PayOs);

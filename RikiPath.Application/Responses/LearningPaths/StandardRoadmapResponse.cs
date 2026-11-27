@@ -69,4 +69,7 @@ public class StandardRoadmapLessonResponse
     public int PracticeAttemptCount { get; set; }
     public int? QuickCheckExerciseId { get; set; }
     public int QuickCheckQuestionCount { get; set; }
+
+    /// <summary>Passing score (percent, 0–100) of this lesson's Quick Check, from the exercise configuration.</summary>
+    public double? QuickCheckPassingScorePercent { get; set; }
 }

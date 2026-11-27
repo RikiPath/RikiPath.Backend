@@ -26,7 +26,7 @@ public sealed class RequestObservabilityAndSecurityMiddleware(
             headers.TryAdd("X-Content-Type-Options", "nosniff");
             headers.TryAdd("X-Frame-Options", "DENY");
             headers.TryAdd("Referrer-Policy", "strict-origin-when-cross-origin");
-            headers.TryAdd("Permissions-Policy", "camera=(self), microphone=(self), geolocation=()");
+            headers.TryAdd("Permissions-Policy", "camera=(self), microphone=(self), geolocation=(self)");
             headers.Remove("X-Powered-By");
             headers.Remove("Server");
             return Task.CompletedTask;

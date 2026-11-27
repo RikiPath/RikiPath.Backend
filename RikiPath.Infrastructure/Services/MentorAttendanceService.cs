@@ -34,6 +34,78 @@ public sealed class MentorAttendanceService : IMentorAttendanceService
         _logger = logger;
     }
 
+    private async Task<(bool Allowed, bool IsCohortSlot, string? Reason)> EvaluateCohortRoomEligibilityAsync(
+        MentorAvailability slot,
+        DateTime nowUtc,
+        CancellationToken cancellationToken)
+    {
+        var cohortSession = await _context.Set<StudyCohortSession>()
+            .AsNoTracking()
+            .Include(cs => cs.Cohort)
+                .ThenInclude(c => c.GroupPolicy)
+            .Include(cs => cs.Cohort)
+                .ThenInclude(c => c.Enrollments)
+            .Include(cs => cs.Cohort)
+                .ThenInclude(c => c.Sessions)
+                    .ThenInclude(s => s.Availability)
+                        .ThenInclude(a => a.GroupPolicy)
+            .AsSplitQuery()
+            .FirstOrDefaultAsync(cs => cs.AvailabilityId == slot.Id, cancellationToken);
+
+        if (cohortSession is null)
+        {
+            return (true, false, null);
+        }
+
+        var cohort = cohortSession.Cohort;
+        var cohortStatus = cohort.Status?.Trim() ?? string.Empty;
+        if (string.Equals(cohortStatus, "Cancelled", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(cohortStatus, "Draft", StringComparison.OrdinalIgnoreCase))
+        {
+            return (false, true, "Lớp học chưa được kích hoạt hoặc đã bị hủy.");
+        }
+
+        var confirmedEnrolledCount = cohort.Enrollments.Count(c =>
+            c.PaymentStatus is "Paid" or "PartiallyRefunded"
+            && c.Status is not ("PaymentReview" or "Cancelled" or "Transferred" or "PendingPayment" or "PaymentExpired" or "PaymentFailed"));
+
+        var effectivePolicy = cohort.GroupPolicy
+            ?? slot.GroupPolicy
+            ?? cohort.Sessions.Select(s => s.Availability.GroupPolicy).FirstOrDefault(p => p is not null)
+            ?? await _context.MentorGroupPolicies
+                .AsNoTracking()
+                .Where(p => p.IsActive && !p.IsArchivedRevision && !p.IsDeleted)
+                .OrderByDescending(p => p.LastAppliedAtUtc)
+                .ThenByDescending(p => p.Version)
+                .FirstOrDefaultAsync(cancellationToken);
+
+        var minLearners = Math.Max(1, effectivePolicy?.MinLearnersToStart ?? 1);
+        if (confirmedEnrolledCount < minLearners)
+        {
+            return (false, true, "Lớp học chưa đủ học viên ghi danh chính thức để bắt đầu.");
+        }
+
+        var firstSession = cohort.Sessions
+            .Where(s => s.Availability != null && s.Availability.IsApproved && !s.Availability.IsDeleted && s.Availability.RejectedAt == null)
+            .OrderBy(s => s.Availability.StartTime)
+            .FirstOrDefault();
+
+        var cutoffMinutes = firstSession?.Availability.GroupPolicy?.EnrollmentCutoffMinutesBeforeFirstSession
+            ?? effectivePolicy?.EnrollmentCutoffMinutesBeforeFirstSession
+            ?? 0;
+        var enrollmentCutoffUtc = firstSession is null
+            ? cohort.StartsAt
+            : firstSession.Availability.StartTime.AddMinutes(-cutoffMinutes);
+
+        if (!string.Equals(cohortStatus, "Completed", StringComparison.OrdinalIgnoreCase)
+            && enrollmentCutoffUtc > nowUtc)
+        {
+            return (false, true, "Lớp học vẫn đang trong thời gian tuyển sinh; phòng học chưa khả dụng.");
+        }
+
+        return (true, true, null);
+    }
+
     public async Task<bool> CanAccessRoomAsync(Guid roomId, int userId, CancellationToken cancellationToken = default)
     {
         if (roomId == Guid.Empty || userId <= 0) return false;
@@ -42,6 +114,7 @@ public sealed class MentorAttendanceService : IMentorAttendanceService
 
         var slot = await _context.MentorAvailabilities
             .Include(a => a.Mentor)
+            .Include(a => a.GroupPolicy)
             .FirstOrDefaultAsync(a => a.RoomId == roomId && !a.IsDeleted && a.IsApproved && a.RejectedAt == null, cancellationToken);
 
         if (slot is null) return false;
@@ -50,19 +123,37 @@ public sealed class MentorAttendanceService : IMentorAttendanceService
         if (nowUtc < slot.StartTime.AddMinutes(-15) || nowUtc > slot.EndTime.AddMinutes(30))
             return false;
 
+        // Quản trị viên (Admin) luôn có quyền giám sát
+        var claim = _claimService.GetUserClaim();
+        if (claim.Role == Role.Admin)
+            return true;
+
+        var (cohortEligible, isCohortSlot, _) = await EvaluateCohortRoomEligibilityAsync(slot, nowUtc, cancellationToken);
+        if (isCohortSlot && !cohortEligible)
+            return false;
+
         // Nếu là Mentor phụ trách
         if (slot.MentorId == userId && slot.Mentor?.Role == Role.Mentor)
         {
+            // Kiểm tra có ít nhất 1 ghi danh hợp lệ hoặc phiên lớp học đủ điều kiện
+            var hasEligibleCourse = await _context.StudyCourses.AnyAsync(
+                c => (c.PaymentStatus == "Paid" || c.PaymentStatus == "PartiallyRefunded")
+                    && (c.Status == "Active" || c.Status == "Ready")
+                    && c.Sessions.Any(s => s.AvailabilityId == slot.Id && s.Status == "Scheduled"),
+                cancellationToken);
+            if (!isCohortSlot && !hasEligibleCourse)
+                return false;
+
             RoomMentors[roomId] = userId;
             return true;
         }
 
-        if (await _context.StudyCourses.AnyAsync(c => c.LearnerId == userId && c.PaymentStatus == "Paid" && c.Status == "Active"
+        if (await _context.StudyCourses.AnyAsync(c => c.LearnerId == userId
+            && (c.PaymentStatus == "Paid" || c.PaymentStatus == "PartiallyRefunded")
+            && (c.Status == "Active" || c.Status == "Ready")
             && c.Sessions.Any(s => s.AvailabilityId == slot.Id && s.Status == "Scheduled"), cancellationToken)) return true;
 
-        // Quản trị viên (Admin) luôn có quyền giám sát
-        var claim = _claimService.GetUserClaim();
-        return claim.Role == Role.Admin;
+        return false;
     }
 
     public async Task<ApiResponse<MentorAttendanceResponse>> RecordJoinAsync(
@@ -78,14 +169,19 @@ public sealed class MentorAttendanceService : IMentorAttendanceService
             // Tìm khung giờ và thông tin người dùng
             var slot = await _context.MentorAvailabilities
                 .Include(a => a.Mentor)
+                .Include(a => a.GroupPolicy)
                 .FirstOrDefaultAsync(a => a.RoomId == roomId && !a.IsDeleted && a.IsApproved && a.RejectedAt == null, cancellationToken);
 
             if (slot is null)
                 return ApiResponse<MentorAttendanceResponse>.Fail("Không tìm thấy phòng họp hợp lệ.", HttpStatusCode.NotFound);
 
-            // Chỉ ghi nhận điểm danh trong cửa sổ tham gia phòng thực tế.
-            if (nowUtc < slot.StartTime.AddMinutes(-10) || nowUtc >= slot.EndTime)
+            // Chỉ ghi nhận điểm danh trong cửa sổ mở phòng thực tế (tối đa 15 phút trước giờ bắt đầu tới 30 phút sau giờ kết thúc).
+            if (nowUtc < slot.StartTime.AddMinutes(-15) || nowUtc > slot.EndTime.AddMinutes(30))
                 return ApiResponse<MentorAttendanceResponse>.Fail("Buổi học chưa mở hoặc đã kết thúc.", HttpStatusCode.Conflict);
+
+            var (cohortEligible, isCohortSlot, cohortReason) = await EvaluateCohortRoomEligibilityAsync(slot, nowUtc, cancellationToken);
+            if (isCohortSlot && !cohortEligible)
+                return ApiResponse<MentorAttendanceResponse>.Fail(cohortReason ?? "Lớp học chưa đủ điều kiện vào phòng.", HttpStatusCode.Conflict);
 
             var isMentor = slot.MentorId == userId && slot.Mentor?.Role == Role.Mentor;
             string participantName = string.Empty;
@@ -98,18 +194,25 @@ public sealed class MentorAttendanceService : IMentorAttendanceService
             }
             else
             {
-                if (!await _context.StudyCourses.AnyAsync(c => c.LearnerId == userId && c.PaymentStatus == "Paid" && c.Status == "Active" && c.Sessions.Any(s => s.AvailabilityId == slot.Id && s.Status == "Scheduled"), cancellationToken))
+                if (!await _context.StudyCourses.AnyAsync(c => c.LearnerId == userId
+                    && (c.PaymentStatus == "Paid" || c.PaymentStatus == "PartiallyRefunded")
+                    && (c.Status == "Active" || c.Status == "Ready")
+                    && c.Sessions.Any(s => s.AvailabilityId == slot.Id && s.Status == "Scheduled"), cancellationToken))
                     return ApiResponse<MentorAttendanceResponse>.Fail("Bạn không có lịch hẹn hợp lệ cho phòng họp này.", HttpStatusCode.Forbidden);
 
                 var learnerAccount = await _context.Users.FindAsync([userId], cancellationToken);
                 participantName = learnerAccount != null ? $"{learnerAccount.FirstName} {learnerAccount.LastName}".Trim() : $"User #{userId}";
             }
 
-            var courseSessionId = await _context.StudyCourses.Where(c => c.PaymentStatus == "Paid" && c.Status == "Active"
-                && (isMentor || c.LearnerId == userId)).SelectMany(c => c.Sessions)
-                .Where(s => s.AvailabilityId == slot.Id && s.Status == "Scheduled").Select(s => (int?)s.Id).FirstOrDefaultAsync(cancellationToken);
-            var isCohortSession = courseSessionId.HasValue
-                || (isMentor && await _context.Set<StudyCohortSession>().AnyAsync(s => s.AvailabilityId == slot.Id, cancellationToken));
+            var courseSessionId = await _context.StudyCourses
+                .Where(c => (c.PaymentStatus == "Paid" || c.PaymentStatus == "PartiallyRefunded")
+                    && (c.Status == "Active" || c.Status == "Ready")
+                    && (isMentor || c.LearnerId == userId))
+                .SelectMany(c => c.Sessions)
+                .Where(s => s.AvailabilityId == slot.Id && s.Status == "Scheduled")
+                .Select(s => (int?)s.Id)
+                .FirstOrDefaultAsync(cancellationToken);
+            var isCohortSession = courseSessionId.HasValue || (isMentor && isCohortSlot && cohortEligible);
             if (!courseSessionId.HasValue && !isCohortSession)
                 return ApiResponse<MentorAttendanceResponse>.Fail("Chưa có buổi học hợp lệ cho phòng này.", HttpStatusCode.Conflict);
 
@@ -370,7 +473,7 @@ public sealed class MentorAttendanceService : IMentorAttendanceService
                 if (booking is null)
                 {
                     return ApiResponse<List<MentorAttendanceResponse>>.Fail(
-                        "Không tìm thấy thông tin lịch hẹn tư vấn.", HttpStatusCode.NotFound);
+                        "Không tìm thấy thông tin buổi học.", HttpStatusCode.NotFound);
                 }
 
                 var isOwnerLearner = booking.UserSubscription != null && booking.UserSubscription.UserId == claim.Id;

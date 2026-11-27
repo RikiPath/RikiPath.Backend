@@ -11,6 +11,7 @@ using RikiPath.Application.Responses.MockTests;
 using RikiPath.Application.Responses.PlacementTests;
 using RikiPath.Domain.Entities;
 using RikiPath.Domain.Enums;
+using System.Collections.Concurrent;
 using System.Net;
 using System.Text;
 using System.Text.Json;
@@ -22,7 +23,8 @@ namespace RikiPath.Application.Services
         IUnitOfWork unitOfWork,
         IAiLearningPathClient aiClient,
         IClaimService claimService,
-        ILogger<LearningPathService> logger) : ILearningPathService
+        ILogger<LearningPathService> logger,
+        ILearnerSetupStateService? setupStateService = null) : ILearningPathService
     {
         // ===== Constants =====
         private const int MaxPlanDays = 730;          // Giới hạn vận hành cho lịch đầy đủ.
@@ -33,6 +35,7 @@ namespace RikiPath.Application.Services
         private const int MaxCatalogLessons = 200;     // Số bài học tối đa đưa vào prompt (tổng cả 4 kỹ năng)
         private const double MinimumPracticePassPercent = LessonPracticeProgress.PassingScore;
         private const double CompletedPercent = 100;
+        private static readonly ConcurrentDictionary<int, SemaphoreSlim> UserGenerateLocks = new();
         private static readonly JsonSerializerOptions StoredPathJsonOptions =
             new(JsonSerializerDefaults.Web);
 
@@ -72,11 +75,35 @@ namespace RikiPath.Application.Services
         public async Task<ApiResponse<LearningPathResponse>> GenerateLearningPathAsync(
             GenerateLearningPathRequest request,
             CancellationToken cancellationToken)
-            => await GenerateInternalAsync(request ?? new GenerateLearningPathRequest(), null, isPreview: false, cancellationToken);
+        {
+            var userId = claimService.GetUserClaim().Id;
+            var gate = UserGenerateLocks.GetOrAdd(userId, _ => new SemaphoreSlim(1, 1));
+            await gate.WaitAsync(cancellationToken);
+            try
+            {
+                return await GenerateInternalAsync(request ?? new GenerateLearningPathRequest(), null, isPreview: false, cancellationToken);
+            }
+            finally
+            {
+                gate.Release();
+            }
+        }
 
         public async Task<ApiResponse<LearningPathResponse>> PreviewLearningPathAsync(
             PreviewLearningPathRequest request, CancellationToken cancellationToken)
-            => await GenerateInternalAsync(request ?? new PreviewLearningPathRequest(), request, isPreview: true, cancellationToken);
+        {
+            var userId = claimService.GetUserClaim().Id;
+            var gate = UserGenerateLocks.GetOrAdd(userId, _ => new SemaphoreSlim(1, 1));
+            await gate.WaitAsync(cancellationToken);
+            try
+            {
+                return await GenerateInternalAsync(request ?? new PreviewLearningPathRequest(), request, isPreview: true, cancellationToken);
+            }
+            finally
+            {
+                gate.Release();
+            }
+        }
 
         private async Task<ApiResponse<LearningPathResponse>> GenerateInternalAsync(
             LearningPathOptionsRequest options,
@@ -102,6 +129,30 @@ namespace RikiPath.Application.Services
 
             if (user is null)
                 return ApiResponse<LearningPathResponse>.NotFound($"Không tìm thấy user Id = {userId}.");
+
+            var setupResolver = setupStateService ?? new LearnerSetupStateService(unitOfWork, claimService);
+            var currentSetupState = await setupResolver.ResolveForUserAsync(userId, includeProgress: false, cancellationToken);
+            if (!isPreview && (currentSetupState is null || !currentSetupState.HasConfirmedGoal))
+            {
+                return ApiResponse<LearningPathResponse>.Fail(
+                    "Vui lòng thiết lập mục tiêu JLPT (N5–N2) trước khi tạo lộ trình học AI.",
+                    HttpStatusCode.BadRequest, errorCode: "LEARNING_PATH_GOAL_REQUIRED");
+            }
+            if (!isPreview && currentSetupState is { HasConfirmedGoal: true, AiRoadmapEligible: false } &&
+                (!options.TargetCertificateLevelId.HasValue || options.TargetCertificateLevelId == currentSetupState.TargetJlptLevelId) &&
+                (!options.TargetJlptLevelId.HasValue || options.TargetJlptLevelId == currentSetupState.TargetJlptLevelId))
+            {
+                var errCode = currentSetupState.PlacementCompatibilityStatus == "INSUFFICIENT_FOR_TARGET"
+                    ? "PLACEMENT_INSUFFICIENT_FOR_TARGET"
+                    : "LEARNING_PATH_PLACEMENT_REQUIRED";
+                var msg = currentSetupState.PlacementCompatibilityStatus == "INSUFFICIENT_FOR_TARGET"
+                    ? (currentSetupState.PlacementCompatibilityReason ?? "Kết quả đánh giá hiện tại chưa đủ dữ liệu năng lực cho mục tiêu này. Vui lòng hoàn thành đánh giá bổ sung.")
+                    : currentSetupState.IsPlacementExplicitlySkipped
+                        ? "Bạn đã chọn bỏ qua đánh giá năng lực. Hãy hoàn thành bài đánh giá năng lực để mở khóa lộ trình cá nhân hóa AI."
+                        : "Bạn cần hoàn thành bài đánh giá năng lực hợp lệ trước khi tạo lộ trình cá nhân hóa AI.";
+                return ApiResponse<LearningPathResponse>.Fail(
+                    msg, HttpStatusCode.Conflict, errorCode: errCode);
+            }
 
             if (options.TargetCertificateLevelId.HasValue && options.TargetJlptLevelId.HasValue &&
                 options.TargetCertificateLevelId != options.TargetJlptLevelId)
@@ -365,14 +416,14 @@ namespace RikiPath.Application.Services
             {
                 logger.LogWarning(ex, "AI provider failed while creating learning path. UserId={UserId}", userId);
                 return ApiResponse<LearningPathResponse>.Fail(
-                    "Dịch vụ AI không hoàn tất yêu cầu. Xem log backend để biết nguyên nhân.",
+                    "Dịch vụ AI tạm thời không thể hoàn tất yêu cầu. Vui lòng thử lại sau.",
                     HttpStatusCode.BadGateway, errorCode: "LEARNING_PATH_AI_PROVIDER_ERROR");
             }
             catch (HttpRequestException ex)
             {
                 logger.LogWarning(ex, "AI HTTP request failed while creating learning path. UserId={UserId}", userId);
                 return ApiResponse<LearningPathResponse>.Fail(
-                    "Backend gặp lỗi khi kết nối dịch vụ AI. Xem log backend để biết nguyên nhân.",
+                    "Không thể kết nối đến dịch vụ AI. Vui lòng thử lại sau.",
                     HttpStatusCode.BadGateway, errorCode: "LEARNING_PATH_AI_CONNECTION_ERROR");
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
@@ -500,6 +551,7 @@ namespace RikiPath.Application.Services
                         lockedUser.DailyStudyMinutesMax = dailyStudyMinutesMax;
                         lockedUser.TargetExamDate = normalizedExamDate;
                         lockedUser.LearningMode = LearningMode.AiPersonalized;
+                        lockedUser.LearningGoalVersion++;
                         unitOfWork.UserAccounts.Update(lockedUser);
                     }
                     await unitOfWork.RecommendedLearningPaths.AddAsync(suggestion, transactionCancellationToken);
@@ -722,6 +774,20 @@ namespace RikiPath.Application.Services
                         return;
                     }
 
+                    if (draft.TargetCertificateLevelId is int draftTargetId)
+                    {
+                        var resolver = setupStateService ?? new LearnerSetupStateService(unitOfWork, claimService);
+                        var hasCompatiblePlacement = await resolver.HasValidCompletedPlacementForTargetAsync(
+                            userId, draftTargetId, ct);
+                        if (!hasCompatiblePlacement)
+                        {
+                            outcome = ApiResponse<LearningPathResponse>.Fail(
+                                "Cần có kết quả đánh giá năng lực tương thích với mục tiêu của lộ trình trước khi xác nhận.",
+                                HttpStatusCode.Conflict, errorCode: "LEARNING_PATH_PLACEMENT_REQUIRED");
+                            return;
+                        }
+                    }
+
                     if (current is not null)
                     {
                         current.Status = LearningPathStatus.Superseded;
@@ -743,6 +809,7 @@ namespace RikiPath.Application.Services
                     }
                     if (confirmedOptions.HasTargetExamDate == true) user.TargetExamDate = confirmedOptions.TargetExamDate;
                     user.LearningMode = LearningMode.AiPersonalized;
+                    user.LearningGoalVersion++;
                     unitOfWork.UserAccounts.Update(user);
                     await unitOfWork.SaveChangesAsync(ct);
                     outcome = ApiResponse<LearningPathResponse>.Success(
@@ -984,36 +1051,28 @@ namespace RikiPath.Application.Services
 
         private async Task<PlacementTestResultResponse?> LoadLatestPlacementResultAsync(int userId, int targetId)
         {
-            bool MatchesTarget(PlacementTestResultResponse? result) =>
-                result is { IsMiniAssessment: false } &&
-                (result.AssessmentTargetLevelId is null || result.AssessmentTargetLevelId == targetId);
+            var targetLevel = await unitOfWork.CertificateLevels.GetActiveJlptLevelByIdAsync(targetId);
+            var targetCode = targetLevel?.Code;
 
             var attempts = await unitOfWork.MockTestAttempts.GetPlacementByUserAsync(userId) ?? [];
-            PlacementTestResultResponse? legacyResult = null;
-            foreach (var candidate in attempts
-                .Where(attempt => !attempt.IsDeleted && attempt.UserId == userId &&
-                                  attempt.AttemptKind == AttemptKind.Placement &&
-                                  attempt.IsCompleted && attempt.TotalScore.HasValue)
-                .OrderByDescending(attempt => attempt.SubmittedAt ?? attempt.StartedAt)
-                .ThenByDescending(attempt => attempt.Id))
+            var compatibility = PracticeTestService.EvaluatePlacementCompatibility(attempts, targetId, targetCode);
+            if (compatibility.CompatibleAttempt is not null)
             {
-                var result = await TryGetStoredPlacementResultAsync(candidate);
-                if (!MatchesTarget(result)) continue;
-                if (result!.ScreeningLevelName is not null) return result;
-                legacyResult ??= result;
+                return await TryGetStoredPlacementResultAsync(compatibility.CompatibleAttempt) ?? compatibility.CompatibleResult;
             }
-
-            if (legacyResult is not null) return legacyResult;
 
             var latestCompleted = await unitOfWork.MockTestAttempts.GetLatestCompletedPlacementByUserAsync(userId);
-            var latestResult = latestCompleted is
+            if (latestCompleted is
+                {
+                    IsDeleted: false, AttemptKind: AttemptKind.Placement,
+                    IsCompleted: true, TotalScore: not null
+                })
             {
-                IsDeleted: false, AttemptKind: AttemptKind.Placement,
-                IsCompleted: true, TotalScore: not null
+                var fallbackComp = PracticeTestService.EvaluatePlacementCompatibility([latestCompleted], targetId, targetCode);
+                if (fallbackComp.CompatibleAttempt is not null)
+                    return await TryGetStoredPlacementResultAsync(latestCompleted) ?? fallbackComp.CompatibleResult;
             }
-                ? await TryGetStoredPlacementResultAsync(latestCompleted)
-                : null;
-            return MatchesTarget(latestResult) ? latestResult : null;
+            return null;
         }
 
         private async Task<PlacementTestResultResponse?> TryGetStoredPlacementResultAsync(MockTestAttempt attempt)

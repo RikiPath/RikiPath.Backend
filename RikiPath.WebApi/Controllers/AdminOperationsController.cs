@@ -54,7 +54,7 @@ public class AdminOperationsController(IUnitOfWork uow, IClaimService claimServi
         if (!Enum.IsDefined(r.Role))
             return BadRequest(new { error = "Vai trò không hợp lệ.", errorMessage = "Vai trò không hợp lệ." });
         if (r.Role == Role.Admin)
-            return BadRequest(new { error = "Không thể tạo thêm tài khoản Admin.", errorMessage = "Không thể tạo thêm tài khoản Admin." });
+            return BadRequest(new { error = "Không thể tạo thêm tài khoản Quản trị viên.", errorMessage = "Không thể tạo thêm tài khoản Quản trị viên." });
 
         var email = r.Email.Trim().ToLowerInvariant();
         if (await uow.UserAccounts.AnyAsync(x => x.Email != null && x.Email.ToLower() == email, ct))
@@ -118,11 +118,11 @@ public class AdminOperationsController(IUnitOfWork uow, IClaimService claimServi
 
         var actor = claimService.GetUserClaim();
         if (user.Id == actor.Id && !r.IsActive)
-            return BadRequest(new { error = "Không thể tự vô hiệu hóa tài khoản Admin đang đăng nhập.", errorMessage = "Không thể tự vô hiệu hóa tài khoản Admin đang đăng nhập." });
+            return BadRequest(new { error = "Không thể tự vô hiệu hóa tài khoản Quản trị viên đang đăng nhập.", errorMessage = "Không thể tự vô hiệu hóa tài khoản Quản trị viên đang đăng nhập." });
         if (user.Role == Role.Admin && (r.Role != Role.Admin || !r.IsActive))
-            return BadRequest(new { error = "Không thể hạ quyền hoặc vô hiệu hóa tài khoản Admin duy nhất.", errorMessage = "Không thể hạ quyền hoặc vô hiệu hóa tài khoản Admin duy nhất." });
+            return BadRequest(new { error = "Không thể hạ quyền hoặc vô hiệu hóa tài khoản Quản trị viên duy nhất.", errorMessage = "Không thể hạ quyền hoặc vô hiệu hóa tài khoản Quản trị viên duy nhất." });
         if (user.Role != Role.Admin && r.Role == Role.Admin)
-            return BadRequest(new { error = "Không thể cấp thêm quyền Admin.", errorMessage = "Không thể cấp thêm quyền Admin." });
+            return BadRequest(new { error = "Không thể cấp thêm quyền Quản trị viên.", errorMessage = "Không thể cấp thêm quyền Quản trị viên." });
 
         var deactivating = !user.IsDeleted && !r.IsActive;
         var demotingMentor = user.Role == Role.Mentor && r.Role != Role.Mentor;
@@ -195,7 +195,7 @@ public class AdminOperationsController(IUnitOfWork uow, IClaimService claimServi
 
         var actor = claimService.GetUserClaim();
         if (user.Id == actor.Id || user.Role == Role.Admin)
-            return BadRequest(new { error = "Không thể vô hiệu hóa tài khoản Admin duy nhất.", errorMessage = "Không thể vô hiệu hóa tài khoản Admin duy nhất." });
+            return BadRequest(new { error = "Không thể vô hiệu hóa tài khoản Quản trị viên duy nhất.", errorMessage = "Không thể vô hiệu hóa tài khoản Quản trị viên duy nhất." });
 
         if (user.Role == Role.Mentor && await HasActiveMentorCommitmentsAsync(user.Id, ct))
         {

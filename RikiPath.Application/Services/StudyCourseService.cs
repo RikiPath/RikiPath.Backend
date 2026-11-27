@@ -49,18 +49,105 @@ public sealed partial class StudyCourseService(IUnitOfWork uow, IClaimService cl
         if (Actor.Role != Role.Admin && !(Actor.Role == Role.Learner && c.LearnerId == Actor.Id)
             && !(Actor.Role == Role.Mentor && (c.MentorId ?? c.Cohort?.MentorId) == Actor.Id)) throw new UnauthorizedAccessException();
     }
+    private static bool HasConfirmedCourseAccess(StudyCourse c)
+        => c.PaymentStatus is "Paid" or "PartiallyRefunded"
+           && c.Status is "Ready" or "Active" or "Completed" or "Transferred";
+
+    private static bool IsActiveRosterEnrollment(StudyCourse c)
+        => c.PaymentStatus is "Paid" or "PartiallyRefunded"
+           && c.Status is "Ready" or "Active" or "Completed";
+
+    private static bool IsActivePendingHold(StudyCourse c, DateTime nowUtc)
+        => c.PaymentStatus == "Pending"
+           && c.Status == "PendingPayment"
+           && (!c.PaymentExpiresAt.HasValue || c.PaymentExpiresAt.Value > nowUtc);
+
+    private static bool IsVisibleInLearnerCourseList(StudyCourse c, DateTime nowUtc)
+        => IsActivePendingHold(c, nowUtc) || HasConfirmedCourseAccess(c);
+
+    private static List<StudyCourse> FilterAndDeduplicateRosterCourses(
+        IEnumerable<StudyCourse> source,
+        Role actorRole,
+        DateTime nowUtc)
+    {
+        var eligible = actorRole switch
+        {
+            Role.Mentor => source.Where(IsActiveRosterEnrollment),
+            Role.Admin => source.Where(c => IsActiveRosterEnrollment(c) || IsActivePendingHold(c, nowUtc)),
+            _ => source.Where(c => IsVisibleInLearnerCourseList(c, nowUtc)),
+        };
+
+        int PriorityOf(StudyCourse c)
+        {
+            if (IsActiveRosterEnrollment(c)) return 0;
+            if (HasConfirmedCourseAccess(c)) return 1;
+            return 2;
+        }
+
+        var result = new List<StudyCourse>();
+        var cohortGroups = new Dictionary<(int CohortId, int LearnerId), StudyCourse>();
+
+        foreach (var course in eligible)
+        {
+            if (!course.CohortId.HasValue)
+            {
+                result.Add(course);
+                continue;
+            }
+
+            var key = (course.CohortId.Value, course.LearnerId);
+            if (!cohortGroups.TryGetValue(key, out var existing))
+            {
+                cohortGroups[key] = course;
+                continue;
+            }
+
+            var existingPriority = PriorityOf(existing);
+            var candidatePriority = PriorityOf(course);
+            if (candidatePriority < existingPriority || (candidatePriority == existingPriority && course.Id > existing.Id))
+            {
+                cohortGroups[key] = course;
+            }
+        }
+
+        result.AddRange(cohortGroups.Values);
+        return result
+            .OrderBy(PriorityOf)
+            .ThenByDescending(c => c.Id)
+            .ToList();
+    }
+
+    private async Task TryVoidPaymentLinkBestEffortAsync(long orderCode, string reason, CancellationToken ct)
+    {
+        try
+        {
+            await payments.CancelPaymentLinkAsync(orderCode, reason, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger?.LogWarning(ex, "Best-effort PayOS link cancellation failed for order {OrderCode}", orderCode);
+        }
+    }
     private IQueryable<StudyCourse> Details => uow.StudyCourses.Query().Include(x => x.CertificateLevel)
         .Include(x => x.Learner).Include(x => x.Mentor).Include(x => x.Cohort).Include(x => x.GroupPolicy)
         .Include(x => x.Sessions).Include(x => x.Homework).Include(x => x.RetakeRequests).Include(x => x.Audit).AsSplitQuery();
     private void Audit(StudyCourse c, string action, string detail)
         => c.Audit.Add(new() { ActorId = Actor.Id, Action = action, Detail = detail });
-    private static void Active(StudyCourse c) => Require(c.Status == "Active" && c.PaymentStatus == "Paid", "Khóa chưa hoạt động hoặc đã chốt dữ liệu.");
+    private static void Active(StudyCourse c) => Require(c.Status == "Active" && c.PaymentStatus is "Paid" or "PartiallyRefunded", "Khóa chưa hoạt động hoặc đã chốt dữ liệu.");
 
     private async Task<ApiResponse<object>> Run(Func<Task<object>> action)
     {
         try { return ApiResponse<object>.Success(await action()); }
         catch (UnauthorizedAccessException) { return ApiResponse<object>.Fail("Bạn không có quyền thực hiện thao tác này.", HttpStatusCode.Forbidden); }
         catch (CourseRuleException ex) { return ex.Code is null ? ApiResponse<object>.Fail(ex.Message, ex.Status) : ApiResponse<object>.Fail(ex.Message, ex.Status, ex.Code); }
+        catch (PaymentGatewayException ex)
+        {
+            logger?.LogWarning(ex, "PayOS gateway call failed during StudyCourse operation: {Failure} ({ProviderCode})", ex.Failure, ex.ProviderCode);
+            return ApiResponse<object>.Fail(
+                string.IsNullOrWhiteSpace(ex.Message) ? "Cổng thanh toán PayOS tạm thời không phản hồi. Vui lòng thử lại sau ít phút." : ex.Message,
+                HttpStatusCode.BadGateway,
+                "PAYMENT_GATEWAY_ERROR");
+        }
         catch (DbUpdateConcurrencyException) { return ApiResponse<object>.Fail("Dữ liệu vừa thay đổi. Hãy tải lại.", HttpStatusCode.Conflict); }
         catch (DbUpdateException ex) when (SqlStateOf(ex) == "23505")
         { return ApiResponse<object>.Fail("Yêu cầu đã được xử lý hoặc dữ liệu bị trùng. Vui lòng tải lại.", HttpStatusCode.Conflict, "DUPLICATE_REQUEST"); }
@@ -140,9 +227,16 @@ public sealed partial class StudyCourseService(IUnitOfWork uow, IClaimService cl
     internal static decimal? TotalTeachingHoursOf(int? totalSessions, int? sessionMinutes)
         => totalSessions.HasValue && sessionMinutes.HasValue ? totalSessions.Value * sessionMinutes.Value / 60m : null;
 
-    // Chính sách nhóm hiệu lực; không có bản ghi (môi trường kiểm thử) -> mặc định theo quyết định Product Owner.
     private async Task<MentorGroupPolicy> EffectiveGroupPolicyAsync(DateTime atUtc, CancellationToken ct)
-        => (groupPolicies is null ? null : await groupPolicies.GetEffectiveAsync(atUtc, ct)) ?? DefaultGroupPolicy();
+    {
+        if (groupPolicies is null)
+            return DefaultGroupPolicy();
+        var effective = await groupPolicies.GetEffectiveAsync(atUtc, ct);
+        Rule(effective is not null, "GROUP_POLICY_UNAVAILABLE",
+            "Hệ thống chưa có chính sách lớp học nhóm đang có hiệu lực. Vui lòng liên hệ Quản trị viên.",
+            HttpStatusCode.ServiceUnavailable);
+        return effective!;
+    }
 
     internal static MentorGroupPolicy DefaultGroupPolicy() => new()
     {
@@ -151,67 +245,27 @@ public sealed partial class StudyCourseService(IUnitOfWork uow, IClaimService cl
         MinLearnersToStart = 1
     };
 
-    // Gói nhóm chuẩn theo chính sách: tổng buổi = số tuần khóa học x số buổi/tuần.
-    private static bool IsPolicyStandardPlan(StudyCoursePlan p, MentorGroupPolicy policy)
-        => p.TotalSessions.HasValue && p.TotalSessions.Value == policy.CourseDurationWeeks * p.SessionsPerWeek;
-
-    public Task<ApiResponse<object>> SavePlanAsync(int? id, SaveCoursePlan r, CancellationToken ct) => Run(async () =>
+    public Task<ApiResponse<object>> SavePlanAsync(int? id, SaveCoursePlan r, CancellationToken ct) => Run(() =>
     {
         Admin();
-        Require(!string.IsNullOrWhiteSpace(r.Name) && r.Name.Length <= 200, "Tên gói phải từ 1 đến 200 ký tự.");
-        Require(r.DurationMonths is >= 1 and <= 36 && r.SessionsPerWeek is >= 1 and <= 7, "Kiểm tra thời hạn và số buổi mỗi tuần.");
-        Require(r.SessionMinutes is null or >= 15 and <= 240 && r.TotalSessions is null or >= 1 and <= 500
-            && r.RetakeClaimDays is null or >= 1 and <= 730, "Thông số thời lượng, tổng buổi hoặc hạn học lại không hợp lệ.");
-        Require(r.Price >= 0 && r.Price == decimal.Truncate(r.Price) && r.Price <= int.MaxValue, "Giá phải là số VND nguyên không âm.");
-        Require(!r.IsPublished || (r.SessionMinutes.HasValue && r.TotalSessions.HasValue && r.Price > 0),
-            "Chưa được mở bán khi thiếu thời lượng, tổng buổi cam kết hoặc giá.");
-        Require(await uow.CertificateLevels.Query().Include(x => x.CertificateType)
-            .AnyAsync(x => x.Id == r.CertificateLevelId && !x.IsDeleted && !x.CertificateType.IsDeleted && x.CertificateType.IsActive, ct), "Cấp độ không còn hoạt động.");
-        Rule(r.SessionType == "Group", "INDIVIDUAL_PLAN_DISCONTINUED", "Hệ thống chỉ hỗ trợ gói khóa học nhóm (Group).", HttpStatusCode.BadRequest);
-        // Gói học nhóm: 1 Mentor chính, 1..sức chứa chính sách học viên; 10 tuần x 2/3/4 buổi, buổi 90 phút (theo chính sách).
-        var policy = await EffectiveGroupPolicyAsync(DateTime.UtcNow, ct);
-        var allowed = policy.AllowedSessionsPerWeek();
-        Rule(allowed.Contains(r.SessionsPerWeek), "COURSE_PLAN_INVALID_INTENSITY",
-            $"Số buổi mỗi tuần phải là một trong các cường độ được phép: {string.Join(", ", allowed.Select(x => $"{x} buổi ({IntensityLabelOf(x)})"))}.");
-        Rule(r.TotalSessions == policy.CourseDurationWeeks * r.SessionsPerWeek && r.SessionMinutes == policy.SessionMinutes,
-            "COURSE_PLAN_INVALID_DURATION",
-            $"Khóa học nhóm kéo dài {policy.CourseDurationWeeks} tuần: với {r.SessionsPerWeek} buổi/tuần cần đúng {policy.CourseDurationWeeks * r.SessionsPerWeek} buổi, mỗi buổi {policy.SessionMinutes} phút.");
-        Rule(r.Capacity >= 1 && r.Capacity <= policy.MaxLearners, "COURSE_PLAN_INVALID_CAPACITY",
-            $"Sĩ số lớp nhóm phải từ 1 đến {policy.MaxLearners} học viên.");
-        Require(!r.TargetExamDate.HasValue || (r.TargetExamDate.Value.Kind == DateTimeKind.Utc && r.TargetExamDate > DateTime.UtcNow), "Ngày thi mục tiêu phải trong tương lai và có múi giờ UTC.");
-        var p = id.HasValue ? await uow.StudyCoursePlans.GetByIdAsync(id.Value, ct) : new StudyCoursePlan();
-        Require(p is not null, "Không tìm thấy gói.");
-        Require(!id.HasValue || p!.Revision == r.Revision, "Gói vừa được cập nhật. Hãy tải lại.");
-        p!.SessionType = r.SessionType; p.Capacity = r.Capacity; p.TargetExamDate = r.TargetExamDate;
-        p.Name = r.Name.Trim(); p.CertificateLevelId = r.CertificateLevelId; p.DurationMonths = r.DurationMonths;
-        p.SessionsPerWeek = r.SessionsPerWeek; p.SessionMinutes = r.SessionMinutes; p.TotalSessions = r.TotalSessions;
-        p.RetakeClaimDays = r.RetakeClaimDays; p.Price = r.Price; p.IsPublished = r.IsPublished;
-        if (!id.HasValue) await uow.StudyCoursePlans.AddAsync(p, ct); else p.Revision++;
-        await uow.SaveChangesAsync(ct);
-        await RecordAdminAuditAsync("StudyCoursePlan", p.Id, id.HasValue ? "Updated" : "Created", new
-        {
-            p.Id,
-            p.Name,
-            p.CertificateLevelId,
-            p.DurationMonths,
-            p.SessionsPerWeek,
-            p.SessionMinutes,
-            p.TotalSessions,
-            p.Capacity,
-            p.Price,
-            p.IsPublished,
-            p.Revision,
-        }, ct);
-        return new { p.Id };
+        // Gói lớp nhóm chỉ được hệ thống khởi tạo/khớp tự động theo chính sách Học phí & tuyển sinh khi duyệt đề xuất mở lớp.
+        Rule(false, "LEGACY_MANUAL_COURSE_PLAN_DISABLED",
+            "Gói lớp học nhóm được hệ thống tự động tạo theo chính sách Học phí & tuyển sinh khi phê duyệt đề xuất mở lớp; không hỗ trợ tạo hoặc chỉnh sửa gói lớp nhóm thủ công.",
+            HttpStatusCode.Conflict);
+        return Task.FromResult<object>(new { Id = id ?? 0 });
     });
 
     public Task<ApiResponse<object>> CoursesAsync(CancellationToken ct) => Run(async () =>
     {
         var actor = Actor;
+        var nowUtc = DateTime.UtcNow;
         var courses = await Details.Where(x => actor.Role == Role.Admin ||
             (actor.Role == Role.Learner && x.LearnerId == actor.Id)
             || (actor.Role == Role.Mentor && (x.MentorId == actor.Id || (x.Cohort != null && x.Cohort.MentorId == actor.Id))))
             .OrderByDescending(x => x.Id).ToListAsync(ct);
+        var isLearner = actor.Role == Role.Learner;
+        var isMentor = actor.Role == Role.Mentor;
+        courses = FilterAndDeduplicateRosterCourses(courses, actor.Role, nowUtc);
         var retaken = await uow.StudyCourses.Query().Where(x => x.RetakeOfId.HasValue).Select(x => x.RetakeOfId!.Value).ToListAsync(ct);
         var cohortCourseIds = courses.Where(c => c.CohortId.HasValue).Select(c => c.Id).ToList();
         var cohortAssignmentsByCourse = cohortCourseIds.Count == 0
@@ -223,56 +277,215 @@ public sealed partial class StudyCourseService(IUnitOfWork uow, IClaimService cl
                 .GroupBy(h => h.StudyCourseId!.Value)
                 .ToDictionary(g => g.Key, g => g.ToList());
         var fallbackPolicy = cohortCourseIds.Count > 0 && courses.Any(c => c.GroupPolicy is null) && groupPolicies is not null
-            ? await groupPolicies.GetEffectiveAsync(DateTime.UtcNow, ct)
+            ? await groupPolicies.GetEffectiveAsync(nowUtc, ct)
             : null;
-        return courses.Select(c => View(
-            c,
-            retaken.Contains(c.Id),
-            c.GroupPolicy ?? (c.CohortId.HasValue ? fallbackPolicy : null),
-            c.CohortId.HasValue ? cohortAssignmentsByCourse.GetValueOrDefault(c.Id) : null)).ToList();
+        var distinctCohortIds = courses
+            .Where(c => c.CohortId.HasValue)
+            .Select(c => c.CohortId!.Value)
+            .Distinct()
+            .ToList();
+        var cohortMetaById = await LoadCohortLifecycleMetaAsync(distinctCohortIds, nowUtc, ct);
+        return courses.Select(c =>
+        {
+            var canSeeInternal = !isLearner || HasConfirmedCourseAccess(c);
+            return View(
+                c,
+                canSeeInternal && retaken.Contains(c.Id),
+                canSeeInternal ? (c.GroupPolicy ?? (c.CohortId.HasValue ? fallbackPolicy : null)) : null,
+                canSeeInternal && c.CohortId.HasValue ? cohortAssignmentsByCourse.GetValueOrDefault(c.Id) : null,
+                includeInternalDetails: canSeeInternal,
+                includeFinancialDetails: !isMentor,
+                cohortMeta: c.CohortId.HasValue ? cohortMetaById.GetValueOrDefault(c.CohortId.Value) : null);
+        }).ToList();
     });
 
     public Task<ApiResponse<object>> DetailAsync(int id, CancellationToken ct) => Run(async () =>
     {
         var c = await Details.SingleOrDefaultAsync(x => x.Id == id, ct);
         Require(c is not null, "Không tìm thấy khóa học."); CanRead(c!);
+        if (Actor.Role == Role.Learner)
+        {
+            Rule(HasConfirmedCourseAccess(c!), "PAYMENT_REQUIRED",
+                "Vui lòng hoàn tất thanh toán để truy cập không gian lớp học.",
+                HttpStatusCode.Forbidden);
+        }
+        else if (Actor.Role == Role.Mentor)
+        {
+            Rule(IsActiveRosterEnrollment(c!), "ENROLLMENT_NOT_CONFIRMED",
+                "Chỉ được xem hồ sơ học viên đã ghi danh hợp lệ.",
+                HttpStatusCode.Forbidden);
+        }
         var effectivePolicy = c!.GroupPolicy;
         List<HomeworkAssignment>? cohortAssignments = null;
+        CohortLifecycleMeta? cohortMeta = null;
         if (c.CohortId.HasValue)
         {
+            var nowUtc = DateTime.UtcNow;
             effectivePolicy ??= groupPolicies is null
                 ? null
-                : await groupPolicies.GetEffectiveAsync(c.StartsAt ?? c.Cohort?.StartsAt ?? DateTime.UtcNow, ct);
+                : await groupPolicies.GetEffectiveAsync(c.StartsAt ?? c.Cohort?.StartsAt ?? nowUtc, ct);
             cohortAssignments = await uow.HomeworkAssignments.Query().AsNoTracking()
                 .Include(h => h.Submission)
                 .Where(h => !h.IsDeleted && h.StudyCourseId == c.Id)
                 .ToListAsync(ct);
+            var cohortMetaById = await LoadCohortLifecycleMetaAsync([c.CohortId.Value], nowUtc, ct);
+            cohortMeta = cohortMetaById.GetValueOrDefault(c.CohortId.Value);
         }
-        return View(c, await uow.StudyCourses.Query().AnyAsync(x => x.RetakeOfId == id, ct), effectivePolicy, cohortAssignments);
+        return View(
+            c,
+            await uow.StudyCourses.Query().AnyAsync(x => x.RetakeOfId == id, ct),
+            effectivePolicy,
+            cohortAssignments,
+            includeInternalDetails: true,
+            includeFinancialDetails: Actor.Role != Role.Mentor,
+            cohortMeta: cohortMeta);
     });
+
+    private sealed record CohortLifecycleMeta(
+        string? CohortStatus,
+        int? CohortCapacity,
+        int CohortConfirmedEnrolledCount,
+        int CohortMinLearnersToStart,
+        DateTime? CohortEnrollmentClosesAtUtc,
+        int? CohortCourseDurationWeeks,
+        DateTime? CohortFirstSessionStartUtc);
+
+    private async Task<Dictionary<int, CohortLifecycleMeta>> LoadCohortLifecycleMetaAsync(
+        IReadOnlyCollection<int> cohortIds,
+        DateTime nowUtc,
+        CancellationToken ct)
+    {
+        if (cohortIds.Count == 0)
+            return new Dictionary<int, CohortLifecycleMeta>();
+
+        var cohorts = await uow.StudyCohorts.Query().AsNoTracking()
+            .Include(x => x.Plan)
+            .Include(x => x.GroupPolicy)
+            .Include(x => x.Enrollments)
+            .Include(x => x.Sessions).ThenInclude(s => s.Availability).ThenInclude(a => a.GroupPolicy)
+            .AsSplitQuery()
+            .Where(x => cohortIds.Contains(x.Id))
+            .ToListAsync(ct);
+
+        if (cohorts.Count == 0)
+            return new Dictionary<int, CohortLifecycleMeta>();
+
+        var proposalIds = cohorts
+            .Where(x => x.SourceProposalId.HasValue)
+            .Select(x => x.SourceProposalId!.Value)
+            .Distinct()
+            .ToList();
+
+        var proposalWeeksById = proposalIds.Count == 0
+            ? new Dictionary<int, int>()
+            : await uow.MentorTeachingProposals.Query().AsNoTracking()
+                .Where(p => proposalIds.Contains(p.Id) && p.CourseDurationWeeks > 0)
+                .ToDictionaryAsync(p => p.Id, p => p.CourseDurationWeeks, ct);
+
+        var fallbackPolicy = cohorts.Any(x => x.GroupPolicy is null) && groupPolicies is not null
+            ? await groupPolicies.GetEffectiveAsync(nowUtc, ct)
+            : null;
+
+        var result = new Dictionary<int, CohortLifecycleMeta>(cohorts.Count);
+        foreach (var x in cohorts)
+        {
+            var effectiveCapacity = x.CapacitySnapshot is int snapCap && snapCap > 0 ? snapCap : x.Capacity;
+            var confirmedCount = x.Enrollments
+                .Where(c => c.PaymentStatus is "Paid" or "PartiallyRefunded"
+                    && c.Status is "Ready" or "Active" or "Completed")
+                .Select(c => c.LearnerId)
+                .Distinct()
+                .Count();
+
+            var cohortPolicy = x.GroupPolicy
+                ?? x.Sessions.Select(s => s.Availability.GroupPolicy).FirstOrDefault(p => p is not null)
+                ?? fallbackPolicy;
+
+            var minLearnersToStart = Math.Max(1, cohortPolicy?.MinLearnersToStart ?? 1);
+            var enrollmentClosesAtUtc = EnrollmentCutoffUtc(x, fallbackPolicy);
+            var firstSessionStartUtc = x.Sessions
+                .Where(s => s.Availability is not null
+                    && s.Availability.IsApproved
+                    && !s.Availability.IsDeleted
+                    && s.Availability.RejectedAt == null)
+                .OrderBy(s => s.Availability.StartTime)
+                .Select(s => (DateTime?)s.Availability.StartTime)
+                .FirstOrDefault() ?? x.StartsAt;
+
+            var courseDurationWeeks = x.SourceProposalId.HasValue
+                && proposalWeeksById.TryGetValue(x.SourceProposalId.Value, out var pw)
+                && pw > 0
+                ? pw
+                : (x.Plan?.SessionsPerWeek > 0 && x.Plan.TotalSessions is int pts && pts > 0
+                    ? Math.Max(1, (int)Math.Ceiling((double)pts / x.Plan.SessionsPerWeek))
+                    : cohortPolicy?.CourseDurationWeeks);
+
+            result[x.Id] = new CohortLifecycleMeta(
+                CohortStatus: x.Status,
+                CohortCapacity: effectiveCapacity,
+                CohortConfirmedEnrolledCount: confirmedCount,
+                CohortMinLearnersToStart: minLearnersToStart,
+                CohortEnrollmentClosesAtUtc: enrollmentClosesAtUtc,
+                CohortCourseDurationWeeks: courseDurationWeeks,
+                CohortFirstSessionStartUtc: firstSessionStartUtc);
+        }
+
+        return result;
+    }
 
     private static object View(
         StudyCourse c,
         bool retaken,
         MentorGroupPolicy? policy = null,
-        IReadOnlyCollection<HomeworkAssignment>? cohortAssignments = null) => new
+        IReadOnlyCollection<HomeworkAssignment>? cohortAssignments = null,
+        bool includeInternalDetails = true,
+        bool includeFinancialDetails = true,
+        CohortLifecycleMeta? cohortMeta = null) => new
     {
         c.Id, c.Name, c.PlanId, c.PlanRevision, c.CohortId, CohortName = c.Cohort?.Name,
         c.SessionType, c.TargetExamDate, c.CertificateLevelId, Level = c.CertificateLevel?.Code,
-        c.LearnerId, LearnerName = $"{c.Learner?.FirstName} {c.Learner?.LastName}".Trim(), c.MentorId, MentorName = $"{c.Mentor?.FirstName} {c.Mentor?.LastName}".Trim(),
-        c.DurationMonths, c.SessionsPerWeek, c.TotalSessions, c.SessionMinutes, c.Amount, c.Currency, c.PaymentStatus,
-        c.Status, c.StartsAt, c.EndsAt, c.CompletedAt, c.RetakeOfId, c.RetakeClaimDays, c.CheckoutUrl, c.PaymentExpiresAt,
-        c.PaymentConfirmedAtUtc, c.PaymentReviewReason, PaymentState = PaymentStateOf(c, DateTime.UtcNow),
+        c.LearnerId, LearnerName = $"{c.Learner?.FirstName} {c.Learner?.LastName}".Trim(),
+        LearnerAvatarUrl = c.Learner?.AvatarUrl,
+        EnrolledAtUtc = c.PaymentConfirmedAtUtc ?? c.CreatedAt,
+        c.MentorId, MentorName = $"{c.Mentor?.FirstName} {c.Mentor?.LastName}".Trim(),
+        MentorAvatarUrl = c.Mentor?.AvatarUrl,
+        CohortStatus = cohortMeta?.CohortStatus ?? c.Cohort?.Status,
+        CohortCapacity = cohortMeta?.CohortCapacity ?? c.CapacitySnapshot ?? c.Cohort?.CapacitySnapshot ?? c.Cohort?.Capacity,
+        CohortConfirmedEnrolledCount = cohortMeta?.CohortConfirmedEnrolledCount,
+        CohortMinLearnersToStart = cohortMeta?.CohortMinLearnersToStart,
+        CohortEnrollmentClosesAtUtc = cohortMeta?.CohortEnrollmentClosesAtUtc,
+        CohortCourseDurationWeeks = cohortMeta?.CohortCourseDurationWeeks,
+        CohortFirstSessionStartUtc = cohortMeta?.CohortFirstSessionStartUtc,
+        c.DurationMonths, c.SessionsPerWeek, c.TotalSessions, c.SessionMinutes,
+        Amount = includeFinancialDetails ? c.Amount : 0m,
+        Currency = includeFinancialDetails ? c.Currency : null,
+        PaymentStatus = includeFinancialDetails ? c.PaymentStatus : null,
+        RefundedAmount = includeFinancialDetails ? c.RefundedAmount : 0m,
+        RefundedAtUtc = includeFinancialDetails ? c.RefundedAtUtc : (DateTime?)null,
+        c.Status, c.StartsAt, c.EndsAt, c.CompletedAt, c.RetakeOfId, c.RetakeClaimDays,
+        CheckoutUrl = includeFinancialDetails ? c.CheckoutUrl : null,
+        PaymentExpiresAt = includeFinancialDetails ? c.PaymentExpiresAt : (DateTime?)null,
+        PaymentConfirmedAtUtc = includeFinancialDetails ? c.PaymentConfirmedAtUtc : (DateTime?)null,
+        PaymentReviewReason = includeFinancialDetails ? c.PaymentReviewReason : null,
+        PaymentState = includeFinancialDetails ? PaymentStateOf(c, DateTime.UtcNow) : null,
         c.MinimumHomeworkPercent, c.MaximumAbsencePercent,
-        Eligibility = CourseRetakePolicy.Evaluate(c, retaken, policy, cohortAssignments),
-        Sessions = c.Sessions.OrderBy(x => x.Number).ThenBy(x => x.Attempt).Select(x => new {
-            x.Id, x.Number, x.Attempt, x.ScheduledAt, x.Status, x.Note, x.MeetingUrl, x.ConfirmedAt }),
-        Homework = c.Homework.OrderBy(x => x.DueAt).Select(x => new {
-            x.Id, x.Title, x.Instructions, x.Required, x.DueAt, x.Submission, x.SubmittedAt, x.Passed, x.ReviewedAt, x.Feedback }),
-        Requests = c.RetakeRequests.OrderByDescending(x => x.Id).Select(x => new {
-            x.Id, x.Status, x.ExamDate, x.ResultPublishedAt, x.Reason, x.SubmittedAt, x.ReviewedAt, x.Response,
-            x.EligibilitySnapshot, x.MentorSupportPlan, x.MentorSupportPlanAtUtc }),
-        Audit = c.Audit.OrderByDescending(x => x.Id).Select(x => new { x.ActorId, x.Action, x.Detail, x.At })
+        Eligibility = includeInternalDetails ? CourseRetakePolicy.Evaluate(c, retaken, policy, cohortAssignments) : null,
+        Sessions = includeInternalDetails
+            ? c.Sessions.OrderBy(x => x.Number).ThenBy(x => x.Attempt).Select(x => (object)new {
+                x.Id, x.Number, x.Attempt, x.AvailabilityId, x.ScheduledAt, x.Status, x.Note, x.MeetingUrl, x.ConfirmedAt }).ToArray()
+            : [],
+        Homework = includeInternalDetails
+            ? c.Homework.OrderBy(x => x.DueAt).Select(x => (object)new {
+                x.Id, x.Title, x.Instructions, x.Required, x.DueAt, x.Submission, x.SubmittedAt, x.Passed, x.ReviewedAt, x.Feedback }).ToArray()
+            : [],
+        Requests = includeInternalDetails
+            ? c.RetakeRequests.OrderByDescending(x => x.Id).Select(x => (object)new {
+                x.Id, x.Status, x.ExamDate, x.ResultPublishedAt, x.Reason, x.SubmittedAt, x.ReviewedAt, x.Response,
+                x.EligibilitySnapshot, x.MentorSupportPlan, x.MentorSupportPlanAtUtc }).ToArray()
+            : [],
+        Audit = includeInternalDetails
+            ? c.Audit.OrderByDescending(x => x.Id).Select(x => (object)new { x.ActorId, x.Action, x.Detail, x.At }).ToArray()
+            : []
     };
 
     public async Task<ApiResponse<object>> EnrollCohortAsync(int cohortId, EnrollCohortRequest r, CancellationToken ct)
@@ -305,7 +518,7 @@ public sealed partial class StudyCourseService(IUnitOfWork uow, IClaimService cl
             }
             var p = await uow.StudyCoursePlans.GetByIdAsync(r.PlanId, token);
             Require(p is { IsPublished: true, SessionMinutes: not null, TotalSessions: not null } && p.Price > 0, "Gói chưa đủ cấu hình để mua.");
-            Rule(p!.SessionType == "Group" && r.CohortId.HasValue, "INDIVIDUAL_COURSE_DISCONTINUED", "Mua khóa học cá nhân 1-1 đã ngừng hỗ trợ. Vui lòng chọn lớp học nhóm (Cohort).", HttpStatusCode.Conflict);
+            Rule(p!.SessionType == "Group" && r.CohortId.HasValue, "INDIVIDUAL_COURSE_DISCONTINUED", "Khóa học cá nhân 1-1 đã ngừng hỗ trợ. Vui lòng chọn lớp học nhóm.", HttpStatusCode.Conflict);
             Require(!p!.TargetExamDate.HasValue || p.TargetExamDate > DateTime.UtcNow, "Gói đã qua kỳ thi mục tiêu.");
             Require(await uow.CertificateLevels.Query().AnyAsync(x => x.Id == p!.CertificateLevelId && !x.IsDeleted
                 && !x.CertificateType.IsDeleted && x.CertificateType.IsActive, token), "Cấp độ không còn mở đăng ký.");
@@ -322,13 +535,15 @@ public sealed partial class StudyCourseService(IUnitOfWork uow, IClaimService cl
                 Require(r.CohortId.HasValue, "Chọn lớp có lịch cố định.");
                 await uow.StudyCourses.LockScheduleAsync(Actor.Id, Actor.Id, token);
                 await uow.StudyCourses.LockCohortAsync(r.CohortId!.Value, token);
-                cohort = await uow.StudyCohorts.Query().Include(x => x.Sessions).ThenInclude(x => x.Availability).ThenInclude(x => x.GroupPolicy)
+                cohort = await uow.StudyCohorts.Query()
+                    .Include(x => x.GroupPolicy)
+                    .Include(x => x.Sessions).ThenInclude(x => x.Availability).ThenInclude(x => x.GroupPolicy)
                     .Include(x => x.Enrollments).SingleOrDefaultAsync(x => x.Id == r.CohortId.Value, token);
                 var now = DateTime.UtcNow;
                 const string closedMessage = "Lớp đã khóa đăng ký hoặc chưa mở đăng ký.";
                 Rule(cohort is not null && cohort.PlanId == p.Id && cohort.Status == "Published",
                     "COHORT_ENROLLMENT_CLOSED", closedMessage, HttpStatusCode.Conflict);
-                Rule(EnrollmentCutoffUtc(cohort!) > now, "COHORT_ENROLLMENT_CLOSED", closedMessage, HttpStatusCode.Conflict);
+                Rule(EnrollmentCutoffUtc(cohort!, holdPolicy) > now, "COHORT_ENROLLMENT_CLOSED", closedMessage, HttpStatusCode.Conflict);
                 Rule(!cohort!.Sessions.Any() || cohort.Sessions.Min(s => s.Availability.StartTime) > now,
                     "COHORT_ENROLLMENT_CLOSED", closedMessage, HttpStatusCode.Conflict);
                 // Bấm lặp (mã giao dịch mới) khi đơn cũ còn hạn: trả lại đơn đang chờ, không tạo checkout trùng.
@@ -357,7 +572,7 @@ public sealed partial class StudyCourseService(IUnitOfWork uow, IClaimService cl
                     var policy = policySlots[0].GroupPolicy;
                     if (policy is not null)
                     {
-                        Rule(cohort.Capacity <= policy.MaxLearners, "COHORT_POLICY_CAPACITY",
+                        Rule((cohort.CapacitySnapshot ?? cohort.Capacity) <= policy.MaxLearners, "COHORT_POLICY_CAPACITY",
                             "Sĩ số lớp vượt giới hạn chính sách hiện hành.", HttpStatusCode.Conflict);
                         cohortPolicyId = policy.Id;
                         cohortPolicyVersion = policy.Version;
@@ -368,21 +583,26 @@ public sealed partial class StudyCourseService(IUnitOfWork uow, IClaimService cl
                         cohortPolicyVersion = cohort.PolicyVersionSnapshot;
                     }
                 }
-                cohortCapacitySnapshot = cohort.CapacitySnapshot ?? cohort.Capacity;
+                cohortCapacitySnapshot = cohort.CapacitySnapshot is int capSnap && capSnap > 0 ? capSnap : cohort.Capacity;
                 Rule(cohort.Sessions.All(s => s.Availability.IsApproved && !s.Availability.IsDeleted && s.Availability.RejectedAt == null && s.Availability.ChangeRequestedAt == null),
                     "COHORT_SCHEDULE_PENDING", "Lịch lớp đang chờ xử lý điều chỉnh.", HttpStatusCode.Conflict);
-                Rule(cohort.Enrollments.Count(x => ReservesSeat(x, now)) < cohort.Capacity,
-                    "COHORT_FULL", "Lớp vừa hết chỗ.", HttpStatusCode.Conflict);
+                var confirmedCount = cohort.Enrollments.Count(x => x.PaymentStatus is "Paid" or "PartiallyRefunded"
+                    && x.Status is not ("PaymentReview" or "Cancelled" or "Transferred" or "PendingPayment" or "PaymentExpired" or "PaymentFailed"));
+                var reservedCount = cohort.Enrollments.Count(x => ReservesSeat(x, now));
+                if (confirmedCount >= cohortCapacitySnapshot)
+                    Rule(false, "COHORT_FULL", "Lớp học đã đủ sĩ số.", HttpStatusCode.Conflict);
+                else if (reservedCount >= cohortCapacitySnapshot)
+                    Rule(false, "COHORT_FULL", "Tất cả chỗ còn lại đang được giữ chờ thanh toán. Vui lòng thử lại sau ít phút.", HttpStatusCode.Conflict);
                 Rule(!cohort.Enrollments.Any(x => x.LearnerId == Actor.Id && ReservesSeat(x, now)),
                     "COHORT_ALREADY_ENROLLED", "Bạn đã đăng ký hoặc đang giữ chỗ lớp này.", HttpStatusCode.Conflict);
                 Rule(cohort.Sessions.Count == p.TotalSessions && cohort.Sessions.All(s => (s.Availability.EndTime - s.Availability.StartTime).TotalMinutes == p.SessionMinutes),
-                    "COHORT_PLAN_CHANGED", "Gói đã thay đổi; Admin cần kiểm tra lại lớp.", HttpStatusCode.Conflict);
+                    "COHORT_PLAN_CHANGED", "Gói học đã thay đổi; Quản trị viên cần kiểm tra lại lớp.", HttpStatusCode.Conflict);
                 Rule(!await HasLearnerConflictAsync(Actor.Id, cohort.Sessions.Select(s => s.Availability).ToList(), 0, token),
                     "COHORT_SCHEDULE_CONFLICT", "Bạn đã có lịch hoặc đang giữ chỗ trùng giờ.", HttpStatusCode.Conflict);
                 if (entitlementMode.RequiresCheckout)
                 {
                     // Giữ chỗ không được kéo dài quá mốc khóa đăng ký của lớp.
-                    var cutoff = EnrollmentCutoffUtc(cohort);
+                    var cutoff = EnrollmentCutoffUtc(cohort, holdPolicy);
                     Rule(cutoff - now >= TimeSpan.FromMinutes(2), "COHORT_ENROLLMENT_CLOSED",
                         "Lớp sắp khóa đăng ký; không còn đủ thời gian để thanh toán.", HttpStatusCode.Conflict);
                     var hold = now.AddMinutes(holdMinutes);
@@ -391,28 +611,34 @@ public sealed partial class StudyCourseService(IUnitOfWork uow, IClaimService cl
             }
             else Require(!r.CohortId.HasValue, "Gói 1–1 không đăng ký vào lớp nhóm.");
             var grantDirectEntitlement = cohort is not null && !entitlementMode.RequiresCheckout;
+            var authoritativePrice = cohort?.TotalTuitionSnapshot is decimal snapshotTotal && snapshotTotal > 0
+                ? snapshotTotal
+                : p.Price;
+            Require(authoritativePrice > 0 || grantDirectEntitlement, "Học phí lớp học chưa được cấu hình hợp lệ.");
             course = new StudyCourse { CohortId = cohort?.Id, MentorId = cohort?.MentorId, StartsAt = cohort?.StartsAt, EndsAt = cohort?.EndsAt,
                 SessionType = p.SessionType, TargetExamDate = p.TargetExamDate, LearnerId = Actor.Id, PurchaseKey = r.IdempotencyKey,
-                PlanId = p!.Id, Name = p.Name, CertificateLevelId = p.CertificateLevelId, PlanRevision = p.Revision,
+                PlanId = p!.Id, Name = cohort?.Name ?? p.Name, CertificateLevelId = p.CertificateLevelId, PlanRevision = p.Revision,
                 DurationMonths = p.DurationMonths, SessionsPerWeek = p.SessionsPerWeek, TotalSessions = p.TotalSessions!.Value,
                 SessionMinutes = p.SessionMinutes!.Value, RetakeClaimDays = p.RetakeClaimDays,
                 GroupPolicyId = cohortPolicyId ?? cohort?.GroupPolicyId,
                 PolicyVersionSnapshot = cohortPolicyVersion ?? cohort?.PolicyVersionSnapshot,
                 CapacitySnapshot = cohortCapacitySnapshot,
-                Amount = grantDirectEntitlement ? 0 : p.Price,
+                Amount = grantDirectEntitlement ? 0 : authoritativePrice,
                 Currency = "VND",
                 PaymentStatus = grantDirectEntitlement ? "Paid" : "Pending",
                 Status = grantDirectEntitlement ? "Active" : "PendingPayment",
                 PaymentReference = entitlementMode.EntitlementReference,
                 PaymentExpiresAt = grantDirectEntitlement ? null : checkoutExpiresAt ?? DateTime.UtcNow.AddMinutes(holdMinutes),
-                OrderSnapshot = cohort is null ? null : CohortOrderSnapshot(cohort, p, cohortPolicyId, cohortPolicyVersion,
+                OrderSnapshot = cohort is null ? null : CohortOrderSnapshot(cohort, p, authoritativePrice, cohortPolicyId, cohortPolicyVersion,
                     grantDirectEntitlement ? "AdminEntitlement" : "PayOS", grantDirectEntitlement ? null : holdMinutes) };
             if (grantDirectEntitlement && cohort is not null)
                 AddCohortSessions(course, cohort);
+            var retakeThresholdOp = holdPolicy?.RemediationThresholdComparison ?? ">";
+            var retakeThresholdPct = holdPolicy?.RemediationCompletionThresholdPercent ?? 90m;
             Audit(course, grantDirectEntitlement ? "CohortEnrolled" : "PurchaseCreated",
                 grantDirectEntitlement
                     ? $"Ghi danh lớp #{cohort!.Id} theo quyền học được duyệt ({entitlementMode.EntitlementReference ?? "entitlement"})."
-                    : "Đóng băng gói. Quyền học lại một lần xét minh chứng nộp BTVN đúng hạn >=90%; không xét tỷ lệ nghỉ.");
+                    : $"Đã lưu thông tin gói học. Quyền học lại một lần xét minh chứng nộp bài tập về nhà đúng hạn ({retakeThresholdOp} {retakeThresholdPct:0.##}%); không xét tỷ lệ nghỉ.");
             await uow.StudyCourses.AddAsync(course, token); await uow.SaveChangesAsync(token);
             if (grantDirectEntitlement && cohort is not null
                 && !string.IsNullOrWhiteSpace(entitlementMode.EntitlementReference)
@@ -438,7 +664,7 @@ public sealed partial class StudyCourseService(IUnitOfWork uow, IClaimService cl
             }
         }, ct);
         RequireConflict(course!.Id < 100_000_000, "Mã đơn vượt giới hạn.");
-        RequireConflict(course.PaymentStatus != "Cancelled", "Đơn ghi danh đã hủy; hãy tạo yêu cầu mới.");
+        RequireConflict(course.PaymentStatus is not ("Cancelled" or "Expired" or "Failed"), "Đơn ghi danh đã hủy hoặc hết hạn; hãy tạo yêu cầu mới.");
         RequireConflict(course.PaymentStatus != "Pending" || course.PaymentExpiresAt > DateTime.UtcNow, "Đơn hết hạn. Hãy tạo đơn mới.");
         if (!entitlementMode.RequiresCheckout)
         {
@@ -457,9 +683,9 @@ public sealed partial class StudyCourseService(IUnitOfWork uow, IClaimService cl
             if (state.CheckoutUrl is null && state.PaymentStatus == "Pending")
             {
                 var root = settings.FrontendBaseUrl.TrimEnd('/');
-                // Link PayOS hết hạn cùng lúc với thời gian giữ chỗ.
+                // Link PayOS hết hạn cùng lúc với thời gian giữ chỗ; mô tả ngắn gọn <= 9 ký tự chuẩn ngân hàng.
                 var checkout = await payments.CreatePaymentLinkAsync(700_000_000L + course.Id, (int)course.Amount,
-                    $"COURSE {course.Id}", root + "/my-courses", root + "/my-courses", course.PaymentExpiresAt, token);
+                    $"RP-C{course.Id}", root + $"/my-courses/?courseId={course.Id}&paymentReturn=1", root + $"/my-courses/?courseId={course.Id}&paymentCancel=1", course.PaymentExpiresAt, token);
                 // Phản hồi rỗng/không hợp lệ: đơn vẫn Pending; thử lại cùng mã giao dịch sẽ tạo lại link.
                 Rule(checkout is not null && Uri.TryCreate(checkout.CheckoutUrl, UriKind.Absolute, out var url) && url.Scheme == Uri.UriSchemeHttps,
                     "PAYMENT_GATEWAY_INVALID_LINK", "Cổng thanh toán trả link không hợp lệ. Vui lòng thử lại.", HttpStatusCode.BadGateway);
@@ -472,7 +698,7 @@ public sealed partial class StudyCourseService(IUnitOfWork uow, IClaimService cl
     });
 
     // Điều khoản đơn hàng bất biến chụp tại thời điểm checkout (giá, lịch, sức chứa, phiên bản chính sách).
-    private static string CohortOrderSnapshot(StudyCohort cohort, StudyCoursePlan plan, int? policyId, int? policyVersion, string checkoutKind,
+    private static string CohortOrderSnapshot(StudyCohort cohort, StudyCoursePlan plan, decimal authoritativePrice, int? policyId, int? policyVersion, string checkoutKind,
         int? holdMinutes = null)
     {
         var hasSessions = cohort.Sessions.Count > 0;
@@ -483,7 +709,9 @@ public sealed partial class StudyCourseService(IUnitOfWork uow, IClaimService cl
             cohortName = cohort.Name,
             planId = plan.Id,
             planRevision = plan.Revision,
-            price = plan.Price,
+            price = authoritativePrice,
+            tuitionPerSessionSnapshot = cohort.TuitionPerSessionSnapshot,
+            tuitionPolicyVersionSnapshot = cohort.TuitionPolicyVersionSnapshot,
             currency = "VND",
             totalSessions = plan.TotalSessions,
             sessionMinutes = plan.SessionMinutes,
@@ -503,13 +731,14 @@ public sealed partial class StudyCourseService(IUnitOfWork uow, IClaimService cl
     {
         if (Actor.Role != Role.Learner) throw new UnauthorizedAccessException();
         object result = new { Id = id, Status = "Cancelled" };
+        var shouldVoidGatewayLink = false;
         await uow.ExecuteInTransactionAsync(async token =>
         {
             var locked = await uow.StudyCourses.LockAsync(id, token);
             Require(locked is not null && locked.CohortId.HasValue && locked.LearnerId == Actor.Id,
                 "Không tìm thấy lượt ghi danh của bạn.");
             if (locked!.Status == "Cancelled" && locked.PaymentStatus == "Cancelled") return;
-            RequireConflict(locked.PaymentStatus == "Pending", "Đơn đã thanh toán cần Admin xem xét; không tự hủy hoặc hoàn tiền.");
+            RequireConflict(locked.PaymentStatus == "Pending", "Đơn đã thanh toán cần Quản trị viên xem xét; không thể tự hủy hoặc hoàn tiền.");
             locked.Status = "Cancelled";
             locked.PaymentStatus = "Cancelled";
             locked.CancelledAtUtc = DateTime.UtcNow;
@@ -517,7 +746,10 @@ public sealed partial class StudyCourseService(IUnitOfWork uow, IClaimService cl
             locked.PaymentExpiresAt = DateTime.UtcNow;
             Audit(locked, "PendingEnrollmentCancelled", "Học viên hủy giữ chỗ trước khi thanh toán; không phát sinh hoàn tiền.");
             await uow.SaveChangesAsync(token);
+            shouldVoidGatewayLink = locked.Amount > 0;
         }, ct);
+        if (shouldVoidGatewayLink)
+            await TryVoidPaymentLinkBestEffortAsync(700_000_000L + id, "Học viên hủy giữ chỗ trước khi thanh toán", ct);
         return result;
     });
 
@@ -525,6 +757,7 @@ public sealed partial class StudyCourseService(IUnitOfWork uow, IClaimService cl
     {
         if (Actor.Role is not (Role.Learner or Role.Admin)) throw new UnauthorizedAccessException();
         object result = new { Id = id, Status = "Cancelled" };
+        var shouldVoidGatewayLink = false;
         await uow.ExecuteInTransactionAsync(async token =>
         {
             var locked = await uow.StudyCourses.LockAsync(id, token);
@@ -549,35 +782,23 @@ public sealed partial class StudyCourseService(IUnitOfWork uow, IClaimService cl
                 course.CancellationReason = request?.Reason?.Trim() ?? "Hủy giữ chỗ trước khi thanh toán.";
                 Audit(course, "PendingEnrollmentCancelled", course.CancellationReason);
                 await uow.SaveChangesAsync(token);
+                shouldVoidGatewayLink = course.Amount > 0;
                 result = new { course.Id, course.CohortId, course.Status, SeatReleased = true };
                 return;
             }
-            RequireConflict(course.Status == "Active" && course.PaymentStatus == "Paid",
-                "Chỉ được hủy ghi danh đang hoạt động trước giờ khóa.");
+
+            // Học viên không thể tự hủy ghi danh sau khi đã thanh toán và ghi danh có hiệu lực; Admin xử lý chuyển lớp/hoàn tiền/ngoại lệ.
+            Rule(Actor.Role == Role.Admin,
+                "LEARNER_SELF_CANCEL_DISABLED",
+                "Học viên không thể tự hủy ghi danh sau khi đã thanh toán. Vui lòng gửi yêu cầu hỗ trợ hoặc chuyển lớp để Quản trị viên xem xét.",
+                HttpStatusCode.Forbidden);
+
+            RequireConflict(course.Status is "Active" or "Ready" && course.PaymentStatus is "Paid" or "PartiallyRefunded",
+                "Chỉ được hủy ghi danh còn hiệu lực.");
             await uow.StudyCourses.LockCohortAsync(course.CohortId!.Value, token);
-            var cohort = await uow.StudyCohorts.Query()
-                .Include(x => x.Sessions).ThenInclude(x => x.Availability).ThenInclude(x => x.GroupPolicy)
-                .Include(x => x.GroupPolicy)
-                .SingleAsync(x => x.Id == course.CohortId.Value, token);
-            var firstApproved = cohort.Sessions
-                .Where(s => s.Availability.IsApproved && !s.Availability.IsDeleted && s.Availability.RejectedAt == null)
-                .OrderBy(s => s.Availability.StartTime)
-                .Select(s => s.Availability)
-                .FirstOrDefault();
-            var startsAt = firstApproved?.StartTime ?? cohort.StartsAt;
-            var leadHours = firstApproved?.GroupPolicy?.CancellationLeadHours
-                ?? cohort.GroupPolicy?.CancellationLeadHours ?? 24;
             var now = DateTime.UtcNow;
-            if (Actor.Role != Role.Admin)
-            {
-                // Quyết định chính thức: Học viên không tự hủy khóa đang diễn ra; Admin xử lý các trường hợp pháp lý/hoàn tiền.
-                Rule(startsAt > now, "COHORT_CANCELLATION_NOT_ALLOWED",
-                    "Khóa học đã bắt đầu; học viên không thể tự hủy. Vui lòng liên hệ Admin nếu cần hỗ trợ.", HttpStatusCode.Conflict);
-                RequireConflict(startsAt > now && (startsAt - now).TotalHours >= leadHours,
-                    $"Chỉ được hủy ghi danh trước giờ khai giảng ít nhất {leadHours} giờ.");
-            }
             var reasonText = string.IsNullOrWhiteSpace(request?.Reason)
-                ? $"Hủy ghi danh cá nhân bởi {Actor.Role}; giải phóng 1 chỗ trong lớp."
+                ? "Quản trị viên hủy ghi danh theo yêu cầu/ngoại lệ; giải phóng 1 chỗ trong lớp."
                 : request!.Reason!.Trim();
             Require(reasonText.Length <= 1000, "Lý do hủy tối đa 1000 ký tự.");
             course.Status = "Cancelled";
@@ -592,9 +813,25 @@ public sealed partial class StudyCourseService(IUnitOfWork uow, IClaimService cl
             }
             // Không tự hoàn vào sổ cái vé tư vấn 1-1 hoặc hủy lịch của học viên khác.
             Audit(course, "CohortEnrollmentCancelled", reasonText);
+            if (course.PaymentStatus is "Paid" or "PartiallyRefunded")
+            {
+                var admins = await ActiveAdminIdsAsync(token);
+                QueueNotifications(
+                    $"cohort-cancel-refund-review:{course.Id}",
+                    "StudyCourse",
+                    course.Id.ToString(),
+                    admins.Select(adminId => (
+                        adminId,
+                        "Quản trị viên hủy ghi danh đã thanh toán",
+                        $"Ghi danh khóa \"{course.Name}\" đã được hủy bởi Quản trị viên. Vui lòng kiểm tra giao dịch hoàn tiền nếu có.",
+                        "PaymentReview",
+                        (string?)$"/admin/payments?stream=study_course&id={course.Id}")));
+            }
             await uow.SaveChangesAsync(token);
             result = new { course.Id, course.CohortId, course.Status, SeatReleased = true };
         }, ct);
+        if (shouldVoidGatewayLink)
+            await TryVoidPaymentLinkBestEffortAsync(700_000_000L + id, "Học viên hủy giữ chỗ trước khi thanh toán", ct);
         return result;
     });
 
@@ -623,10 +860,10 @@ public sealed partial class StudyCourseService(IUnitOfWork uow, IClaimService cl
                 "Ghi danh này không phải đơn mua qua cổng thanh toán.", HttpStatusCode.Conflict);
             Rule(orderCode == 700_000_000L + courseId, "PAYMENT_ORDER_MISMATCH", "Mã thanh toán không khớp đơn mua.", HttpStatusCode.Conflict);
             Rule(amount == c.Amount, "PAYMENT_AMOUNT_MISMATCH", "Số tiền không khớp đơn mua.", HttpStatusCode.Conflict);
-            if (c.PaymentStatus == "Paid")
+            if (c.PaymentStatus is "Paid" or "PartiallyRefunded" or "Refunded")
             {
-                // Webhook trùng lặp: không cấp quyền hoặc ghi danh lần hai.
-                result = new { Confirmed = true, Idempotent = true, c.Status };
+                // Webhook trùng lặp: không cấp quyền, ghi danh hoặc cộng doanh thu lần hai.
+                result = new { Confirmed = true, Idempotent = true, c.Status, c.PaymentStatus };
                 return;
             }
             var now = DateTime.UtcNow;
@@ -654,7 +891,7 @@ public sealed partial class StudyCourseService(IUnitOfWork uow, IClaimService cl
             {
                 c.Status = "PaymentReview";
                 c.PaymentReviewReason = "LATE_PAYMENT_AFTER_CANCEL_OR_FAILURE";
-                Audit(c, "CancelledEnrollmentPaidLate", $"Đã nhận tiền sau khi đơn bị hủy/thất bại/hết hạn ({source}); Admin xử lý, không tự kích hoạt quyền học.");
+                Audit(c, "CancelledEnrollmentPaidLate", $"Đã nhận thanh toán sau khi đơn bị hủy/thất bại/hết hạn ({source}); Quản trị viên sẽ xem xét xử lý, không tự kích hoạt quyền học.");
                 await QueuePaymentReviewNotificationsAsync(c, token);
                 await uow.SaveChangesAsync(token);
                 result = new { Confirmed = true, Idempotent = false, c.Status, c.PaymentReviewReason };
@@ -665,18 +902,22 @@ public sealed partial class StudyCourseService(IUnitOfWork uow, IClaimService cl
             {
                 await uow.StudyCourses.LockScheduleAsync(c.LearnerId, c.LearnerId, token);
                 await uow.StudyCourses.LockCohortAsync(c.CohortId.Value, token);
-                var cohort = await uow.StudyCohorts.Query().Include(x => x.Plan).Include(x => x.Enrollments)
+                var cohort = await uow.StudyCohorts.Query()
+                    .Include(x => x.GroupPolicy)
+                    .Include(x => x.Plan)
+                    .Include(x => x.Enrollments)
                     .Include(x => x.Sessions).ThenInclude(x => x.Availability).ThenInclude(x => x.GroupPolicy)
                     .SingleAsync(x => x.Id == c.CohortId.Value, token);
+                var fallbackHoldPolicy = groupPolicies is null ? null : await groupPolicies.GetEffectiveAsync(now, token);
                 var alreadyStarted = cohort.Sessions.Any() && cohort.Sessions.Min(s => s.Availability.StartTime) <= now;
                 string? reviewReason = null;
                 if (!(c.PaymentExpiresAt > now)) reviewReason = "RESERVATION_EXPIRED";
                 else if (cohort.Status != "Published") reviewReason = "COHORT_NOT_PUBLISHED";
-                else if (EnrollmentCutoffUtc(cohort) <= now) reviewReason = "ENROLLMENT_CUTOFF_PASSED";
+                else if (EnrollmentCutoffUtc(cohort, fallbackHoldPolicy) <= now) reviewReason = "ENROLLMENT_CUTOFF_PASSED";
                 else if (alreadyStarted) reviewReason = "COHORT_ALREADY_STARTED";
                 else if (cohort.Enrollments.Any(x => x.Id != c.Id && x.LearnerId == c.LearnerId && ReservesSeat(x, now)))
                     reviewReason = "DUPLICATE_ENROLLMENT";
-                else if (cohort.Enrollments.Count(x => x.Id != c.Id && ReservesSeat(x, now)) >= cohort.Capacity)
+                else if (cohort.Enrollments.Count(x => x.Id != c.Id && ReservesSeat(x, now)) >= (cohort.CapacitySnapshot ?? cohort.Capacity))
                     reviewReason = "COHORT_FULL";
                 else if (await HasLearnerConflictAsync(c.LearnerId, cohort.Sessions.Select(s => s.Availability).ToList(), c.Id, token))
                     reviewReason = "SCHEDULE_CONFLICT";
@@ -686,7 +927,7 @@ public sealed partial class StudyCourseService(IUnitOfWork uow, IClaimService cl
                     c.Status = "PaymentReview";
                     c.PaymentReviewReason = reviewReason;
                     Audit(c, "PaidEnrollmentUnresolved",
-                        $"Đã nhận tiền ({source}) nhưng suất không còn hợp lệ: {reviewReason}. Không cấp quyền học; Admin xử lý hoàn tiền/đổi lớp.");
+                        $"Đã nhận thanh toán ({source}) nhưng suất học không còn hợp lệ: {reviewReason}. Chưa cấp quyền học; Quản trị viên sẽ xem xét hoàn tiền hoặc chuyển lớp.");
                     await QueuePaymentReviewNotificationsAsync(c, token);
                 }
                 else
@@ -711,7 +952,47 @@ public sealed partial class StudyCourseService(IUnitOfWork uow, IClaimService cl
                     }
                     AddCohortSessions(c, cohort);
                     Audit(c, "CohortPurchaseConfirmed",
-                        $"Xác nhận thanh toán đơn PayOS {orderCode} ({source}); ghi danh lớp #{cohort.Id} và cấp quyền PURCHASE-{c.Id}.");
+                        $"Xác nhận thanh toán đơn PayOS {orderCode} ({source}); ghi danh lớp \"{cohort.Name}\" và cấp quyền PURCHASE-{c.Id}.");
+
+                    var learnerInfo = await uow.UserAccounts.Query().AsNoTracking()
+                        .Where(u => u.Id == c.LearnerId)
+                        .Select(u => new { u.FirstName, u.LastName, u.Email })
+                        .FirstOrDefaultAsync(token);
+                    var learnerDisplay = learnerInfo is null
+                        ? "Một học viên"
+                        : $"{learnerInfo.FirstName} {learnerInfo.LastName}".Trim();
+                    if (string.IsNullOrWhiteSpace(learnerDisplay)) learnerDisplay = learnerInfo?.Email ?? "Một học viên";
+
+                    var enrollmentNotifs = new List<object>
+                    {
+                        new
+                        {
+                            UserId = c.LearnerId,
+                            Title = "Đăng ký lớp học thành công",
+                            Message = $"Bạn đã thanh toán và ghi danh thành công vào lớp \"{cohort.Name}\". Lịch học đã sẵn sàng trong mục Khóa học của tôi.",
+                            Type = "CourseEnrollment",
+                            LinkUrl = $"/my-courses/?courseId={c.Id}",
+                        },
+                        new
+                        {
+                            UserId = cohort.MentorId,
+                            Title = "Có học viên mới ghi danh lớp học",
+                            Message = $"{learnerDisplay} đã hoàn tất thanh toán và tham gia lớp \"{cohort.Name}\".",
+                            Type = "CohortEnrollment",
+                            LinkUrl = $"/mentor-study-courses/{cohort.Id}/",
+                        },
+                    };
+                    uow.AddMentorOutboxEvent(new MentorOutboxEvent
+                    {
+                        EventKey = $"cohort-enrollment-confirmed:{c.Id}",
+                        AggregateType = "StudyCourse",
+                        AggregateId = c.Id.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                        EventType = "CohortLearningNotification",
+                        EventVersion = 1,
+                        PayloadJson = JsonSerializer.Serialize(new { Notifications = enrollmentNotifs }),
+                        CreatedAtUtc = now,
+                        AvailableAtUtc = now,
+                    });
                 }
             }
             await uow.SaveChangesAsync(token);
@@ -755,7 +1036,7 @@ public sealed partial class StudyCourseService(IUnitOfWork uow, IClaimService cl
             };
 
             if (course.StartsAt.HasValue)
-                details.Add(new("Khai giảng dự kiến", EmailTemplateService.FormatVietnamDateTime(course.StartsAt.Value)));
+                details.Add(new("Bắt đầu dự kiến", EmailTemplateService.FormatVietnamDateTime(course.StartsAt.Value)));
 
             if (course.Mentor is not null)
                 details.Add(new("Giáo viên phụ trách", UserNameHelper.FormatFullName(course.Mentor.FirstName, course.Mentor.LastName)));
@@ -767,7 +1048,7 @@ public sealed partial class StudyCourseService(IUnitOfWork uow, IClaimService cl
                 $"Xác nhận ghi danh {courseTitle} · RikiPath",
                 "Xác nhận ghi danh",
                 "Ghi danh khóa học thành công",
-                "Suất học của bạn trên RikiPath đã được xác nhận. Bạn có thể xem lịch học từng buổi và chuẩn bị trước khi khai giảng.",
+                "Suất học của bạn trên RikiPath đã được xác nhận. Bạn có thể xem lịch học từng buổi và chuẩn bị trước khi bắt đầu.",
                 courseTitle,
                 details,
                 SakuraEmailTone.Success,
@@ -793,30 +1074,46 @@ public sealed partial class StudyCourseService(IUnitOfWork uow, IClaimService cl
         if (c!.PaymentStatus != "Pending" || c.Amount <= 0) return CoursePaymentState(c, false);
         // Chỉ tin trạng thái truy vấn server-to-server có xác thực từ PayOS; redirect phía client không phải bằng chứng.
         var orderCode = 700_000_000L + courseId;
-        PaymentLinkInformation info;
+        PaymentLinkInformation? info = null;
+        var gatewayUnavailable = false;
         try { info = await payments.GetPaymentInformationAsync(orderCode, ct); }
-        catch (Exception ex) when (ex is not OperationCanceledException) { return CoursePaymentState(c, true); }
-        var remoteStatus = info.Status?.Trim().ToUpperInvariant();
-        if (remoteStatus == "PAID" && info.AmountPaid >= c.Amount)
-            await ApplyVerifiedCoursePaymentAsync(courseId, true, info.Amount, info.OrderCode, info.PaymentLinkId, "PayOSStatusQuery", ct);
-        else if (remoteStatus == "CANCELLED")
-            await ApplyVerifiedCoursePaymentAsync(courseId, false, info.Amount, info.OrderCode, info.PaymentLinkId, "PayOSStatusQuery", ct);
-        else if (remoteStatus == "EXPIRED")
+        catch (Exception ex) when (ex is not OperationCanceledException) { gatewayUnavailable = true; }
+        var remoteStatus = info?.Status?.Trim().ToUpperInvariant();
+        if (info is not null && remoteStatus == "PAID" && info.AmountPaid >= c.Amount)
         {
+            await ApplyVerifiedCoursePaymentAsync(courseId, true, info.Amount, info.OrderCode, info.PaymentLinkId, "PayOSStatusQuery", ct);
+        }
+        else if (info is not null && remoteStatus == "CANCELLED")
+        {
+            await ApplyVerifiedCoursePaymentAsync(courseId, false, info.Amount, info.OrderCode, info.PaymentLinkId, "PayOSStatusQuery", ct);
+        }
+        else if (remoteStatus == "EXPIRED" || (c.PaymentExpiresAt.HasValue && c.PaymentExpiresAt.Value <= DateTime.UtcNow))
+        {
+            var expiredInDb = false;
             await uow.ExecuteInTransactionAsync(async token =>
             {
                 var locked = await uow.StudyCourses.LockAsync(courseId, token);
                 if (locked is null || locked.PaymentStatus != "Pending") return;
                 var now = DateTime.UtcNow;
+                if (remoteStatus != "EXPIRED" && !(locked.PaymentExpiresAt.HasValue && locked.PaymentExpiresAt.Value <= now)) return;
                 locked.PaymentStatus = "Expired";
                 locked.Status = "PaymentExpired";
                 if (!(locked.PaymentExpiresAt <= now)) locked.PaymentExpiresAt = now;
-                Audit(locked, "PaymentExpired", "PayOS xác nhận link thanh toán đã hết hạn; giải phóng giữ chỗ.");
+                Audit(locked, "PaymentExpired", remoteStatus == "EXPIRED"
+                    ? "PayOS xác nhận link thanh toán đã hết hạn; giải phóng giữ chỗ."
+                    : "Hết thời gian giữ chỗ thanh toán; giải phóng chỗ và vô hiệu hóa phiên thanh toán.");
                 await uow.SaveChangesAsync(token);
+                expiredInDb = true;
             }, ct);
+            if (expiredInDb && remoteStatus != "EXPIRED")
+                await TryVoidPaymentLinkBestEffortAsync(orderCode, "Hết thời gian giữ chỗ thanh toán", ct);
+        }
+        else if (gatewayUnavailable)
+        {
+            return CoursePaymentState(c, true);
         }
         var current = await uow.StudyCourses.Query().AsNoTracking().SingleAsync(x => x.Id == courseId, ct);
-        return CoursePaymentState(current, false);
+        return CoursePaymentState(current, gatewayUnavailable);
     });
 
     private static object CoursePaymentState(StudyCourse c, bool gatewayUnavailable) => new
@@ -847,7 +1144,9 @@ public sealed partial class StudyCourseService(IUnitOfWork uow, IClaimService cl
                 if ((slotMentorId ?? c.MentorId ?? c.Cohort?.MentorId) != Actor.Id) throw new UnauthorizedAccessException();
             }
             // Ghi danh đã chuyển lớp vẫn chốt được các buổi diễn ra trước thời điểm chuyển.
-            Require((c.Status == "Active" && c.PaymentStatus == "Paid")
+            if (c.Cohort is not null)
+                Require(c.Cohort.Status != "Cancelled" && c.Cohort.Status != "Draft", "Lớp học chưa hoạt động hoặc đã bị hủy; không thể điểm danh.");
+            Require((c.Status == "Active" && c.PaymentStatus is "Paid" or "PartiallyRefunded")
                 || (c.Status == "Transferred" && c.TransferredAtUtc.HasValue && target is not null && target.ScheduledAt < c.TransferredAtUtc),
                 "Khóa chưa hoạt động hoặc đã chốt dữ liệu.");
             result = await ConfirmAttendance(c, sessionId, r);
@@ -871,10 +1170,18 @@ public sealed partial class StudyCourseService(IUnitOfWork uow, IClaimService cl
     public Task<ApiResponse<object>> CompleteAsync(int id, CancellationToken ct) => Change(id, c =>
     {
         Admin(); Active(c);
-        Require(c.Sessions.Where(x => x.Status != "CancelledByMentor").Select(x => x.Number).Distinct().Count() == c.TotalSessions && !c.Sessions.Any(x => x.Status == "Scheduled"), "Cần chốt đủ các buổi cam kết trước khi hoàn thành khóa.");
+        var completedOfficialSessionNumbers = c.Sessions
+            .Where(x => x.Status is "Present" or "Absent" or "ExcusedAbsent" or "Completed")
+            .Select(x => x.Number)
+            .Distinct()
+            .Count();
+        Require(c.TotalSessions > 0
+            && completedOfficialSessionNumbers >= c.TotalSessions
+            && !c.Sessions.Any(x => x.Status == "Scheduled"),
+            "Cần chốt đủ các buổi cam kết trước khi hoàn thành khóa.");
         // Homework is deferred; completion records actual teaching sessions only.
         c.Status = "Completed"; c.CompletedAt = DateTime.UtcNow;
-        Audit(c, "Completed", "Xác nhận các buổi đã hoàn thành; chưa tự động xét BTVN/học lại.");
+        Audit(c, "Completed", "Đã xác nhận hoàn thành các buổi học; chưa tự động xét bài tập về nhà hoặc quyền học lại.");
         return Task.FromResult<object>(new { c.Id });
     }, ct);
 
@@ -893,7 +1200,7 @@ public sealed partial class StudyCourseService(IUnitOfWork uow, IClaimService cl
                 .ToListAsync(ct)
             : [];
         var eligibility = CourseRetakePolicy.Evaluate(c, await uow.StudyCourses.Query().AnyAsync(x => x.RetakeOfId == id, ct), effectivePolicy, cohortAssignments);
-        Require(c.Status == "Completed" && c.PaymentStatus == "Paid" && c.RetakeOfId is null
+        Require(c.Status == "Completed" && c.PaymentStatus is "Paid" or "PartiallyRefunded" && c.RetakeOfId is null
             && !await uow.StudyCourses.Query().AnyAsync(x => x.RetakeOfId == id, ct), "Khóa chưa hoàn thành hoặc đã dùng quyền học lại.");
         Require(!c.RetakeRequests.Any(x => x.Status == "Pending"), "Đã có yêu cầu đang chờ duyệt.");
         var courseStartDate = (c.StartsAt ?? c.Cohort?.StartsAt)?.Date;
@@ -934,13 +1241,13 @@ public sealed partial class StudyCourseService(IUnitOfWork uow, IClaimService cl
                 MaximumAbsencePercent = c.MaximumAbsencePercent, GroupPolicyId = effectivePolicy?.Id,
                 PolicyVersionSnapshot = effectivePolicy?.Version, Amount = 0, PaymentStatus = "Paid", Status = "Ready"
             };
-            Audit(retake, "FreeRetakeAutoApproved", $"Học lại một lần của khóa {c.Id} theo chính sách không cần duyệt Admin.");
+            Audit(retake, "FreeRetakeAutoApproved", $"Học lại một lần của khóa {c.Id} theo chính sách không cần Quản trị viên phê duyệt.");
             await uow.StudyCourses.AddAsync(retake, ct);
             await uow.SaveChangesAsync(ct);
             Audit(c, "RetakeAutoApproved", "Đủ điều kiện học lại theo chính sách hiện hành.");
             return new { c.Id, NewCourseId = retake.Id, AutoApproved = true };
         }
-        Audit(c, "RetakeRequested", "Học viên khai báo trượt JLPT chính thức; chờ Admin kiểm tra danh tính, cấp độ và kết quả.");
+        Audit(c, "RetakeRequested", "Học viên đã gửi minh chứng kết quả JLPT; đang chờ Quản trị viên xác minh danh tính, cấp độ và kết quả.");
         return new { c.Id, AutoApproved = false };
     }, ct);
 
@@ -965,17 +1272,19 @@ public sealed partial class StudyCourseService(IUnitOfWork uow, IClaimService cl
             var eligibility = CourseRetakePolicy.Evaluate(c, false, effectivePolicy, cohortAssignments);
             var requireOfficial = effectivePolicy?.RequireOfficialExamEvidence ?? true;
             if (requireOfficial)
-                Require(r.OfficialFailureVerified, "Admin phải xác nhận minh chứng trượt JLPT, đúng học viên và cấp độ của khóa.");
-            Require(c.Status == "Completed" && c.PaymentStatus == "Paid" && c.RetakeOfId is null
+                Require(r.OfficialFailureVerified, "Quản trị viên cần xác nhận minh chứng kết quả JLPT khớp với học viên và cấp độ của khóa học.");
+            Require(c.Status == "Completed" && c.PaymentStatus is "Paid" or "PartiallyRefunded" && c.RetakeOfId is null
                 && !await uow.StudyCourses.Query().AnyAsync(x => x.RetakeOfId == id, ct), "Khóa không còn quyền học lại.");
             if (effectivePolicy is null)
             {
-                Require(r.OnTimeHomeworkEvidenceVerified, "Admin cần xác nhận minh chứng ít nhất 90% BTVN nộp đúng hạn; hệ thống BTVN chưa triển khai.");
+                var fallbackPercent = c.MinimumHomeworkPercent > 0m ? c.MinimumHomeworkPercent : 90m;
+                Require(r.OnTimeHomeworkEvidenceVerified,
+                    $"Quản trị viên cần xác nhận minh chứng học viên đã nộp đúng hạn đạt ngưỡng {fallbackPercent:0.##}% bài tập về nhà.");
             }
             else
             {
                 Require(eligibility.HomeworkMet || r.OnTimeHomeworkEvidenceVerified,
-                    $"Học viên chưa đạt điều kiện BTVN nộp đúng hạn ({effectivePolicy.RemediationThresholdComparison} {effectivePolicy.RemediationCompletionThresholdPercent:0.##}%).");
+                    $"Học viên chưa đạt điều kiện nộp bài tập về nhà đúng hạn ({effectivePolicy.RemediationThresholdComparison} {effectivePolicy.RemediationCompletionThresholdPercent:0.##}%).");
             }
             var retake = new StudyCourse { LearnerId = c.LearnerId, PurchaseKey = Guid.NewGuid(), PlanId = c.PlanId,
                 RetakeOfId = c.Id, SessionType = c.SessionType, Name = c.Name, CertificateLevelId = c.CertificateLevelId, PlanRevision = c.PlanRevision,
@@ -993,7 +1302,7 @@ public sealed partial class StudyCourseService(IUnitOfWork uow, IClaimService cl
                     && cohort.Plan.CertificateLevelId == c.CertificateLevelId && cohort.Plan.TotalSessions >= c.TotalSessions
                     && cohort.Plan.SessionMinutes >= c.SessionMinutes
                     && cohort.Enrollments.Count(x => ReservesSeat(x, DateTime.UtcNow)) < cohort.Capacity,
-                    "Lớp học lại phải còn chỗ, cùng cấp độ, đủ số buổi/thời lượng tương đương và chưa khai giảng.");
+                    "Lớp học lại phải còn chỗ, cùng cấp độ, đủ số buổi/thời lượng tương đương và chưa bắt đầu.");
                 retake.CohortId = cohort!.Id; retake.PlanId = cohort.PlanId; retake.MentorId = cohort.MentorId;
                 retake.StartsAt = cohort.StartsAt; retake.EndsAt = cohort.EndsAt; retake.CapacitySnapshot = cohort.CapacitySnapshot ?? cohort.Capacity;
                 retake.TotalSessions = cohort.Sessions.Count; retake.SessionMinutes = cohort.Plan.SessionMinutes!.Value;
@@ -1013,13 +1322,13 @@ public sealed partial class StudyCourseService(IUnitOfWork uow, IClaimService cl
         Teacher(c);
         var request = c.RetakeRequests.SingleOrDefault(x => x.Id == requestId);
         RequireConflict(request is not null, "Không tìm thấy yêu cầu hỗ trợ ôn lại JLPT.");
-        RequireConflict(request!.Status == "Approved", "Chỉ cố vấn mới lập kế hoạch hỗ trợ sau khi Admin đã duyệt yêu cầu.");
+        RequireConflict(request!.Status == "Approved", "Chỉ Giáo viên mới được lập kế hoạch hỗ trợ sau khi Quản trị viên đã phê duyệt yêu cầu.");
         var plan = r.SupportPlan?.Trim() ?? string.Empty;
         Require(!string.IsNullOrWhiteSpace(plan) && plan.Length <= 2000, "Cần nhập lộ trình hỗ trợ ôn lại tối đa 2000 ký tự.");
         request.MentorSupportPlan = plan;
         request.MentorSupportPlanById = Actor.Id;
         request.MentorSupportPlanAtUtc = DateTime.UtcNow;
-        Audit(c, "RetakeSupportPlanSaved", $"Mentor đã lập kế hoạch hỗ trợ ôn lại cho yêu cầu #{requestId}.");
+        Audit(c, "RetakeSupportPlanSaved", $"Giáo viên đã lập kế hoạch hỗ trợ ôn tập cho yêu cầu #{requestId}.");
         return Task.FromResult<object>(new
         {
             request.Id,
@@ -1032,7 +1341,7 @@ public sealed partial class StudyCourseService(IUnitOfWork uow, IClaimService cl
     public async Task<PrivateVerificationReadResult?> EvidenceAsync(int id, int requestId, CancellationToken ct)
     {
         var c = await Details.SingleOrDefaultAsync(x => x.Id == id, ct);
-        if (c is null || (Actor.Role != Role.Admin && !(Actor.Role == Role.Learner && c.LearnerId == Actor.Id))) return null;
+        if (c is null || (Actor.Role != Role.Admin && !(Actor.Role == Role.Learner && c.LearnerId == Actor.Id && HasConfirmedCourseAccess(c)))) return null;
         var r = c.RetakeRequests.SingleOrDefault(x => x.Id == requestId);
         return r is null ? null : await storage.OpenPrivateVerificationAsync(r.EvidenceUrl, ct);
     }

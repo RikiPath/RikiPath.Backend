@@ -280,7 +280,7 @@ namespace RikiPath.Application.Services
             {
                 var claim = claimService.GetUserClaim();
                 if (claim.Role != Role.Admin)
-                    return ApiResponse<AdminMentorProfileResponse>.Fail("Chỉ Quản trị viên (Admin) mới có quyền xét duyệt hồ sơ Giáo viên.", HttpStatusCode.Forbidden);
+                    return ApiResponse<AdminMentorProfileResponse>.Fail("Chỉ Quản trị viên mới có quyền xét duyệt hồ sơ Giáo viên.", HttpStatusCode.Forbidden);
 
                 var admin = await unitOfWork.UserAccounts.GetByIdAsync(claim.Id, cancellationToken);
                 var adminName = admin is not null
@@ -519,7 +519,7 @@ namespace RikiPath.Application.Services
         {
             var actor = claimService.GetUserClaim();
             if (actor.Role != Role.Admin)
-                return ApiResponse<MentorQualificationBadgeResponse>.Fail("Chỉ Admin mới được cấp quyền giảng dạy.", HttpStatusCode.Forbidden);
+                return ApiResponse<MentorQualificationBadgeResponse>.Fail("Chỉ Quản trị viên mới có quyền cấp phép giảng dạy.", HttpStatusCode.Forbidden);
 
             var mentor = await unitOfWork.UserAccounts.Query()
                 .Include(u => u.MentorProfile)
@@ -556,7 +556,7 @@ namespace RikiPath.Application.Services
 
             var now = DateTime.UtcNow;
             var adminUser = await unitOfWork.UserAccounts.GetByIdAsync(actor.Id, cancellationToken);
-            var adminName = adminUser is null ? $"Admin #{actor.Id}" : UserNameHelper.FormatFullName(adminUser.FirstName, adminUser.LastName);
+            var adminName = adminUser is null ? $"Quản trị viên #{actor.Id}" : UserNameHelper.FormatFullName(adminUser.FirstName, adminUser.LastName);
 
             await unitOfWork.ExecuteInTransactionAsync(async token =>
             {
@@ -610,7 +610,7 @@ namespace RikiPath.Application.Services
         {
             var actor = claimService.GetUserClaim();
             if (actor.Role != Role.Admin)
-                return ApiResponse<bool>.Fail("Chỉ Admin mới được thu hồi quyền giảng dạy.", HttpStatusCode.Forbidden);
+                return ApiResponse<bool>.Fail("Chỉ Quản trị viên mới có quyền thu hồi quyền giảng dạy.", HttpStatusCode.Forbidden);
 
             if (string.IsNullOrWhiteSpace(request.Reason))
                 return ApiResponse<bool>.Fail("Vui lòng nhập lý do thu hồi quyền giảng dạy.", HttpStatusCode.BadRequest);
@@ -696,10 +696,10 @@ namespace RikiPath.Application.Services
         private static string GetStatusDescription(MentorVerificationStatus status) => status switch
         {
             MentorVerificationStatus.Unverified => "Chưa nộp hồ sơ",
-            MentorVerificationStatus.Pending => "Đang chờ duyệt",
-            MentorVerificationStatus.Approved => "Đã phê duyệt",
-            MentorVerificationStatus.Rejected => "Đã bị từ chối",
-            MentorVerificationStatus.ChangesRequested => "Yêu cầu bổ sung thông tin",
+            MentorVerificationStatus.Pending => "Chờ duyệt",
+            MentorVerificationStatus.Approved => "Đã duyệt",
+            MentorVerificationStatus.Rejected => "Bị từ chối",
+            MentorVerificationStatus.ChangesRequested => "Cần bổ sung",
             _ => status.ToString(),
         };
     }

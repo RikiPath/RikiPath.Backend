@@ -21,6 +21,9 @@ namespace RikiPath.Application.Responses.MockTests
         public string? PassageTitle { get; set; }
         public string? PassageText { get; set; }
         public string? ReviewTranscript { get; set; }
+        public string? SectionTitle { get; set; }
+        public string? SkillName { get; set; }
+        public bool IsAnswered { get; set; }
         public bool WasPreviouslyIncorrect { get; set; }
         public int TimesAnsweredWrong { get; set; }
     }

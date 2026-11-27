@@ -70,6 +70,14 @@ public sealed class AdminBusinessConfigController(
         return StatusCode((int)result.StatusCode, result);
     }
 
+    [HttpPost("payments/study-course/{id:int}/refund")]
+    [ProducesResponseType(typeof(ApiResponse<AdminPaymentDetailDto>), 200)]
+    public async Task<IActionResult> RefundStudyCoursePayment(int id, [FromBody] RefundStudyCoursePaymentRequest request, CancellationToken ct)
+    {
+        var result = await service.RefundStudyCoursePaymentAsync(id, request, claims.GetUserClaim().Id, ct);
+        return StatusCode((int)result.StatusCode, result);
+    }
+
     [HttpGet("payments/gateway-status")]
     [ProducesResponseType(typeof(ApiResponse<PayOsGatewayStatusDto>), 200)]
     public async Task<IActionResult> GetPayOsStatus(CancellationToken ct)

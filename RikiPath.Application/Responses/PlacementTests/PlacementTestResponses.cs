@@ -11,11 +11,51 @@ namespace RikiPath.Application.Responses.PlacementTests
         public string AttemptType { get; set; } = "placement";
         public string PlacementDecision { get; set; } = "NOT_TAKEN";
         public bool HasActiveAttempt { get; set; }
+
+        [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
         public PlacementAttemptAllowance? AttemptAllowance { get; set; }
+
+        public bool QuotaInitialized { get; set; } = true;
         public bool CanStartNewAttempt { get; set; }
 
         [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+        public string? CannotStartReason { get; set; }
+
+        public string AssessmentMode { get; set; } = "TARGETED";
+        public bool IsGoalConfirmed { get; set; }
+
+        [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+        public int? LatestAssessmentLevelId { get; set; }
+
+        [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+        public string? LatestAssessmentLevelName { get; set; }
+
+        public bool LatestAssessmentIsComprehensive { get; set; }
+
+        /// <summary>NONE | GOAL_NOT_SET | COMPATIBLE | INSUFFICIENT_FOR_TARGET</summary>
+        public string PlacementCompatibilityStatus { get; set; } = "NONE";
+
+        [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+        public string? PlacementCompatibilityReason { get; set; }
+
+        public List<int> AvailableAssessmentLevelIds { get; set; } = [];
+
+        /// <summary>JLPT level codes covered by the general assessment for the confirmed goal (lower comparison level first).</summary>
+        public List<string> PlannedAssessmentLevelCodes { get; set; } = [];
+
+        /// <summary>Skills the general assessment measures (vocabulary, grammar, reading, listening).</summary>
+        public List<string> PlannedSkillCodes { get; set; } = [];
+
+        [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
         public int? ActiveAttemptId { get; set; }
+
+        [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+        public int? ActiveAttemptAssessmentLevelId { get; set; }
+
+        [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+        public string? ActiveAttemptAssessmentLevelName { get; set; }
+
+        public bool ActiveAttemptIsComprehensive { get; set; }
 
         [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
         public DateTime? ActiveAttemptExpiresAt { get; set; }

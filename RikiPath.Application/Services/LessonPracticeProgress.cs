@@ -37,7 +37,9 @@ internal static class LessonPracticeProgress
                 exercise => exercise.Id, (attempt, exercise) => new { attempt, exercise })
             .Where(row => !row.attempt.IsDeleted && !row.exercise.IsDeleted &&
                 row.attempt.UserId == userId && row.attempt.HomeworkAssignmentId == null && row.attempt.IsCompleted &&
-                row.attempt.ScorePercent >= PassingScore && lessonIds.Contains(row.exercise.LessonId!.Value))
+                // Same rule as the roadmap: the Quick Check's own passing score; PassingScore only when unset.
+                row.attempt.ScorePercent >= (row.exercise.PassingScorePercent > 0 ? row.exercise.PassingScorePercent : PassingScore) &&
+                lessonIds.Contains(row.exercise.LessonId!.Value))
             .Select(row => row.exercise.LessonId!.Value).Distinct().ToListAsync(ct)).ToHashSet();
     }
 

@@ -74,13 +74,15 @@ public sealed partial class StudyCourseService
 
         Check("COHORT_NOT_ACTIVE", cohort.Status is "Published" or "Draft", "Lớp đã đóng hoặc đã hủy; không thể dời/hủy lịch.");
         Check("COHORT_ALREADY_STARTED", (FirstSessionStartUtc(cohort) ?? cohort.StartsAt) > now,
-            "Lớp đã khai giảng; chỉ dời/hủy được lớp chưa bắt đầu.");
+            "Lớp đã bắt đầu; chỉ dời/hủy được lớp chưa bắt đầu.");
         var blockers = cohort.Enrollments.Select(e => PaymentBlockerOf(e, now)).OfType<CohortPaymentBlocker>().ToList();
         Check("COHORT_PAYMENT_REVIEW_OPEN", !blockers.Any(b => b.Kind == "PaymentReview"),
-            "Lớp có giao dịch thanh toán đang được Admin xem xét; cần xử lý xong trước khi dời/hủy lịch.");
+            "Lớp có giao dịch thanh toán đang được Quản trị viên xem xét; cần xử lý xong trước khi dời hoặc hủy lịch.");
         Check("COHORT_PAYMENT_PENDING", !blockers.Any(b => b.Kind is "CheckoutHold" or "AwaitingReconciliation"),
             "Lớp có học viên đang giữ chỗ thanh toán hoặc đơn thanh toán chờ đối soát; cần đối soát trước khi dời/hủy lịch.");
-        var confirmed = cohort.Enrollments.Count(e => e.PaymentStatus == "Paid" && ReservesSeat(e, now));
+        var confirmed = cohort.Enrollments.Count(e => e.PaymentStatus is "Paid" or "PartiallyRefunded"
+            && e.Status is not ("PaymentReview" or "Cancelled" or "Transferred" or "PendingPayment" or "PaymentExpired" or "PaymentFailed")
+            && ReservesSeat(e, now));
         Check("COHORT_HAS_CONFIRMED_LEARNERS", confirmed == 0,
             $"Lớp đã có {confirmed} học viên xác nhận; chỉ dời/hủy được lớp chưa có học viên.");
 
@@ -89,7 +91,7 @@ public sealed partial class StudyCourseService
             Check("COHORT_HAS_NO_SESSIONS", ordered.Count > 0, "Lớp chưa có buổi học nào để dời.", HttpStatusCode.UnprocessableEntity);
         Check("COHORT_SESSION_LOCKED", ordered.All(s => s.Availability.IsApproved && !s.Availability.IsDeleted
                 && s.Availability.RejectedAt == null && s.Availability.ChangeRequestedAt == null && s.Availability.MentorId == cohort.MentorId),
-            "Có buổi đang chờ điều chỉnh lịch hoặc không còn thuộc Mentor chính của lớp.");
+            "Có buổi học đang chờ điều chỉnh lịch hoặc không còn thuộc Giáo viên phụ trách của lớp.");
         Check("COHORT_SCHEDULE_CHANGE_PENDING", !await uow.CourseScheduleRequests.Query()
                 .AnyAsync(x => x.Status == "Pending" && x.Course.CohortId == cohortId, ct),
             "Có yêu cầu đổi/hủy buổi đang chờ xử lý trong lớp.");
@@ -117,7 +119,7 @@ public sealed partial class StudyCourseService
                 }, ct);
             var first = report.First;
             checks.Add(new TransferCheck(first?.Code ?? MentorTeachingConflictService.ScheduleConflict, report.IsValid,
-                report.IsValid ? "Mentor không bị trùng lịch dạy trong các tuần mới."
+                report.IsValid ? "Giáo viên không bị trùng lịch dạy trong các tuần mới."
                     : $"Buổi {first!.SessionNumber} sau khi dời bị trùng lịch: {first.Message}", (int)HttpStatusCode.Conflict));
             var firstShift = shifted.MinBy(x => x.ProposedStart)!;
             newCutoff = firstShift.ProposedStart.AddMinutes(
@@ -203,7 +205,7 @@ public sealed partial class StudyCourseService
         Rule(r is not null, "COHORT_SCHEDULE_REQUEST_KIND_INVALID", "Thiếu nội dung yêu cầu.");
         var kind = r!.Kind?.Trim() ?? "";
         Rule(kind is CohortScheduleRequest.KindShiftWeeks or CohortScheduleRequest.KindCancelEmptyCohort,
-            "COHORT_SCHEDULE_REQUEST_KIND_INVALID", "Loại yêu cầu phải là ShiftWeeks (dời lịch) hoặc CancelEmptyCohort (hủy lớp trống).");
+            "COHORT_SCHEDULE_REQUEST_KIND_INVALID", "Loại yêu cầu không hợp lệ (chỉ hỗ trợ dời lịch lớp hoặc hủy lớp chưa có học viên).");
         int? weeks = kind == CohortScheduleRequest.KindShiftWeeks ? r.ShiftWeeks ?? 1 : null;
         Rule(weeks is null || weeks is >= 1 and <= MaxCohortShiftWeeks, "COHORT_SHIFT_WEEKS_INVALID",
             $"Số tuần dời phải từ 1 đến {MaxCohortShiftWeeks}.");
@@ -226,7 +228,7 @@ public sealed partial class StudyCourseService
             // Kiểm tra lại sau khi giữ khóa: Mentor chính có thể vừa được thay.
             await EnsureCohortScheduleActorAsync(cohortId, token);
             Rule(!await uow.CohortScheduleRequests.AnyAsync(x => x.CohortId == cohortId && x.Status == CohortScheduleRequest.Pending, token),
-                "COHORT_SCHEDULE_REQUEST_PENDING", "Lớp đang có một yêu cầu dời/hủy lịch chờ Admin xử lý.", HttpStatusCode.Conflict);
+                "COHORT_SCHEDULE_REQUEST_PENDING", "Lớp đang có một yêu cầu dời/hủy lịch chờ Quản trị viên xử lý.", HttpStatusCode.Conflict);
             var e = await EvaluateCohortScheduleAsync(cohortId, kind, weeks, token);
             // Điều kiện cấu trúc chặn việc tạo yêu cầu; giao dịch chờ đối soát và trùng lịch chỉ được liệt kê trong bản xem trước.
             foreach (var code in new[] { "COHORT_NOT_FOUND", "COHORT_NOT_ACTIVE", "COHORT_ALREADY_STARTED", "COHORT_HAS_CONFIRMED_LEARNERS", "COHORT_HAS_NO_SESSIONS" })
@@ -357,7 +359,7 @@ public sealed partial class StudyCourseService
                     {
                         MentorId = old.MentorId, StartTime = shift.ProposedStart, EndTime = shift.ProposedEnd, RoomId = Guid.NewGuid(),
                         AttendanceTrackingEnabled = old.AttendanceTrackingEnabled, MaxLearners = old.MaxLearners, BookedCount = 0,
-                        IsApproved = true, AdminName = "Admin (dời lịch lớp)", PublishedAt = now,
+                        IsApproved = true, AdminName = "Quản trị viên (dời lịch lớp)", PublishedAt = now,
                         GroupPolicyId = old.GroupPolicyId, PolicyVersion = old.PolicyVersion,
                         SessionMinutesSnapshot = old.SessionMinutesSnapshot, RestMinutesSnapshot = old.RestMinutesSnapshot,
                         MentorScheduleRuleId = old.MentorScheduleRuleId,
@@ -386,7 +388,7 @@ public sealed partial class StudyCourseService
                 cohort.StartsAt = cohort.StartsAt.AddDays(days);
                 cohort.EndsAt = cohort.EndsAt.AddDays(days);
                 Rule(cohort.Sessions.Count == countBefore, "COHORT_SHIFT_INVARIANT", "Số buổi của lớp bị thay đổi ngoài dự kiến.", HttpStatusCode.Conflict);
-                detail = $"Admin duyệt dời toàn bộ {countBefore} buổi thêm {weeks} tuần; khai giảng mới {cohort.StartsAt:O}.";
+                detail = $"Quản trị viên đã phê duyệt dời toàn bộ {countBefore} buổi thêm {weeks} tuần; ngày bắt đầu mới {cohort.StartsAt:O}.";
                 title = "Lịch lớp đã được dời";
                 message = $"Lớp {cohort.Name} được dời {weeks} tuần; buổi đầu tiên mới bắt đầu {LocalTime(cohort.StartsAt):HH:mm dd/MM/yyyy}.";
             }
@@ -394,7 +396,7 @@ public sealed partial class StudyCourseService
             {
                 // Lớp trống bị hủy: khung giờ được giữ làm lịch sử; lớp đã hủy không còn giữ lịch dạy của Mentor.
                 cohort.Status = "Cancelled";
-                detail = "Admin duyệt hủy lớp chưa có học viên.";
+                detail = "Quản trị viên đã phê duyệt hủy lớp chưa có học viên.";
                 title = "Lớp đã được hủy";
                 message = $"Lớp {cohort.Name} chưa có học viên đã được hủy theo yêu cầu #{request.Id}.";
             }

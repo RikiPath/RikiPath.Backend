@@ -183,13 +183,14 @@ public sealed class SidebarCounterService(
     {
         var pendingAttendanceSessions = await unitOfWork.StudyCohorts.Query()
             .AsNoTracking()
-            .Where(c => c.MentorId == mentorId && c.Status != "Cancelled" && c.Status != "Draft")
+            .Where(c => c.Status != "Cancelled" && c.Status != "Draft")
             .SelectMany(c => c.Sessions)
-            .Where(s => !s.Availability.IsDeleted
+            .Where(s => s.Availability.MentorId == mentorId
+                && !s.Availability.IsDeleted
                 && s.Availability.EndTime <= utcNow
                 && unitOfWork.StudyCourses.Query().Any(e =>
                     e.CohortId == s.CohortId
-                    && e.PaymentStatus == "Paid"
+                    && (e.PaymentStatus == "Paid" || e.PaymentStatus == "PartiallyRefunded")
                     && e.Status == "Active"
                     && e.Sessions.Any(cs => cs.AvailabilityId == s.AvailabilityId && cs.Status == "Scheduled")))
             .CountAsync(ct);
@@ -344,18 +345,24 @@ public sealed class SidebarCounterService(
                 && x.StartTime > utcNow,
                 ct);
 
+        var pendingCourseScheduleRequests = await unitOfWork.CourseScheduleRequests.Query()
+            .AsNoTracking()
+            .CountAsync(x => x.Status == "Pending", ct);
+
         response.Counters.Add(new SidebarCounterItemDto
         {
             Key = "admin.schedule_requests",
             Count = Math.Max(0, pendingCohortScheduleRequests)
                 + Math.Max(0, pendingSlotCancelRequests)
-                + Math.Max(0, pendingSlotChangeRequests),
+                + Math.Max(0, pendingSlotChangeRequests)
+                + Math.Max(0, pendingCourseScheduleRequests),
             Kind = SidebarCounterKind.ActionRequired,
             Metadata = new Dictionary<string, object?>
             {
                 ["cohortScheduleRequests"] = pendingCohortScheduleRequests,
                 ["slotCancelRequests"] = pendingSlotCancelRequests,
                 ["slotChangeRequests"] = pendingSlotChangeRequests,
+                ["courseScheduleRequests"] = pendingCourseScheduleRequests,
             },
         });
 

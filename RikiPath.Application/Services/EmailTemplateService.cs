@@ -552,7 +552,7 @@ public sealed partial class EmailTemplateService(AppSettings? appSettings = null
         html.Append("<td style=\"padding-left:10px;vertical-align:middle;\">");
         html.Append(CultureInfo.InvariantCulture, $"<div class=\"rp-brand-title\" style=\"font-family:{FontFamily};font-size:19px;font-weight:700;letter-spacing:-0.02em;line-height:1.2;color:#B53D5C;\">RikiPath</div>");
         if (!minimal)
-            html.Append(CultureInfo.InvariantCulture, $"<div class=\"rp-text-muted\" style=\"font-family:{FontFamily};font-size:11px;font-weight:500;line-height:1.3;color:#776C70;\">Japanese Learning Platform</div>");
+            html.Append(CultureInfo.InvariantCulture, $"<div class=\"rp-text-muted\" style=\"font-family:{FontFamily};font-size:11px;font-weight:500;line-height:1.3;color:#776C70;\">Nền tảng học tiếng Nhật</div>");
         html.Append("</td>");
         html.Append("</tr></table>");
         html.Append("</td>");
@@ -599,7 +599,7 @@ public sealed partial class EmailTemplateService(AppSettings? appSettings = null
                 html.Append(CultureInfo.InvariantCulture, $" hoặc truy cập <a href=\"{safeWebUrl}\" target=\"_blank\" rel=\"noopener noreferrer\" class=\"rp-link-accent\" style=\"color:#B53D5C;text-decoration:underline;font-weight:600;\">RikiPath Web</a>");
             }
             html.Append(".</p>");
-            html.Append(CultureInfo.InvariantCulture, $"<p class=\"rp-text-muted\" style=\"margin:0;font-family:{FontFamily};font-size:11px;line-height:1.55;color:#776C70;\">Đây là email tự động từ hệ thống RikiPath. &copy; {year} RikiPath. All rights reserved.</p>");
+            html.Append(CultureInfo.InvariantCulture, $"<p class=\"rp-text-muted\" style=\"margin:0;font-family:{FontFamily};font-size:11px;line-height:1.55;color:#776C70;\">Đây là email tự động từ hệ thống RikiPath. &copy; {year} RikiPath. Bảo lưu mọi quyền.</p>");
         }
         html.Append("</td>");
         html.Append("</tr>");
@@ -624,7 +624,7 @@ public sealed partial class EmailTemplateService(AppSettings? appSettings = null
         string year)
     {
         var sb = new StringBuilder();
-        sb.AppendLine("RIKIPATH — Japanese Learning Platform");
+        sb.AppendLine("RIKIPATH — Nền tảng học tiếng Nhật");
         sb.AppendLine(subject);
         sb.AppendLine(new string('-', 48));
         foreach (var line in bodyLines)

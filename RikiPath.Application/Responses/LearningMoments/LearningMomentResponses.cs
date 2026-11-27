@@ -25,6 +25,21 @@ namespace RikiPath.Application.Responses.LearningMoments
 
         /// <summary>Small, display-only facts (level codes, lesson title, counts). Never fabricated.</summary>
         public Dictionary<string, string> Data { get; set; } = [];
+
+        /// <summary>
+        /// Purchase moments only: the features the purchased plan grants, from the plan's real feature bindings.
+        /// <see cref="LearningMomentBenefitResponse.IsNew"/> is false when another active order already granted it.
+        /// </summary>
+        public List<LearningMomentBenefitResponse> Benefits { get; set; } = [];
+    }
+
+    public class LearningMomentBenefitResponse
+    {
+        public string Code { get; set; } = string.Empty;
+        public string Name { get; set; } = string.Empty;
+        public string? Description { get; set; }
+        public string Category { get; set; } = "general";
+        public bool IsNew { get; set; } = true;
     }
 
     public class PendingLearningMomentsResponse

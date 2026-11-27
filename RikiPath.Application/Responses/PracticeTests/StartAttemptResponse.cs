@@ -6,10 +6,17 @@
         public int MockTestId { get; set; }
         public string Title { get; set; } = string.Empty;
         public string JlptLevelName { get; set; } = string.Empty;
+        public string ExamKind { get; set; } = "FullMockTest";
+        public bool EnforceStrictTimer { get; set; } = true;
+        public bool IsResumed { get; set; }
+        public string AttemptStatus { get; set; } = "in_progress";
         public DateTime StartedAt { get; set; }
         public DateTime ServerNow { get; set; }
+        public DateTime? LastSavedAt { get; set; }
         public DateTime? ExpiresAt { get; set; }
         public int TimeLimitMinutes { get; set; }
+        public long LatestAnswerSequence { get; set; }
+        public int? ElapsedSeconds { get; set; }
         public int TotalPreviouslyWrongQuestions { get; set; }
         public List<int> PreviouslyWrongQuestionIds { get; set; } = [];
         public List<StartAttemptQuestionResponse> Questions { get; set; } = [];
@@ -20,6 +27,8 @@
         public int QuestionId { get; set; }
         public int MockTestSectionId { get; set; }
         public string SectionTitle { get; set; } = string.Empty;
+        public string? LanguageSkillName { get; set; }
+        public string? QuestionGroupTitle { get; set; }
         public int SectionOrder { get; set; }
         public int Order { get; set; }
         public string Content { get; set; } = string.Empty;

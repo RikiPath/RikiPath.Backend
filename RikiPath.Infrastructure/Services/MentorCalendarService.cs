@@ -101,7 +101,7 @@ public sealed class MentorCalendarService(AppDbContext db, IHttpClientFactory cl
         {
             var eventId = Hash($"rikipath:{slot.RoomId}");
             var room = settings.FrontendBaseUrl.TrimEnd('/') + $"/meeting-room/{slot.RoomId}";
-            var body = new { id = eventId, summary = "RikiPath · Buổi học Mentor", description = "Lịch do RikiPath quản lý. Đổi lịch cần Admin duyệt.\n" + room,
+            var body = new { id = eventId, summary = "RikiPath · Buổi dạy cùng Giáo viên", description = "Lịch do RikiPath quản lý. Mọi thay đổi lịch cần Quản trị viên phê duyệt.\n" + room,
                 location = room, start = new { dateTime = DateTime.SpecifyKind(slot.StartTime, DateTimeKind.Utc).ToString("O"), timeZone = "Asia/Ho_Chi_Minh" },
                 end = new { dateTime = DateTime.SpecifyKind(slot.EndTime, DateTimeKind.Utc).ToString("O"), timeZone = "Asia/Ho_Chi_Minh" } };
             var digest = Hash(JsonSerializer.Serialize(body));

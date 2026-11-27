@@ -8,6 +8,6 @@ namespace RikiPath.Application.IRepositories
     {
         Task<(List<Notification> Items, int TotalCount)> GetByUserAsync(int userId, bool unreadOnly, int page, int pageSize);
         Task<int> CountUnreadAsync(int userId);
-        Task MarkAllAsReadAsync(int userId);
+        Task MarkAllAsReadAsync(int userId, DateTime? asOfUtc = null);
     }
 }

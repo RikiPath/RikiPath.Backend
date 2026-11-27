@@ -10,13 +10,26 @@ namespace RikiPath.Application.IServices
     {
         Task<ApiResponse<List<TestSummaryResponse>>> GetTestsByLevelAsync(int certificationLevelId, CancellationToken cancellationToken = default);
         Task<ApiResponse<TestSummaryResponse>> GetTestInfoAsync(int practiceTestId, CancellationToken cancellationToken = default);
+        Task<ApiResponse<PracticeSetPreviewResponse>> GetPracticeSetPreviewAsync(int practiceTestId, CancellationToken cancellationToken = default);
         Task<ApiResponse<StartAttemptResponse>> StartAttemptAsync(int practiceTestId, CancellationToken cancellationToken = default);
+        Task<ApiResponse<StartAttemptResponse>> StartAttemptAsync(int practiceTestId, bool forceNew, CancellationToken cancellationToken);
         Task<ApiResponse<StartAttemptResponse>> GetAttemptSnapshotAsync(int attemptId, CancellationToken cancellationToken = default);
         Task<ApiResponse<AttemptResultResponse>> SaveAttemptAnswersAsync(int attemptId, SubmitAttemptRequest request, CancellationToken cancellationToken = default);
+        Task<ApiResponse<AttemptResultResponse>> PauseAttemptAsync(int attemptId, SubmitAttemptRequest? request = null, CancellationToken cancellationToken = default);
         Task<ApiResponse<AttemptResultResponse>> SubmitAttemptAsync(int attemptId, SubmitAttemptRequest request, CancellationToken cancellationToken = default);
         Task<ApiResponse<AttemptResultResponse>> GetAttemptResultAsync(int attemptId, CancellationToken cancellationToken = default);
         Task<ApiResponse<DetailedAttemptResultResponse>> GetDetailedResultAsync(int attemptId, CancellationToken cancellationToken = default);
         Task<ApiResponse<List<MockTestHistoryItem>>> GetHistoryAsync(CancellationToken cancellationToken = default);
+        Task<ApiResponse<List<MockTestHistoryItem>>> GetHistoryAsync(string? kind, string? status, CancellationToken cancellationToken);
+        Task<ApiResponse<PagedMockTestHistoryResponse>> GetPagedHistoryAsync(
+            string? kind,
+            string? status,
+            string? jlptLevel,
+            int? days,
+            string? search,
+            int page,
+            int pageSize,
+            CancellationToken cancellationToken);
 
         Task<ApiResponse<PlacementTestStatusResponse>> GetStatusAsync(
             CancellationToken cancellationToken = default);
@@ -89,9 +102,25 @@ namespace RikiPath.Application.IServices
             string? keyword = null,
             CancellationToken cancellationToken = default);
 
+        Task<ApiResponse<List<TestSummaryResponse>>> GetPracticeSetsAsync(
+            int? certificateLevelId,
+            int? languageSkillId,
+            string? examKind,
+            string? keyword,
+            string? status,
+            string? sort,
+            CancellationToken cancellationToken);
+
         Task<ApiResponse<List<TestSummaryResponse>>> GetFullMockTestsAsync(
             int? certificateLevelId = null,
             string? keyword = null,
             CancellationToken cancellationToken = default);
+
+        Task<ApiResponse<List<TestSummaryResponse>>> GetFullMockTestsAsync(
+            int? certificateLevelId,
+            string? keyword,
+            string? status,
+            string? sort,
+            CancellationToken cancellationToken);
     }
 }

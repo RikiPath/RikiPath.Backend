@@ -27,11 +27,12 @@ public sealed class MentorKpiService(
         if (claim.Role != Role.Mentor)
         {
             return ApiResponse<MentorKpiSummaryResponse>.Fail(
-                "Chỉ Cố vấn được xem bảng Chấm công & KPI cá nhân.",
+                "Chỉ Giáo viên mới được xem bảng Chấm công & KPI cá nhân.",
                 HttpStatusCode.Forbidden);
         }
 
-        if (!TryResolveWindow(from, to, out var fromDate, out var toDate, out var error))
+        var defaultPeriodDays = await ResolveReportingPeriodDaysAsync(cancellationToken);
+        if (!TryResolveWindow(from, to, defaultPeriodDays, out var fromDate, out var toDate, out var error))
         {
             return ApiResponse<MentorKpiSummaryResponse>.Fail(error!, HttpStatusCode.BadRequest);
         }
@@ -42,7 +43,7 @@ public sealed class MentorKpiService(
 
         if (mentor is null)
         {
-            return ApiResponse<MentorKpiSummaryResponse>.NotFound("Không tìm thấy hồ sơ Cố vấn.");
+            return ApiResponse<MentorKpiSummaryResponse>.NotFound("Không tìm thấy hồ sơ Giáo viên.");
         }
 
         var summary = await BuildSummaryForMentorAsync(mentor, fromDate, toDate, cancellationToken);
@@ -61,11 +62,12 @@ public sealed class MentorKpiService(
         if (claim.Role != Role.Admin)
         {
             return ApiResponse<List<MentorKpiSummaryResponse>>.Fail(
-                "Chỉ Admin mới có quyền xem báo cáo KPI toàn hệ thống.",
+                "Chỉ Quản trị viên mới có quyền xem báo cáo KPI toàn hệ thống.",
                 HttpStatusCode.Forbidden);
         }
 
-        if (!TryResolveWindow(from, to, out var fromDate, out var toDate, out var error))
+        var defaultPeriodDays = await ResolveReportingPeriodDaysAsync(cancellationToken);
+        if (!TryResolveWindow(from, to, defaultPeriodDays, out var fromDate, out var toDate, out var error))
         {
             return ApiResponse<List<MentorKpiSummaryResponse>>.Fail(error!, HttpStatusCode.BadRequest);
         }
@@ -107,11 +109,12 @@ public sealed class MentorKpiService(
         if (claim.Role != Role.Admin)
         {
             return ApiResponse<MentorKpiSummaryResponse>.Fail(
-                "Chỉ Admin mới có quyền xem KPI chi tiết của Cố vấn.",
+                "Chỉ Quản trị viên mới có quyền xem KPI chi tiết của Giáo viên.",
                 HttpStatusCode.Forbidden);
         }
 
-        if (!TryResolveWindow(from, to, out var fromDate, out var toDate, out var error))
+        var defaultPeriodDays = await ResolveReportingPeriodDaysAsync(cancellationToken);
+        if (!TryResolveWindow(from, to, defaultPeriodDays, out var fromDate, out var toDate, out var error))
         {
             return ApiResponse<MentorKpiSummaryResponse>.Fail(error!, HttpStatusCode.BadRequest);
         }
@@ -122,7 +125,7 @@ public sealed class MentorKpiService(
 
         if (mentor is null)
         {
-            return ApiResponse<MentorKpiSummaryResponse>.NotFound("Không tìm thấy Cố vấn.");
+            return ApiResponse<MentorKpiSummaryResponse>.NotFound("Không tìm thấy Giáo viên.");
         }
 
         var summary = await BuildSummaryForMentorAsync(mentor, fromDate, toDate, cancellationToken);
@@ -142,7 +145,7 @@ public sealed class MentorKpiService(
         var qualifications = await context.MentorTeachingQualifications
             .AsNoTracking()
             .Include(q => q.CertificateLevel)
-            .Where(q => q.MentorUserId == mentor.Id && q.IsActive)
+            .Where(q => q.MentorUserId == mentor.Id && q.IsActive && q.RevokedAtUtc == null)
             .OrderBy(q => q.CertificateLevel.SortOrder)
             .Select(q => q.CertificateLevel.Code)
             .ToListAsync(cancellationToken);
@@ -158,7 +161,8 @@ public sealed class MentorKpiService(
             .Include(c => c.Homework)
             .Where(c => (c.MentorId == mentor.Id || (c.Cohort != null && c.Cohort.MentorId == mentor.Id)
                     || c.Sessions.Any(s => s.Availability != null && s.Availability.MentorId == mentor.Id))
-                && c.PaymentStatus == "Paid"
+                && (c.Cohort == null || c.Cohort.Status != "Cancelled")
+                && (c.PaymentStatus == "Paid" || c.PaymentStatus == "PartiallyRefunded")
                 && (c.Status == "Active" || c.Status == "Completed" || c.Status == "Transferred"))
             .AsSplitQuery()
             .ToListAsync(cancellationToken);
@@ -238,21 +242,57 @@ public sealed class MentorKpiService(
             })
             .ToList();
 
-        // Reviews & Disputes
-        var reviews = await context.MentorReviews
+        // Reviews & Disputes — đọc đầy đủ CohortMentorReviews & CohortComplaints (mô hình lớp nhóm hiện hành) + dữ liệu lịch sử nếu có
+        var legacyReviews = await context.MentorReviews
             .AsNoTracking()
             .Where(r => r.MentorId == mentor.Id
                 && r.ModerationStatus == MentorReviewStatus.Approved
                 && r.CreatedAtUtc >= fromStartUtc
                 && r.CreatedAtUtc < toEndExclusiveUtc)
+            .Select(r => new { r.Rating, r.CreatedAtUtc })
             .ToListAsync(cancellationToken);
 
-        var disputes = await context.MentorDisputes
+        var cohortReviews = await context.CohortMentorReviews
+            .AsNoTracking()
+            .Where(r => r.MentorId == mentor.Id
+                && !r.IsHidden
+                && r.CreatedAtUtc >= fromStartUtc
+                && r.CreatedAtUtc < toEndExclusiveUtc)
+            .Select(r => new { r.Rating, r.CreatedAtUtc })
+            .ToListAsync(cancellationToken);
+
+        var allReviews = legacyReviews.Concat(cohortReviews).ToList();
+
+        var legacyDisputes = await context.MentorDisputes
             .AsNoTracking()
             .Where(d => d.MentorId == mentor.Id
                 && d.CreatedAtUtc >= fromStartUtc
                 && d.CreatedAtUtc < toEndExclusiveUtc)
+            .Select(d => new
+            {
+                d.CreatedAtUtc,
+                IsOpen = d.Status == MentorDisputeStatus.Submitted
+                    || d.Status == MentorDisputeStatus.UnderReview
+                    || d.Status == MentorDisputeStatus.AwaitingResponse,
+                IsRefund = d.CreditRefunded || d.IsRefundApproved == true,
+            })
             .ToListAsync(cancellationToken);
+
+        var cohortComplaints = await context.CohortComplaints
+            .AsNoTracking()
+            .Where(c => c.MentorId == mentor.Id
+                && c.Category != CohortComplaint.CategoryPaymentEnrollment
+                && c.CreatedAtUtc >= fromStartUtc
+                && c.CreatedAtUtc < toEndExclusiveUtc)
+            .Select(c => new
+            {
+                c.CreatedAtUtc,
+                IsOpen = c.Status == CohortComplaint.Open || c.Status == CohortComplaint.UnderReview,
+                IsRefund = c.RefundReviewRequested && c.Status == CohortComplaint.Resolved,
+            })
+            .ToListAsync(cancellationToken);
+
+        var allDisputes = legacyDisputes.Concat(cohortComplaints).ToList();
 
         // Aggregate session events for overall + weekly + monthly
         var weeklyBuckets = new Dictionary<DateOnly, BucketAccumulator>();
@@ -268,9 +308,11 @@ public sealed class MentorKpiService(
         int missedOrNoShow = 0;
         int upcomingOrIncomplete = 0;
 
-        // Deduplicate Cohort class sessions by AvailabilityId so 4 enrolled learners = 1 Mentor teaching session.
+        // Deduplicate by logical class session (CohortId+Number or CourseId+Number) so makeup/rescheduled sessions never double-count.
         var courseSessionGroups = scopedCourseSessions
-            .GroupBy(x => x.Session.AvailabilityId.HasValue ? (long)x.Session.AvailabilityId.Value : -x.Session.Id)
+            .GroupBy(x => x.Course.CohortId.HasValue
+                ? $"cohort:{x.Course.CohortId.Value}:{x.Session.Number}"
+                : $"course:{x.Course.Id}:{x.Session.Number}")
             .ToList();
 
         foreach (var group in courseSessionGroups)
@@ -288,9 +330,13 @@ public sealed class MentorKpiService(
             var observedSecs = Math.Max(observedBySession, observedByRoom);
             var observedMins = (int)Math.Round(observedSecs / 60.0);
 
-            var isPresent = items.Any(x => x.Session.Status == "Present");
-            var isCancelled = !isPresent && items.All(x => x.Session.Status is "CancelledByMentor" or "CancelledByLearner" or "Cancelled");
-            var isMissed = !isPresent && !isCancelled && (items.Any(x => x.Session.Status is "Absent" or "ExcusedAbsent") || endUtc < nowUtc);
+            var hasConfirmedPresent = items.Any(x => x.Session.Status == "Present");
+            var hasConfirmedAttendance = items.Any(x => x.Session.Status is "Present" or "Absent" or "ExcusedAbsent");
+            // Chỉ công nhận buổi hoàn thành khi có điểm danh chính thức (không tự đánh dấu hoàn thành chỉ vì đã qua giờ Scheduled).
+            var mentorAttendedRoom = observedMins > 0;
+            var isPresent = hasConfirmedPresent || (mentorAttendedRoom && endUtc <= nowUtc && hasConfirmedAttendance && items.All(x => x.Session.Status is "Present" or "Absent" or "ExcusedAbsent"));
+            var isCancelled = !isPresent && items.All(x => x.Session.Status is "CancelledByMentor" or "CancelledByLearner" or "CancelledByAdmin" or "Cancelled");
+            var isMissed = !isPresent && !isCancelled && !mentorAttendedRoom && items.Any(x => x.Session.Status is "Absent" or "ExcusedAbsent");
             var isUpcoming = !isPresent && !isCancelled && !isMissed;
 
             var sessionConfirmedMins = isPresent
@@ -308,6 +354,8 @@ public sealed class MentorKpiService(
                 cancelled++;
                 if (items.Any(x => x.Session.Status == "CancelledByMentor"))
                     cancelledByMentor++;
+                else if (items.Any(x => x.Session.Status == "CancelledByLearner"))
+                    cancelledByLearner++;
             }
             else if (isMissed)
             {
@@ -436,7 +484,7 @@ public sealed class MentorKpiService(
             [5] = 0
         };
 
-        foreach (var review in reviews)
+        foreach (var review in allReviews)
         {
             var star = Math.Clamp(review.Rating, 1, 5);
             ratingDist[star] = ratingDist.GetValueOrDefault(star, 0) + 1;
@@ -447,7 +495,7 @@ public sealed class MentorKpiService(
             m.ReviewRatings.Add(review.Rating);
         }
 
-        foreach (var dispute in disputes)
+        foreach (var dispute in allDisputes)
         {
             var w = GetBucket(weeklyBuckets, GetWeekStartLocal(dispute.CreatedAtUtc));
             var m = GetBucket(monthlyBuckets, GetMonthStartLocal(dispute.CreatedAtUtc));
@@ -455,10 +503,8 @@ public sealed class MentorKpiService(
             m.DisputesCount++;
         }
 
-        var openDisputes = disputes.Count(d => d.Status is MentorDisputeStatus.Submitted
-            or MentorDisputeStatus.UnderReview
-            or MentorDisputeStatus.AwaitingResponse);
-        var resolvedRefunds = disputes.Count(d => d.CreditRefunded || d.IsRefundApproved == true);
+        var openDisputes = allDisputes.Count(d => d.IsOpen);
+        var resolvedRefunds = allDisputes.Count(d => d.IsRefund);
 
         return new MentorKpiSummaryResponse
         {
@@ -497,10 +543,10 @@ public sealed class MentorKpiService(
                 : null,
             FeedbackTurnaroundSampleCount = turnaroundSamples.Count,
 
-            AverageRating = reviews.Count > 0 ? Math.Round(reviews.Average(r => r.Rating), 2) : null,
-            TotalReviewsCount = reviews.Count,
+            AverageRating = allReviews.Count > 0 ? Math.Round(allReviews.Average(r => r.Rating), 2) : null,
+            TotalReviewsCount = allReviews.Count,
             RatingDistribution = ratingDist,
-            TotalDisputesCount = disputes.Count,
+            TotalDisputesCount = allDisputes.Count,
             OpenDisputesCount = openDisputes,
             ResolvedRefundCount = resolvedRefunds,
 
@@ -529,27 +575,41 @@ public sealed class MentorKpiService(
 
             MetricSources = new Dictionary<string, string>
             {
-                ["AssignedAndCompletedSessions"] = "Tổng hợp từ MentorBookings (khác AwaitingPayment) và StudyCourseSessions (khóa đã thanh toán). Buổi hợp lệ: Booking Completed hoặc CourseSession Present.",
-                ["ConfirmedTeachingMinutes"] = "Ưu tiên tổng thời lượng hiện diện của Cố vấn trong MentorAttendanceRecords; với buổi khóa học/tư vấn đã xác nhận hoàn thành chưa có bản ghi WebRTC thì lấy theo thời lượng kế hoạch (phút).",
+                ["AssignedAndCompletedSessions"] = "Tổng hợp từ lịch buổi học của lớp nhóm (StudyCourseSessions, loại trừ lớp đã hủy và buổi chuyển lớp). Buổi hợp lệ: đã xác nhận điểm danh chính thức (Present hoặc có mặt trong buổi đã xác nhận).",
+                ["ConfirmedTeachingMinutes"] = "Ưu tiên tổng thời lượng hiện diện của Giáo viên trong MentorAttendanceRecords; với buổi đã xác nhận hoàn thành chưa có bản ghi WebRTC thì lấy theo thời lượng kế hoạch (phút).",
                 ["ScheduledCompletedMinutes"] = "Tổng thời lượng kế hoạch (phút) của các buổi đã hoàn thành hợp lệ.",
-                ["HomeworkMetrics"] = "Tổng hợp trực tiếp từ StudyCourseHomework (SubmittedAt, ReviewedAt, Passed) và HomeworkAssignments (1-1 Booking, GradingResult).",
+                ["HomeworkMetrics"] = "Tổng hợp trực tiếp từ StudyCourseHomework (SubmittedAt, ReviewedAt, Passed) và HomeworkAssignments (GradingResult).",
                 ["AverageFeedbackTurnaroundMinutes"] = "Trung bình (GradedAt/ReviewedAt - SubmittedAt) tính bằng phút; trả null khi chưa có mẫu bài tập đã chấm trong kỳ (không giả lập 0).",
-                ["QualityMetrics"] = "MentorReviews (trạng thái Approved) và MentorDisputes thuộc Cố vấn trong kỳ thống kê theo múi giờ UTC+7.",
+                ["QualityMetrics"] = "MentorReviews (trạng thái Approved) và khiếu nại học tập/chất lượng giảng dạy trong kỳ thống kê theo múi giờ UTC+7 (không tính khiếu nại thanh toán).",
                 ["CompensationScopeNotice"] = "Hệ thống không áp dụng trọng số KPI hay quy đổi thưởng/phạt/thù lao."
             }
         };
     }
 
+    private async Task<int> ResolveReportingPeriodDaysAsync(CancellationToken ct)
+    {
+        var days = await context.MentorGroupPolicies
+            .AsNoTracking()
+            .Where(p => p.IsActive && !p.IsArchivedRevision && !p.IsDeleted)
+            .OrderByDescending(p => p.LastAppliedAtUtc)
+            .ThenByDescending(p => p.Version)
+            .Select(p => (int?)p.KpiReportingPeriodDays)
+            .FirstOrDefaultAsync(ct);
+        return days is > 0 ? days.Value : 30;
+    }
+
     private static bool TryResolveWindow(
         DateOnly? from,
         DateOnly? to,
+        int defaultReportingPeriodDays,
         out DateOnly fromDate,
         out DateOnly toDate,
         out string? error)
     {
         var todayVn = DateOnly.FromDateTime(DateTime.UtcNow.Add(VietnamOffset));
         toDate = to ?? todayVn;
-        fromDate = from ?? new DateOnly(toDate.Year, toDate.Month, 1).AddMonths(-2);
+        var resolvedPeriod = Math.Max(1, defaultReportingPeriodDays);
+        fromDate = from ?? toDate.AddDays(-(resolvedPeriod - 1));
 
         if (fromDate > toDate)
         {
@@ -557,18 +617,16 @@ public sealed class MentorKpiService(
             return false;
         }
 
-        if (toDate.DayNumber - fromDate.DayNumber > 370)
+        var maxRangeDays = Math.Max(370, resolvedPeriod);
+        if (toDate.DayNumber - fromDate.DayNumber > maxRangeDays)
         {
-            error = "Khoảng thời gian thống kê tối đa là 370 ngày.";
+            error = $"Khoảng thời gian thống kê tối đa là {maxRangeDays} ngày.";
             return false;
         }
 
         error = null;
         return true;
     }
-
-    private static DateTime ResolveBookingStartUtc(MentorBooking booking)
-        => booking.MentorAvailability?.StartTime ?? booking.ScheduledAt ?? booking.CreatedDate ?? DateTime.UtcNow;
 
     private static DateTime ResolveBookingHomeworkAnchorUtc(HomeworkAssignment hw)
         => hw.Submission?.GradingResult?.GradedAt

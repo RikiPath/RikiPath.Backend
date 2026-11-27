@@ -139,7 +139,7 @@ namespace RikiPath.Application.Handlers
                 if (!seenInFile.Add(rowKey))
                     diff.Errors.Add($"Bài học '{title}' ({levelCode}) bị lặp lại ở nhiều dòng trong cùng file.");
                 if (openRowKeys.Contains(rowKey))
-                    diff.Errors.Add($"Bài học '{title}' ({levelCode}) đang có bản nháp chờ Admin duyệt, chưa thể import lại.");
+                    diff.Errors.Add($"Bài học '{title}' ({levelCode}) đang có bản nháp chờ Quản trị viên duyệt, chưa thể nhập lại.");
             }
 
             if (diff.Errors.Count > 0)

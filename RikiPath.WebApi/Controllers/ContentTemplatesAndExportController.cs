@@ -96,7 +96,7 @@ public sealed class ContentTemplatesAndExportController(
         var isAuthorOrAdmin = User.IsInRole("ContentAuthor") || User.IsInRole("Admin");
         var res = await exportService.ExportExamAsync(examId, format, includeAnswers, claimService.GetUserClaim().Id, isAuthorOrAdmin, ct);
         if (!res.IsSuccess || res.Result is null)
-            return StatusCode(res.StatusCode, ApiResponse<object>.Fail(res.ErrorMessage ?? "Không thể xuất đề.", (System.Net.HttpStatusCode)res.StatusCode));
+            return StatusCode(res.StatusCode, ApiResponse<object>.Fail(res.ErrorMessage ?? "Không thể xuất đề.", (System.Net.HttpStatusCode)res.StatusCode, errorCode: res.ErrorCode));
 
         return File(res.Result.Bytes, res.Result.ContentType, res.Result.FileName);
     }
@@ -122,7 +122,7 @@ public sealed class ContentTemplatesAndExportController(
         var res = await exportService.ExportQuestionBankAsync(
             filter, format, includeAnswers, claimService.GetUserClaim().Id, true, ct);
         if (!res.IsSuccess || res.Result is null)
-            return StatusCode(res.StatusCode, ApiResponse<object>.Fail(res.ErrorMessage ?? "Không thể xuất ngân hàng câu hỏi.", (System.Net.HttpStatusCode)res.StatusCode));
+            return StatusCode(res.StatusCode, ApiResponse<object>.Fail(res.ErrorMessage ?? "Không thể xuất ngân hàng câu hỏi.", (System.Net.HttpStatusCode)res.StatusCode, errorCode: res.ErrorCode));
 
         return File(res.Result.Bytes, res.Result.ContentType, res.Result.FileName);
     }

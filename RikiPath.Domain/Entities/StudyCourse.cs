@@ -55,6 +55,8 @@ public sealed class StudyCourse
     // Mã giao dịch PayOS chỉ của thanh toán ĐÃ XÁC MINH (webhook có chữ ký hoặc truy vấn server-to-server).
     public string? ProviderPaymentReference { get; set; }
     public DateTime? PaymentConfirmedAtUtc { get; set; }
+    public decimal RefundedAmount { get; set; }
+    public DateTime? RefundedAtUtc { get; set; }
     public string? PaymentReviewReason { get; set; }
     public string? CheckoutUrl { get; set; }
     public DateTime? PaymentExpiresAt { get; set; }

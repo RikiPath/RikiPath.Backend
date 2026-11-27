@@ -8,7 +8,7 @@ namespace RikiPath.Application.Requests.MentorScheduling
         public int Weekday { get; init; }
 
         [Required(ErrorMessage = "Mã ca làm việc không được để trống.")]
-        [RegularExpression("^(Morning|Noon|Afternoon|Evening)$", ErrorMessage = "Ca làm việc phải là một trong các giá trị: Morning, Noon, Afternoon, Evening.")]
+        [RegularExpression("^(Morning|Noon|Afternoon|Evening)$", ErrorMessage = "Ca dạy không hợp lệ (chỉ hỗ trợ: Sáng, Trưa, Chiều hoặc Tối).")]
         public string DaypartCode { get; init; } = "Morning";
 
         public TimeOnly LocalStart { get; init; }

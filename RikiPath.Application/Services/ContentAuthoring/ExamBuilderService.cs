@@ -208,7 +208,7 @@ public sealed class ExamBuilderService(
                 if (existing.PublishStatus == ContentStatus.Published)
                     throw new InvalidOperationException("Đề đã xuất bản không được sửa trực tiếp. Hãy tạo phiên bản mới.");
                 if (existing.PublishStatus == ContentStatus.PendingReview)
-                    throw new InvalidOperationException("Đề đang chờ Admin xét duyệt.");
+                    throw new InvalidOperationException("Đề thi đang chờ Quản trị viên xét duyệt.");
 
                 exam = existing;
                 // Xóa mềm sections cũ trước khi đồng bộ cấu trúc mới trong cùng transaction

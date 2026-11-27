@@ -83,6 +83,7 @@ namespace RikiPath.Infrastructure
         public DbSet<MentorSchedule> MentorSchedules { get; set; }
         public DbSet<MentorScheduleRule> MentorScheduleRules { get; set; }
         public DbSet<MentorGroupPolicy> MentorGroupPolicies { get; set; }
+        public DbSet<MentorGroupPolicyLevelLimit> MentorGroupPolicyLevelLimits { get; set; }
         public DbSet<MentorBookingIntent> MentorBookingIntents { get; set; }
         public DbSet<MentorBookingTerms> MentorBookingTerms { get; set; }
         public DbSet<MentorBookingReservation> MentorBookingReservations { get; set; }
@@ -195,6 +196,7 @@ namespace RikiPath.Infrastructure
             modelBuilder.ApplyConfiguration(new MentorScheduleConfig());
             modelBuilder.ApplyConfiguration(new MentorScheduleRuleConfig());
             modelBuilder.ApplyConfiguration(new MentorGroupPolicyConfig());
+            modelBuilder.ApplyConfiguration(new MentorGroupPolicyLevelLimitConfig());
             modelBuilder.ApplyConfiguration(new MentorBookingIntentConfig());
             modelBuilder.ApplyConfiguration(new MentorBookingTermsConfig());
             modelBuilder.ApplyConfiguration(new MentorBookingReservationConfig());

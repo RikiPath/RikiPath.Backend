@@ -1,17 +1,77 @@
-﻿using Microsoft.AspNetCore.Authorization;
+﻿using System.Collections.Concurrent;
+using Microsoft.AspNetCore.Authorization;
 using RikiPath.Application.Services;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using RikiPath.Application.IServices;
 using RikiPath.Application.Requests.LearningPath;
+using RikiPath.Application.Responses;
+using RikiPath.Application.Responses.LearningPaths;
 
 namespace RikiPath.WebApi.Controllers
 {
     [Route("api/[controller]")]
     [ApiController]
     [Authorize(Roles = "Learner")]
-    public class LearningPathController(ILearningPathService learningPathService, SubscriptionAccessService subscriptions) : ControllerBase
+    public class LearningPathController(
+        ILearningPathService learningPathService,
+        SubscriptionAccessService subscriptions,
+        IClaimService claimService,
+        ILearnerSetupStateService setupStateService) : ControllerBase
     {
+        private static readonly ConcurrentDictionary<int, Task<ApiResponse<LearningPathResponse>>> InFlightGenerations = new();
+
+        private async Task<IActionResult?> ValidateAiPrerequisiteAsync(
+            int userId,
+            int? requestedTargetLevelId,
+            CancellationToken cancellationToken)
+        {
+            var setupState = await setupStateService.ResolveForUserAsync(userId, includeProgress: false, cancellationToken);
+            if (setupState is null)
+                return StatusCode(StatusCodes.Status404NotFound, ApiResponse<LearningPathResponse>.NotFound("Không tìm thấy người dùng."));
+
+            // Never allow request body level IDs to bypass confirmed Learning Goal prerequisite.
+            if (!setupState.HasConfirmedGoal)
+            {
+                var fail = ApiResponse<LearningPathResponse>.Fail(
+                    "Vui lòng thiết lập mục tiêu JLPT (N5–N2) trước khi tạo lộ trình học AI.",
+                    System.Net.HttpStatusCode.BadRequest, errorCode: "LEARNING_PATH_GOAL_REQUIRED");
+                return StatusCode((int)fail.StatusCode, fail);
+            }
+
+            if (requestedTargetLevelId.HasValue && requestedTargetLevelId != setupState.TargetJlptLevelId)
+            {
+                var hasPlacementForTarget = await setupStateService.HasValidCompletedPlacementForTargetAsync(
+                    userId, requestedTargetLevelId.Value, cancellationToken);
+                if (!hasPlacementForTarget)
+                {
+                    var fail = ApiResponse<LearningPathResponse>.Fail(
+                        "Bạn cần hoàn thành bài đánh giá năng lực hợp lệ và tương thích cho cấp độ mục tiêu này trước khi tạo lộ trình AI.",
+                        System.Net.HttpStatusCode.Conflict, errorCode: "LEARNING_PATH_PLACEMENT_REQUIRED");
+                    return StatusCode((int)fail.StatusCode, fail);
+                }
+                return null;
+            }
+
+            if (!setupState.AiRoadmapEligible)
+            {
+                var errorCode = setupState.PlacementCompatibilityStatus == "INSUFFICIENT_FOR_TARGET"
+                    ? "PLACEMENT_INSUFFICIENT_FOR_TARGET"
+                    : "LEARNING_PATH_PLACEMENT_REQUIRED";
+                var message = setupState.PlacementCompatibilityStatus == "INSUFFICIENT_FOR_TARGET"
+                    ? (setupState.PlacementCompatibilityReason ?? "Kết quả đánh giá hiện tại chưa đủ dữ liệu năng lực cho mục tiêu này. Vui lòng hoàn thành đánh giá bổ sung.")
+                    : setupState.IsPlacementExplicitlySkipped
+                        ? "Bạn đã chọn bỏ qua đánh giá năng lực. Hãy hoàn thành bài đánh giá năng lực để mở khóa lộ trình cá nhân hóa AI."
+                        : "Bạn cần hoàn thành bài đánh giá năng lực hợp lệ trước khi tạo lộ trình cá nhân hóa AI.";
+
+                var fail = ApiResponse<LearningPathResponse>.Fail(
+                    message,
+                    System.Net.HttpStatusCode.Conflict, errorCode: errorCode);
+                return StatusCode((int)fail.StatusCode, fail);
+            }
+
+            return null;
+        }
         /// <summary>Lấy lộ trình học gần nhất đã được tạo cho Learner hiện tại.</summary>
         /// <remarks>Không tự gọi AI. Result là null khi người học chưa từng tạo lộ trình.</remarks>
         [HttpGet("latest")]
@@ -57,8 +117,13 @@ namespace RikiPath.WebApi.Controllers
         [HttpPost("preview")]
         public async Task<IActionResult> Preview([FromBody] PreviewLearningPathRequest request, CancellationToken cancellationToken)
         {
+            var userId = claimService.GetUserClaim().Id;
+            var prereqError = await ValidateAiPrerequisiteAsync(
+                userId, request?.TargetCertificateLevelId ?? request?.TargetJlptLevelId, cancellationToken);
+            if (prereqError is not null) return prereqError;
+
             var response = await subscriptions.UseAiAsync("learning_path",
-                () => learningPathService.PreviewLearningPathAsync(request, cancellationToken), cancellationToken);
+                () => learningPathService.PreviewLearningPathAsync(request!, cancellationToken), cancellationToken);
             return StatusCode((int)response.StatusCode, response);
         }
 
@@ -101,10 +166,48 @@ namespace RikiPath.WebApi.Controllers
             [FromBody] GenerateLearningPathRequest request,
             CancellationToken cancellationToken)
         {
-            var response = await subscriptions.UseAiAsync("learning_path",
-                () => learningPathService.GenerateLearningPathAsync(request, cancellationToken), cancellationToken);
+            var userId = claimService.GetUserClaim().Id;
+            var prereqError = await ValidateAiPrerequisiteAsync(
+                userId, request?.TargetCertificateLevelId ?? request?.TargetJlptLevelId, cancellationToken);
+            if (prereqError is not null) return prereqError;
 
-            return StatusCode((int)response.StatusCode, response);
+            if (InFlightGenerations.TryGetValue(userId, out var existingTask))
+            {
+                var sharedResponse = await existingTask.WaitAsync(cancellationToken);
+                return StatusCode((int)sharedResponse.StatusCode, sharedResponse);
+            }
+
+            var tcs = new TaskCompletionSource<ApiResponse<LearningPathResponse>>(TaskCreationOptions.RunContinuationsAsynchronously);
+            if (!InFlightGenerations.TryAdd(userId, tcs.Task))
+            {
+                if (InFlightGenerations.TryGetValue(userId, out var racedTask))
+                {
+                    var sharedResponse = await racedTask.WaitAsync(cancellationToken);
+                    return StatusCode((int)sharedResponse.StatusCode, sharedResponse);
+                }
+            }
+
+            try
+            {
+                // Detach shared AI generation from caller 1's cancellation token so aborting one tab
+                // never fails coalesced concurrent callers awaiting the same in-flight task.
+                using var serverTimeoutCts = new CancellationTokenSource(TimeSpan.FromMinutes(3));
+                var response = await subscriptions.UseAiAsync("learning_path",
+                    () => learningPathService.GenerateLearningPathAsync(request!, serverTimeoutCts.Token),
+                    serverTimeoutCts.Token);
+                tcs.TrySetResult(response);
+                var awaitedResponse = await tcs.Task.WaitAsync(cancellationToken);
+                return StatusCode((int)awaitedResponse.StatusCode, awaitedResponse);
+            }
+            catch (Exception ex)
+            {
+                tcs.TrySetException(ex);
+                throw;
+            }
+            finally
+            {
+                InFlightGenerations.TryRemove(new KeyValuePair<int, Task<ApiResponse<LearningPathResponse>>>(userId, tcs.Task));
+            }
         }
     }
 }

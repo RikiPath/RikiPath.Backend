@@ -1,3 +1,4 @@
+using RikiPath.Application.Helpers;
 using Microsoft.EntityFrameworkCore;
 using RikiPath.Application.IServices;
 using RikiPath.Application.Requests.MockTests;
@@ -93,7 +94,13 @@ namespace RikiPath.Application.Services
 
         public Func<DateTime> UtcNowProvider { get; init; } = static () => DateTime.UtcNow;
 
+        public Task<ApiResponse<PlacementTestStatusResponse>> GetStatusAsync(
+            CancellationToken cancellationToken = default)
+            => GetStatusAsync(null, null, cancellationToken);
+
         public async Task<ApiResponse<PlacementTestStatusResponse>> GetStatusAsync(
+            int? assessmentLevelId,
+            string? assessmentMode,
             CancellationToken cancellationToken = default)
         {
             try
@@ -108,66 +115,140 @@ namespace RikiPath.Application.Services
                 var serverNow = EnsureUtc(UtcNowProvider());
                 var placementAttempts = await LoadUserPlacementAttemptsAsync(userId, cancellationToken);
 
-                var targetId = GetAdaptiveGoalId(user);
-                var activeAttempt = FindCanonicalActiveAttempt(
-                    placementAttempts, serverNow, targetId)?.Attempt;
-                var completedWithSnapshot = FindLatestCompletedAssessment(placementAttempts, targetId, requireMatchingGoal: targetId.HasValue);
-                var allowance = targetId is int levelId
-                    ? await GetAttemptAllowanceAsync(userId, levelId, serverNow, cancellationToken)
-                    : null;
+                var goalId = GetAdaptiveGoalId(user);
+                var hasConfirmedGoal = goalId.HasValue && user.DailyStudyMinutes > 0 && user.DailyStudyMinutes <= 1440;
 
-                var latestCompleted = completedWithSnapshot.Attempt;
-                var recovered = completedWithSnapshot.Recovered;
-
-                int? assessedLevelId = recovered is { AssessedJlptLevelId: > 0 } ? recovered.AssessedJlptLevelId : null;
-                string? assessedLevelName = recovered?.AssessedJlptLevelName;
-                int? recommendedLevelId = recovered?.RecommendedTargetJlptLevelId;
-                string? recommendedLevelName = recovered?.RecommendedTargetJlptLevelName;
-
-                string? targetLevelName = user.TargetCertificateLevel?.Code;
-                if (user.TargetCertificateLevelId.HasValue && string.IsNullOrWhiteSpace(targetLevelName))
+                string? goalLevelName = user.TargetCertificateLevel?.Code;
+                if (user.TargetCertificateLevelId.HasValue && string.IsNullOrWhiteSpace(goalLevelName))
                 {
                     var targetLevel = await unitOfWork.CertificateLevels.GetByIdAsync(
                         user.TargetCertificateLevelId.Value,
                         cancellationToken);
-                    targetLevelName = targetLevel?.Code;
+                    goalLevelName = targetLevel?.Code;
                 }
 
-                var hasValidExamDate = user.TargetExamDate is not { } examDate ||
-                    (BusinessDateHelper.IsJlptExamMonth(examDate) &&
-                     BusinessDateHelper.IsFutureExamDate(examDate, serverNow));
-                var canStart = allowance is { Remaining: > 0, PendingSubmissionAttemptId: null } &&
-                    user.TargetExamDate is { } scheduledExam && BusinessDateHelper.IsJlptExamDate(scheduledExam) &&
-                    BusinessDateHelper.IsFutureExamDate(scheduledExam, serverNow);
-                var isReadyForLearningPath =
-                    (user.StartingCertificateLevelId ?? user.TargetCertificateLevelId).HasValue &&
-                    user.TargetCertificateLevelId.HasValue &&
-                    hasValidExamDate &&
-                    user.DailyStudyMinutes > 0 &&
-                    recovered is not null;
+                // Resolve assessment scope independently of Learning Goal.
+                var normalizedMode = (assessmentMode ?? string.Empty).Trim().ToUpperInvariant();
+                int? scopeLevelId = null;
+                var effectiveMode = "COMPREHENSIVE";
+
+                if (normalizedMode == "COMPREHENSIVE")
+                {
+                    scopeLevelId = null;
+                    effectiveMode = "COMPREHENSIVE";
+                }
+                else if (assessmentLevelId is int requestedLevelId)
+                {
+                    var requestedLevel = await unitOfWork.CertificateLevels.GetActiveJlptLevelByIdAsync(
+                        requestedLevelId, cancellationToken);
+                    if (requestedLevel is not null && JlptCurriculum.IsSupportedStudyLevel(requestedLevel.Code))
+                    {
+                        scopeLevelId = requestedLevel.Id;
+                        effectiveMode = "TARGETED";
+                    }
+                }
+                else if (goalId is int existingGoalId)
+                {
+                    scopeLevelId = existingGoalId;
+                    effectiveMode = "TARGETED";
+                }
+
+                var activeEntry = FindCanonicalActiveAttempt(placementAttempts, serverNow, scopeLevelId)
+                    ?? FindCanonicalActiveAttempt(placementAttempts, serverNow, preferredScopeId: null, anyScope: true);
+                var activeAttempt = activeEntry?.Attempt;
+                var activeSnapshot = activeEntry?.Snapshot;
+
+                var compatibility = EvaluatePlacementCompatibility(placementAttempts, goalId, goalLevelName);
+                var displayAttempt = compatibility.CompatibleAttempt ?? compatibility.LatestAttempt;
+                var displayResult = compatibility.CompatibleResult ?? compatibility.LatestResult;
+
+                var allowance = await GetAttemptAllowanceAsync(userId, scopeLevelId, serverNow, cancellationToken);
+                var availableLevelIds = await GetAvailableAssessmentLevelIdsAsync(cancellationToken);
+
+                int? assessedLevelId = displayResult is { AssessedJlptLevelId: > 0 }
+                    ? displayResult.AssessedJlptLevelId
+                    : user.AssessedCertificateLevelId;
+                string? assessedLevelName = !string.IsNullOrWhiteSpace(displayResult?.AssessedJlptLevelName)
+                    ? displayResult!.AssessedJlptLevelName
+                    : user.AssessedCertificateLevel?.Code;
+                int? recommendedLevelId = displayResult?.RecommendedTargetJlptLevelId;
+                string? recommendedLevelName = displayResult?.RecommendedTargetJlptLevelName;
+
+                int? latestAssessmentLevelId = displayResult?.AssessmentTargetLevelId;
+                string? latestAssessmentLevelName = displayResult?.ScreeningLevelName
+                    ?? (displayResult?.AssessmentTargetLevelId is int aid
+                        ? displayResult.LevelBreakdowns.FirstOrDefault(b => b.JlptLevelId == aid)?.JlptLevelName
+                        : null);
+
+                int? activeScopeLevelId = activeSnapshot?.AssessmentTargetLevelId;
+                string? activeScopeLevelName = activeScopeLevelId is int activeLvlId
+                    ? activeSnapshot?.CatalogLevels.FirstOrDefault(l => l.JlptLevelId == activeLvlId)?.JlptLevelName
+                    : null;
+
+                var hasValidCompleted = compatibility.Status == "COMPATIBLE"
+                    || (!hasConfirmedGoal && compatibility.HasAnyCompletedPlacement);
+
+                string? cannotStartReason = null;
+                if (activeAttempt is not null)
+                    cannotStartReason = "ACTIVE_ATTEMPT_EXISTS";
+                else if (allowance.PendingSubmissionAttemptId.HasValue)
+                    cannotStartReason = "PENDING_SUBMISSION";
+                else if (allowance.Remaining <= 0)
+                    cannotStartReason = "PLACEMENT_ATTEMPT_LIMIT_REACHED";
+
+                var canStart = cannotStartReason is null;
+                var isReadyForLearningPath = hasConfirmedGoal && compatibility.Status == "COMPATIBLE";
+
+                var decision = hasValidCompleted
+                    ? "COMPLETED"
+                    : hasConfirmedGoal && user.PlacementDecision == PlacementDecision.Skipped
+                        ? "SKIPPED"
+                        : "NOT_TAKEN";
 
                 return ApiResponse<PlacementTestStatusResponse>.Success(new PlacementTestStatusResponse
                 {
                     AttemptType = AttemptTypePlacement,
-                    PlacementDecision = latestCompleted is not null || user.PlacementDecision == PlacementDecision.Completed
-                        ? "COMPLETED"
-                        : user.PlacementDecision == PlacementDecision.Skipped ? "SKIPPED" : "NOT_TAKEN",
+                    PlacementDecision = decision,
                     HasActiveAttempt = activeAttempt is not null,
                     AttemptAllowance = allowance,
+                    QuotaInitialized = true,
                     CanStartNewAttempt = canStart,
+                    CannotStartReason = cannotStartReason,
+                    AssessmentMode = effectiveMode,
+                    IsGoalConfirmed = hasConfirmedGoal,
+                    LatestAssessmentLevelId = latestAssessmentLevelId,
+                    LatestAssessmentLevelName = latestAssessmentLevelName,
+                    LatestAssessmentIsComprehensive = displayResult?.IsComprehensiveAssessment ?? false,
+                    PlacementCompatibilityStatus = compatibility.Status,
+                    PlacementCompatibilityReason = compatibility.Reason,
+                    AvailableAssessmentLevelIds = availableLevelIds,
                     ActiveAttemptId = activeAttempt?.Id,
+                    ActiveAttemptAssessmentLevelId = activeScopeLevelId,
+                    ActiveAttemptAssessmentLevelName = activeScopeLevelName,
+                    ActiveAttemptIsComprehensive = activeSnapshot?.IsComprehensiveAssessment ?? false,
                     ActiveAttemptExpiresAt = activeAttempt?.ExpiresAt is { } exp ? EnsureUtc(exp) : null,
-                    HasCompletedPlacementTest = latestCompleted is not null,
-                    LatestCompletedAttemptId = latestCompleted?.Id,
-                    LatestAttemptId = latestCompleted?.Id,
-                    LatestSubmittedAt = latestCompleted?.SubmittedAt is { } sub ? EnsureUtc(sub) : null,
-                    LatestScorePercent = latestCompleted?.TotalScore,
+                    HasCompletedPlacementTest = displayResult is not null,
+                    LatestCompletedAttemptId = displayAttempt?.Id,
+                    LatestAttemptId = displayAttempt?.Id ?? placementAttempts.FirstOrDefault()?.Id,
+                    LatestSubmittedAt = displayAttempt?.SubmittedAt is { } sub ? EnsureUtc(sub) : null,
+                    LatestScorePercent = displayAttempt?.TotalScore,
                     AssessedJlptLevelId = assessedLevelId,
                     AssessedJlptLevelName = assessedLevelName,
                     RecommendedTargetJlptLevelId = recommendedLevelId,
                     RecommendedTargetJlptLevelName = recommendedLevelName,
-                    TargetJlptLevelId = user.TargetCertificateLevelId,
-                    TargetJlptLevelName = targetLevelName,
+                    TargetJlptLevelId = hasConfirmedGoal ? user.TargetCertificateLevelId : null,
+                    TargetJlptLevelName = hasConfirmedGoal ? goalLevelName : null,
+                    // Scope of the one general assessment for the confirmed goal, from the same policy the start uses
+                    // (goal level + one lower comparison level when it exists; the four assessed JLPT skills).
+                    PlannedAssessmentLevelCodes = hasConfirmedGoal && !string.IsNullOrWhiteSpace(goalLevelName)
+                        ? new[] { PlacementAssessmentModePolicy.ComparisonLevel(NormalizeLevelCode(goalLevelName)), NormalizeLevelCode(goalLevelName) }
+                            .Where(code => !string.IsNullOrWhiteSpace(code) && JlptCurriculum.IsSupportedStudyLevel(code))
+                            .Select(code => code!)
+                            .ToList()
+                        : [],
+                    PlannedSkillCodes = hasConfirmedGoal
+                        ? Enum.GetValues<JlptStudySkill>().Select(skill => skill.ToString().ToLowerInvariant()).ToList()
+                        : [],
                     DailyStudyMinutes = user.DailyStudyMinutes,
                     TargetExamDate = user.TargetExamDate,
                     IsReadyForLearningPath = isReadyForLearningPath,
@@ -187,16 +268,28 @@ namespace RikiPath.Application.Services
             try
             {
                 var userId = claimService.GetUserClaim().Id;
-                var user = await unitOfWork.UserAccounts.GetByIdAsync(userId, cancellationToken);
+                var user = await unitOfWork.UserAccounts.GetWithLearningGoalAsync(userId, cancellationToken);
                 if (user is null)
                     return ApiResponse<PlacementTestStatusResponse>.NotFound("Không tìm thấy người dùng.");
 
-                // Không ghi đè quyết định COMPLETED đã được xác nhận từ kết quả thật.
-                if (user.PlacementDecision != PlacementDecision.Completed)
+                var targetId = GetAdaptiveGoalId(user);
+                if (!targetId.HasValue || user.DailyStudyMinutes <= 0)
+                    return ApiResponse<PlacementTestStatusResponse>.Fail(
+                        "Vui lòng thiết lập mục tiêu JLPT (N5–N2) trước khi chọn bỏ qua bài đánh giá năng lực.",
+                        HttpStatusCode.BadRequest, errorCode: "LEARNING_GOAL_REQUIRED");
+
+                // Chỉ giữ COMPLETED nếu thực sự có kết quả đánh giá hợp lệ và tương thích với mục tiêu hiện tại.
+                var attempts = await LoadUserPlacementAttemptsAsync(userId, cancellationToken);
+                var goalCode = user.TargetCertificateLevel?.Code
+                    ?? (await unitOfWork.CertificateLevels.GetByIdAsync(targetId.Value, cancellationToken))?.Code;
+                var compatibility = EvaluatePlacementCompatibility(attempts, targetId, goalCode);
+                if (compatibility.Status != "COMPATIBLE" && user.PlacementDecision != PlacementDecision.Skipped)
                 {
-                    user.PlacementDecision = PlacementDecision.Skipped;
-                    unitOfWork.UserAccounts.Update(user);
-                    await unitOfWork.SaveChangesAsync(cancellationToken);
+                    // Sequential flow: a new roadmap needs a real assessment result, so skipping is no longer
+                    // accepted. Learners who skipped earlier keep their existing roadmap (see LearnerSetupStateService).
+                    return ApiResponse<PlacementTestStatusResponse>.Fail(
+                        "Hãy hoàn thành bài đánh giá năng lực để tạo lộ trình học phù hợp với bạn.",
+                        HttpStatusCode.Conflict, errorCode: "PLACEMENT_SKIP_DISABLED");
                 }
                 return await GetStatusAsync(cancellationToken);
             }
@@ -357,7 +450,7 @@ namespace RikiPath.Application.Services
 
         public Task<ApiResponse<PlacementAttemptSnapshotResponse>> StartPlacementTestAsync(
             CancellationToken cancellationToken = default)
-            => StartPlacementTestInternalAsync(DefaultQuestionsPerLevel, retakeTargetAssessment: false, cancellationToken);
+            => StartPlacementTestInternalAsync(DefaultQuestionsPerLevel, null, cancellationToken);
 
         public Task<ApiResponse<PlacementAttemptSnapshotResponse>> StartPlacementTestAsync(
             StartPlacementTestRequest? request,
@@ -366,14 +459,17 @@ namespace RikiPath.Application.Services
             var requestedQuestionsPerLevel = Math.Clamp(DefaultQuestionsPerLevel,
                 MinimumEligibleQuestionsPerLevel,
                 DefaultQuestionsPerLevel);
-            return StartPlacementTestInternalAsync(requestedQuestionsPerLevel, request?.RetakeTargetAssessment == true, cancellationToken);
+            return StartPlacementTestInternalAsync(requestedQuestionsPerLevel, request, cancellationToken);
         }
 
         private async Task<ApiResponse<PlacementAttemptSnapshotResponse>> StartPlacementTestInternalAsync(
             int questionsPerSupportedLevel,
-            bool retakeTargetAssessment,
+            StartPlacementTestRequest? request,
             CancellationToken cancellationToken)
         {
+            var retakeTargetAssessment = request?.RetakeTargetAssessment == true;
+            var restartExisting = request?.RestartExisting == true;
+            var requestedMode = (request?.AssessmentMode ?? string.Empty).Trim().ToUpperInvariant();
             var userId = 0;
             SemaphoreSlim? userLock = null;
             try
@@ -385,11 +481,91 @@ namespace RikiPath.Application.Services
                 var serverNow = EnsureUtc(UtcNowProvider());
                 var goal = unitOfWork.UserAccounts is null ? null :
                     await unitOfWork.UserAccounts.GetWithLearningGoalAsync(userId, cancellationToken);
-                var goalCode = NormalizeLevelCode(goal?.TargetCertificateLevel?.Code);
-                var adaptiveGoalId = GetAdaptiveGoalId(goal);
+                if (goal is null && unitOfWork.UserAccounts is not null)
+                    return ApiResponse<PlacementAttemptSnapshotResponse>.NotFound("Không tìm thấy người dùng.");
+
+                var confirmedGoalId = GetAdaptiveGoalId(goal);
+                if (confirmedGoalId is null && unitOfWork.UserAccounts is not null)
+                {
+                    // Sequential flow: no new attempt before a confirmed goal. An attempt already in progress
+                    // (started earlier) can still be resumed so no answers are lost.
+                    var existingAttempts = await LoadUserPlacementAttemptsAsync(userId, cancellationToken);
+                    var resumable = FindCanonicalActiveAttempt(existingAttempts, serverNow, null, anyScope: true);
+                    if (resumable is not null && !restartExisting)
+                        return ApiResponse<PlacementAttemptSnapshotResponse>.Success(
+                            BuildSnapshotResponse(resumable.Value.Attempt, resumable.Value.Snapshot, serverNow, isResumed: true),
+                            HttpStatusCode.OK);
+                    return ApiResponse<PlacementAttemptSnapshotResponse>.Fail(
+                        "Vui lòng đặt mục tiêu JLPT trước khi làm bài đánh giá năng lực.",
+                        HttpStatusCode.BadRequest, errorCode: "LEARNING_GOAL_REQUIRED");
+                }
+                if (confirmedGoalId is not null)
+                {
+                    // One general assessment for the confirmed goal: level/mode choices from older clients are ignored.
+                    requestedMode = string.Empty;
+                    if (request is not null)
+                    {
+                        request.AssessmentLevelId = null;
+                        request.MockTestId = 0;
+                    }
+                }
+                var allLevelsRaw = (await unitOfWork.CertificateLevels.GetAllAsync(cancellationToken))
+                    .Where(l => !l.IsDeleted && l.Id > 0 && !string.IsNullOrWhiteSpace(l.Code))
+                    .ToList();
+
+                // Resolve assessment scope independently from Learning Goal:
+                // 1) Explicit COMPREHENSIVE -> multi-level assessment (AssessmentTargetLevelId = null)
+                // 2) Explicit AssessmentLevelId or MockTestId -> targeted assessment for that level WITHOUT mutating TargetCertificateLevelId
+                // 3) Fallback to confirmed goal level if set
+                // 4) Otherwise untargeted COMPREHENSIVE multi-level assessment
+                int? scopeLevelId = null;
+                string? scopeCode = null;
+                bool isComprehensive = false;
+                CertificateLevel? explicitLevel = null;
+
+                if (requestedMode == "COMPREHENSIVE")
+                {
+                    isComprehensive = true;
+                }
+                else if (request?.AssessmentLevelId is int requestedAssessmentLevelId)
+                {
+                    explicitLevel = allLevelsRaw.FirstOrDefault(l =>
+                        l.Id == requestedAssessmentLevelId && JlptCurriculum.IsSupportedStudyLevel(NormalizeLevelCode(l.Code)));
+                    if (explicitLevel is null)
+                        return ApiResponse<PlacementAttemptSnapshotResponse>.Fail(
+                            "Cấp độ đánh giá không hợp lệ. Hệ thống hiện hỗ trợ từ N5 đến N2.",
+                            HttpStatusCode.BadRequest, errorCode: "STUDY_LEVEL_UNSUPPORTED");
+                    scopeLevelId = explicitLevel.Id;
+                    scopeCode = NormalizeLevelCode(explicitLevel.Code);
+                }
+                else if (request?.MockTestId is > 0)
+                {
+                    var selectedTest = await unitOfWork.MockTests.GetWithSectionsAndQuestionsAsync(request.MockTestId, cancellationToken);
+                    if (selectedTest is null || selectedTest.IsDeleted)
+                        return ApiResponse<PlacementAttemptSnapshotResponse>.NotFound("Không tìm thấy bài đánh giá đã chọn.");
+                    explicitLevel = allLevelsRaw.FirstOrDefault(l =>
+                        l.Id == selectedTest.CertificateLevelId && JlptCurriculum.IsSupportedStudyLevel(NormalizeLevelCode(l.Code)));
+                    if (explicitLevel is null)
+                        return ApiResponse<PlacementAttemptSnapshotResponse>.Fail(
+                            "Cấp độ của đề đánh giá này chưa được hỗ trợ.", HttpStatusCode.BadRequest, errorCode: "STUDY_LEVEL_UNSUPPORTED");
+                    scopeLevelId = explicitLevel.Id;
+                    scopeCode = NormalizeLevelCode(explicitLevel.Code);
+                }
+                else if (confirmedGoalId is int existingGoalId)
+                {
+                    scopeLevelId = existingGoalId;
+                    scopeCode = NormalizeLevelCode(goal?.TargetCertificateLevel?.Code);
+                    explicitLevel = goal?.TargetCertificateLevel ?? allLevelsRaw.FirstOrDefault(l => l.Id == existingGoalId);
+                }
+                else
+                {
+                    isComprehensive = true;
+                }
+
                 var attempts = await LoadUserPlacementAttemptsAsync(userId, cancellationToken);
-                var preExistingActive = FindCanonicalActiveAttempt(attempts, serverNow, adaptiveGoalId);
-                if (preExistingActive is not null)
+                var preExistingActive = FindCanonicalActiveAttempt(attempts, serverNow, scopeLevelId)
+                    ?? (!restartExisting ? FindCanonicalActiveAttempt(attempts, serverNow, null, anyScope: true) : null);
+                if (preExistingActive is not null && !restartExisting)
                 {
                     return ApiResponse<PlacementAttemptSnapshotResponse>.Success(
                         BuildSnapshotResponse(
@@ -400,29 +576,28 @@ namespace RikiPath.Application.Services
                         HttpStatusCode.OK);
                 }
 
-                if (adaptiveGoalId is not int targetLevelId || goal?.TargetExamDate is not { } examDate ||
-                    !BusinessDateHelper.IsJlptExamDate(examDate) || !BusinessDateHelper.IsFutureExamDate(examDate, serverNow))
-                    return ApiResponse<PlacementAttemptSnapshotResponse>.Fail(
-                        "Hãy lưu cấp JLPT mục tiêu và ngày thi hợp lệ trước khi bắt đầu bài đánh giá.",
-                        HttpStatusCode.Conflict, errorCode: "PLACEMENT_GOAL_REQUIRED");
-
-                var allowance = await GetAttemptAllowanceAsync(userId, targetLevelId, serverNow, cancellationToken);
-                var latestTarget = GetLatestTargetResult(attempts, targetLevelId);
-                var unavailable = CheckStartAllowance(allowance, latestTarget, retakeTargetAssessment);
+                var allowance = await GetAttemptAllowanceAsync(userId, scopeLevelId, serverNow, cancellationToken);
+                var latestForScope = GetLatestResultForScope(attempts, scopeLevelId);
+                var unavailable = CheckStartAllowance(allowance, latestForScope, retakeTargetAssessment);
                 if (unavailable is not null) return unavailable;
-                var comparisonLevel = PlacementAssessmentModePolicy.ComparisonLevel(goalCode);
-                var shortQuestionLimit = PlacementAssessmentModePolicy.ShortAssessmentQuestionsPerSkillAndLevel(
-                    goalCode, goal?.DeclaredJlptCertificateCode);
-                var previousQuestionIds = latestTarget is not null && TryDeserializeSnapshot(
-                    attempts.FirstOrDefault(attempt => attempt.Id == latestTarget.AttemptId)?.QuestionSnapshotJson,
+
+                var declaredCertCode = scopeLevelId.HasValue && scopeLevelId == confirmedGoalId
+                    ? goal?.DeclaredJlptCertificateCode
+                    : null;
+                var comparisonLevel = scopeCode is not null ? PlacementAssessmentModePolicy.ComparisonLevel(scopeCode) : null;
+                var shortQuestionLimit = scopeCode is not null
+                    ? PlacementAssessmentModePolicy.ShortAssessmentQuestionsPerSkillAndLevel(scopeCode, declaredCertCode)
+                    : 0;
+                var previousQuestionIds = latestForScope is not null && TryDeserializeSnapshot(
+                    attempts.FirstOrDefault(attempt => attempt.Id == latestForScope.AttemptId)?.QuestionSnapshotJson,
                     out var previousSnapshot)
                     ? previousSnapshot.Questions.Select(question => question.QuestionId).ToHashSet()
                     : [];
 
                 var tests = await unitOfWork.MockTests.GetAllWithSectionsAndQuestionsAsync(cancellationToken);
-                var allLevels = (await unitOfWork.CertificateLevels.GetAllAsync(cancellationToken))
-                    .Where(l => !l.IsDeleted && l.Id > 0 && !string.IsNullOrWhiteSpace(l.Code) &&
-                        (!adaptiveGoalId.HasValue || l.CertificateTypeId == goal!.TargetCertificateLevel!.CertificateTypeId))
+                var certificateFamilyId = explicitLevel?.CertificateTypeId ?? goal?.TargetCertificateLevel?.CertificateTypeId;
+                var allLevels = allLevelsRaw
+                    .Where(l => !certificateFamilyId.HasValue || l.CertificateTypeId == certificateFamilyId.Value)
                     .ToList();
 
                 var supportedCatalogLevels = allLevels
@@ -480,7 +655,7 @@ namespace RikiPath.Application.Services
                     }
 
                     if (resolvedCode is null || JlptCurriculum.Rank(resolvedCode) == 0 || resolvedLevelId <= 0 ||
-                        (adaptiveGoalId.HasValue && resolvedLevelId != adaptiveGoalId.Value && resolvedLevelId != comparisonLevelId))
+                        (scopeLevelId.HasValue && resolvedLevelId != scopeLevelId.Value && resolvedLevelId != comparisonLevelId))
                     {
                         continue;
                     }
@@ -569,10 +744,10 @@ namespace RikiPath.Application.Services
 
                 var selectedQuestions = eligibleCandidates.GetRange(0, 0);
                 int? fullTestTimeLimit = null;
-                if (adaptiveGoalId.HasValue && comparisonLevel is not null)
+                if (scopeLevelId.HasValue && comparisonLevel is not null && scopeCode is not null)
                 {
                     var groups = (from skill in Enum.GetValues<JlptStudySkill>()
-                                  from level in new[] { comparisonLevel, goalCode }
+                                  from level in new[] { comparisonLevel, scopeCode }
                                   select new
                                   {
                                       Skill = skill,
@@ -604,7 +779,7 @@ namespace RikiPath.Application.Services
                     if (shortQuestionLimit > 0)
                         fullTestTimeLimit = selectedQuestions.Count * 5 / 4;
                 }
-                else if (adaptiveGoalId.HasValue)
+                else if (scopeLevelId.HasValue && scopeCode is not null)
                 {
                     var fullTest = eligibleCandidates
                         .GroupBy(candidate => candidate.Test)
@@ -619,15 +794,37 @@ namespace RikiPath.Application.Services
                         .ThenByDescending(test => test.Questions.Count())
                         .ThenBy(test => test.Test.Id)
                         .FirstOrDefault();
-                    if (fullTest is null)
-                        return ApiResponse<PlacementAttemptSnapshotResponse>.Fail(
-                            $"Chưa có đề {goalCode} với ít nhất 3 câu hợp lệ cho mỗi kỹ năng: từ vựng, ngữ pháp, đọc hiểu và nghe hiểu.",
-                            HttpStatusCode.Conflict, errorCode: ErrorBankNotReady, retryable: false);
+                    if (fullTest is not null)
+                    {
+                        selectedQuestions = fullTest.Questions.ToList();
+                        if (fullTest.Test.TimeLimitMinutes > 0)
+                            fullTestTimeLimit = fullTest.Test.TimeLimitMinutes;
+                    }
+                    else
+                    {
+                        // Pool balanced questions across published tests of this level across all 4 skills.
+                        var singleLevelGroups = Enum.GetValues<JlptStudySkill>()
+                            .Select(skill => new
+                            {
+                                Skill = skill,
+                                Candidates = eligibleCandidates.Where(candidate => candidate.LevelCode == scopeCode &&
+                                    JlptSkillAssessmentPolicy.Classify(candidate.Section.LanguageSkill?.Name) == skill)
+                                    .OrderByDescending(candidate => skill == JlptStudySkill.Listening &&
+                                        !string.IsNullOrWhiteSpace(candidate.Question.AudioUrl))
+                                    .ThenBy(candidate => previousQuestionIds.Contains(candidate.Question.Id))
+                                    .ToList(),
+                            }).ToList();
 
-                    selectedQuestions = fullTest.Questions.ToList();
-                    if (fullTest.Test.TimeLimitMinutes > 0)
-                        fullTestTimeLimit = fullTest.Test.TimeLimitMinutes;
+                        var missingSingle = singleLevelGroups.FirstOrDefault(group =>
+                            group.Candidates.Count < PlacementAssessmentModePolicy.MinimumQuestionsPerSkillAndLevel);
+                        if (missingSingle is not null)
+                            return ApiResponse<PlacementAttemptSnapshotResponse>.Fail(
+                                $"Chưa có đề {scopeCode} với ít nhất {PlacementAssessmentModePolicy.MinimumQuestionsPerSkillAndLevel} câu hợp lệ cho {JlptSkillAssessmentPolicy.Label(missingSingle.Skill)}.",
+                                HttpStatusCode.Conflict, errorCode: ErrorBankNotReady, retryable: false);
 
+                        foreach (var group in singleLevelGroups)
+                            selectedQuestions.AddRange(group.Candidates.Take(5));
+                    }
                 }
                 else
                 {
@@ -663,13 +860,14 @@ namespace RikiPath.Application.Services
                 var snapshotDoc = new PlacementAttemptSnapshotDocument
                 {
                     SchemaVersion = 2,
-                    AssessmentTargetLevelId = adaptiveGoalId,
+                    AssessmentTargetLevelId = scopeLevelId,
+                    IsComprehensiveAssessment = isComprehensive || !scopeLevelId.HasValue,
                     IsShortenedAssessment = shortQuestionLimit > 0,
                     TimeLimitMinutes = timeLimitMinutes,
                     StartedAt = startedAt,
                     ExpiresAt = expiresAt,
                     CatalogLevels = supportedCatalogLevels.Values
-                        .Where(level => !adaptiveGoalId.HasValue || selectedQuestions.Any(question => question.LevelId == level.LevelId))
+                        .Where(level => !scopeLevelId.HasValue || selectedQuestions.Any(question => question.LevelId == level.LevelId))
                         .OrderBy(l => l.Rank)
                         .Select(l => new PlacementSnapshotLevelCatalogItem
                         {
@@ -718,25 +916,13 @@ namespace RikiPath.Application.Services
                         await LockUserForPlacementStartAsync(userId, transactionCancellationToken);
 
                         var nowInTx = EnsureUtc(UtcNowProvider());
-                        var currentGoal = await unitOfWork.UserAccounts.Query().AsNoTracking()
-                            .Where(user => user.Id == userId && !user.IsDeleted)
-                            .Select(user => new { user.TargetCertificateLevelId, user.TargetExamDate, user.DeclaredJlptCertificateCode })
-                            .SingleOrDefaultAsync(transactionCancellationToken);
-                        if (currentGoal is null || currentGoal.TargetCertificateLevelId != targetLevelId ||
-                            currentGoal.TargetExamDate != examDate || currentGoal.DeclaredJlptCertificateCode != goal.DeclaredJlptCertificateCode ||
-                            !BusinessDateHelper.IsFutureExamDate(examDate, nowInTx))
-                        {
-                            response = ApiResponse<PlacementAttemptSnapshotResponse>.Fail(
-                                "Mục tiêu vừa thay đổi. Hãy tải lại thông tin đánh giá.",
-                                HttpStatusCode.Conflict, "PLACEMENT_STAGE_CHANGED", retryable: true);
-                            return;
-                        }
                         var allPlacementAttempts = await LoadUserPlacementAttemptsAsync(
                             userId,
                             transactionCancellationToken);
 
-                        var activeAfterLock = FindCanonicalActiveAttempt(allPlacementAttempts, nowInTx, adaptiveGoalId);
-                        if (activeAfterLock is not null)
+                        var activeAfterLock = FindCanonicalActiveAttempt(allPlacementAttempts, nowInTx, scopeLevelId)
+                            ?? (!restartExisting ? FindCanonicalActiveAttempt(allPlacementAttempts, nowInTx, null, anyScope: true) : null);
+                        if (activeAfterLock is not null && !restartExisting)
                         {
                             response = ApiResponse<PlacementAttemptSnapshotResponse>.Success(
                                 BuildSnapshotResponse(
@@ -748,12 +934,12 @@ namespace RikiPath.Application.Services
                             return;
                         }
 
-                        var currentAllowance = await GetAttemptAllowanceAsync(userId, targetLevelId, nowInTx, transactionCancellationToken);
-                        var currentResult = GetLatestTargetResult(allPlacementAttempts, targetLevelId);
+                        var currentAllowance = await GetAttemptAllowanceAsync(userId, scopeLevelId, nowInTx, transactionCancellationToken);
+                        var currentResult = GetLatestResultForScope(allPlacementAttempts, scopeLevelId);
                         response = CheckStartAllowance(currentAllowance, currentResult, retakeTargetAssessment);
                         if (response is not null) return;
 
-                        if (currentAllowance.Started != allowance.Started || currentResult?.AttemptId != latestTarget?.AttemptId)
+                        if (currentAllowance.Started != allowance.Started || currentResult?.AttemptId != latestForScope?.AttemptId)
                         {
                             response = ApiResponse<PlacementAttemptSnapshotResponse>.Fail(
                                 "Trạng thái bài đánh giá vừa thay đổi. Vui lòng bắt đầu lại.",
@@ -1079,8 +1265,8 @@ namespace RikiPath.Application.Services
                             CorrectCount = snapshotDoc.Questions.Count(q => q.IsCorrect),
                             NotStudiedCount = snapshotDoc.Questions.Count(q => q.SelectedOptionId == NotStudiedOptionId),
                             TotalQuestions = snapshotDoc.Questions.Count,
-                            AssessedJlptLevelId = isTargetAssessment || snapshotDoc.IsComprehensiveAssessment ? 0 : evaluation.AssessedLevelId,
-                            AssessedJlptLevelName = isTargetAssessment || snapshotDoc.IsComprehensiveAssessment ? string.Empty : evaluation.AssessedLevelName,
+                            AssessedJlptLevelId = evaluation.AssessedLevelId,
+                            AssessedJlptLevelName = evaluation.AssessedLevelName,
                             RecommendedTargetJlptLevelId = targetLevel?.JlptLevelId ?? evaluation.RecommendedTargetLevelId,
                             RecommendedTargetJlptLevelName = targetLevel?.JlptLevelName ?? evaluation.RecommendedTargetLevelName,
                             WrongQuestionIds = snapshotDoc.Questions
@@ -1103,17 +1289,29 @@ namespace RikiPath.Application.Services
                         attempt.QuestionSnapshotJson = JsonSerializer.Serialize(snapshotDoc, SnapshotJsonOptions);
                         unitOfWork.MockTestAttempts.Update(attempt);
 
-                        // Assessment comes only from this owned, immutable Placement result;
-                        // it never changes the learner's chosen starting level, goal, or active path.
+                        // Assessment updates estimated proficiency level (AssessedCertificateLevelId) and PlacementDecision
+                        // strictly without mutating TargetCertificateLevelId or StartingCertificateLevelId.
                         var learner = await unitOfWork.UserAccounts.GetByIdForUpdateAsync(
                             userId, transactionCancellationToken);
-                        if (learner is not null && !snapshotDoc.ParentAssessmentAttemptId.HasValue &&
-                            (snapshotDoc.AssessmentTargetLevelId is null ||
-                             snapshotDoc.AssessmentTargetLevelId == learner.TargetCertificateLevelId))
+                        if (learner is not null && !snapshotDoc.ParentAssessmentAttemptId.HasValue)
                         {
-                            if (!isTargetAssessment && !snapshotDoc.IsComprehensiveAssessment)
+                            if (evaluation.AssessedLevelId > 0)
                                 learner.AssessedCertificateLevelId = evaluation.AssessedLevelId;
-                            learner.PlacementDecision = PlacementDecision.Completed;
+
+                            if (!learner.TargetCertificateLevelId.HasValue)
+                            {
+                                learner.PlacementDecision = PlacementDecision.Completed;
+                            }
+                            else
+                            {
+                                var learnerTargetCode = learner.TargetCertificateLevel?.Code
+                                    ?? (await unitOfWork.CertificateLevels.GetByIdAsync(
+                                        learner.TargetCertificateLevelId.Value, transactionCancellationToken))?.Code;
+                                if (IsAttemptCompatibleWithTarget(canonicalResult, learner.TargetCertificateLevelId, learnerTargetCode))
+                                {
+                                    learner.PlacementDecision = PlacementDecision.Completed;
+                                }
+                            }
                             unitOfWork.UserAccounts.Update(learner);
                         }
 
@@ -1258,6 +1456,137 @@ namespace RikiPath.Application.Services
             }
         }
 
+        internal sealed record PlacementCompatibilitySummary(
+            string Status,
+            string? Reason,
+            bool HasAnyCompletedPlacement,
+            MockTestAttempt? LatestAttempt,
+            PlacementTestResultResponse? LatestResult,
+            MockTestAttempt? CompatibleAttempt,
+            PlacementTestResultResponse? CompatibleResult,
+            string? CoveredLevelName);
+
+        internal static bool IsAttemptCompatibleWithTarget(
+            PlacementTestResultResponse? result,
+            int? targetLevelId,
+            string? targetLevelCode)
+        {
+            if (result is null || result.IsMiniAssessment)
+                return false;
+
+            if (!targetLevelId.HasValue || string.IsNullOrWhiteSpace(targetLevelCode))
+                return false;
+
+            if (result.AssessmentTargetLevelId == targetLevelId.Value)
+                return true;
+
+            var targetRank = JlptCurriculum.Rank(NormalizeLevelCode(targetLevelCode));
+            if (targetRank <= 0)
+                return false;
+
+            if (result.AssessmentTargetLevelId.HasValue && !result.IsComprehensiveAssessment)
+            {
+                var scopeCode = result.LevelBreakdowns
+                    .FirstOrDefault(b => b.JlptLevelId == result.AssessmentTargetLevelId.Value)?.JlptLevelName
+                    ?? result.ScreeningLevelName;
+                var scopeRank = JlptCurriculum.Rank(NormalizeLevelCode(scopeCode));
+                return scopeRank >= targetRank;
+            }
+
+            var maxTestedRank = result.LevelBreakdowns
+                .Where(b => b.TotalCount > 0)
+                .Select(b => JlptCurriculum.Rank(NormalizeLevelCode(b.JlptLevelName)))
+                .DefaultIfEmpty(0)
+                .Max();
+            return maxTestedRank >= targetRank;
+        }
+
+        internal static PlacementCompatibilitySummary EvaluatePlacementCompatibility(
+            IEnumerable<MockTestAttempt> attempts,
+            int? targetLevelId,
+            string? targetLevelCode)
+        {
+            var completed = attempts
+                .Where(a => a.IsCompleted && a.TotalScore.HasValue)
+                .Select(a => (Attempt: a, Recovered: RecoverResultFromCompletedAttempt(a)))
+                .Where(item => item.Recovered is { IsMiniAssessment: false })
+                .OrderByDescending(item => item.Attempt.SubmittedAt ?? item.Attempt.StartedAt)
+                .ThenByDescending(item => item.Attempt.Id)
+                .ToList();
+
+            if (completed.Count == 0)
+            {
+                return new PlacementCompatibilitySummary(
+                    "NONE", null, false, null, null, null, null, null);
+            }
+
+            var latest = completed[0];
+            if (!targetLevelId.HasValue || string.IsNullOrWhiteSpace(targetLevelCode))
+            {
+                var maxCovered = ResolveMaxCoveredLevelName(latest.Recovered!);
+                return new PlacementCompatibilitySummary(
+                    "GOAL_NOT_SET",
+                    null,
+                    true,
+                    latest.Attempt,
+                    latest.Recovered,
+                    null,
+                    null,
+                    maxCovered);
+            }
+
+            var normalizedTarget = NormalizeLevelCode(targetLevelCode);
+            var exactOrCompatible = completed
+                .Where(item => IsAttemptCompatibleWithTarget(item.Recovered, targetLevelId, normalizedTarget))
+                .OrderByDescending(item => item.Recovered!.AssessmentTargetLevelId == targetLevelId.Value)
+                .ThenByDescending(item => item.Attempt.SubmittedAt ?? item.Attempt.StartedAt)
+                .ThenByDescending(item => item.Attempt.Id)
+                .FirstOrDefault();
+
+            if (exactOrCompatible.Attempt is not null)
+            {
+                return new PlacementCompatibilitySummary(
+                    "COMPATIBLE",
+                    null,
+                    true,
+                    latest.Attempt,
+                    latest.Recovered,
+                    exactOrCompatible.Attempt,
+                    exactOrCompatible.Recovered,
+                    ResolveMaxCoveredLevelName(exactOrCompatible.Recovered!));
+            }
+
+            var coveredName = ResolveMaxCoveredLevelName(latest.Recovered!) ?? "N5";
+            var reason = $"Kết quả đánh giá gần nhất mới kiểm tra đến phạm vi {coveredName}, chưa đủ dữ liệu năng lực cho mục tiêu JLPT {normalizedTarget}. Hãy làm bài đánh giá bổ sung cho {normalizedTarget} hoặc chọn Lộ trình tiêu chuẩn.";
+            return new PlacementCompatibilitySummary(
+                "INSUFFICIENT_FOR_TARGET",
+                reason,
+                true,
+                latest.Attempt,
+                latest.Recovered,
+                null,
+                null,
+                coveredName);
+        }
+
+        private static string? ResolveMaxCoveredLevelName(PlacementTestResultResponse result)
+        {
+            if (result.AssessmentTargetLevelId.HasValue && !result.IsComprehensiveAssessment)
+            {
+                var scopeCode = result.LevelBreakdowns
+                    .FirstOrDefault(b => b.JlptLevelId == result.AssessmentTargetLevelId.Value)?.JlptLevelName
+                    ?? result.ScreeningLevelName;
+                if (!string.IsNullOrWhiteSpace(scopeCode))
+                    return NormalizeLevelCode(scopeCode);
+            }
+
+            return result.LevelBreakdowns
+                .Where(b => b.TotalCount > 0 && JlptCurriculum.Rank(NormalizeLevelCode(b.JlptLevelName)) > 0)
+                .OrderByDescending(b => JlptCurriculum.Rank(NormalizeLevelCode(b.JlptLevelName)))
+                .Select(b => NormalizeLevelCode(b.JlptLevelName))
+                .FirstOrDefault();
+        }
+
         private async Task<(MockTestAttempt Attempt, PlacementAttemptSnapshotDocument Snapshot)?>
             TryFindCanonicalActiveAttemptAsync(
                 int userId,
@@ -1267,7 +1596,9 @@ namespace RikiPath.Application.Services
             var attempts = await LoadUserPlacementAttemptsAsync(userId, cancellationToken);
             var goal = unitOfWork.UserAccounts is null ? null :
                 await unitOfWork.UserAccounts.GetWithLearningGoalAsync(userId, cancellationToken);
-            return FindCanonicalActiveAttempt(attempts, serverNowUtc, GetAdaptiveGoalId(goal));
+            var scopeId = GetAdaptiveGoalId(goal);
+            return FindCanonicalActiveAttempt(attempts, serverNowUtc, scopeId)
+                ?? FindCanonicalActiveAttempt(attempts, serverNowUtc, null, anyScope: true);
         }
 
         private static int? GetAdaptiveGoalId(UserAccount? user)
@@ -1275,11 +1606,45 @@ namespace RikiPath.Application.Services
                 ? user?.TargetCertificateLevelId
                 : null;
 
+        internal static int? FindActivePlacementAttemptId(
+            IEnumerable<MockTestAttempt> placementAttempts,
+            DateTime serverNowUtc,
+            int? preferredScopeId,
+            bool anyScope = true)
+            => (FindCanonicalActiveAttempt(placementAttempts, serverNowUtc, preferredScopeId)
+                ?? (anyScope ? FindCanonicalActiveAttempt(placementAttempts, serverNowUtc, null, anyScope: true) : null))?.Attempt.Id;
+
+        internal static int? FindPendingSubmissionAttemptId(
+            IEnumerable<MockTestAttempt> placementAttempts,
+            DateTime serverNowUtc,
+            int? preferredScopeId = null)
+        {
+            foreach (var candidate in placementAttempts
+                .Where(a => !a.IsDeleted &&
+                            a.AttemptKind == AttemptKind.Placement &&
+                            !a.IsCompleted)
+                .OrderByDescending(a => a.Id))
+            {
+                if (!TryDeserializeSnapshot(candidate.QuestionSnapshotJson, out var snapshot) ||
+                    snapshot.ParentAssessmentAttemptId.HasValue ||
+                    !HasValidSnapshotQuestions(snapshot.Questions))
+                {
+                    continue;
+                }
+
+                if (EnsureUtc(candidate.ExpiresAt ?? snapshot.ExpiresAt) <= serverNowUtc)
+                    return candidate.Id;
+            }
+
+            return null;
+        }
+
         private static (MockTestAttempt Attempt, PlacementAttemptSnapshotDocument Snapshot)?
             FindCanonicalActiveAttempt(
                 IEnumerable<MockTestAttempt> placementAttempts,
                 DateTime serverNowUtc,
-                int? adaptiveGoalId)
+                int? preferredScopeId,
+                bool anyScope = false)
         {
             foreach (var candidate in placementAttempts
                 .Where(a => !a.IsDeleted &&
@@ -1291,10 +1656,9 @@ namespace RikiPath.Application.Services
                 .ThenByDescending(a => a.Id))
             {
                 if (TryDeserializeSnapshot(candidate.QuestionSnapshotJson, out var snapshotDoc) &&
-                    snapshotDoc.AssessmentTargetLevelId == adaptiveGoalId &&
-                    !snapshotDoc.IsComprehensiveAssessment &&
                     !snapshotDoc.ParentAssessmentAttemptId.HasValue &&
-                    HasValidSnapshotQuestions(snapshotDoc.Questions))
+                    HasValidSnapshotQuestions(snapshotDoc.Questions) &&
+                    (anyScope || snapshotDoc.AssessmentTargetLevelId == preferredScopeId))
                 {
                     return (candidate, snapshotDoc);
                 }
@@ -1740,7 +2104,7 @@ namespace RikiPath.Application.Services
             return (entities, responses, overallScore);
         }
 
-        private static bool TryDeserializeSnapshot(
+        internal static bool TryDeserializeSnapshot(
             string? json,
             out PlacementAttemptSnapshotDocument document)
         {
@@ -1787,41 +2151,83 @@ namespace RikiPath.Application.Services
                 targetCode = (await unitOfWork.CertificateLevels.GetByIdAsync(goalLevelId, cancellationToken))?.Code;
             var resultTargetCode = result.LevelBreakdowns.FirstOrDefault(
                 level => level.JlptLevelId == result.AssessmentTargetLevelId)?.JlptLevelName;
-            result.SkillAssessments = JlptSkillAssessmentPolicy.Assess(result,
-                NormalizeLevelCode(resultTargetCode ?? targetCode),
-                TryGetSkillEvidenceFromSnapshot(snapshotJson));
-
-            if (result.IsMiniAssessment || result.AssessmentTargetLevelId is not int targetId)
-                return;
-
-            if (goal?.TargetCertificateLevelId != targetId)
+            var assessmentReferenceCode = NormalizeLevelCode(resultTargetCode ?? targetCode ?? result.AssessedJlptLevelName);
+            if (!string.IsNullOrWhiteSpace(assessmentReferenceCode))
             {
-                result.FollowUpUnavailableReason = "CURRENT_TARGET_MISMATCH";
-                return;
+                result.SkillAssessments = JlptSkillAssessmentPolicy.Assess(result,
+                    assessmentReferenceCode,
+                    TryGetSkillEvidenceFromSnapshot(snapshotJson));
             }
+
+            if (result.IsMiniAssessment)
+                return;
 
             var attempts = await LoadUserPlacementAttemptsAsync(userId, cancellationToken);
-            if (GetLatestTargetResult(attempts, targetId)?.AttemptId != result.AttemptId)
-            {
+            var scopeId = result.AssessmentTargetLevelId;
+            if (GetLatestResultForScope(attempts, scopeId)?.AttemptId != result.AttemptId)
                 return;
-            }
 
-            if (FindCanonicalActiveAttempt(attempts, EnsureUtc(UtcNowProvider()), targetId) is not null)
+            if (FindCanonicalActiveAttempt(attempts, EnsureUtc(UtcNowProvider()), null, anyScope: true) is not null)
             {
                 result.FollowUpUnavailableReason = "TARGET_ASSESSMENT_IN_PROGRESS";
                 return;
             }
 
-            var allowance = await GetAttemptAllowanceAsync(userId, targetId, EnsureUtc(UtcNowProvider()), cancellationToken);
-            result.CanRetake = allowance.Remaining > 0 && !allowance.PendingSubmissionAttemptId.HasValue &&
-                goal.TargetExamDate is { } examDate && BusinessDateHelper.IsJlptExamDate(examDate) &&
-                BusinessDateHelper.IsFutureExamDate(examDate, UtcNowProvider());
+            var allowance = await GetAttemptAllowanceAsync(userId, scopeId, EnsureUtc(UtcNowProvider()), cancellationToken);
+            result.CanRetake = allowance.Remaining > 0 && !allowance.PendingSubmissionAttemptId.HasValue;
         }
 
-        private async Task<PlacementAttemptAllowance> GetAttemptAllowanceAsync(int userId, int levelId,
+        private async Task<List<int>> GetAvailableAssessmentLevelIdsAsync(CancellationToken cancellationToken)
+        {
+            var tests = await unitOfWork.MockTests.GetAllWithSectionsAndQuestionsAsync(cancellationToken);
+            var levels = (await unitOfWork.CertificateLevels.GetAllAsync(cancellationToken))
+                .Where(l => !l.IsDeleted && JlptCurriculum.IsSupportedStudyLevel(NormalizeLevelCode(l.Code)))
+                .ToList();
+
+            var skillCountByLevel = new Dictionary<string, HashSet<JlptStudySkill>>();
+            foreach (var test in (tests ?? []).Where(t => t is not null && !t.IsDeleted && t.Id > 0 && t.CertificateLevelId > 0
+                && t.ExamKind is ExamKind.FullMockTest or ExamKind.Placement
+                && !t.IsArchivedVersion
+                && (!t.IsManagedWorkflow || t.PublishStatus == ContentStatus.Published)))
+            {
+                var code = NormalizeLevelCode(test.CertificateLevel?.Code ?? levels.FirstOrDefault(l => l.Id == test.CertificateLevelId)?.Code);
+                if (JlptCurriculum.Rank(code) == 0) continue;
+
+                foreach (var sec in (test.Sections ?? []).Where(s => s is not null && !s.IsDeleted))
+                {
+                    if (JlptSkillAssessmentPolicy.Classify(sec.LanguageSkill?.Name) is not { } skill) continue;
+                    var validCount = (sec.Questions ?? []).Count(q => q is not null && !q.IsDeleted && HasUsablePrompt(q) &&
+                        (SentenceOrdering.IsType(q.QuestionType) || (q.Options ?? []).Count(o => !o.IsDeleted) >= 2));
+                    if (validCount >= PlacementAssessmentModePolicy.MinimumQuestionsPerSkillAndLevel)
+                    {
+                        if (!skillCountByLevel.TryGetValue(code, out var set))
+                        {
+                            set = [];
+                            skillCountByLevel[code] = set;
+                        }
+                        set.Add(skill);
+                    }
+                }
+            }
+
+            return levels
+                .OrderBy(l => JlptCurriculum.Rank(NormalizeLevelCode(l.Code)))
+                .Where(l =>
+                {
+                    var code = NormalizeLevelCode(l.Code);
+                    if (!skillCountByLevel.TryGetValue(code, out var skills) || skills.Count == 0)
+                        return false;
+                    return skills.Count >= 3;
+                })
+                .Select(l => l.Id)
+                .Distinct()
+                .ToList();
+        }
+
+        private async Task<PlacementAttemptAllowance> GetAttemptAllowanceAsync(int userId, int? scopeLevelId,
             DateTime now, CancellationToken cancellationToken)
         {
-            // Include replaced attempts so changing goals cannot reset an existing level's allowance.
+            // Include replaced attempts so changing goals or modes cannot reset an existing scope's allowance.
             var attempts = await unitOfWork.MockTestAttempts.Query().AsNoTracking()
                 .Where(attempt => attempt.UserId == userId && attempt.AttemptKind == AttemptKind.Placement)
                 .OrderByDescending(attempt => attempt.Id)
@@ -1832,13 +2238,15 @@ namespace RikiPath.Application.Services
             foreach (var attempt in attempts)
             {
                 if (!TryDeserializeSnapshot(attempt.QuestionSnapshotJson, out var snapshot) ||
-                    snapshot.AssessmentTargetLevelId != levelId || snapshot.ParentAssessmentAttemptId.HasValue ||
+                    snapshot.ParentAssessmentAttemptId.HasValue ||
                     !HasValidSnapshotQuestions(snapshot.Questions)) continue;
 
-                started++;
                 if (pendingSubmissionId is null && !attempt.IsDeleted && !attempt.IsCompleted &&
                     EnsureUtc(attempt.ExpiresAt ?? snapshot.ExpiresAt) <= now)
                     pendingSubmissionId = attempt.Id;
+
+                if (snapshot.AssessmentTargetLevelId == scopeLevelId)
+                    started++;
             }
 
             var policyLimit = groupPolicies is null
@@ -1857,21 +2265,24 @@ namespace RikiPath.Application.Services
                     "Hãy nộp lượt đã hết giờ để xem kết quả.", HttpStatusCode.Conflict, "PLACEMENT_PENDING_SUBMISSION");
             if (allowance.Remaining == 0)
                 return ApiResponse<PlacementAttemptSnapshotResponse>.Fail(
-                    $"Bạn đã dùng hết {allowance.Limit} lượt đánh giá ở cấp mục tiêu này.",
+                    $"Bạn đã dùng hết {allowance.Limit} lượt đánh giá cho phạm vi này.",
                     HttpStatusCode.Conflict, "PLACEMENT_ATTEMPT_LIMIT_REACHED");
-            if (retake != (latest is not null))
+            if (!retake && latest is not null)
                 return ApiResponse<PlacementAttemptSnapshotResponse>.Fail(
-                    "Hãy mở kết quả đánh giá hiện tại để tiếp tục.",
+                    "Hãy mở kết quả đánh giá hiện tại hoặc chọn Đánh giá lại để làm lượt mới.",
                     HttpStatusCode.Conflict, "PLACEMENT_RETAKE_NOT_AVAILABLE");
             return null;
         }
 
-        private static PlacementTestResultResponse? GetLatestTargetResult(IEnumerable<MockTestAttempt> attempts, int targetId) =>
+        private static PlacementTestResultResponse? GetLatestResultForScope(IEnumerable<MockTestAttempt> attempts, int? scopeLevelId) =>
             attempts.Where(attempt => attempt.IsCompleted)
                 .OrderByDescending(attempt => attempt.SubmittedAt ?? attempt.StartedAt)
                 .ThenByDescending(attempt => attempt.Id)
                 .Select(RecoverResultFromCompletedAttempt)
-                .FirstOrDefault(result => result is { IsMiniAssessment: false } && result.AssessmentTargetLevelId == targetId);
+                .FirstOrDefault(result => result is { IsMiniAssessment: false } && result.AssessmentTargetLevelId == scopeLevelId);
+
+        private static PlacementTestResultResponse? GetLatestTargetResult(IEnumerable<MockTestAttempt> attempts, int targetId)
+            => GetLatestResultForScope(attempts, targetId);
 
         private static int ComputeTimeLimitMinutes(int questionCount)
             => Math.Clamp(questionCount * 2, 10, 45);

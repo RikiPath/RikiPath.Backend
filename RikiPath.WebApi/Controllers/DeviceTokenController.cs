@@ -37,10 +37,10 @@ namespace RikiPath.WebApi.Controllers
         public async Task<IActionResult> RegisterToken([FromBody] RegisterDeviceTokenRequest request, CancellationToken cancellationToken)
         {
             if (string.IsNullOrWhiteSpace(request.DeviceIdentifier))
-                return BadRequest(ApiResponse.Fail("DeviceIdentifier is required.", HttpStatusCode.BadRequest));
+                return BadRequest(ApiResponse.Fail("Thiếu mã định danh thiết bị.", HttpStatusCode.BadRequest));
 
             if (string.IsNullOrWhiteSpace(request.FcmToken))
-                return BadRequest(ApiResponse.Fail("FcmToken is required.", HttpStatusCode.BadRequest));
+                return BadRequest(ApiResponse.Fail("Thiếu mã thông báo đẩy của thiết bị.", HttpStatusCode.BadRequest));
 
             var userId = _claimService.GetUserClaim().Id;
             var token = await _unitOfWork.UserDeviceTokens.RegisterOrUpdateTokenAsync(

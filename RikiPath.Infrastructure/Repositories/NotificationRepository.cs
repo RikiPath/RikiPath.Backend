@@ -39,13 +39,18 @@ namespace RikiPath.Infrastructure.Repositories
         public async Task<int> CountUnreadAsync(int userId)
             => await _context.Notifications.CountAsync(x => x.UserId == userId && !x.IsRead);
 
-        public async Task MarkAllAsReadAsync(int userId)
+        public async Task MarkAllAsReadAsync(int userId, DateTime? asOfUtc = null)
         {
+            var query = _context.Notifications.Where(n => n.UserId == userId && !n.IsRead);
+            if (asOfUtc.HasValue)
+            {
+                var cutoff = asOfUtc.Value;
+                query = query.Where(n => n.CreatedDate == null || n.CreatedDate <= cutoff);
+            }
+
             if (_context.Database.ProviderName == "Microsoft.EntityFrameworkCore.InMemory")
             {
-                var unreadList = await _context.Notifications
-                    .Where(n => n.UserId == userId && !n.IsRead)
-                    .ToListAsync();
+                var unreadList = await query.ToListAsync();
                 foreach (var n in unreadList)
                 {
                     n.IsRead = true;
@@ -54,9 +59,7 @@ namespace RikiPath.Infrastructure.Repositories
             }
             else
             {
-                await _context.Notifications
-                    .Where(n => n.UserId == userId && !n.IsRead)
-                    .ExecuteUpdateAsync(s => s.SetProperty(n => n.IsRead, true));
+                await query.ExecuteUpdateAsync(s => s.SetProperty(n => n.IsRead, true));
             }
         }
     }

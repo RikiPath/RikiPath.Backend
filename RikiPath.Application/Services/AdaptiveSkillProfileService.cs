@@ -50,13 +50,12 @@ public sealed class AdaptiveSkillProfileService(IUnitOfWork unitOfWork)
         var failedLessonIds = new HashSet<int>();
         var weakTopicIds = new HashSet<int>();
 
-        // 1. Placement Evidence (Matching target first, fallback latest completed placement)
+        // 1. Placement Evidence (strictly compatible with target level)
         var placementAttempts = await unitOfWork.MockTestAttempts.GetPlacementByUserAsync(userId, cancellationToken);
-        var (matchingAttempt, matchingResult) = PracticeTestService.FindLatestCompletedAssessment(
-            placementAttempts, targetLevelId, requireMatchingGoal: true);
-        var (fallbackAttempt, fallbackResult) = matchingAttempt is not null
-            ? (matchingAttempt, matchingResult)
-            : PracticeTestService.FindLatestCompletedAssessment(placementAttempts, targetLevelId, requireMatchingGoal: false);
+        var compatibility = PracticeTestService.EvaluatePlacementCompatibility(
+            placementAttempts, targetLevelId, targetLevelCode);
+        var fallbackAttempt = compatibility.CompatibleAttempt;
+        var fallbackResult = compatibility.CompatibleResult;
 
         var placementAssessments = new List<LearningPathSectionAssessmentResponse>();
         if (fallbackAttempt is not null && fallbackResult is not null)
@@ -335,8 +334,8 @@ public sealed class AdaptiveSkillProfileService(IUnitOfWork unitOfWork)
             daysSinceLastStudy,
             failedLessonIds,
             weakTopicIds,
-            matchingAttempt?.Id,
-            matchingResult,
+            fallbackAttempt?.Id,
+            fallbackResult,
             placementAssessments);
     }
 
