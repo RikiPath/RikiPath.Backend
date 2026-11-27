@@ -56,88 +56,7 @@ public sealed partial class StudyCourseService
         var hasDirectQualification = uow.MentorTeachingQualifications is not null && await uow.MentorTeachingQualifications.Query()
             .AnyAsync(q => q.MentorUserId == mentorId && q.CertificateLevelId == cohort.Plan.CertificateLevelId && q.IsActive && q.RevokedAtUtc == null, ct);
         var qualified = hasDirectQualification || RikiPath.Domain.MentorScheduling.MentorSlotPolicy.CanMentorTeachLevel(highestRank, targetLevelCode);
-        Check("REPLACEMENT_LEVEL_NOT_QUALIFIED", qualified, $"Giáo viên thay thế chưa đủ trình độ hoặc chưa được phân quyền giảng dạy cấp độ {targetLevelCode}.");
-
-        if (mentor is not null)
-        {
-            var levelLimit = policy.GetMaxActiveClassesForLevel(cohort.Plan.CertificateLevelId, targetLevelCode);
-            var maxTotalLimit = Math.Max(1, policy.MaxTotalActiveClassesPerMentor);
-            var targetCohorts = await uow.StudyCohorts.Query().AsNoTracking()
-                .Include(c => c.Plan)
-                .Include(c => c.Enrollments)
-                .Where(c => c.MentorId == mentorId && c.Id != cohort.Id)
-                .Select(c => new
-                {
-                    c.Id,
-                    c.Status,
-                    c.EndsAt,
-                    c.SourceProposalId,
-                    LevelId = c.Plan.CertificateLevelId,
-                    HasConfirmed = c.Enrollments.Any(e =>
-                        (e.PaymentStatus == "Paid" || e.PaymentStatus == "PartiallyRefunded")
-                        && e.Status != "PaymentReview"
-                        && e.Status != "Cancelled"
-                        && e.Status != "Transferred"
-                        && e.Status != "PendingPayment"
-                        && e.Status != "PaymentExpired"
-                        && e.Status != "PaymentFailed"),
-                    HasIncompleteConfirmed = c.Enrollments.Any(e =>
-                        (e.PaymentStatus == "Paid" || e.PaymentStatus == "PartiallyRefunded")
-                        && e.Status != "PaymentReview"
-                        && e.Status != "Cancelled"
-                        && e.Status != "Transferred"
-                        && e.Status != "PendingPayment"
-                        && e.Status != "PaymentExpired"
-                        && e.Status != "PaymentFailed"
-                        && e.Status != "Completed"),
-                })
-                .ToListAsync(ct);
-
-            var activeTargetCohorts = targetCohorts
-                .Where(c => !string.Equals(c.Status, "Cancelled", StringComparison.OrdinalIgnoreCase)
-                    && !string.Equals(c.Status, "Completed", StringComparison.OrdinalIgnoreCase)
-                    && (!(c.HasConfirmed && !c.HasIncompleteConfirmed))
-                    && (c.HasConfirmed || c.EndsAt > now))
-                .ToList();
-
-            var cohortProposalIds = targetCohorts
-                .Where(c => c.SourceProposalId.HasValue)
-                .Select(c => c.SourceProposalId!.Value)
-                .ToHashSet();
-
-            var activeTargetProposals = await uow.MentorTeachingProposals.Query().AsNoTracking()
-                .Where(p => p.MentorId == mentorId
-                    && p.CertificateLevelId.HasValue
-                    && (p.Status == MentorTeachingProposalStatus.PendingReview
-                        || p.Status == MentorTeachingProposalStatus.ChangesRequested
-                        || p.Status == MentorTeachingProposalStatus.Approved))
-                .Select(p => new
-                {
-                    p.Id,
-                    LevelId = p.CertificateLevelId!.Value,
-                    p.Status,
-                    HasFutureSlots = p.GeneratedAvailabilities.Any(a => !a.IsDeleted && a.IsApproved && a.RejectedAt == null && a.EndTime > now),
-                })
-                .ToListAsync(ct);
-
-            var unlinkedActiveProposals = activeTargetProposals
-                .Where(p => p.Status != MentorTeachingProposalStatus.Approved
-                    || (!cohortProposalIds.Contains(p.Id) && p.HasFutureSlots))
-                .ToList();
-
-            var activeAtTargetLevel = activeTargetCohorts.Count(c => c.LevelId == cohort.Plan.CertificateLevelId)
-                + unlinkedActiveProposals.Count(p => p.LevelId == cohort.Plan.CertificateLevelId);
-            var totalActiveForMentor = activeTargetCohorts.Count + unlinkedActiveProposals.Count;
-
-            Check("REPLACEMENT_LEVEL_CLASS_LIMIT", levelLimit > 0 && activeAtTargetLevel < levelLimit,
-                levelLimit <= 0
-                    ? $"Cấp độ JLPT {targetLevelCode} hiện tạm ngưng nhận lớp mới theo cấu hình."
-                    : $"Giáo viên thay thế đã đạt giới hạn tối đa {levelLimit} lớp đồng thời ở cấp độ JLPT {targetLevelCode}.",
-                HttpStatusCode.Conflict);
-            Check("REPLACEMENT_TOTAL_CLASS_LIMIT", totalActiveForMentor < maxTotalLimit,
-                $"Giáo viên thay thế đã đạt tổng giới hạn tối đa {maxTotalLimit} lớp đồng thời của hệ thống.",
-                HttpStatusCode.Conflict);
-        }
+        Check("REPLACEMENT_LEVEL_NOT_QUALIFIED", qualified, $"Giáo viên thay thế chưa được cấp quyền giảng dạy cấp độ {targetLevelCode}.");
 
         var earliest = now.AddHours(policy.MentorReplacementLeadHours);
         var ordered = cohort.Sessions.OrderBy(s => s.Number).ToList();
@@ -165,27 +84,19 @@ public sealed partial class StudyCourseService
                 {
                     ExcludeCohortId = cohort.Id,
                     RestMinutes = policy.Version == 0 ? null : policy.RestMinutes,
-                    DailyCap = policy.Version == 0 ? null : policy.DailySessionCap,
-                    WeeklyCap = policy.Version == 0 ? null : policy.WeeklySessionCap,
-                    // Các buổi của chính lớp đã được xếp hợp lệ; chỉ xét va chạm với lịch hiện có của Mentor mới.
+                    // Các buổi của chính lớp đã được xếp hợp lệ; chỉ xét va chạm với lịch hiện có của Giáo viên mới.
                     IncludeOwnIntervals = false
                 }, ct);
-            var capCodes = new[] { MentorTeachingConflictService.DailyLimit, MentorTeachingConflictService.WeeklyLimit };
-            var scheduleConflicts = report.Conflicts.Where(x => !capCodes.Contains(x.Code)).ToList();
-            var capConflicts = report.Conflicts.Where(x => capCodes.Contains(x.Code)).ToList();
             foreach (var x in report.Conflicts)
                 conflicts.Add(new
                 {
                     x.SessionNumber, Kind = x.CommitmentKind, x.Code, x.CohortId, x.CohortName,
                     StartTime = x.CommitmentStartUtc ?? x.ProposedStartUtc, EndTime = x.CommitmentEndUtc ?? x.ProposedEndUtc, x.Message
                 });
-            Check("REPLACEMENT_MENTOR_SCHEDULE_CONFLICT", scheduleConflicts.Count == 0,
-                scheduleConflicts.Count == 0 ? "Giáo viên thay thế không bị trùng lịch dạy."
-                    : $"Giáo viên thay thế bị trùng lịch hoặc không đủ thời gian nghỉ ở buổi {scheduleConflicts[0].SessionNumber}: {scheduleConflicts[0].Message}",
+            Check("REPLACEMENT_MENTOR_SCHEDULE_CONFLICT", report.IsValid,
+                report.IsValid ? "Giáo viên thay thế không bị trùng lịch dạy."
+                    : $"Giáo viên thay thế bị trùng lịch hoặc không đủ thời gian nghỉ ở buổi {report.Conflicts[0].SessionNumber}: {report.Conflicts[0].Message}",
                 HttpStatusCode.Conflict);
-            Check("REPLACEMENT_DAILY_CAP", capConflicts.Count == 0,
-                capConflicts.Count == 0 ? "Giáo viên thay thế không vượt giới hạn số buổi dạy."
-                    : $"Giáo viên thay thế sẽ vượt số buổi tối đa theo chính sách: {capConflicts[0].Message}", HttpStatusCode.Conflict);
         }
         return new ReplacementEvaluation(cohort, mentor, policy, from, retained, affected, checks, conflicts);
     }

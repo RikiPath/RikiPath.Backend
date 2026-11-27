@@ -128,20 +128,12 @@ public sealed partial class HomeworkService(
             .ToList();
         var firstValidSessionStartUtc = BusinessDateHelper.EnsureUtc(
             validSessions.FirstOrDefault()?.Availability.StartTime ?? cohort.StartsAt);
-        var fallbackPolicy = cohort.GroupPolicy is null && groupPolicies is not null
-            ? await groupPolicies.GetEffectiveAsync(DateTime.UtcNow, ct)
-            : null;
-        var minLearnersToStart = Math.Max(1,
-            (cohort.GroupPolicy
-                ?? validSessions.Select(s => s.Availability.GroupPolicy).FirstOrDefault(p => p is not null)
-                ?? fallbackPolicy)?.MinLearnersToStart ?? 1);
-
         var activeEnrollments = cohort.Enrollments
             .Where(e => e.PaymentStatus is "Paid" or "PartiallyRefunded" && e.Status == "Active")
             .ToList();
         var confirmedLearnerCount = activeEnrollments.Select(e => e.LearnerId).Distinct().Count();
-        if (confirmedLearnerCount < minLearnersToStart)
-            return ApiResponse<List<int>>.Fail("Lớp nhóm chưa đạt sĩ số tối thiểu để bắt đầu.", HttpStatusCode.Conflict);
+        if (confirmedLearnerCount < 1)
+            return ApiResponse<List<int>>.Fail("Lớp học chưa có học viên ghi danh chính thức để bắt đầu.", HttpStatusCode.Conflict);
 
         var hasDeliveredSession = activeEnrollments
             .SelectMany(e => e.Sessions)
@@ -337,6 +329,7 @@ public sealed partial class HomeworkService(
             if (await unit.UserAccounts.GetByIdForUpdateAsync(userId, token) is not { IsDeleted: false })
                 return;
             var assignment = await unit.HomeworkAssignments.Query().AsTracking()
+                .Include(item => item.Cohort)
                 .Include(item => item.Submission).ThenInclude(submission => submission!.GradingResult)
                 .Include(item => item.Exercises).Include(item => item.HomeworkAssignmentLessons)
                 .SingleOrDefaultAsync(item => item.Id == assignmentId && item.LearnerId == userId && !item.IsDeleted, token);
@@ -407,7 +400,7 @@ public sealed partial class HomeworkService(
                 assignment.AiDraftUnavailableReason = null;
                 assignment.Status = "Submitted";
                 await unit.SaveChangesAsync(token);
-                notifyMentorId = assignment.MentorId;
+                notifyMentorId = assignment.MentorId > 0 ? assignment.MentorId : assignment.Cohort?.MentorId;
                 response = ApiResponse<HomeworkSubmissionDetail>.Success(ToSubmission(existing), HttpStatusCode.OK, "Cập nhật bài nộp thành công.");
                 return;
             }
@@ -429,11 +422,14 @@ public sealed partial class HomeworkService(
             await unit.HomeworkSubmissions.AddAsync(submission, token);
             assignment.Status = "Submitted";
             await unit.SaveChangesAsync(token);
-            notifyMentorId = assignment.MentorId;
+            notifyMentorId = assignment.MentorId > 0 ? assignment.MentorId : assignment.Cohort?.MentorId;
             response = ApiResponse<HomeworkSubmissionDetail>.Created(ToSubmission(submission));
         }, ct);
-        if (response.IsSuccess && notifyMentorId.HasValue && sidebarNotifier is not null)
-            await sidebarNotifier.NotifyUsersAsync([notifyMentorId.Value], "homework_submitted", ct);
+        if (response.IsSuccess && sidebarNotifier is not null)
+        {
+            var targets = notifyMentorId.HasValue ? new[] { notifyMentorId.Value, userId } : new[] { userId };
+            await sidebarNotifier.NotifyUsersAsync(targets, "homework_submitted", ct);
+        }
         return response;
     }
 

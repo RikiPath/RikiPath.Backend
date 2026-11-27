@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using RikiPath.Domain.MentorScheduling;
 
 namespace RikiPath.Application.Requests.MentorScheduling;
 
@@ -12,7 +13,7 @@ public sealed class WeeklySessionSlotDto
     [Range(0, 1439)]
     public int StartMinute { get; set; }
 
-    /// <summary>Phút kết thúc kể từ 00:00 giờ Việt Nam (phải bằng StartMinute + SessionDurationMinutes).</summary>
+    /// <summary>Phút kết thúc kể từ 00:00 giờ Việt Nam.</summary>
     [Range(1, 1440)]
     public int EndMinute { get; set; }
 }
@@ -52,9 +53,10 @@ public sealed class SaveTeachingProposalDraftRequest
     [MaxLength(1500)]
     public string? CourseObjective { get; set; }
 
+    // Bỏ trống cho đề xuất mới/chưa duyệt; giữ optional để tương thích model binding JSON sạch sẽ.
     public DateOnly? ExpectedStartDate { get; set; }
 
-    [Range(1, 52)]
+    [Range(MentorSlotPolicy.MinCourseDurationWeeks, MentorSlotPolicy.MaxCourseDurationWeeksTechnical)]
     public int? CourseDurationWeeks { get; set; }
 
     [Range(30, 240)]
@@ -65,33 +67,27 @@ public sealed class SaveTeachingProposalDraftRequest
     [MaxLength(2000)]
     public string? OptionalNotes { get; set; }
 
-    /// <summary>Tệp đính kèm không bắt buộc (giáo trình/đề cương tham khảo).</summary>
     public List<ProposalAttachmentDto>? OptionalAttachments { get; set; }
 
-    /// <summary>Bắt buộc khi cập nhật bản nháp đã tồn tại để kiểm soát ghi đè đồng thời (optimistic concurrency).</summary>
     public int? ExpectedRevision { get; set; }
 }
 
 public sealed class SubmitTeachingProposalRequest
 {
-    /// <summary>Khóa chống gửi trùng (idempotency) tạo từ phía client cho mỗi lần bấm gửi duyệt.</summary>
     [Required]
     [MaxLength(128)]
     public string IdempotencyKey { get; set; } = string.Empty;
 
-    /// <summary>Phiên bản bản nháp hiện tại nhằm đảm bảo không gửi dữ liệu cũ.</summary>
     [Range(1, int.MaxValue)]
     public int ExpectedRevision { get; set; }
 }
 
 public sealed class ResubmitTeachingProposalRequest
 {
-    /// <summary>Khóa chống gửi trùng (idempotency) tạo từ phía client cho mỗi lần bấm gửi lại xét duyệt.</summary>
     [Required]
     [MaxLength(128)]
     public string IdempotencyKey { get; set; } = string.Empty;
 
-    /// <summary>Phiên bản hiện tại của đề xuất Cần bổ sung nhằm kiểm soát ghi đè đồng thời.</summary>
     [Range(1, int.MaxValue)]
     public int ExpectedRevision { get; set; }
 
@@ -110,7 +106,7 @@ public sealed class ResubmitTeachingProposalRequest
 
     public DateOnly? ExpectedStartDate { get; set; }
 
-    [Range(1, 52)]
+    [Range(MentorSlotPolicy.MinCourseDurationWeeks, MentorSlotPolicy.MaxCourseDurationWeeksTechnical)]
     public int? CourseDurationWeeks { get; set; }
 
     [Range(30, 240)]
@@ -158,6 +154,10 @@ public sealed class ReviewTeachingProposalRequest
 
     [Range(1, int.MaxValue)]
     public int ExpectedRevision { get; set; }
+
+    /// <summary>Mã kiểm tra nhất quán giữa bản xem trước Admin đã xác nhận và thời điểm phê duyệt.</summary>
+    [MaxLength(64)]
+    public string? ExpectedSchedulePreviewToken { get; set; }
 }
 
 public sealed class BulkApproveProposalItemRequest
@@ -165,9 +165,11 @@ public sealed class BulkApproveProposalItemRequest
     [Range(1, int.MaxValue)]
     public int ProposalId { get; set; }
 
-    /// <summary>Phiên bản đề xuất để chống ghi đè / phê duyệt đồng thời (optimistic concurrency).</summary>
     [Range(1, int.MaxValue)]
     public int? ExpectedRevision { get; set; }
+
+    [MaxLength(64)]
+    public string? ExpectedSchedulePreviewToken { get; set; }
 }
 
 public sealed class BulkApproveTeachingProposalsRequest
@@ -179,4 +181,24 @@ public sealed class BulkApproveTeachingProposalsRequest
 
     [MaxLength(1500)]
     public string? Reason { get; set; }
+}
+
+public sealed class OpenEnrollmentPreviewRequest
+{
+    public DateOnly? EnrollmentDeadlineLocalDate { get; set; }
+}
+
+public sealed class ConfirmOpenEnrollmentRequest
+{
+    [Required]
+    public DateOnly EnrollmentDeadlineLocalDate { get; set; }
+
+    [Range(1, int.MaxValue)]
+    public int ExpectedRevision { get; set; }
+
+    [MaxLength(64)]
+    public string? ExpectedSchedulePreviewToken { get; set; }
+
+    [MaxLength(128)]
+    public string? IdempotencyKey { get; set; }
 }

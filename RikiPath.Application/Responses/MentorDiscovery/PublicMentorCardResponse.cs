@@ -13,4 +13,9 @@ public sealed class PublicMentorCardResponse
     public string? Workplace { get; set; }
     public string? IntroductionVideoUrl { get; set; }
     public bool IsBookable { get; set; }
+    public double? AverageRating { get; set; }
+    public int ReviewCount { get; set; }
+    public int RecruitingCohortCount { get; set; }
+    public int OpenRecruitingCohortCount { get; set; }
+    public int MatchingRecruitingCohortCount { get; set; }
 }

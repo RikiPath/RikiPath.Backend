@@ -132,7 +132,7 @@ try {
         throw 'Failed connectivity/empty check against target database.'
     }
     if (($existing | Select-Object -First 1).Trim() -eq 'true') {
-        throw "Database $dbName is not empty. Use tools/apply-release-migrations.sh or standard upgrade flow instead."
+        throw "Database $dbName is not empty. Refusing fresh bootstrap on an existing database."
     }
 
     $bootstrapIds = [System.Collections.Generic.List[string]]::new()

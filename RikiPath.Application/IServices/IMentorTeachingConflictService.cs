@@ -13,11 +13,10 @@ public sealed record TeachingConflictOptions
     /// <summary>Bỏ qua các khung giờ này (ví dụ buổi đang được dời đi).</summary>
     public IReadOnlyCollection<int>? ExcludeAvailabilityIds { get; init; }
     public int? RestMinutes { get; init; }
-    public int? DailyCap { get; init; }
-    /// <summary>0 hoặc null (khi chính sách = 0) nghĩa là không giới hạn theo tuần.</summary>
-    public int? WeeklyCap { get; init; }
     /// <summary>Kiểm tra trùng/nghỉ giữa chính các khung giờ dự kiến với nhau.</summary>
     public bool IncludeOwnIntervals { get; init; } = true;
+    /// <summary>Cam kết tạm thời bổ sung trong bộ nhớ (ví dụ các đề xuất cùng Giáo viên đã xếp lịch trước trong cùng đợt duyệt hàng loạt).</summary>
+    public IReadOnlyCollection<ProposedTeachingInterval>? AdditionalCommittedIntervals { get; init; }
 }
 
 /// <summary>Một xung đột lịch dạy. Không bao giờ chứa dữ liệu học viên.</summary>
@@ -43,7 +42,8 @@ public sealed record TeachingConflictReport(bool IsValid, IReadOnlyList<Teaching
 }
 
 /// <summary>
-/// Nguồn kiểm tra trùng lịch dạy chuẩn duy nhất của Mentor (lớp nhóm đã công bố, lịch 1-1 đã xác nhận, buổi khóa 1-1).
+/// Nguồn kiểm tra trùng lịch dạy chuẩn duy nhất của Mentor (chỉ kiểm tra lịch giảng dạy chính thức của cùng một Giáo viên;
+/// không khóa slot theo đề xuất chưa duyệt và không kiểm tra chéo giữa nhiều Giáo viên).
 /// Bên gọi phải giữ <c>LockScheduleAsync(mentorId, ...)</c> trong cùng giao dịch trước khi ghi lịch.
 /// </summary>
 public interface IMentorTeachingConflictService
