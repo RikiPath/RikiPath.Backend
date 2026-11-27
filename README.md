@@ -27,6 +27,15 @@ Canonical operational rules for schema changes, EF Core migrations, QA verificat
 
 ## Automated Read-Only Tooling & Release Package
 
+- **Fresh empty database initialization (local/CI PostgreSQL):**
+  > Why: Historical migration `20261120112045_SeedFullAccessLearnerDemo` predates the Nov 21 squash migration `20261121010126_InitialCreate`. Existing databases already record both in `"__EFMigrationsHistory"` and upgrade with `tools/apply-release-migrations.sh`; brand-new empty databases must initialize with the automated fail-closed bootstrap script (never reorder or tamper with `__EFMigrationsHistory` manually):
+  ```powershell
+  .\tools\bootstrap-fresh-database.ps1 -ConnectionString "Host=localhost;Port=5432;Database=rikipath_fresh;Username=postgres;Password=..."
+  ```
+  Or on Linux / Docker:
+  ```bash
+  ./tools/bootstrap-fresh-database.sh --appsettings /path/to/appsettings.json
+  ```
 - **Offline CI build & migration checks:**
   ```powershell
   dotnet build RikiPath.Backend.slnx -c Release
