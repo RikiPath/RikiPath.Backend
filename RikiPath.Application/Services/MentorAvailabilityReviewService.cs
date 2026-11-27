@@ -16,7 +16,8 @@ public sealed class MentorAvailabilityReviewService(
     IUnitOfWork unitOfWork,
     IClaimService claimService,
     IMentorGroupPolicyService? groupPolicies = null,
-    IOptions<MentorSlotGenerationOptions>? slotOptions = null)
+    IOptions<MentorSlotGenerationOptions>? slotOptions = null,
+    ISidebarCounterNotifier? sidebarNotifier = null)
     : IMentorAvailabilityReviewService
 {
     private const int MinAdvanceMonths = 1;
@@ -165,6 +166,12 @@ public sealed class MentorAvailabilityReviewService(
             mapped = Map(slot, $"{mentor.FirstName} {mentor.LastName}".Trim());
         }, cancellationToken);
 
+        if (errorResponse is null && mapped is not null && sidebarNotifier is not null)
+        {
+            await sidebarNotifier.NotifyAdminsAsync("mentor_availability_reviewed", cancellationToken);
+            await sidebarNotifier.NotifyUsersAsync([seed.MentorId], "mentor_availability_reviewed", cancellationToken);
+        }
+
         return errorResponse ?? ApiResponse<MentorAvailabilityResponse>.Success(mapped!);
     }
 
@@ -175,8 +182,6 @@ public sealed class MentorAvailabilityReviewService(
     {
         var policy = candidate.GroupPolicy ?? (groupPolicies is not null ? await groupPolicies.GetEffectiveAsync(candidate.StartTime, ct) : null);
         var restMinutes = Math.Max(0, policy?.RestMinutes ?? RikiPath.Domain.MentorScheduling.MentorSlotPolicy.MinimumRestMinutes);
-        var dailyCap = policy?.DailySessionCap ?? RikiPath.Domain.MentorScheduling.MentorSlotPolicy.DefaultDailyBookingCap;
-        var weeklyCap = policy?.WeeklySessionCap ?? 0;
 
         var vnZone = TimeZoneInfo.FindSystemTimeZoneById(RikiPath.Domain.MentorScheduling.MentorSlotPolicy.BusinessTimeZoneId);
         var vnStart = TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(candidate.StartTime, DateTimeKind.Utc), vnZone);
@@ -204,14 +209,6 @@ public sealed class MentorAvailabilityReviewService(
         if (restMinutes > 0 && peers.Any(x =>
                 x.EndTime.AddMinutes(restMinutes) > candidate.StartTime && x.StartTime < candidate.EndTime.AddMinutes(restMinutes)))
             return $"Giáo viên cần ít nhất {restMinutes} phút nghỉ giữa hai khung giờ dạy theo chính sách.";
-
-        var dayCount = 1 + peers.Count(x => TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(x.StartTime, DateTimeKind.Utc), vnZone).Date == dayStartLocal);
-        if (dailyCap > 0 && dayCount > dailyCap)
-            return $"Vượt giới hạn tối đa {dailyCap} khung giờ/ngày của Giáo viên.";
-
-        var weekCount = 1 + peers.Count(x => x.StartTime >= weekStartUtc && x.StartTime < weekEndUtc);
-        if (weeklyCap > 0 && weekCount > weeklyCap)
-            return $"Vượt giới hạn tối đa {weeklyCap} khung giờ/tuần của Giáo viên.";
 
         return null;
     }
@@ -541,8 +538,6 @@ public sealed class MentorAvailabilityReviewService(
                 var policy = groupPolicies is null ? null : await groupPolicies.GetEffectiveAsync(rows[0].StartTime, token);
                 var sessionMinutes = policy?.SessionMinutes ?? 90;
                 var restMinutes = policy?.RestMinutes ?? 0;
-                var dailyCap = policy?.DailySessionCap ?? opts.DailyBookingCap;
-                var weeklyCap = policy?.WeeklySessionCap ?? 0;
 
                 if (enforceStrictSessionDuration && policy is not null && sessionMinutes > 0)
                 {
@@ -641,46 +636,6 @@ public sealed class MentorAvailabilityReviewService(
                     }
                 }
 
-                // Daily Session Cap check (only when GroupPolicy is configured or enforceBatchSubmissionCap is true)
-                if ((policy is not null || enforceBatchSubmissionCap) && dailyCap > 0)
-                {
-                    var existingByDay = activeDbSlots
-                        .Where(x => x.StartTime < queryMaxUtc && x.EndTime > queryMinUtc)
-                        .GroupBy(x => DateOnly.FromDateTime(x.StartTime.AddHours(7)))
-                        .ToDictionary(g => g.Key, g => g.Count());
-
-                    foreach (var dayGroup in rows.GroupBy(r => DateOnly.FromDateTime(r.StartTime.AddHours(7))))
-                    {
-                        var existingOnDay = existingByDay.GetValueOrDefault(dayGroup.Key, 0);
-                        if (existingOnDay + dayGroup.Count() > dailyCap)
-                        {
-                            throw new AvailabilityQuotaException(
-                                $"Bạn đã đạt giới hạn đăng ký lịch trong ngày {dayGroup.Key:dd/MM/yyyy} (tối đa {dailyCap} khung giờ/ngày, hiện đã có {existingOnDay} khung).",
-                                HttpStatusCode.Conflict);
-                        }
-                    }
-                }
-
-                // Weekly Session Cap check (0 = unlimited)
-                if (weeklyCap > 0)
-                {
-                    var existingByWeek = activeDbSlots
-                        .Where(x => x.StartTime < queryMaxUtc && x.EndTime > queryMinUtc)
-                        .GroupBy(x => MondayOfVnDate(DateOnly.FromDateTime(x.StartTime.AddHours(7))))
-                        .ToDictionary(g => g.Key, g => g.Count());
-
-                    foreach (var weekGroup in rows.GroupBy(r => MondayOfVnDate(DateOnly.FromDateTime(r.StartTime.AddHours(7)))))
-                    {
-                        var existingInWeek = existingByWeek.GetValueOrDefault(weekGroup.Key, 0);
-                        if (existingInWeek + weekGroup.Count() > weeklyCap)
-                        {
-                            throw new AvailabilityQuotaException(
-                                $"Bạn đã đạt giới hạn đăng ký lịch trong tuần này (tối đa {weeklyCap} khung giờ/tuần, hiện đã có {existingInWeek} khung).",
-                                HttpStatusCode.Conflict);
-                        }
-                    }
-                }
-
                 await unitOfWork.MentorAvailabilities.AddRangeAsync(rows, token);
                 await unitOfWork.SaveChangesAsync(token);
             }, cancellationToken);
@@ -688,6 +643,12 @@ public sealed class MentorAvailabilityReviewService(
             if (cleanIdemKey is not null && rows.Count > 0)
             {
                 IdempotencyRecords[cleanIdemKey] = (nowUtc.AddMinutes(10), rows.Select(r => r.Id).ToList());
+            }
+
+            if (sidebarNotifier is not null && rows.Count > 0)
+            {
+                await sidebarNotifier.NotifyAdminsAsync("mentor_availability_created", cancellationToken);
+                await sidebarNotifier.NotifyUsersAsync([mentorId], "mentor_availability_created", cancellationToken);
             }
 
             return ApiResponse<List<MentorAvailabilityResponse>>.Success(
@@ -734,6 +695,11 @@ public sealed class MentorAvailabilityReviewService(
 
         slot.IsDeleted = true;
         await unitOfWork.SaveChangesAsync(cancellationToken);
+        if (sidebarNotifier is not null)
+        {
+            await sidebarNotifier.NotifyAdminsAsync("mentor_availability_deleted", cancellationToken);
+            await sidebarNotifier.NotifyUsersAsync([slot.MentorId], "mentor_availability_deleted", cancellationToken);
+        }
         return ApiResponse<bool>.Success(true);
     }
 
@@ -786,6 +752,11 @@ public sealed class MentorAvailabilityReviewService(
             unitOfWork.MentorAvailabilities.Update(slot);
         }
         await unitOfWork.SaveChangesAsync(cancellationToken);
+        if (sidebarNotifier is not null)
+        {
+            await sidebarNotifier.NotifyAdminsAsync("mentor_availability_cancel_requested", cancellationToken);
+            await sidebarNotifier.NotifyUsersAsync([claims.Id], "mentor_availability_cancel_requested", cancellationToken);
+        }
         return ApiResponse<List<MentorAvailabilityResponse>>.Success(slots.OrderBy(x => x.StartTime)
             .Select(s => Map(s, $"{s.Mentor?.FirstName} {s.Mentor?.LastName}".Trim())).ToList());
     }
@@ -806,6 +777,7 @@ public sealed class MentorAvailabilityReviewService(
             return ApiResponse<bool>.Fail("Chỉ Quản trị viên mới được duyệt yêu cầu hủy lịch.", HttpStatusCode.Forbidden);
 
         ApiResponse<bool>? error = null;
+        List<int> notifiedMentorIds = [];
         await unitOfWork.ExecuteInTransactionAsync(async token =>
         {
             var slots = await unitOfWork.MentorAvailabilities.Query()
@@ -851,7 +823,14 @@ public sealed class MentorAvailabilityReviewService(
                 CreatedAtUtc = now,
             }, token);
             await unitOfWork.SaveChangesAsync(token);
+            notifiedMentorIds = mentorIds;
         }, cancellationToken);
+
+        if (error is null && sidebarNotifier is not null && notifiedMentorIds.Count > 0)
+        {
+            await sidebarNotifier.NotifyAdminsAsync("mentor_availability_cancel_reviewed", cancellationToken);
+            await sidebarNotifier.NotifyUsersAsync(notifiedMentorIds, "mentor_availability_cancel_reviewed", cancellationToken);
+        }
 
         return error ?? ApiResponse<bool>.Success(true);
     }
@@ -890,6 +869,7 @@ public sealed class MentorAvailabilityReviewService(
         var adminName = user is not null ? $"{user.FirstName} {user.LastName}".Trim() : null;
 
         ApiResponse<bool>? error = null;
+        List<int> notifiedMentorIds = [];
         await unitOfWork.ExecuteInTransactionAsync(async token =>
         {
             var slots = await unitOfWork.MentorAvailabilities.Query()
@@ -958,7 +938,14 @@ public sealed class MentorAvailabilityReviewService(
                 CreatedAtUtc = now,
             }, token);
             await unitOfWork.SaveChangesAsync(token);
+            notifiedMentorIds = mentorIds;
         }, cancellationToken);
+
+        if (error is null && sidebarNotifier is not null && notifiedMentorIds.Count > 0)
+        {
+            await sidebarNotifier.NotifyAdminsAsync("mentor_availability_batch_reviewed", cancellationToken);
+            await sidebarNotifier.NotifyUsersAsync(notifiedMentorIds, "mentor_availability_batch_reviewed", cancellationToken);
+        }
 
         return error ?? ApiResponse<bool>.Success(true);
     }

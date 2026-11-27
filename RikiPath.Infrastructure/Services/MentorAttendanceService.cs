@@ -16,6 +16,7 @@ public sealed class MentorAttendanceService : IMentorAttendanceService
     private readonly AppDbContext _context;
     private readonly IClaimService _claimService;
     private readonly ILogger<MentorAttendanceService> _logger;
+    private readonly ICohortEnrollmentDeadlineService? _enrollmentDeadlines;
 
     // Quản lý kết nối thời gian thực theo phiên bộ nhớ (hỗ trợ đa thiết bị / đa tab cho cùng 1 người dùng)
     private sealed record ConnectionInfo(string ConnectionId, Guid RoomId, int UserId, string Role, string Name);
@@ -27,11 +28,13 @@ public sealed class MentorAttendanceService : IMentorAttendanceService
     public MentorAttendanceService(
         AppDbContext context,
         IClaimService claimService,
-        ILogger<MentorAttendanceService> logger)
+        ILogger<MentorAttendanceService> logger,
+        ICohortEnrollmentDeadlineService? enrollmentDeadlines = null)
     {
         _context = context;
         _claimService = claimService;
         _logger = logger;
+        _enrollmentDeadlines = enrollmentDeadlines;
     }
 
     private async Task<(bool Allowed, bool IsCohortSlot, string? Reason)> EvaluateCohortRoomEligibilityAsync(
@@ -79,25 +82,28 @@ public sealed class MentorAttendanceService : IMentorAttendanceService
                 .ThenByDescending(p => p.Version)
                 .FirstOrDefaultAsync(cancellationToken);
 
-        var minLearners = Math.Max(1, effectivePolicy?.MinLearnersToStart ?? 1);
-        if (confirmedEnrolledCount < minLearners)
-        {
-            return (false, true, "Lớp học chưa đủ học viên ghi danh chính thức để bắt đầu.");
-        }
-
         var firstSession = cohort.Sessions
             .Where(s => s.Availability != null && s.Availability.IsApproved && !s.Availability.IsDeleted && s.Availability.RejectedAt == null)
             .OrderBy(s => s.Availability.StartTime)
             .FirstOrDefault();
 
-        var cutoffMinutes = firstSession?.Availability.GroupPolicy?.EnrollmentCutoffMinutesBeforeFirstSession
-            ?? effectivePolicy?.EnrollmentCutoffMinutesBeforeFirstSession
-            ?? 0;
-        var enrollmentCutoffUtc = firstSession is null
-            ? cohort.StartsAt
-            : firstSession.Availability.StartTime.AddMinutes(-cutoffMinutes);
+        var enrollmentCutoffUtc = cohort.EnrollmentClosesAtUtc
+            ?? (firstSession is null ? cohort.StartsAt : firstSession.Availability.StartTime);
+
+        if (confirmedEnrolledCount < 1 && enrollmentCutoffUtc <= nowUtc && _enrollmentDeadlines is not null)
+        {
+            var outcome = await _enrollmentDeadlines.ProcessCohortIfPastCutoffAsync(cohort.Id, cancellationToken);
+            if (string.Equals(outcome.Outcome, "AutoCancelledEmpty", StringComparison.Ordinal))
+                return (false, true, "Lớp học đã được hủy do không có học viên ghi danh.");
+        }
+
+        if (confirmedEnrolledCount < 1)
+        {
+            return (false, true, "Lớp học chưa có học viên ghi danh chính thức để bắt đầu.");
+        }
 
         if (!string.Equals(cohortStatus, "Completed", StringComparison.OrdinalIgnoreCase)
+            && cohort.EnrollmentClosedAtUtc is null
             && enrollmentCutoffUtc > nowUtc)
         {
             return (false, true, "Lớp học vẫn đang trong thời gian tuyển sinh; phòng học chưa khả dụng.");
@@ -402,7 +408,7 @@ public sealed class MentorAttendanceService : IMentorAttendanceService
             RoomId = roomId,
             CanAccess = canAccess,
             IsRoomReady = isReady,
-            Reason = canAccess ? null : "Bạn không có quyền tham gia phòng tư vấn này hoặc thời gian chưa hợp lệ."
+            Reason = canAccess ? null : "Bạn không có quyền tham gia phòng học này hoặc thời gian chưa hợp lệ."
         };
 
         if (!canAccess)

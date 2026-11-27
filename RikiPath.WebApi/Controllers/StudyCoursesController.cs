@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using RikiPath.Application.IServices;
 using RikiPath.Application.Requests.StudyCourses;
 using RikiPath.Application.Responses;
+using RikiPath.WebApi.Services;
 
 namespace RikiPath.WebApi.Controllers;
 
@@ -150,13 +151,48 @@ public sealed class StudyCoursesController(
     /// <summary>Học viên rút yêu cầu chuyển lớp đang chờ.</summary>
     [HttpPost("transfer-requests/{requestId:int}/withdraw"), Authorize(Roles = "Learner")]
     public async Task<IActionResult> WithdrawTransfer(int requestId, CancellationToken ct) => Result(await service.WithdrawTransferAsync(requestId, ct));
+    /// <summary>Tải hoặc xem tài liệu giới thiệu / đề cương gắn với lớp nhóm (đã kiểm tra quyền theo vai trò).</summary>
+    [HttpGet("cohorts/{cohortId:int}/attachments/{index:int}"), Authorize(Roles = "Admin,Learner,Mentor")]
+    public async Task<IActionResult> CohortAttachment(
+        int cohortId,
+        int index,
+        [FromServices] IFileStorageService fileStorageService,
+        [FromServices] IHttpClientFactory httpClientFactory,
+        [FromQuery] bool download = false,
+        CancellationToken ct = default)
+    {
+        var meta = await service.GetAuthorizedCohortAttachmentAsync(cohortId, index, ct);
+        if (!meta.IsSuccess || meta.Result is null)
+            return StatusCode(meta.StatusCode, meta);
+
+        return await ProposalAttachmentStreamHelper.StreamAttachmentAsync(
+            this, fileStorageService, httpClientFactory, meta.Result, download, ct);
+    }
+
+    /// <summary>Xem trước cấu trúc tài liệu giới thiệu / đề cương gắn với lớp nhóm.</summary>
+    [HttpGet("cohorts/{cohortId:int}/attachments/{index:int}/preview"), Authorize(Roles = "Admin,Learner,Mentor")]
+    public async Task<IActionResult> CohortAttachmentPreview(
+        int cohortId,
+        int index,
+        [FromServices] IFileStorageService fileStorageService,
+        [FromServices] IHttpClientFactory httpClientFactory,
+        CancellationToken ct = default)
+    {
+        var meta = await service.GetAuthorizedCohortAttachmentAsync(cohortId, index, ct);
+        if (!meta.IsSuccess || meta.Result is null)
+            return StatusCode(meta.StatusCode, meta);
+
+        return await ProposalAttachmentStreamHelper.PreviewAttachmentAsync(
+            this, fileStorageService, httpClientFactory, meta.Result, ct);
+    }
+
     /// <summary>Tải minh chứng riêng tư của yêu cầu chuyển lớp.</summary>
     [HttpGet("transfer-requests/{requestId:int}/evidence"), Authorize(Roles = "Admin,Learner")]
-    public async Task<IActionResult> TransferEvidence(int requestId, CancellationToken ct)
+    public async Task<IActionResult> TransferEvidence(int requestId, [FromQuery] bool download = false, CancellationToken ct = default)
     {
         var file = await service.TransferEvidenceAsync(requestId, ct);
-        Response.Headers.CacheControl = "no-store";
-        return file is null ? NotFound() : File(file.Content, file.ContentType);
+        return ProposalAttachmentStreamHelper.StreamPrivateVerificationResult(
+            this, file, $"minh-chung-chuyen-lop-{requestId}", download);
     }
     /// <summary>Xem trước tác động khi thay cố vấn chính cho các buổi còn lại của lớp.</summary>
     [HttpGet("cohorts/{cohortId:int}/mentor-replacement/preview"), Authorize(Roles = "Admin")]
@@ -203,12 +239,16 @@ public sealed class StudyCoursesController(
     [HttpPost("cohort-schedule-requests/{requestId:int}/withdraw"), Authorize(Roles = "Admin,Mentor")]
     public async Task<IActionResult> WithdrawCohortScheduleRequest(int requestId, CancellationToken ct)
         => Result(await service.WithdrawCohortScheduleRequestAsync(requestId, ct));
+    /// <summary>Giáo viên tự hủy lớp đang tuyển sinh khi chưa có học viên xác nhận và không có giữ chỗ thanh toán đang hoạt động.</summary>
+    [HttpPost("cohorts/{cohortId:int}/cancel-recruiting"), Authorize(Roles = "Mentor")]
+    public async Task<IActionResult> MentorCancelRecruitingCohort(int cohortId, [FromBody] CancelCohortEnrollmentRequest? request, CancellationToken ct)
+        => Result(await service.MentorCancelRecruitingCohortAsync(cohortId, request, ct));
     [HttpGet("{id:int}/retake/{requestId:int}/evidence"), Authorize(Roles = "Admin,Learner")]
-    public async Task<IActionResult> Evidence(int id, int requestId, CancellationToken ct)
+    public async Task<IActionResult> Evidence(int id, int requestId, [FromQuery] bool download = false, CancellationToken ct = default)
     {
         var file = await service.EvidenceAsync(id, requestId, ct);
-        Response.Headers.CacheControl = "no-store";
-        return file is null ? NotFound() : File(file.Content, file.ContentType);
+        return ProposalAttachmentStreamHelper.StreamPrivateVerificationResult(
+            this, file, $"minh-chung-thi-jlpt-{id}-{requestId}", download);
     }
     /// <summary>Học viên đánh giá cố vấn của khóa học sau khi đã có ít nhất một buổi học được ghi nhận có mặt.</summary>
     [HttpPost("{courseId:int}/mentor-reviews"), Authorize(Roles = "Learner")]
@@ -257,11 +297,11 @@ public sealed class StudyCoursesController(
         => Result(await service.DecideCohortComplaintAsync(id, r, ct));
     /// <summary>Tải tệp minh chứng riêng tư của khiếu nại khóa học (Admin hoặc Học viên sở hữu; không lưu cache).</summary>
     [HttpGet("complaints/{id:int}/evidence"), Authorize(Roles = "Admin,Learner")]
-    public async Task<IActionResult> CohortComplaintEvidence(int id, CancellationToken ct)
+    public async Task<IActionResult> CohortComplaintEvidence(int id, [FromQuery] bool download = false, CancellationToken ct = default)
     {
         var file = await service.CohortComplaintEvidenceAsync(id, ct);
-        Response.Headers.CacheControl = "no-store";
-        return file is null ? NotFound() : File(file.Content, file.ContentType);
+        return ProposalAttachmentStreamHelper.StreamPrivateVerificationResult(
+            this, file, $"minh-chung-khieu-nai-{id}", download);
     }
     /// <summary>Báo cáo tổng kết quá trình học và hoàn thành khóa học nội bộ (không phải chứng chỉ JLPT chính thức).</summary>
     [HttpGet("{courseId:int}/completion-summary"), Authorize(Roles = "Admin,Learner,Mentor")]

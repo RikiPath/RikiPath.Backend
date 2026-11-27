@@ -54,7 +54,7 @@ public sealed partial class StudyCourseService
             Kind = r.Kind, Reason = r.Reason.Trim() }, ct);
         Audit(c, "ScheduleChangeRequested", $"Buổi {s!.Number}: {r.Kind}. {r.Reason.Trim()}");
         return new { c.Id };
-    }, ct);
+    }, ct, () => NotifyAdminsCounterAsync("course_schedule_request_updated", ct));
 
     public Task<ApiResponse<object>> ReviewChangeAsync(int id, int requestId, ReviewCourseChange r, CancellationToken ct) => Change(id, async c =>
     {
@@ -182,5 +182,5 @@ public sealed partial class StudyCourseService
         request.ReviewedById = Actor.Id; request.ReviewedAt = DateTime.UtcNow;
         Audit(c, "ScheduleChangeReviewed", $"Yêu cầu {requestId}: {request.Status}. {r.Response.Trim()}");
         return new { request.Id };
-    }, ct);
+    }, ct, () => NotifyAdminsCounterAsync("course_schedule_request_updated", ct));
 }

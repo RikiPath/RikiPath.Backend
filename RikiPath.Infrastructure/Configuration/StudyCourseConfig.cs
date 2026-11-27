@@ -135,9 +135,16 @@ public sealed class StudyCohortConfig : IEntityTypeConfiguration<StudyCohort>
         b.ToTable("StudyCohorts", t =>
         {
             t.HasCheckConstraint("CK_StudyCohort_Capacity", "\"Capacity\" > 0");
+            t.HasCheckConstraint("CK_StudyCohort_DurationWeeks", "\"CourseDurationWeeks\" >= 1");
         });
         b.HasKey(x => x.Id);
         b.Property(x => x.Name).HasMaxLength(200); b.Property(x => x.Revision).IsConcurrencyToken();
+        b.Property(x => x.CourseDurationWeeks).HasDefaultValue(1);
+        b.Property(x => x.EnrollmentOpensAtUtc).HasColumnType("timestamp with time zone");
+        b.Property(x => x.EnrollmentClosesAtUtc).HasColumnType("timestamp with time zone");
+        b.Property(x => x.EnrollmentClosedAtUtc).HasColumnType("timestamp with time zone");
+        b.Property(x => x.CancellationReason).HasMaxLength(1000);
+        b.Property(x => x.CancelledAtUtc).HasColumnType("timestamp with time zone");
         b.Property(x => x.TuitionPerSessionSnapshot).HasPrecision(18, 0);
         b.Property(x => x.TotalTuitionSnapshot).HasPrecision(18, 0);
         b.Property(x => x.TuitionSnapshotAtUtc).HasColumnType("timestamp with time zone");
@@ -145,7 +152,7 @@ public sealed class StudyCohortConfig : IEntityTypeConfiguration<StudyCohort>
         b.HasOne(x => x.Mentor).WithMany().HasForeignKey(x => x.MentorId).OnDelete(DeleteBehavior.Restrict);
         b.HasOne(x => x.GroupPolicy).WithMany().HasForeignKey(x => x.GroupPolicyId).OnDelete(DeleteBehavior.Restrict);
         b.HasOne(x => x.SourceProposal).WithMany().HasForeignKey(x => x.SourceProposalId).OnDelete(DeleteBehavior.Restrict);
-        b.HasIndex(x => x.SourceProposalId).IsUnique().HasFilter("\"SourceProposalId\" IS NOT NULL AND \"Status\" <> 'Cancelled'");
+        b.HasIndex(x => x.SourceProposalId).IsUnique().HasFilter("\"SourceProposalId\" IS NOT NULL");
         b.HasMany(x => x.Sessions).WithOne(x => x.Cohort).HasForeignKey(x => x.CohortId);
     }
 }

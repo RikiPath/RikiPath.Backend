@@ -12,13 +12,10 @@ namespace RikiPath.Application.Responses.MentorScheduling
         public int PolicyVersion { get; init; }
         public int SessionMinutes { get; init; }
         public int RestMinutes { get; init; }
-        public int DailySessionCap { get; init; }
-        public int WeeklySessionCap { get; init; }
         public int MaxSlotsPerSubmission { get; init; } = 14;
         public int MaxPendingSlots { get; init; } = 24;
         public int SubmissionCooldownSeconds { get; init; } = 5;
-        public int PublicationHorizonDays { get; init; }
-        public int CourseDurationWeeks { get; init; }
+        public int MinimumPreparationDays { get; init; } = 1;
         public int CancellationLeadHours { get; init; }
         public int ReschedulingLeadHours { get; init; }
         public int MaxLearners { get; init; }

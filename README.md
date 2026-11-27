@@ -27,6 +27,15 @@ Canonical operational rules for schema changes, EF Core migrations, QA verificat
 
 ## Automated Read-Only Tooling & Release Package
 
+- **Fresh empty database initialization (local / isolated Docker PostgreSQL only — never integrated into VPS deployment):**
+  > Brand-new empty local/Docker PostgreSQL databases can initialize cleanly using the fail-closed local bootstrap script (existing databases upgrade via standard reviewed EF Core migrations after preflight verification):
+  ```powershell
+  .\tools\bootstrap-fresh-database.ps1 -ConnectionString "Host=localhost;Port=5432;Database=rikipath_fresh;Username=postgres;Password=..."
+  ```
+  Or on Linux / Docker:
+  ```bash
+  ./tools/bootstrap-fresh-database.sh --appsettings /path/to/appsettings.json
+  ```
 - **Offline CI build & migration checks:**
   ```powershell
   dotnet build RikiPath.Backend.slnx -c Release
