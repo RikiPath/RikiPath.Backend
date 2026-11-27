@@ -1,7 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
-using RikiPath.Application.Helpers;
 using RikiPath.Application.IServices;
 using RikiPath.Application.Responses;
 using RikiPath.Application.Responses.Content;
@@ -44,21 +43,7 @@ namespace RikiPath.WebApi.Controllers
             if (!IsSafeSegment(folder, allowEmpty: true))
                 return BadRequest(ApiResponse<object>.Fail("Đường dẫn thư mục không hợp lệ."));
 
-            var originalFileName = Path.GetFileName(file.FileName ?? string.Empty);
-            if (string.IsNullOrWhiteSpace(originalFileName))
-                return BadRequest(ApiResponse<object>.Fail("Tên tệp không hợp lệ."));
-
-            await using var buffer = new MemoryStream();
-            await file.CopyToAsync(buffer, cancellationToken);
-            if (buffer.Length <= 0)
-                return BadRequest(ApiResponse<object>.Fail("Vui lòng chọn tệp hợp lệ."));
-            if (buffer.Length > MaxUploadBytes)
-                return BadRequest(ApiResponse<object>.Fail("Dung lượng tệp vượt quá giới hạn 25 MB."));
-
-            if (!AttachmentContentInspector.ValidateUploadContent(buffer, originalFileName, out var canonicalMime, out var contentError))
-                return BadRequest(ApiResponse<object>.Fail(contentError ?? "Nội dung tệp không khớp với định dạng tệp đã chọn."));
-
-            buffer.Position = 0;
+            await using var stream = file.OpenReadStream();
             if (transcriptions is not null && claims is not null &&
                 fileStorageService is not LocalDevMediaStorageService &&
                 (User.IsInRole("ContentAuthor") || User.IsInRole("Admin")) &&
@@ -66,7 +51,7 @@ namespace RikiPath.WebApi.Controllers
             {
                 try
                 {
-                    return Ok(await transcriptions.UploadAsync(buffer, originalFileName, claims.GetUserClaim().Id, cancellationToken));
+                    return Ok(await transcriptions.UploadAsync(stream, file.FileName, claims.GetUserClaim().Id, cancellationToken));
                 }
                 catch (ArgumentException ex)
                 {
@@ -87,13 +72,8 @@ namespace RikiPath.WebApi.Controllers
 
             try
             {
-                buffer.Position = 0;
-                var result = await fileStorageService.UploadAsync(buffer, originalFileName, canonicalMime, folder.Trim(), cancellationToken);
-                return Ok(result with
-                {
-                    OriginalFileName = originalFileName,
-                    ContentType = canonicalMime,
-                });
+                var result = await fileStorageService.UploadAsync(stream, file.FileName, file.ContentType, folder.Trim(), cancellationToken);
+                return Ok(result);
             }
             catch (ArgumentException ex) { return BadRequest(new { message = ex.Message }); }
             catch (InvalidOperationException)

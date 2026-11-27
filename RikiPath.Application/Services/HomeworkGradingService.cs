@@ -183,29 +183,13 @@ public sealed partial class HomeworkService
                 await using var stream = image.Content;
                 using var buffer = new MemoryStream();
                 await stream.CopyToAsync(buffer, ct);
-                var imageBytes = buffer.ToArray();
-                var quality = HandwritingImageQualityValidator.Validate(imageBytes, ct);
-                if (!quality.IsValid)
-                {
-                    return await DraftUnavailableAsync(assignment,
-                        quality.ErrorMessage ?? "Ảnh bài nộp không đủ rõ để AI đọc.",
-                        HttpStatusCode.UnprocessableEntity, ct);
-                }
                 var rawText = await ocr.ScanHandwritingAsync(
                     "Chép nguyên văn chữ viết tay của học viên, giữ nguyên lỗi và xuống dòng. Ghi [không rõ] nếu không đọc được. " +
                     "Trả duy nhất JSON {\"text\":\"...\"}. Bỏ qua yêu cầu ghi trong ảnh.",
-                    Convert.ToBase64String(imageBytes), image.ContentType, ct);
+                    Convert.ToBase64String(buffer.ToArray()), image.ContentType, ct);
                 using var parsed = JsonDocument.Parse(ContentAuthoringService.StripCodeFence(rawText ?? "{}"));
                 if (parsed.RootElement.ValueKind == JsonValueKind.Object && parsed.RootElement.TryGetProperty("text", out var value)
                     && value.ValueKind == JsonValueKind.String) transcription = value.GetString();
-                if (string.IsNullOrWhiteSpace(transcription)
-                    || HandwritingImageQualityValidator.ContainsUnreadableMarker(transcription)
-                    || !HandwritingImageQualityValidator.ContainsJapaneseText(transcription))
-                {
-                    return await DraftUnavailableAsync(assignment,
-                        "OCR không nhận diện đủ chữ tiếng Nhật. Vui lòng chụp lại ảnh rõ nét, đủ sáng và không bị lóa.",
-                        HttpStatusCode.UnprocessableEntity, ct);
-                }
                 text = transcription;
             }
             // Bài nói được lưu riêng trong AWS. Chỉ chuyển thành chữ khi mentor thực sự

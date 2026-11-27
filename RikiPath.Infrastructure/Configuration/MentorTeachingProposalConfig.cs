@@ -12,13 +12,13 @@ public sealed class MentorTeachingProposalConfig : IEntityTypeConfiguration<Ment
         {
             t.HasCheckConstraint(
                 "CK_MentorTeachingProposal_Status",
-                "\"Status\" IN ('Draft', 'PendingReview', 'ChangesRequested', 'Approved', 'OpenedClass', 'Rejected', 'Withdrawn')");
+                "\"Status\" IN ('Draft', 'PendingReview', 'ChangesRequested', 'Approved', 'Rejected', 'Withdrawn')");
             t.HasCheckConstraint(
                 "CK_MentorTeachingProposal_ProgramType",
                 "\"ProgramType\" IN ('StandardJlpt', 'IntensiveJlpt', 'ExamPrepJlpt', 'CustomJlpt')");
             t.HasCheckConstraint(
                 "CK_MentorTeachingProposal_Duration",
-                "\"CourseDurationWeeks\" BETWEEN 1 AND 104 AND \"SessionDurationMinutes\" BETWEEN 30 AND 240");
+                "\"CourseDurationWeeks\" BETWEEN 1 AND 52 AND \"SessionDurationMinutes\" BETWEEN 30 AND 240");
             t.HasCheckConstraint(
                 "CK_MentorTeachingProposal_Revision",
                 "\"Revision\" > 0");
@@ -35,17 +35,13 @@ public sealed class MentorTeachingProposalConfig : IEntityTypeConfiguration<Ment
         b.Property(x => x.Status).HasMaxLength(32).IsRequired();
         b.Property(x => x.Revision).IsConcurrencyToken();
         b.Property(x => x.SubmissionIdempotencyKey).HasMaxLength(128);
-        b.Property(x => x.OpenEnrollmentIdempotencyKey).HasMaxLength(128);
         b.Property(x => x.ReviewReason).HasMaxLength(1500);
 
         b.Property(x => x.SubmittedAtUtc).HasColumnType("timestamp with time zone");
         b.Property(x => x.ReviewedAtUtc).HasColumnType("timestamp with time zone");
-        b.Property(x => x.OpenedClassAtUtc).HasColumnType("timestamp with time zone");
         b.Property(x => x.CreatedAtUtc).HasColumnType("timestamp with time zone");
         b.Property(x => x.UpdatedAtUtc).HasColumnType("timestamp with time zone");
         b.Property(x => x.LastSavedAtUtc).HasColumnType("timestamp with time zone");
-        b.Property(x => x.IsHiddenFromMentorHistory).HasDefaultValue(false);
-        b.Property(x => x.HiddenFromMentorAtUtc).HasColumnType("timestamp with time zone");
 
         b.HasOne(x => x.Mentor).WithMany().HasForeignKey(x => x.MentorId).OnDelete(DeleteBehavior.Restrict);
         b.HasOne(x => x.CertificateLevel).WithMany().HasForeignKey(x => x.CertificateLevelId).OnDelete(DeleteBehavior.Restrict);
@@ -64,10 +60,6 @@ public sealed class MentorTeachingProposalConfig : IEntityTypeConfiguration<Ment
             .IsUnique()
             .HasDatabaseName("IX_MentorTeachingProposals_MentorId_SubmissionIdempotencyKey")
             .HasFilter("\"SubmissionIdempotencyKey\" IS NOT NULL");
-        b.HasIndex(x => new { x.MentorId, x.OpenEnrollmentIdempotencyKey })
-            .IsUnique()
-            .HasDatabaseName("IX_MentorTeachingProposals_MentorId_OpenEnrollmentIdempotencyKey")
-            .HasFilter("\"OpenEnrollmentIdempotencyKey\" IS NOT NULL");
     }
 }
 

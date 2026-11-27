@@ -13,6 +13,5 @@ namespace RikiPath.Application.Responses.MentorProfile
         public string? Workplace { get; set; }
         public string? IntroductionVideoUrl { get; set; }
         public bool IsBookable { get; set; }
-        public int CompletedCohortCount { get; set; }
     }
 }

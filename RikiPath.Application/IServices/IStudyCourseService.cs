@@ -1,6 +1,5 @@
 using Microsoft.AspNetCore.Http;
 using RikiPath.Application.IClients;
-using RikiPath.Application.Requests.MentorScheduling;
 using RikiPath.Application.Requests.StudyCourses;
 using RikiPath.Application.Responses;
 
@@ -63,7 +62,6 @@ public interface IStudyCourseService
     Task<ApiResponse<object>> CohortShiftPreviewAsync(int cohortId, int weeks, CancellationToken ct);
     Task<ApiResponse<object>> ApproveCohortScheduleRequestAsync(int requestId, ApproveCohortScheduleRequest request, CancellationToken ct);
     Task<ApiResponse<object>> RejectCohortScheduleRequestAsync(int requestId, RejectCohortScheduleRequest request, CancellationToken ct);
-    Task<ApiResponse<object>> MentorCancelRecruitingCohortAsync(int cohortId, CancelCohortEnrollmentRequest? request, CancellationToken ct);
     Task<ApiResponse<object>> WithdrawCohortScheduleRequestAsync(int requestId, CancellationToken ct);
     // Đánh giá cố vấn, khiếu nại và báo cáo tổng kết hoàn thành khóa/lớp nhóm.
     Task<ApiResponse<object>> CreateCohortMentorReviewAsync(int courseId, CreateCohortMentorReviewRequest request, CancellationToken ct);
@@ -77,5 +75,4 @@ public interface IStudyCourseService
     Task<ApiResponse<object>> DecideCohortComplaintAsync(int complaintId, DecideCohortComplaintRequest request, CancellationToken ct);
     Task<PrivateVerificationReadResult?> CohortComplaintEvidenceAsync(int complaintId, CancellationToken ct);
     Task<ApiResponse<object>> CourseCompletionSummaryAsync(int courseId, CancellationToken ct);
-    Task<ApiResponse<ProposalAttachmentDto>> GetAuthorizedCohortAttachmentAsync(int cohortId, int attachmentIndex, CancellationToken ct);
 }

@@ -2,7 +2,6 @@ using System.Net;
 using System.Text;
 using Microsoft.AspNetCore.Http;
 using RikiPath.Application.IClients;
-using RikiPath.Application.Helpers;
 using RikiPath.Application.IServices;
 using RikiPath.Application.Responses;
 using RikiPath.Application.Responses.Essay;
@@ -29,8 +28,7 @@ STRICT INSTRUCTIONS:
 2. Completely IGNORE and EXCLUDE all PRINTED text (e.g., printed questions, task instructions, section headers, page numbers, grid lines, or pre-printed form elements).
 3. If both printed and handwritten Japanese text exist on the page, DO NOT include any word from the printed text.
 4. Preserve the natural line breaks and order of the handwritten text.
-5. If a character or line cannot be read with confidence, write [không rõ] at that exact position instead of guessing.
-6. Output ONLY the extracted handwritten text. Do NOT add any introduction, explanation, markdown formatting, or extra commentary.
+5. Output ONLY the extracted handwritten text. Do NOT add any introduction, explanation, markdown formatting, or extra commentary.
 ";
 
     public async Task<ApiResponse<EssayScanResponse>> ScanAsync(
@@ -44,35 +42,17 @@ STRICT INSTRUCTIONS:
         try
         {
             // 1. Chuyển đổi file ảnh sang Base64
-            var (imageBytes, base64Image, mimeType) = await ConvertFormFileToBase64Async(image, cancellationToken);
+            var (base64Image, mimeType) = await ConvertFormFileToBase64Async(image, cancellationToken);
 
-            // 2. Kiểm tra chất lượng cục bộ trước khi gọi AI để ảnh mờ/thiếu sáng
-            // không tiêu tốn quota và trả lỗi rõ ràng cho người học.
-            var quality = HandwritingImageQualityValidator.Validate(
-                imageBytes, cancellationToken);
-            if (!quality.IsValid)
-            {
-                return ApiResponse<EssayScanResponse>.Fail(
-                    quality.ErrorMessage!,
-                    HttpStatusCode.UnprocessableEntity,
-                    quality.ErrorCode,
-                    retryable: false);
-            }
-
-            // 3. Gọi OpenAI OCR Client
+            // 2. Gọi OpenAI OCR Client
             var text = await aiOcrClient.ScanHandwritingAsync(
                 JapaneseOcrPrompt, base64Image, mimeType, cancellationToken);
 
-            if (string.IsNullOrWhiteSpace(text)
-                || HandwritingImageQualityValidator.ContainsUnreadableMarker(text)
-                || !HandwritingImageQualityValidator.ContainsJapaneseText(text))
+            if (string.IsNullOrWhiteSpace(text))
                 return ApiResponse<EssayScanResponse>.Fail(
-                    "Không nhận diện được chữ tiếng Nhật trong ảnh. Hãy dùng ảnh rõ hơn và chụp đủ sáng.",
-                    HttpStatusCode.UnprocessableEntity,
-                    "HANDWRITING_OCR_LOW_CONFIDENCE",
-                    retryable: false);
+                    "Không nhận diện được chữ tiếng Nhật trong ảnh. Hãy dùng ảnh rõ hơn và chụp đủ sáng.");
 
-            // 4. Trả về kết quả OCR preview (không lưu DB / không upload Cloud)
+            // 3. Trả về kết quả OCR preview (không lưu DB / không upload Cloud)
             var response = new EssayScanResponse
             {
 
@@ -246,7 +226,7 @@ STRICT INSTRUCTIONS:
         return essay is { IsDeleted: false } && essay.UserId == userId ? essay : null;
     }
 
-    private static async Task<(byte[] Bytes, string Base64, string MimeType)> ConvertFormFileToBase64Async(
+    private static async Task<(string Base64, string MimeType)> ConvertFormFileToBase64Async(
         IFormFile file,
         CancellationToken cancellationToken)
     {
@@ -255,7 +235,7 @@ STRICT INSTRUCTIONS:
         var bytes = memoryStream.ToArray();
         var base64 = Convert.ToBase64String(bytes);
         var mimeType = string.IsNullOrWhiteSpace(file.ContentType) ? "image/jpeg" : file.ContentType;
-        return (bytes, base64, mimeType);
+        return (base64, mimeType);
     }
 
     private static string? ValidateImage(IFormFile? image)

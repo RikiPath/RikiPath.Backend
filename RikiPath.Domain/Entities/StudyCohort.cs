@@ -23,12 +23,6 @@ public sealed class StudyCohort
     public decimal? TotalTuitionSnapshot { get; set; }
     public int? TuitionPolicyVersionSnapshot { get; set; }
     public DateTime? TuitionSnapshotAtUtc { get; set; }
-    public int CourseDurationWeeks { get; set; } = 1;
-    public DateTime? EnrollmentOpensAtUtc { get; set; }
-    public DateTime? EnrollmentClosesAtUtc { get; set; }
-    public DateTime? EnrollmentClosedAtUtc { get; set; }
-    public string? CancellationReason { get; set; }
-    public DateTime? CancelledAtUtc { get; set; }
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
     public string Status { get; set; } = "Draft";
     public int Revision { get; set; } = 1;

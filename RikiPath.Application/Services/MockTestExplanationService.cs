@@ -175,7 +175,6 @@ public sealed class MockTestExplanationService(IMockTestService mockTests, IClai
                 option.OptionId,
                 Number = index + 1,
                 option.OptionText,
-                AuthorOptionExplanation = option.Explanation,
                 HasImage = !string.IsNullOrWhiteSpace(option.ImageUrl),
                 Selected = selectedIds.Contains(option.OptionId),
                 option.IsCorrect,

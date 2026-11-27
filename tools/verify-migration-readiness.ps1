@@ -209,20 +209,6 @@ try {
         Write-Warning ("Unexpected DB migration IDs: {0}" -f ($unexpectedExtra -join ', '))
     }
 
-    if ('20261121010126_InitialCreate' -in $pending) {
-        $hasAdminAudit = (Invoke-ReadOnlySql "SELECT (to_regclass('public.""AdminAuditLogs""') IS NOT NULL)::text" | Select-Object -First 1)
-        if ($hasAdminAudit -eq 'true') {
-            Write-Warning 'PRE-SQUASH DRIFT DETECTED: 20261121010126_InitialCreate is pending while "AdminAuditLogs" already exists. Do NOT run InitialCreate or blind dotnet ef database update on this database.'
-        }
-    }
-
-    if ('20261122074649_N5ToN2CertificateSection' -in $pending) {
-        $existingSec = [int](Invoke-ReadOnlySql 'SELECT COUNT(*) FROM "CertificateSections" WHERE "Id" BETWEEN 8 AND 15' | Select-Object -First 1)
-        if ($existingSec -gt 0) {
-            Write-Warning ("CERTIFICATE SECTION DRIFT: 20261122074649_N5ToN2CertificateSection is pending while CertificateSections Id 8..15 already exist ({0} row(s))." -f $existingSec)
-        }
-    }
-
     $feedbackParity = $true
     if ('20261117121238_AddLearnerFeedback' -in $applied) {
         $feedbackCheck = Invoke-ReadOnlySql @'
@@ -249,9 +235,7 @@ SELECT
     (SELECT COUNT(*) FROM "StudyCohorts" WHERE "Capacity" <= 0)::text,
     (SELECT COUNT(*) FROM (SELECT "CohortId","LearnerId" FROM "StudyCourses" WHERE "CohortId" IS NOT NULL AND "Status"='Active' GROUP BY 1,2 HAVING COUNT(*)>1) s)::text,
     (SELECT COUNT(*) FROM pg_constraint con JOIN pg_class cls ON cls.oid = con.conrelid JOIN pg_namespace ns ON ns.oid = cls.relnamespace WHERE ns.nspname = 'public' AND con.contype = 'f' AND NOT con.convalidated)::text,
-    ((SELECT COUNT(*) FROM "MentorBookings" b WHERE b."CreditGrantId" IS NOT NULL AND NOT EXISTS (SELECT 1 FROM "MentorCreditGrants" g WHERE g."Id" = b."CreditGrantId")) + (SELECT COUNT(*) FROM "MentorCreditEntries" e WHERE e."CreditGrantId" IS NOT NULL AND NOT EXISTS (SELECT 1 FROM "MentorCreditGrants" g WHERE g."Id" = e."CreditGrantId")))::text,
-    (SELECT COUNT(*) FROM (SELECT "SourceProposalId" FROM "StudyCohorts" WHERE "SourceProposalId" IS NOT NULL AND "Status" <> 'Cancelled' GROUP BY 1 HAVING COUNT(*) > 1) p)::text,
-    (SELECT COUNT(*) FROM "StudyCourses" WHERE "Amount" < 0)::text
+    ((SELECT COUNT(*) FROM "MentorBookings" b WHERE b."CreditGrantId" IS NOT NULL AND NOT EXISTS (SELECT 1 FROM "MentorCreditGrants" g WHERE g."Id" = b."CreditGrantId")) + (SELECT COUNT(*) FROM "MentorCreditEntries" e WHERE e."CreditGrantId" IS NOT NULL AND NOT EXISTS (SELECT 1 FROM "MentorCreditGrants" g WHERE g."Id" = e."CreditGrantId")))::text
 '@
     $partsOut = ($checks | Select-Object -First 1) -split '\|'
     Write-Host ("  btree_gist installed      : {0}" -f $partsOut[0])
@@ -262,8 +246,6 @@ SELECT
     Write-Host ("  Dup active Cohort enroll  : {0}" -f $partsOut[5])
     Write-Host ("  Unvalidated (NOT VALID) FK: {0}" -f $partsOut[6])
     Write-Host ("  Orphan CreditGrantId refs : {0}" -f $partsOut[7])
-    Write-Host ("  Dup Cohort SourceProposal : {0}" -f $partsOut[8])
-    Write-Host ("  Negative StudyCourse Amt  : {0}" -f $partsOut[9])
 
     $reconciledTables = @(
         'MentorBookingDayGuards', 'MentorBookingIntents', 'MentorBookingReservations',
@@ -282,8 +264,7 @@ SELECT
         $partsOut[0] -ne 'true' -or $partsOut[1] -ne 'true' -or $partsOut[2] -ne 'true' -or
         $partsOut[3] -ne 'true' -or [int]$partsOut[4] -gt 0 -or
         [int]$partsOut[5] -gt 0 -or [int]$partsOut[6] -gt 0 -or
-        [int]$partsOut[7] -gt 0 -or [int]$partsOut[8] -gt 0 -or
-        [int]$partsOut[9] -gt 0 -or $presentCount -ne $reconciledTables.Count) {
+        [int]$partsOut[7] -gt 0 -or $presentCount -ne $reconciledTables.Count) {
         Write-Warning 'Release preflight BLOCKED: pending migrations or extension, table, constraint, or history gaps remain.'
         exit 2
     }

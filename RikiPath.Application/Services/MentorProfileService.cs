@@ -17,8 +17,7 @@ namespace RikiPath.Application.Services
         IUnitOfWork unitOfWork,
         IClaimService claimService,
         ILogger<MentorProfileService> logger,
-        IFileStorageService? fileStorageService = null,
-        ISidebarCounterNotifier? sidebarNotifier = null) : IMentorProfileService
+        IFileStorageService? fileStorageService = null) : IMentorProfileService
     {
         public async Task<ApiResponse<MentorProfileResponse>> GetMyProfileAsync(CancellationToken cancellationToken = default)
         {
@@ -139,11 +138,6 @@ namespace RikiPath.Application.Services
                     unitOfWork.MentorProfiles.Update(profile);
                 }
                 await unitOfWork.SaveChangesAsync(cancellationToken);
-                if (sidebarNotifier is not null)
-                {
-                    await sidebarNotifier.NotifyAdminsAsync("mentor_verification_submitted", cancellationToken);
-                    await sidebarNotifier.NotifyUsersAsync([claim.Id], "mentor_verification_submitted", cancellationToken);
-                }
 
                 return ApiResponse<MentorProfileResponse>.Success(
                     MapToMentorProfileResponse(mentor, profile),
@@ -258,11 +252,6 @@ namespace RikiPath.Application.Services
                     AvailableAtUtc = nowUtc
                 });
                 await unitOfWork.SaveChangesAsync(cancellationToken);
-                if (sidebarNotifier is not null)
-                {
-                    await sidebarNotifier.NotifyAdminsAsync("mentor_verification_submitted", cancellationToken);
-                    await sidebarNotifier.NotifyUsersAsync([claim.Id], "mentor_verification_submitted", cancellationToken);
-                }
 
                 return ApiResponse<MentorProfileResponse>.Success(
                     MapToMentorProfileResponse(mentor, profile),

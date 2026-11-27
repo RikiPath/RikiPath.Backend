@@ -227,27 +227,17 @@ public sealed class SidebarCounterService(
             Kind = SidebarCounterKind.ActionRequired,
         });
 
-        var linkedCohortProposalIds = await unitOfWork.StudyCohorts.Query()
-            .AsNoTracking()
-            .Where(c => c.MentorId == mentorId && c.SourceProposalId != null && c.Status != "Cancelled")
-            .Select(c => c.SourceProposalId!.Value)
-            .Distinct()
-            .ToListAsync(ct);
-
-        // Tổng số đề xuất cần Giáo viên xử lý: Cần bổ sung hoặc Đã duyệt nhưng chưa mở tuyển sinh.
         var proposalsActionRequired = await unitOfWork.MentorTeachingProposals.Query()
             .AsNoTracking()
             .CountAsync(p => p.MentorId == mentorId
-                && (p.Status == MentorTeachingProposalStatus.ChangesRequested
-                    || (p.Status == MentorTeachingProposalStatus.Approved
-                        && !linkedCohortProposalIds.Contains(p.Id))),
+                && p.Status == MentorTeachingProposalStatus.ChangesRequested,
                 ct);
 
         response.Counters.Add(new SidebarCounterItemDto
         {
             Key = "mentor.proposals_action_required",
             Count = Math.Max(0, proposalsActionRequired),
-            Kind = SidebarCounterKind.ActionRequired,
+            Kind = SidebarCounterKind.PendingUserAction,
         });
 
         var complaintsAwaitingResponse = await unitOfWork.CohortComplaints.Query()

@@ -12,8 +12,6 @@
         /// <summary>Structured correct answer for non-option interactions, for example token order.</summary>
         public System.Text.Json.JsonElement? AnswerKey { get; set; }
         public string? AudioUrl { get; set; }
-        /// <summary>Bản chép lời tiếng Nhật do author nhập sẵn, dùng cho chấm/giải thích Listening.</summary>
-        public string? AudioTranscript { get; set; }
         public string? ImageUrl { get; set; }
         public string? Explanation { get; set; }
         public List<ImportOptionPayloadResponse> Options { get; set; } = [];

@@ -659,7 +659,6 @@ public class PracticeQuizService(
             {
                 // Group quiz passed and the level assessment on this stage is now the next required check.
                 progression.Milestone = "STAGE_CHECKPOINT_UNLOCKED";
-                progression.MomentOccurrenceKey = $"moment:group-quiz:{userId}:{exercise.Id}";
             }
             else
             {

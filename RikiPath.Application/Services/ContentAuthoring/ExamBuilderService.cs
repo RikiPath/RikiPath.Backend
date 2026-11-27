@@ -435,10 +435,7 @@ public sealed class ExamBuilderService(
         await unitOfWork.ContentApprovalRequests.AddAsync(approval, ct);
         await unitOfWork.SaveChangesAsync(ct);
         if (sidebarNotifier is not null)
-        {
             await sidebarNotifier.NotifyAdminsAsync("exam_submitted", ct);
-            await sidebarNotifier.NotifyUsersAsync([actorUserId], "exam_submitted", ct);
-        }
 
         return await GetDetailAsync(test.Id, actorUserId, isAdmin: false, ct);
     }

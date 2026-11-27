@@ -47,9 +47,7 @@ namespace RikiPath.Infrastructure.Repositories
                 query = query.Where(u =>
                     (u.FirstName != null && u.FirstName.ToLower().Contains(term)) ||
                     (u.LastName != null && u.LastName.ToLower().Contains(term)) ||
-                    (((u.FirstName ?? "") + " " + (u.LastName ?? "")).ToLower().Contains(term)) ||
-                    (u.MentorProfile != null && u.MentorProfile.Expertise != null && u.MentorProfile.Expertise.ToLower().Contains(term)) ||
-                    (u.MentorProfile != null && u.MentorProfile.Bio != null && u.MentorProfile.Bio.ToLower().Contains(term)));
+                    (((u.FirstName ?? "") + " " + (u.LastName ?? "")).ToLower().Contains(term)));
             }
 
             if (!string.IsNullOrWhiteSpace(expertise))
@@ -79,41 +77,6 @@ namespace RikiPath.Infrastructure.Repositories
 
             var items = await query.Skip((p - 1) * ps).Take(ps).ToListAsync(cancellationToken);
             return (items, totalCount);
-        }
-
-        public async Task<IReadOnlyList<UserAccount>> GetApprovedMentorsForDiscoveryAsync(
-            string? searchTerm, string? expertise, string? jlptLevel, CancellationToken cancellationToken = default)
-        {
-            var query = _context.Users.AsNoTracking()
-                .Include(u => u.MentorProfile)
-                .Where(u => u.Role == Role.Mentor && !u.IsDeleted
-                    && u.MentorProfile != null
-                    && u.MentorProfile.VerificationStatus == MentorVerificationStatus.Approved);
-
-            if (!string.IsNullOrWhiteSpace(searchTerm))
-            {
-                var term = searchTerm.Trim().ToLower();
-                query = query.Where(u =>
-                    (u.FirstName != null && u.FirstName.ToLower().Contains(term)) ||
-                    (u.LastName != null && u.LastName.ToLower().Contains(term)) ||
-                    (((u.FirstName ?? "") + " " + (u.LastName ?? "")).ToLower().Contains(term)) ||
-                    (u.MentorProfile != null && u.MentorProfile.Expertise != null && u.MentorProfile.Expertise.ToLower().Contains(term)) ||
-                    (u.MentorProfile != null && u.MentorProfile.Bio != null && u.MentorProfile.Bio.ToLower().Contains(term)));
-            }
-
-            if (!string.IsNullOrWhiteSpace(expertise))
-            {
-                var exp = expertise.Trim().ToLower();
-                query = query.Where(u => u.MentorProfile != null && u.MentorProfile.Expertise != null && u.MentorProfile.Expertise.ToLower().Contains(exp));
-            }
-
-            if (!string.IsNullOrWhiteSpace(jlptLevel))
-            {
-                var level = jlptLevel.Trim().ToUpper();
-                query = query.Where(u => u.MentorProfile != null && u.MentorProfile.JlptLevel != null && u.MentorProfile.JlptLevel.ToUpper().Contains(level));
-            }
-
-            return await query.ToListAsync(cancellationToken);
         }
     }
 }

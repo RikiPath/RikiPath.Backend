@@ -222,28 +222,9 @@ namespace RikiPath.Application.Handlers
             for (var i = 0; i < texts.Count; i++)
             {
                 if (texts[i] is null) continue;
-                list.Add(new ImportOptionPayloadResponse
-                {
-                    SortOrder = i + 1,
-                    OptionText = texts[i]!,
-                    ImageUrl = images[i],
-                    Explanation = GetOptionExplanation(row, i + 1),
-                    IsCorrect = i + 1 == correct,
-                });
+                list.Add(new ImportOptionPayloadResponse { SortOrder = i + 1, OptionText = texts[i]!, ImageUrl = images[i], IsCorrect = i + 1 == correct });
             }
             return list;
-        }
-
-        /// <summary>
-        /// Đọc giải thích lựa chọn theo cả hai cách đặt tên thường dùng trong workbook:
-        /// ExplanationOption1 (template hiện tại) và Option1Explanation (template cũ/tự soạn).
-        /// Cột này luôn tùy chọn để file Excel cũ vẫn import được.
-        /// </summary>
-        public static string? GetOptionExplanation(ExcelRow row, int optionNumber)
-        {
-            if (optionNumber is < 1 or > 4) return null;
-            return Clean(row.Get($"ExplanationOption{optionNumber}"))
-                ?? Clean(row.Get($"Option{optionNumber}Explanation"));
         }
 
         /// <summary>Chuỗi đại diện nội dung 1 câu hỏi, để so sánh câu cũ (DB) với câu mới (Excel).</summary>

@@ -21,7 +21,7 @@ public sealed class MentorSlotGenerator : IMentorSlotGenerator
         int policyVersion = 3)
         => GenerateDailySlots(mentorId, localDate, enabledDayparts, nowUtc, policyVersion,
             MentorSlotPolicy.AppointmentDurationMinutes, MentorSlotPolicy.MinimumRestMinutes,
-            MentorSlotPolicy.DefaultSingleSlotHorizonDays);
+            MentorSlotPolicy.MaximumScheduleHorizonDays);
 
     public IReadOnlyList<MentorGeneratedSlot> GenerateDailySlots(
         int mentorId,
@@ -123,8 +123,8 @@ public sealed class MentorSlotGenerator : IMentorSlotGenerator
         var todayLocal = _policy.GetBusinessDate(now);
         var bookingLocalDate = DateOnly.FromDateTime(startLocal.DateTime);
         if (bookingLocalDate < todayLocal
-            || bookingLocalDate > todayLocal.AddDays(MentorSlotPolicy.DefaultSingleSlotHorizonDays))
-            return MentorSlotValidationResult.Invalid("HORIZON", $"Chỉ có thể đặt lịch trong vòng {MentorSlotPolicy.DefaultSingleSlotHorizonDays} ngày tới theo giờ Việt Nam.");
+            || bookingLocalDate > todayLocal.AddDays(MentorSlotPolicy.MaximumScheduleHorizonDays))
+            return MentorSlotValidationResult.Invalid("HORIZON", "Chỉ có thể đặt lịch trong vòng 30 ngày tới theo giờ Việt Nam.");
 
         var relevant = existingAppointments
             .Where(x => x.MentorId == candidate.MentorId && !x.IsCancelled)
@@ -146,6 +146,10 @@ public sealed class MentorSlotGenerator : IMentorSlotGenerator
             if (gap < rest)
                 return MentorSlotValidationResult.Invalid("REST_BUFFER", "Hai buổi hỗ trợ theo chính sách 90 phút phải cách nhau ít nhất 15 phút.");
         }
+
+        var currentPolicyBookingCount = relevant.Count(x => x.UsesNinetyMinutePolicy && _policy.GetBusinessDate(x.StartUtc) == bookingLocalDate);
+        if (currentPolicyBookingCount >= _policy.DailyBookingCap)
+            return MentorSlotValidationResult.Invalid("DAILY_CAP", $"Giáo viên đã đạt giới hạn {_policy.DailyBookingCap} buổi dạy trong ngày.");
 
         return MentorSlotValidationResult.Valid();
     }

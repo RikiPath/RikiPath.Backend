@@ -39,17 +39,6 @@ public sealed class MentorTeachingProposalController(
             this, fileStorageService, httpClientFactory, meta.Result, download, ct);
     }
 
-    [HttpGet("{id:int}/attachments/{index:int}/preview")]
-    public async Task<IActionResult> PreviewAttachment(int id, int index, CancellationToken ct = default)
-    {
-        var meta = await service.GetAuthorizedAttachmentAsync(id, index, isAdmin: false, ct);
-        if (!meta.IsSuccess || meta.Result is null)
-            return ToActionResult(meta);
-
-        return await ProposalAttachmentStreamHelper.PreviewAttachmentAsync(
-            this, fileStorageService, httpClientFactory, meta.Result, ct);
-    }
-
     [HttpPost("drafts")]
     public async Task<IActionResult> CreateDraft([FromBody] SaveTeachingProposalDraftRequest request, CancellationToken ct)
         => ToActionResult(await service.CreateDraftAsync(request, ct));
@@ -79,19 +68,6 @@ public sealed class MentorTeachingProposalController(
     [HttpPost("{id:int}/withdraw")]
     public async Task<IActionResult> Withdraw(int id, [FromBody] WithdrawTeachingProposalRequest? request, CancellationToken ct)
         => ToActionResult(await service.WithdrawProposalAsync(id, request, ct));
-
-    [HttpPost("{id:int}/open-enrollment/preview")]
-    public async Task<IActionResult> PreviewOpenEnrollment(int id, [FromBody] OpenEnrollmentPreviewRequest? request, CancellationToken ct)
-        => ToActionResult(await service.PreviewOpenEnrollmentAsync(id, request, ct));
-
-    [HttpPost("{id:int}/open-enrollment")]
-    [EnableRateLimiting("mentor-availability-submit")]
-    public async Task<IActionResult> ConfirmOpenEnrollment(int id, [FromBody] ConfirmOpenEnrollmentRequest request, CancellationToken ct)
-        => ToActionResult(await service.ConfirmOpenEnrollmentAsync(id, request, ct));
-
-    [HttpDelete("{id:int}/history")]
-    public async Task<IActionResult> HideRejectedHistory(int id, CancellationToken ct)
-        => ToActionResult(await service.HideRejectedProposalAsync(id, ct));
 
     [HttpPost("{id:int}/clone-draft")]
     public async Task<IActionResult> CloneToDraft(int id, CancellationToken ct)
